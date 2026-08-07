@@ -11,11 +11,12 @@ import { useMutation } from "@tanstack/react-query"
 import { createFileRoute, redirect } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { type ApiError, LoginService } from "../client"
+import type { AxiosError } from "axios"
+import { LoginService } from "../client"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
-import { emailPattern } from "../lib/strings"
 import { handleError } from "../lib/errors"
+import { emailPattern } from "../lib/strings"
 
 interface FormData {
   email: string
@@ -44,7 +45,7 @@ function RecoverPassword() {
   const recoverPassword = async (data: FormData) => {
     await LoginService.recoverPassword({
       email: data.email,
-    })
+    }).then((response) => response.data)
   }
 
   const mutation = useMutation({
@@ -57,7 +58,7 @@ function RecoverPassword() {
       )
       reset()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

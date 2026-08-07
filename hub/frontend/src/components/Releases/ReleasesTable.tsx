@@ -26,7 +26,6 @@ import {
   useDisclosure,
   useToast,
 } from "@chakra-ui/react"
-import Tooltip from "../Common/Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useState } from "react"
@@ -40,9 +39,10 @@ import {
   FaTrash,
 } from "react-icons/fa"
 import { FiExternalLink, FiShare2 } from "react-icons/fi"
+import Tooltip from "../Common/Tooltip"
 
+import type { AxiosError } from "axios"
 import { type ReleaseListItem, ReleasesService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import {
@@ -145,21 +145,24 @@ const ReleasesTable = ({
   const releasesQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "releases", undefined],
     queryFn: () =>
-      ReleasesService.getProjectReleases({ ownerName, projectName }),
+      ReleasesService.getProjectReleases({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   const deleteMutation = useMutation({
     mutationFn: (name: string) =>
       ReleasesService.deleteProjectRelease({
-        ownerName,
-        projectName,
-        releaseName: name,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: name,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success", "Release deleted.", "success")
       confirmDelete.onClose()
       setToDelete(null)
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],
@@ -168,11 +171,14 @@ const ReleasesTable = ({
   })
   const importMutation = useMutation({
     mutationFn: () =>
-      ReleasesService.importGithubReleases({ ownerName, projectName }),
+      ReleasesService.importGithubReleases({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSuccess: (msg) => {
       showToast("Success", msg.message, "success")
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],
@@ -182,10 +188,10 @@ const ReleasesTable = ({
   const githubMutation = useMutation({
     mutationFn: (releaseName: string) =>
       ReleasesService.createReleaseGithubRelease({
-        ownerName,
-        projectName,
-        releaseName,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
+      }).then((response) => response.data),
     onSuccess: (data) => {
       toast({
         title: data.created
@@ -201,7 +207,7 @@ const ReleasesTable = ({
         position: "bottom-right",
       })
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],

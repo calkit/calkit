@@ -24,11 +24,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { FaMapMarkerAlt, FaPlus, FaTrash } from "react-icons/fa"
 import { Highlight, type IHighlight, Popup } from "react-pdf-highlighter"
 
-import {
-  type ApiError,
-  ProjectsService,
-  type ReferenceEntry,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { ProjectsService, type ReferenceEntry } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { formatBibField } from "../../lib/bibtex"
 import { apiUrl } from "../../lib/core"
@@ -138,11 +135,11 @@ const ReferenceItemModal = ({
     queryKey: notesKey,
     queryFn: () =>
       ProjectsService.getProjectReferenceNotes({
-        ownerName,
-        projectName,
-        bibKey: entry!.key,
+        owner_name: ownerName,
+        project_name: projectName,
+        bib_key: entry!.key,
         path: bibPath,
-      }),
+      }).then((response) => response.data),
     enabled: isOpen && Boolean(entry),
   })
   // Reset the editable notes whenever the server copy changes.
@@ -165,10 +162,10 @@ const ReferenceItemModal = ({
   const saveNotesMutation = useMutation({
     mutationFn: (toSave: EditableNote[]) =>
       ProjectsService.putProjectReferenceNotes({
-        ownerName,
-        projectName,
-        bibKey: entry!.key,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        bib_key: entry!.key,
+        referenceNotesPut: {
           path: bibPath,
           // Keep notes with text or an anchor; drop truly empty ones.
           notes: toSave
@@ -183,7 +180,7 @@ const ReferenceItemModal = ({
                 : null,
             })),
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast(
         "Success!",
@@ -196,7 +193,7 @@ const ReferenceItemModal = ({
         queryKey: ["projects", ownerName, projectName, "references"],
       })
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   // PDF highlight anchoring: map notes that carry an anchor to highlights the

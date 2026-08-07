@@ -3,8 +3,8 @@ import { useMutation } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef } from "react"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -21,7 +21,9 @@ function Join() {
 
   const mutation = useMutation({
     mutationFn: () =>
-      ProjectsService.postProjectInvitationRedemption({ token }),
+      ProjectsService.postProjectInvitationRedemption({ token }).then(
+        (response) => response.data,
+      ),
     onSuccess: (data) => {
       showToast(
         "You're in!",
@@ -36,7 +38,7 @@ function Join() {
         },
       })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

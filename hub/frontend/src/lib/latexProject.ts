@@ -3,7 +3,7 @@
 // including figures outside the .tex's own directory and DVC-tracked outputs),
 // falling back to scanning the .tex's directory. Files are seeded at their full
 // repo paths so relative refs like \includegraphics{../figures/x.png} resolve.
-import { ProjectsService } from "../client"
+import { type GetProjectContentsResponse, ProjectsService } from "../client"
 import { decodeBase64Utf8 } from "./strings"
 
 const TEXT_EXT = new Set([
@@ -59,13 +59,13 @@ async function listDir(
   if (depth > MAX_DEPTH || acc.size >= MAX_FILES) {
     return
   }
-  let res: Awaited<ReturnType<typeof ProjectsService.getProjectContents>>
+  let res: GetProjectContentsResponse
   try {
     res = await ProjectsService.getProjectContents({
-      ownerName,
-      projectName,
+      owner_name: ownerName,
+      project_name: projectName,
       path: dir || undefined,
-    })
+    }).then((response) => response.data)
   } catch {
     return
   }
@@ -91,13 +91,13 @@ async function expandDep(
   if (SKIP_PREFIXES.some((p) => dep.startsWith(p)) || dep.startsWith(".")) {
     return
   }
-  let res: Awaited<ReturnType<typeof ProjectsService.getProjectContents>>
+  let res: GetProjectContentsResponse
   try {
     res = await ProjectsService.getProjectContents({
-      ownerName,
-      projectName,
+      owner_name: ownerName,
+      project_name: projectName,
       path: dep,
-    })
+    }).then((response) => response.data)
   } catch {
     return
   }
@@ -113,13 +113,13 @@ async function fetchOne(
   projectName: string,
   path: string,
 ): Promise<ProjectFile | null> {
-  let res: Awaited<ReturnType<typeof ProjectsService.getProjectContents>>
+  let res: GetProjectContentsResponse
   try {
     res = await ProjectsService.getProjectContents({
-      ownerName,
-      projectName,
+      owner_name: ownerName,
+      project_name: projectName,
       path,
-    })
+    }).then((response) => response.data)
   } catch {
     return null
   }
@@ -161,10 +161,10 @@ export async function loadLatexProject(
   if (opts?.fresh) {
     try {
       await ProjectsService.getProjectContents({
-        ownerName,
-        projectName,
+        owner_name: ownerName,
+        project_name: projectName,
         ttl: 0,
-      })
+      }).then((response) => response.data)
     } catch {
       // Best effort: if the refresh call fails, fall through to normal reads.
     }

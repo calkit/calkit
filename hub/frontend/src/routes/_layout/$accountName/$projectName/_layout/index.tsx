@@ -1,56 +1,53 @@
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
-  Box,
-  Flex,
-  Heading,
-  Text,
   Accordion,
-  AccordionItem,
   AccordionButton,
-  AccordionPanel,
   AccordionIcon,
-  Image,
-  useColorModeValue,
+  AccordionItem,
+  AccordionPanel,
+  Box,
   Checkbox,
+  Flex,
   FormControl,
   FormLabel,
-  Switch,
-  Spacer,
-  useDisclosure,
-  IconButton,
-  Link,
+  Heading,
   Icon,
+  IconButton,
+  Image,
+  Link,
+  Spacer,
+  Switch,
   Table,
-  Thead,
   Tbody,
-  Tr,
-  Th,
   Td,
+  Text,
+  Th,
+  Thead,
+  Tr,
+  useColorModeValue,
+  useDisclosure,
 } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
 import {
-  createFileRoute,
   Link as RouterLink,
+  createFileRoute,
   useSearch,
 } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
 import { useRef, useState } from "react"
-import { z } from "zod"
 import { FaPlus, FaRegFileAlt } from "react-icons/fa"
 import { MdEdit } from "react-icons/md"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
+import { z } from "zod"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
+import { type QuestionEvidence, ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
 import FigureView from "../../../../../components/Figures/FigureView"
-import { ReleasesService, type QuestionEvidence } from "../../../../../client"
-import { decodeBase64Utf8 } from "../../../../../lib/strings"
-import {
-  formatReleaseDate,
-  releaseLocation,
-  releasePagePath,
-} from "../../../../../lib/releases"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import EditQuestion from "../../../../../components/Projects/EditQuestion"
+import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
+import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
+import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
 import NewRelease from "../../../../../components/Releases/NewRelease"
 import useProject, {
@@ -58,9 +55,12 @@ import useProject, {
   useProjectQuestions,
   useProjectReadme,
 } from "../../../../../hooks/useProject"
-import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
-import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
-import LatexEditor from "../../../../../components/Publications/LatexEditor"
+import {
+  formatReleaseDate,
+  releaseLocation,
+  releasePagePath,
+} from "../../../../../lib/releases"
+import { decodeBase64Utf8 } from "../../../../../lib/strings"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/",
@@ -278,9 +278,9 @@ function ProjectView() {
     queryKey: ["projects", accountName, projectName, "releases", undefined],
     queryFn: () =>
       ReleasesService.getProjectReleases({
-        ownerName: accountName,
-        projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   // Newest first (ISO dates sort lexically); show only the latest few on the
   // home page and link to the full list on the History page.
@@ -290,15 +290,13 @@ function ProjectView() {
   )
   const topReleases = sortedReleases.slice(0, HOME_RELEASES_LIMIT)
   const gitRepoUrl = projectRequest.data?.git_repo_url
-  const codespacesUrl =
-    String(gitRepoUrl).replace("://github.com/", "://codespaces.new/") +
-    "?quickstart=1"
+  const codespacesUrl = `${String(gitRepoUrl).replace("://github.com/", "://codespaces.new/")}?quickstart=1`
   const githubDevUrl = String(gitRepoUrl).replace(
     "://github.com/",
     "://github.dev/",
   )
   const removeFirstLine = (txt: any) => {
-    let lines = String(txt).split("\n")
+    const lines = String(txt).split("\n")
     lines.splice(0, 1)
     return lines.join("\n")
   }

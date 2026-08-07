@@ -87,21 +87,24 @@ export default function ReleasePdfAnnotator({
     queryKey: commentsKey,
     queryFn: () =>
       ReleasesService.getReleaseComments({
-        ownerName,
-        projectName,
-        releaseName,
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
         token,
-      }),
+      }).then((response) => response.data),
   })
   const postMutation = useMutation({
     mutationFn: (data: { comment: string; highlight: CommentHighlight }) =>
       ReleasesService.postReleaseComment({
-        ownerName,
-        projectName,
-        releaseName,
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
         token,
-        requestBody: { comment: data.comment, highlight: data.highlight },
-      }),
+        releaseCommentPost: {
+          comment: data.comment,
+          highlight: data.highlight,
+        },
+      }).then((response) => response.data),
     // Write the server's comment straight into the cache instead of
     // invalidating, so the highlight renders the moment the request returns
     // with no refetch gap in between.

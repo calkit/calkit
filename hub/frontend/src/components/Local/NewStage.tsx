@@ -3,25 +3,25 @@ import {
   FormControl,
   FormErrorMessage,
   FormLabel,
+  Input,
   Modal,
   ModalBody,
   ModalCloseButton,
-  Input,
-  Textarea,
   ModalContent,
   ModalFooter,
   ModalHeader,
   ModalOverlay,
   Select,
+  Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
-import { useEffect } from "react"
 import axios from "axios"
 import mixpanel from "mixpanel-browser"
+import { useEffect } from "react"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
-import type { ApiError } from "../../client/core/ApiError"
+import type { AxiosError } from "axios"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -99,7 +99,7 @@ const NewStage = ({ isOpen, onClose }: NewStageProps) => {
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

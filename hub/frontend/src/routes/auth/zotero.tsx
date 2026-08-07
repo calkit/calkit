@@ -1,10 +1,11 @@
 import { Container, Text } from "@chakra-ui/react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
-import { useEffect, useRef } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useEffect, useRef } from "react"
+import { z } from "zod"
 
-import { UsersService, type ApiError } from "../../client"
+import type { AxiosError } from "axios"
+import { UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -37,11 +38,11 @@ function ZoteroAuth() {
       oauthVerifier: string
     }) =>
       UsersService.postUserZoteroAuth({
-        requestBody: {
+        zoteroAuthFinish: {
           oauth_token: oauthToken,
           oauth_verifier: oauthVerifier,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Zotero account connected successfully.", "success")
       queryClient.invalidateQueries({
@@ -49,7 +50,7 @@ function ZoteroAuth() {
       })
       returnToOrigin(true)
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
       // Still navigate back after showing error
       setTimeout(() => returnToOrigin(false), 2000)

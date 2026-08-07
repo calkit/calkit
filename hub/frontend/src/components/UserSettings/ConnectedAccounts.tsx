@@ -1,37 +1,38 @@
 import {
-  Heading,
-  HStack,
-  Text,
-  Icon,
   Button,
-  useDisclosure,
-  Link,
-  Input,
+  HStack,
+  Heading,
+  Icon,
   IconButton,
+  Input,
+  Link,
+  Text,
+  useDisclosure,
 } from "@chakra-ui/react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { FaCheck, FaPlus, FaTimes, FaTrash } from "react-icons/fa"
-import LoadingSpinner from "../Common/LoadingSpinner"
-import { MdEdit } from "react-icons/md"
 import { useState } from "react"
+import { FaCheck, FaPlus, FaTimes, FaTrash } from "react-icons/fa"
+import { MdEdit } from "react-icons/md"
+import LoadingSpinner from "../Common/LoadingSpinner"
 
-import {
-  zenodoAuthStateParam,
-  getZenodoRedirectUri,
-  getZenodoAuthUrl,
-} from "../../lib/zenodo"
+import type { AxiosError } from "axios"
+import { type TokenPut, UsersService } from "../../client"
+import useCustomToast from "../../hooks/useCustomToast"
+import { appName } from "../../lib/core"
+import { handleError } from "../../lib/errors"
+import { startGitHubOAuth } from "../../lib/github"
 import {
   createGoogleOAuthState,
-  getGoogleRedirectUri,
   getGoogleAuthUrl,
+  getGoogleRedirectUri,
 } from "../../lib/google"
-import { UsersService, type ApiError, type TokenPut } from "../../client"
+import {
+  getZenodoAuthUrl,
+  getZenodoRedirectUri,
+  zenodoAuthStateParam,
+} from "../../lib/zenodo"
 import UpdateOverleafToken from "./UpdateOverleafToken"
-import { appName } from "../../lib/core"
-import useCustomToast from "../../hooks/useCustomToast"
-import { startGitHubOAuth } from "../../lib/github"
-import { handleError } from "../../lib/errors"
 
 function ConnectedAccounts() {
   const clientId = import.meta.env.VITE_ZENODO_CLIENT_ID
@@ -44,44 +45,38 @@ function ConnectedAccounts() {
   const handleConnectZenodo = () => {
     mixpanel.track("Clicked connect Zenodo")
     // TODO: Set correct redirect URI per environment
-    location.href =
-      `${getZenodoAuthUrl()}?client_id=${clientId}` +
-      `&state=${zenodoAuthStateParam}` +
-      "&scope=deposit%3Awrite+deposit%3Aactions&response_type=code" +
-      `&redirect_uri=${encodeURIComponent(getZenodoRedirectUri())}`
+    location.href = `${getZenodoAuthUrl()}?client_id=${clientId}&state=${zenodoAuthStateParam}&scope=deposit%3Awrite+deposit%3Aactions&response_type=code&redirect_uri=${encodeURIComponent(getZenodoRedirectUri())}`
   }
 
   const handleConnectGoogle = () => {
     mixpanel.track("Clicked connect Google Drive")
     // Google Drive API scope
     const scope = "https://www.googleapis.com/auth/drive.file"
-    location.href =
-      `${getGoogleAuthUrl()}?client_id=${googleClientId}` +
-      `&state=${createGoogleOAuthState()}` +
-      `&scope=${encodeURIComponent(scope)}` +
-      "&access_type=offline" +
-      "&prompt=consent" +
-      "&response_type=code" +
-      `&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
+    location.href = `${getGoogleAuthUrl()}?client_id=${googleClientId}&state=${createGoogleOAuthState()}&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&response_type=code&redirect_uri=${encodeURIComponent(getGoogleRedirectUri())}`
   }
   // Zotero uses OAuth 1.0a, whose requests must be signed with our client
   // secret, so the backend has to hand us the authorization URL.
   const connectZoteroMutation = useMutation({
-    mutationFn: () => UsersService.postUserZoteroAuthStart(),
+    mutationFn: () =>
+      UsersService.postUserZoteroAuthStart().then((response) => response.data),
     onSuccess: (data) => {
       mixpanel.track("Clicked connect Zotero")
       location.href = data.authorize_url
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })
   const connectedAccountsQuery = useQuery({
-    queryFn: () => UsersService.getUserConnectedAccounts(),
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
   const ghInstallQuery = useQuery({
-    queryFn: () => UsersService.getUserGithubAppInstallations(),
+    queryFn: () =>
+      UsersService.getUserGithubAppInstallations().then(
+        (response) => response.data,
+      ),
     queryKey: ["user", "github-app-installations"],
     // Only meaningful once GitHub is connected; otherwise it 401s ("needs to
     // authenticate with GitHub"), which is noise for GitHub-less users.
@@ -91,7 +86,9 @@ function ConnectedAccounts() {
 
   const updateOverleafTokenMutation = useMutation({
     mutationFn: (data: TokenPut) => {
-      return UsersService.putUserOverleafToken({ requestBody: data })
+      return UsersService.putUserOverleafToken({ tokenPut: data }).then(
+        (response) => response.data,
+      )
     },
     onSuccess: () => {
       mixpanel.track("Updated Overleaf token")
@@ -99,7 +96,7 @@ function ConnectedAccounts() {
       setIsEditingOverleaf(false)
       setOverleafToken("")
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {
@@ -111,13 +108,15 @@ function ConnectedAccounts() {
 
   const disconnectAccountMutation = useMutation({
     mutationFn: (provider: string) => {
-      return UsersService.deleteUserExternalCredential({ provider })
+      return UsersService.deleteUserExternalCredential({ provider }).then(
+        (response) => response.data,
+      )
     },
     onSuccess: (_, provider) => {
       mixpanel.track("Disconnected account", { provider })
       showToast("Success!", `${provider} account disconnected.`, "success")
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

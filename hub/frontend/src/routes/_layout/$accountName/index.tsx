@@ -1,4 +1,3 @@
-import LoadingSpinner from "../../../components/Common/LoadingSpinner"
 import {
   Box,
   Container,
@@ -16,17 +15,18 @@ import {
   Tr,
   useDisclosure,
 } from "@chakra-ui/react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { Link as RouterLink } from "@tanstack/react-router"
+import { useEffect } from "react"
+import LoadingSpinner from "../../../components/Common/LoadingSpinner"
 
+import { ExternalLinkIcon } from "@chakra-ui/icons"
+import { FaPlus } from "react-icons/fa"
 import { AccountsService, OrgsService, ProjectsService } from "../../../client"
 import NotFound from "../../../components/Common/NotFound"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { capitalizeFirstLetter } from "../../../lib/strings"
-import { FaPlus } from "react-icons/fa"
 import AddMember from "../../../components/Orgs/AddMember"
+import { capitalizeFirstLetter } from "../../../lib/strings"
 
 export const Route = createFileRoute("/_layout/$accountName/")({
   component: AccountPage,
@@ -36,7 +36,10 @@ function UsersTable() {
   const { accountName } = Route.useParams()
   const { isPending, data: users } = useQuery({
     queryKey: ["org-users", accountName],
-    queryFn: () => OrgsService.getOrgUsers({ orgName: accountName }),
+    queryFn: () =>
+      OrgsService.getOrgUsers({ org_name: accountName }).then(
+        (response) => response.data,
+      ),
   })
   return (
     <>
@@ -91,7 +94,10 @@ function ProjectsTable() {
   const { accountName } = Route.useParams()
   const { isPending, data: projects } = useQuery({
     queryKey: ["projects", accountName],
-    queryFn: () => ProjectsService.getProjects({ ownerName: accountName }),
+    queryFn: () =>
+      ProjectsService.getProjects({ owner_name: accountName }).then(
+        (response) => response.data,
+      ),
   })
 
   return (
@@ -154,7 +160,10 @@ function AccountPage() {
   const navigate = useNavigate({ from: Route.fullPath })
   const { isPending, data: account } = useQuery({
     queryKey: ["accounts", accountName],
-    queryFn: () => AccountsService.getAccount({ accountName }),
+    queryFn: () =>
+      AccountsService.getAccount({ account_name: accountName }).then(
+        (response) => response.data,
+      ),
     retry: (failureCount, error: any) => {
       const status =
         error?.status ?? error?.response?.status ?? error?.statusCode ?? null

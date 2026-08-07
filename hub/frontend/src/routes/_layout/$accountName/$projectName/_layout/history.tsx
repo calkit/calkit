@@ -1,54 +1,54 @@
 import {
-  Box,
-  Heading,
-  Spinner,
-  Flex,
-  Text,
   Avatar,
-  VStack,
   Badge,
-  Code,
-  useColorModeValue,
-  Divider,
+  Box,
   Button,
+  Code,
+  Collapse,
+  Divider,
+  Flex,
+  HStack,
+  Heading,
+  Icon,
   Modal,
-  ModalOverlay,
+  ModalBody,
+  ModalCloseButton,
   ModalContent,
   ModalHeader,
-  ModalCloseButton,
-  ModalBody,
-  HStack,
-  Icon,
-  Collapse,
+  ModalOverlay,
+  Spinner,
+  Text,
+  VStack,
+  useColorModeValue,
 } from "@chakra-ui/react"
-import Tooltip from "../../../../../components/Common/Tooltip"
 import { useQuery } from "@tanstack/react-query"
 import {
   Link as RouterLink,
   createFileRoute,
   useNavigate,
 } from "@tanstack/react-router"
-import { useState, useEffect } from "react"
-import { z } from "zod"
+import { useEffect, useState } from "react"
 import {
-  FaFile,
   FaChevronDown,
   FaChevronRight,
   FaCodeBranch,
+  FaFile,
   FaTag,
 } from "react-icons/fa"
-import { FiArrowUp, FiArrowDown } from "react-icons/fi"
+import { FiArrowDown, FiArrowUp } from "react-icons/fi"
 import SyntaxHighlighter from "react-syntax-highlighter"
 import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
+import { z } from "zod"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
+import {
+  type GitRef,
+  ProjectsService,
+  type ReleaseListItem,
+  ReleasesService,
+} from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import PageMenu from "../../../../../components/Common/PageMenu"
-import {
-  ProjectsService,
-  ReleasesService,
-  type GitRef,
-  type ReleaseListItem,
-} from "../../../../../client"
 import { releasePagePath } from "../../../../../lib/releases"
 
 interface CommitHistory {
@@ -211,10 +211,10 @@ function CommitDetailModal({
     queryKey: ["projects", ownerName, projectName, "commit", commit?.hash],
     queryFn: async () =>
       (await ProjectsService.getProjectCommit({
-        ownerName,
-        projectName,
-        commitHash: commit!.hash,
-      })) as unknown as CommitDetail,
+        owner_name: ownerName,
+        project_name: projectName,
+        commit_hash: commit!.hash,
+      }).then((response) => response.data)) as unknown as CommitDetail,
     enabled: isOpen && Boolean(commit),
   })
 
@@ -250,20 +250,19 @@ function CommitDetailModal({
               </Text>
             </Flex>
           )}
-          {commit?.message &&
-            commit.message.split("\n").slice(1).join("\n").trim() && (
-              <Box
-                mb={4}
-                p={3}
-                borderRadius="md"
-                borderWidth={1}
-                borderColor={borderColor}
-              >
-                <Text fontSize="sm" whiteSpace="pre-wrap" color="gray.600">
-                  {commit.message.split("\n").slice(1).join("\n").trim()}
-                </Text>
-              </Box>
-            )}
+          {commit?.message?.split("\n").slice(1).join("\n").trim() && (
+            <Box
+              mb={4}
+              p={3}
+              borderRadius="md"
+              borderWidth={1}
+              borderColor={borderColor}
+            >
+              <Text fontSize="sm" whiteSpace="pre-wrap" color="gray.600">
+                {commit.message.split("\n").slice(1).join("\n").trim()}
+              </Text>
+            </Box>
+          )}
           <Heading size="xs" mb={2}>
             Changed files
           </Heading>
@@ -361,12 +360,12 @@ function History() {
     ],
     queryFn: async () => {
       const results = (await ProjectsService.getProjectHistory({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
         ref: selectedRef,
-      })) as unknown as CommitHistory[]
+      }).then((response) => response.data)) as unknown as CommitHistory[]
       setAllCommits((prev) => {
         if (page === 0) return results
         const existing = new Set(prev.map((c) => c.hash))
@@ -381,10 +380,10 @@ function History() {
     queryKey: ["projects", accountName, projectName, "refs", "all"],
     queryFn: () =>
       ProjectsService.searchProjectRefs({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         q: undefined,
-      }),
+      }).then((response) => response.data),
   })
 
   const branches = ((refsQuery.data ?? []) as GitRef[])
@@ -401,9 +400,9 @@ function History() {
     queryKey: ["projects", accountName, projectName, "releases", undefined],
     queryFn: () =>
       ReleasesService.getProjectReleases({
-        ownerName: accountName,
-        projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   const releases = releasesQuery.data ?? []
   // A release matches a commit when its (possibly abbreviated) git_rev is a

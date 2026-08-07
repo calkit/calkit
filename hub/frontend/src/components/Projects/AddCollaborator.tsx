@@ -17,8 +17,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -57,23 +57,23 @@ const AddCollaborator = ({ isOpen, onClose }: AddCollabProps) => {
       // else is treated as a GitHub username (repo collaborator).
       if (value.includes("@")) {
         return ProjectsService.postProjectCollaboratorByEmail({
-          ownerName: accountName,
-          projectName: projectName,
-          requestBody: { email: value },
-        })
+          owner_name: accountName,
+          project_name: projectName,
+          nativeCollaboratorPost: { email: value },
+        }).then((response) => response.data)
       }
       return ProjectsService.putProjectCollaborator({
-        githubUsername: value,
-        ownerName: accountName,
-        projectName: projectName,
-      })
+        github_username: value,
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data)
     },
     onSuccess: () => {
       showToast("Success!", "Collaborator added successfully.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

@@ -1,26 +1,27 @@
 import {
-  TableContainer,
-  Table,
-  Thead,
-  Th,
-  Tr,
-  Td,
-  Tbody,
-  SkeletonText,
-  Checkbox,
   Button,
+  Checkbox,
+  SkeletonText,
+  Table,
+  TableContainer,
+  Tbody,
+  Td,
+  Th,
+  Thead,
+  Tr,
   useDisclosure,
 } from "@chakra-ui/react"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { UsersService, type TokenPatch } from "../../client"
+import { type TokenPatch, UsersService } from "../../client"
 import NewToken from "./NewToken"
 
 function UserTokens() {
   const queryClient = useQueryClient()
   const tokensQuery = useQuery({
     queryKey: ["user", "tokens"],
-    queryFn: () => UsersService.getUserTokens(),
+    queryFn: () =>
+      UsersService.getUserTokens().then((response) => response.data),
   })
   interface TokenIsActive {
     tokenId: string
@@ -29,9 +30,9 @@ function UserTokens() {
   const tokenActiveMutation = useMutation({
     mutationFn: ({ tokenId, tokenPatch }: TokenIsActive) =>
       UsersService.patchUserToken({
-        requestBody: tokenPatch,
-        tokenId: tokenId,
-      }),
+        tokenPatch: tokenPatch,
+        token_id: tokenId,
+      }).then((response) => response.data),
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ["user", "tokens"] }),
   })

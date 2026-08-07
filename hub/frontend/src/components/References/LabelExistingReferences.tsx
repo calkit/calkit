@@ -15,8 +15,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import LoadingSpinner from "../Common/LoadingSpinner"
@@ -42,7 +42,10 @@ const LabelExistingReferences = ({
   const [path, setPath] = useState("")
   const pathsQuery = useQuery({
     queryFn: () =>
-      ProjectsService.getProjectContentPaths({ ownerName, projectName }),
+      ProjectsService.getProjectContentPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     queryKey: ["projects", ownerName, projectName, "contents-paths"],
     enabled: isOpen,
   })
@@ -56,10 +59,10 @@ const LabelExistingReferences = ({
   const mutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectReferences({
-        ownerName,
-        projectName,
-        requestBody: { path, label_existing: true },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        referencesPost: { path, label_existing: true },
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "References collection added.", "success")
       queryClient.invalidateQueries({
@@ -67,7 +70,7 @@ const LabelExistingReferences = ({
       })
       onClose()
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   return (

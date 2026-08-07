@@ -15,8 +15,8 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import {
-  type ApiError,
   type ProjectPatch,
   type ProjectPublic,
   ProjectsService,
@@ -47,15 +47,15 @@ const EditProject = ({ project, isOpen, onClose }: EditProjectProps) => {
   const mutation = useMutation({
     mutationFn: (data: ProjectPatch) =>
       ProjectsService.patchProject({
-        ownerName: project.owner_account_name,
-        projectName: project.name,
-        requestBody: data,
-      }),
+        owner_name: project.owner_account_name,
+        project_name: project.name,
+        projectPatch: data,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Project updated successfully.", "success")
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

@@ -15,7 +15,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { FaSync, FaTrash } from "react-icons/fa"
 
-import { type ApiError, ProjectsService, type References } from "../../client"
+import type { AxiosError } from "axios"
+import { ProjectsService, type References } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -58,10 +59,10 @@ const ReferencesInfoPanel = ({
   const zoteroSyncMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectZoteroSync({
-        ownerName,
-        projectName,
-        requestBody: { path },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        zoteroSyncPost: { path },
+      }).then((response) => response.data),
     onSuccess: (data) => {
       showToast(
         "Success!",
@@ -74,7 +75,7 @@ const ReferencesInfoPanel = ({
         queryKey: ["projects", ownerName, projectName, "references"],
       })
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   const commentsKey = [
     "projects",
@@ -88,11 +89,11 @@ const ReferencesInfoPanel = ({
     queryKey: commentsKey,
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName,
-        projectName,
-        artifactType: "references",
-        artifactPath: path,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        artifact_type: "references",
+        artifact_path: path,
+      }).then((response) => response.data),
     enabled: Boolean(path),
   })
   const invalidateComments = () =>
@@ -100,36 +101,36 @@ const ReferencesInfoPanel = ({
   const postCommentMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
       ProjectsService.postProjectComment({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        projectCommentPost: {
           artifact_path: path,
           artifact_type: "references",
           comment: vars.body,
           create_github_issue: vars.createIssue,
           git_ref: gitRef ?? null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const replyCommentMutation = useMutation({
     mutationFn: (vars: { commentId: string; body: string }) =>
       ProjectsService.postProjectCommentReply({
-        ownerName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { body: vars.body },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        commentReply: { body: vars.body },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const resolveCommentMutation = useMutation({
     mutationFn: (vars: { commentId: string; resolved: boolean }) =>
       ProjectsService.patchProjectComment({
-        ownerName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { resolved: vars.resolved },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        projectCommentPatch: { resolved: vars.resolved },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const comments = commentsQuery.data ?? []

@@ -15,12 +15,12 @@ import {
   useClipboard,
   useDisclosure,
 } from "@chakra-ui/react"
-import Tooltip from "../Common/Tooltip"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useState } from "react"
 import { FaPlus, FaTag } from "react-icons/fa"
 import { FiExternalLink, FiLink, FiShare2 } from "react-icons/fi"
+import Tooltip from "../Common/Tooltip"
 
 import { ReleasesService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -60,7 +60,10 @@ const ArtifactReleasesPanel = ({
   const releasesQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "releases", undefined],
     queryFn: () =>
-      ReleasesService.getProjectReleases({ ownerName, projectName }),
+      ReleasesService.getProjectReleases({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   // Only releases that specifically target this artifact's path -- not
   // whole-project releases, which would otherwise flood every artifact's panel

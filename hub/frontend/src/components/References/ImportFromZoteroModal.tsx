@@ -26,8 +26,8 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import LoadingSpinner from "../Common/LoadingSpinner"
@@ -60,7 +60,10 @@ const ImportFromZoteroModal = ({
   const [checkedItems, setCheckedItems] = useState<Record<string, boolean>>({})
   const librariesQuery = useQuery({
     queryFn: () =>
-      ProjectsService.getProjectZoteroLibraries({ ownerName, projectName }),
+      ProjectsService.getProjectZoteroLibraries({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     queryKey: ["projects", ownerName, projectName, "zotero", "libraries"],
     enabled: isOpen,
   })
@@ -68,11 +71,11 @@ const ImportFromZoteroModal = ({
   const collectionsQuery = useQuery({
     queryFn: () =>
       ProjectsService.getProjectZoteroCollections({
-        ownerName,
-        projectName,
-        libraryType: libraryType as "user" | "group",
-        libraryId,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        library_type: libraryType as "user" | "group",
+        library_id: libraryId,
+      }).then((response) => response.data),
     queryKey: [
       "projects",
       ownerName,
@@ -86,13 +89,13 @@ const ImportFromZoteroModal = ({
   const itemsQuery = useQuery({
     queryFn: () =>
       ProjectsService.getProjectZoteroItems({
-        ownerName,
-        projectName,
-        libraryType: libraryType as "user" | "group",
-        libraryId,
-        collectionKey: collectionKey || undefined,
+        owner_name: ownerName,
+        project_name: projectName,
+        library_type: libraryType as "user" | "group",
+        library_id: libraryId,
+        collection_key: collectionKey || undefined,
         q: search || undefined,
-      }),
+      }).then((response) => response.data),
     queryKey: [
       "projects",
       ownerName,
@@ -122,9 +125,9 @@ const ImportFromZoteroModal = ({
         .filter(([, checked]) => checked)
         .map(([key]) => key)
       return ProjectsService.postProjectZoteroImport({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        zoteroImportPost: {
           library_type: libraryType as "user" | "group",
           library_id: libraryId,
           collection_key: mode === "collection" ? collectionKey : null,
@@ -132,7 +135,7 @@ const ImportFromZoteroModal = ({
           bib_path: bibPath.trim(),
           overwrite,
         },
-      })
+      }).then((response) => response.data)
     },
     onSuccess: () => {
       showToast("Success!", "References imported from Zotero.", "success")
@@ -141,7 +144,7 @@ const ImportFromZoteroModal = ({
       })
       resetAndClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       if (err.status === 409) {
         setConflict(true)
         return

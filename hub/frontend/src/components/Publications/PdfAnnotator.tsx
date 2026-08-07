@@ -291,11 +291,11 @@ export default function PdfAnnotator({
     ],
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName,
-        projectName,
-        artifactType,
-        artifactPath: publicationPath,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        artifact_type: artifactType,
+        artifact_path: publicationPath,
+      }).then((response) => response.data),
   })
 
   const postMutation = useMutation({
@@ -305,9 +305,9 @@ export default function PdfAnnotator({
       create_github_issue: boolean
     }) =>
       ProjectsService.postProjectComment({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        projectCommentPost: {
           artifact_path: publicationPath,
           artifact_type: artifactType,
           comment: data.comment,
@@ -315,7 +315,7 @@ export default function PdfAnnotator({
           create_github_issue: data.create_github_issue,
           git_ref: gitRef ?? null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: [
@@ -336,11 +336,11 @@ export default function PdfAnnotator({
       resolved,
     }: { commentId: string; resolved: boolean }) =>
       ProjectsService.patchProjectComment({
-        ownerName,
-        projectName,
-        commentId,
-        requestBody: { resolved },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        comment_id: commentId,
+        projectCommentPatch: { resolved },
+      }).then((response) => response.data),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: [

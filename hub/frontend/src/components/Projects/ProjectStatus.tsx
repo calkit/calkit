@@ -9,23 +9,23 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Textarea,
-  Text,
   Select,
+  Text,
+  Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import {
   type ProjectPublic,
-  ProjectsService,
   type ProjectStatusPost,
+  ProjectsService,
 } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
-import { formatTimestamp, capitalizeFirstLetter } from "../../lib/strings"
 import { handleError } from "../../lib/errors"
+import { capitalizeFirstLetter, formatTimestamp } from "../../lib/strings"
 
 interface ProjectStatusProps {
   project: ProjectPublic
@@ -56,16 +56,16 @@ const ProjectStatus = ({ project, isOpen, onClose }: ProjectStatusProps) => {
   const mutation = useMutation({
     mutationFn: (data: ProjectStatusPost) =>
       ProjectsService.postProjectStatus({
-        ownerName: accountName,
-        projectName: projectName,
-        requestBody: data,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        projectStatusPost: data,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Status updated successfully.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

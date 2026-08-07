@@ -29,16 +29,16 @@ import mixpanel from "mixpanel-browser"
 import { merge as diff3Merge } from "node-diff3"
 import { type MutableRefObject, useEffect, useRef, useState } from "react"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
+import { handleError } from "../../lib/errors"
 import {
   LatexCompiler,
   type LatexFile,
   findMissingPackages,
 } from "../../lib/latexCompiler"
 import { loadLatexProject } from "../../lib/latexProject"
-import { handleError } from "../../lib/errors"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 
 interface LatexEditorProps {
@@ -335,12 +335,12 @@ const LatexEditor = ({
           type: "text/plain",
         })
         await ProjectsService.putProjectContents({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           path: repoPath,
-          contentLength: file.size,
-          formData: { file, message: message || null },
-        })
+          "content-length": file.size,
+          bodyProjectsPutProjectContents: { file, message: message || null },
+        }).then((response) => response.data)
       }
     },
     onSuccess: async () => {
@@ -371,7 +371,7 @@ const LatexEditor = ({
         queryKey: ["projects", ownerName, projectName],
       })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })
@@ -380,9 +380,9 @@ const LatexEditor = ({
   const fetchRemoteHead = async (): Promise<string | null> => {
     try {
       const head = await ProjectsService.getProjectGitRemoteHead({
-        ownerName,
-        projectName,
-      })
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data)
       return head.sha ?? null
     } catch {
       return null

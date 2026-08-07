@@ -29,19 +29,19 @@ import {
   Textarea,
   useClipboard,
 } from "@chakra-ui/react"
-import Tooltip from "../Common/Tooltip"
-import { useNavigate } from "@tanstack/react-router"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiExternalLink, FiThumbsUp } from "react-icons/fi"
+import Tooltip from "../Common/Tooltip"
 
+import type { AxiosError } from "axios"
 import {
   FeatureVotesService,
   type ReleasePublic,
   ReleasesService,
 } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import {
@@ -167,10 +167,10 @@ const NewRelease = ({
     ],
     queryFn: () =>
       ReleasesService.getReleaseStaleness({
-        ownerName,
-        projectName,
+        owner_name: ownerName,
+        project_name: projectName,
         path: stalenessPath || undefined,
-      }),
+      }).then((response) => response.data),
     enabled: stalenessEnabled,
     retry: false,
   })
@@ -182,7 +182,7 @@ const NewRelease = ({
     queryFn: () =>
       FeatureVotesService.getFeatureVoteStatus({
         feature: EXTERNAL_RELEASE_FEATURE,
-      }),
+      }).then((response) => response.data),
     enabled: isOpen,
   })
   const voteMutation = useMutation({
@@ -190,16 +190,16 @@ const NewRelease = ({
       voted
         ? FeatureVotesService.deleteFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
-          })
+          }).then((response) => response.data)
         : FeatureVotesService.postFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
-          }),
+          }).then((response) => response.data),
     onSuccess: (data) =>
       queryClient.setQueryData(
         ["feature-votes", EXTERNAL_RELEASE_FEATURE],
         data,
       ),
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   // Per-field opt-out for password managers (Dashlane especially keeps trying
   // to autofill even with a form-level opt-out), spread onto each text input.
@@ -218,10 +218,10 @@ const NewRelease = ({
   const parseMutation = useMutation({
     mutationFn: (url: string) =>
       ReleasesService.parseReleaseUrl({
-        ownerName,
-        projectName,
-        requestBody: { url },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        releaseUrlImport: { url },
+      }).then((response) => response.data),
     onSuccess: (meta) => {
       // Pre-fill the editable form from the looked-up metadata. The fetched
       // title becomes the release name (no separate title field); the user can
@@ -237,15 +237,15 @@ const NewRelease = ({
       setImportKind(meta.kind ?? kind)
       setFetched(true)
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   const createMutation = useMutation({
     mutationFn: (data: NewReleaseForm) =>
       ReleasesService.postProjectRelease({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        releasePost: {
           name: data.name,
           kind,
           path: data.path.trim() || null,
@@ -255,7 +255,7 @@ const NewRelease = ({
           public: false,
           acknowledge_non_reproducible: data.acknowledge,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: (data) => {
       if (onCreated) {
         onCreated(data)
@@ -265,16 +265,16 @@ const NewRelease = ({
       setCreated(data)
       reset()
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: invalidate,
   })
 
   const importMutation = useMutation({
     mutationFn: (data: NewReleaseForm) =>
       ReleasesService.postExternalRelease({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        externalReleasePost: {
           name: data.name,
           kind: importKind,
           path: data.path.trim() || null,
@@ -285,12 +285,12 @@ const NewRelease = ({
           description: data.description || null,
           public: true,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       setImportDone(true)
       reset()
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: invalidate,
   })
 

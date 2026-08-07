@@ -1,7 +1,9 @@
 import {
   Button,
+  Code,
   FormControl,
   FormLabel,
+  Input,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -11,14 +13,12 @@ import {
   ModalOverlay,
   Select,
   Text,
-  Input,
-  Code,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { UsersService, type TokenPost } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
+import type { AxiosError } from "axios"
+import { type TokenPost, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -49,13 +49,13 @@ const NewToken = ({ isOpen, onClose }: NewTokenProps) => {
   const mutation = useMutation({
     mutationFn: (data: TokenPost) =>
       UsersService.postUserToken({
-        requestBody: data,
-      }),
+        tokenPost: data,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Token created successfully.", "success")
       reset()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

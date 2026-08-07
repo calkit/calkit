@@ -1,23 +1,23 @@
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import {
-  Text,
-  Flex,
   Box,
-  useColorModeValue,
+  Button,
+  Code,
+  Flex,
+  HStack,
   Heading,
   Icon,
-  Code,
-  HStack,
-  Button,
+  Text,
+  useColorModeValue,
 } from "@chakra-ui/react"
-import Tooltip from "../../../../../components/Common/Tooltip"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useNavigate } from "@tanstack/react-router"
-import { lazy, Suspense } from "react"
-import { SiJupyter } from "react-icons/si"
+import { Suspense, lazy } from "react"
 import { FaCodeBranch } from "react-icons/fa"
+import { SiJupyter } from "react-icons/si"
 import { z } from "zod"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
 const IpynbRenderer = lazy(() =>
   import("react-ipynb-renderer").then(async (m) => {
@@ -26,9 +26,9 @@ const IpynbRenderer = lazy(() =>
   }),
 )
 
-import { ProjectsService, type Notebook } from "../../../../../client"
-import PageMenu from "../../../../../components/Common/PageMenu"
+import { type Notebook, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
+import PageMenu from "../../../../../components/Common/PageMenu"
 
 const notebookSearchSchema = z.object({
   ref: z.string().optional(),
@@ -190,10 +190,10 @@ function Notebooks() {
     queryKey: ["projects", accountName, projectName, "notebooks", ref],
     queryFn: () =>
       ProjectsService.getProjectNotebooks({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
 
   const selectedNotebook =

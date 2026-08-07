@@ -1,22 +1,23 @@
 import {
   Alert,
   AlertDescription,
+  AlertIcon,
+  Box,
   Button,
+  Code,
   Container,
   Heading,
+  Spinner,
   Text,
   VStack,
-  AlertIcon,
-  Code,
-  Box,
-  Spinner,
 } from "@chakra-ui/react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
 import { useMutation } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
+import { z } from "zod"
 
-import { LoginService, type ApiError } from "../../client"
+import type { AxiosError } from "axios"
+import { LoginService } from "../../client"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -40,8 +41,8 @@ function CliAuth() {
   const authorizeMutation = useMutation({
     mutationFn: () =>
       LoginService.postLoginDeviceAuthorize({
-        requestBody: { device_code: deviceCode! },
-      }),
+        deviceAuthorizeRequest: { device_code: deviceCode! },
+      }).then((response) => response.data),
     onSuccess: () => {
       setAuthorized(true)
       showToast(
@@ -50,7 +51,7 @@ function CliAuth() {
         "success",
       )
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

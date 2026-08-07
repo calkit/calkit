@@ -14,11 +14,11 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -56,22 +56,22 @@ const UploadDataset = ({ isOpen, onClose }: UploadDatasetProps) => {
   const mutation = useMutation({
     mutationFn: (data: DatasetPostWithFile) =>
       ProjectsService.postProjectDatasetUpload({
-        formData: {
+        bodyProjectsPostProjectDatasetUpload: {
           title: data.title,
           path: data.path,
           description: data.description,
           file: data.file[0],
         },
-        ownerName: accountName,
-        projectName: projectName,
-        contentLength: data.file[0].size,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        "content-length": data.file[0].size,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Dataset uploaded successfully.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

@@ -1,28 +1,28 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Badge,
   Box,
   Button,
-  Flex,
-  Text,
-  Icon,
-  Heading,
-  useDisclosure,
-  IconButton,
-  HStack,
-  Link,
   Code,
+  Flex,
+  HStack,
+  Heading,
+  Icon,
+  IconButton,
+  Link,
+  Text,
+  useDisclosure,
 } from "@chakra-ui/react"
-import { FaTimesCircle, FaUpload, FaLock, FaCodeBranch } from "react-icons/fa"
-import { MdEdit } from "react-icons/md"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { Link as RouterLink } from "@tanstack/react-router"
-import { type ContentsItem } from "../../client"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import EditFileInfo from "./EditFileInfo"
-import useAuth from "../../hooks/useAuth"
-import UploadFile from "./UploadFile"
+import { Link as RouterLink } from "@tanstack/react-router"
+import { FaCodeBranch, FaLock, FaTimesCircle, FaUpload } from "react-icons/fa"
+import { MdEdit } from "react-icons/md"
+import type { ContentsItem } from "../../client"
 import { ProjectsService } from "../../client"
-import { type ArtifactKind } from "../Common/ArtifactCompareModal"
+import useAuth from "../../hooks/useAuth"
+import type { ArtifactKind } from "../Common/ArtifactCompareModal"
+import EditFileInfo from "./EditFileInfo"
+import UploadFile from "./UploadFile"
 
 const FIGURE_EXTS = new Set([
   ".png",
@@ -60,7 +60,7 @@ export function inferKindFromPath(path: string): ArtifactKind | undefined {
   const lower = path.toLowerCase()
   const parts = lower.split("/")
   const ext = parts[parts.length - 1].includes(".")
-    ? "." + parts[parts.length - 1].split(".").pop()!
+    ? `.${parts[parts.length - 1].split(".").pop()!}`
     : ""
 
   // Notebooks: always by extension, never in hidden folders
@@ -92,10 +92,10 @@ function FileLock({ item, ownerName, projectName }: FileLockProps) {
   const createLockMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectFileLock({
-        ownerName,
-        projectName,
-        requestBody: { path: item.path },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        fileLockPost: { path: item.path },
+      }).then((response) => response.data),
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "files"],
@@ -104,10 +104,10 @@ function FileLock({ item, ownerName, projectName }: FileLockProps) {
   const deleteLockMutation = useMutation({
     mutationFn: () =>
       ProjectsService.deleteProjectFileLock({
-        ownerName,
-        projectName,
-        requestBody: { path: item.path },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        fileLockPost: { path: item.path },
+      }).then((response) => response.data),
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "files"],

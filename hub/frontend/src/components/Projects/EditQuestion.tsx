@@ -24,8 +24,8 @@ import { useEffect } from "react"
 import { type SubmitHandler, useFieldArray, useForm } from "react-hook-form"
 import { FaPlus, FaTrash } from "react-icons/fa"
 
+import type { AxiosError } from "axios"
 import { ProjectsService, type QuestionPublic } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import {
   useProjectFigures,
@@ -122,10 +122,10 @@ const EditQuestion = ({
   const mutation = useMutation({
     mutationFn: (data: EditQuestionForm) =>
       ProjectsService.putProjectQuestion({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         number: Number(question?.number),
-        requestBody: {
+        questionPut: {
           question: data.question,
           hypothesis: data.hypothesis,
           answer: data.answer,
@@ -144,12 +144,12 @@ const EditQuestion = ({
             ]
           }),
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Question updated.", "success")
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

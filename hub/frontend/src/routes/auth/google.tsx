@@ -1,14 +1,15 @@
 import { Container, Text } from "@chakra-ui/react"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { z } from "zod"
-import { useEffect, useRef } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useEffect, useRef } from "react"
+import { z } from "zod"
 
-import { UsersService, type ApiError } from "../../client"
-import { consumeGoogleOAuthState, getGoogleRedirectUri } from "../../lib/google"
+import type { AxiosError } from "axios"
+import { UsersService } from "../../client"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import { consumeGoogleOAuthState, getGoogleRedirectUri } from "../../lib/google"
 
 const authParamsSchema = z.object({
   code: z.string(),
@@ -34,11 +35,11 @@ function GoogleAuth() {
   const googleAuthMutation = useMutation({
     mutationFn: (code: string) =>
       UsersService.postUserGoogleAuth({
-        requestBody: {
+        oAuthCodeExchange: {
           code,
           redirect_uri: getGoogleRedirectUri(),
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Google account connected successfully.", "success")
       queryClient.invalidateQueries({
@@ -46,7 +47,7 @@ function GoogleAuth() {
       })
       navigate({ to: "/settings", search: { tab: "connected-accounts" } })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
       // Still navigate back after showing error
       setTimeout(() => {

@@ -18,7 +18,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { type ApiError, type TokenPut, UsersService } from "../../client"
+import type { AxiosError } from "axios"
+import { type TokenPut, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -41,7 +42,9 @@ const UpdateOverleafToken = ({ isOpen, onClose }: UpdateOverleafTokenProps) => {
   })
   const mutation = useMutation({
     mutationFn: (data: TokenPut) => {
-      return UsersService.putUserOverleafToken({ requestBody: data })
+      return UsersService.putUserOverleafToken({ tokenPut: data }).then(
+        (response) => response.data,
+      )
     },
     onSuccess: () => {
       mixpanel.track("Updated Overleaf token")
@@ -49,7 +52,7 @@ const UpdateOverleafToken = ({ isOpen, onClose }: UpdateOverleafTokenProps) => {
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

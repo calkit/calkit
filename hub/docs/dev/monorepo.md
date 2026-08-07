@@ -351,10 +351,21 @@ deploy. Delete this doc when the list is done.
       environment-scoped; none belong at repo level.
 - [ ] Deployment branch/tag rules: `calkit.io` allows only tags matching
       `hub/v*`; `staging.calkit.io` allows `main` plus any branches you
-      actually staging-deploy.
+      actually staging-deploy. The rule is matched against `GITHUB_REF`,
+      so a job on a PR branch can't reach the environment.
+- [ ] Required reviewers on both environments (yourself is enough). This
+      is the control that stops a collaborator from adding
+      `environment: calkit.io` to `test.yml` on a PR branch and printing
+      the secrets: GitHub documents that "a job cannot access
+      environment secrets until one of the required reviewers approves
+      it", and any job naming the environment shows up for approval,
+      regardless of which workflow file declared it. It lives in repo
+      settings, so a PR can't change it.
 - [ ] The one repo-level secret, `CALKIT_ZENODO_TOKEN` (used by
       `test.yml`), moves over as-is; keep it a low-privilege sandbox
-      token since collaborator branches can read it.
+      token since collaborator branches can read it with no gate. Repo
+      secrets have no equivalent of environment protection rules, so
+      nothing else belongs at repo level.
 
 ### Self-hosted runners
 

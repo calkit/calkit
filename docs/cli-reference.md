@@ -2206,9 +2206,9 @@ calkit import environment [OPTIONS] SRC
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                                                           |
-| -------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit Cloud will be queried. |
+| Argument | Type | Required | Default | Description                                                                                                         |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
 
 Options:
 

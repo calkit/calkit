@@ -163,7 +163,11 @@ DEFAULT_HUB_URL = HUB_URLS["production"]
 
 def get_base_url() -> str:
     """Get the API base URL."""
-    override = os.environ.get("CALKIT_CLOUD_BASE_URL")
+    # CALKIT_CLOUD_BASE_URL is the old name, still honored so existing
+    # setups keep working
+    override = os.environ.get("CALKIT_HUB_API_BASE_URL") or os.environ.get(
+        "CALKIT_CLOUD_BASE_URL"
+    )
     if override:
         return override
     urls = {
@@ -179,7 +183,7 @@ def get_base_url() -> str:
         # silently sending its credentials to a built-in instance
         raise ValueError(
             f"The API URL for hub {hub} is unknown; "
-            "set CALKIT_CLOUD_BASE_URL to specify it directly"
+            "set CALKIT_HUB_API_BASE_URL to specify it directly"
         )
     return urls[hub]
 

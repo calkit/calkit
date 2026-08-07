@@ -330,7 +330,7 @@ def register_ck_scheme() -> None:
     from dvc.config_schema import REMOTE_COMMON, REMOTE_SCHEMAS, SCHEMA, ByUrl
     from dvc_objects.fs import known_implementations
 
-    # Include endpointurl for multi-cloud support
+    # Include endpointurl for multi-backend support
     ck_schema = {**REMOTE_COMMON, "endpointurl": str}
     REMOTE_SCHEMAS.setdefault("ck", ck_schema)
     SCHEMA["remote"] = {str: ByUrl(REMOTE_SCHEMAS)}
@@ -622,7 +622,7 @@ def set_remote_auth(
     wdir: str | None = None,
 ):
     """Get a token and set it in the local DVC config so we can interact with
-    the cloud as an HTTP remote.
+    the hub as an HTTP remote.
 
     Note: This only applies to HTTP remotes. The ck:// scheme doesn't need
     HTTP auth configuration.

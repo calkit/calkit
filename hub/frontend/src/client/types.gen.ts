@@ -1203,12 +1203,12 @@ export type ReleaseGithubResult = {
  * A release row for the project releases page.
  *
  * Merges two sources: ``calkit`` releases declared in ``calkit.yaml`` (the
- * public, DOI-bearing ones produced via the CLI/Zenodo) and ``cloud``
+ * public, DOI-bearing ones produced via the CLI/Zenodo) and ``hub``
  * releases stored in this database (the private, secret-link ones). Fields
  * that only apply to one source are optional.
  */
 export type ReleaseListItem = {
-  source: "cloud" | "calkit"
+  source: "hub" | "calkit"
   name: string
   kind?: string | null
   path?: string | null
@@ -1228,7 +1228,7 @@ export type ReleaseListItem = {
   github_release_url?: string | null
 }
 
-export type source = "cloud" | "calkit"
+export type source = "hub" | "calkit"
 
 export type ReleasePost = {
   name: string

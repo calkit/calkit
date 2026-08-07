@@ -24,7 +24,7 @@ is `calkit.yaml`, the project's metadata database.
 - `notebooks`—registered Jupyter notebooks
 - `datasets`, `figures`, `publications`—versioned project outputs
 - `procedures`, `calculations`, `references`—supporting metadata
-- `showcase`—elements shown on the project's Calkit Cloud homepage
+- `showcase`—elements shown on the project's Calkit homepage
 
 A minimal example:
 

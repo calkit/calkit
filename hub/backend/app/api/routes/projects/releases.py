@@ -6,7 +6,7 @@ the per-release view/content/comment endpoints also accept a ``?token=`` share
 link so a non-member holding the link can view the released artifact and
 (optionally) comment without access to the rest of the project.
 
-Internal (Calkit-hosted) releases are recorded both in the cloud database and as
+Internal (Calkit-hosted) releases are recorded both in the hub database and as
 entries in the repo's ``calkit.yaml`` (the portable source of truth). Content
 for the viewer is fetched at the release's pinned commit using the release
 creator's GitHub token, so private repos can be shared via a link without
@@ -339,7 +339,7 @@ def _store_internal_release_copy(
 ) -> str | None:
     """Save a frozen copy of a single-file artifact under ``.calkit/releases``.
 
-    Mirrors ``calkit new release --internal`` for single files so cloud and CLI
+    Mirrors ``calkit new release --internal`` for single files so hub and CLI
     releases are consistent. Returns the stored path (recorded in calkit.yaml),
     or None when no copy is made: whole-project and folder releases (made with
     the CLI, which zips), or a path missing at the pinned commit.
@@ -363,7 +363,7 @@ def _store_internal_release_copy(
     dvc_out = dvc_lock_outs.get(path)
     if dvc_out is None and tree.is_file(path + ".dvc"):
         dvc_out = ryaml.load(tree.read_text(path + ".dvc"))["outs"][0]
-    # Only single files are stored in the cloud; directories (incl. whole
+    # Only single files are stored in the hub; directories (incl. whole
     # project) are zipped, which is a CLI feature for now.
     if dvc_out is not None and str(dvc_out.get("md5", "")).endswith(".dir"):
         return None
@@ -441,8 +441,8 @@ def _record_internal_release_in_calkit_yaml(
 ) -> None:
     """Write an ``internal: true`` entry to ``calkit.yaml`` and push it.
 
-    Mirrors the cloud release into the project's portable source of truth so it
-    shows up wherever ``calkit.yaml`` is read. The cloud database keeps the
+    Mirrors the hub release into the project's portable source of truth so it
+    shows up wherever ``calkit.yaml`` is read. The hub database keeps the
     review-only data (share tokens, comments, view counts). On a push failure
     the working clone is reset so the next request starts clean.
     """
@@ -564,7 +564,7 @@ def post_project_release(
                     f"Path '{release_in.path}' not found at the given ref",
                 )
     # Don't re-release the same artifact at the same commit (a duplicate); a
-    # release at a different commit is a new version and is allowed. Cloud
+    # release at a different commit is a new version and is allowed. Hub
     # releases are authoritative in the DB, so check it directly first (a
     # whole-project release stores path as NULL or "."); CLI/external releases
     # live only in calkit.yaml, checked below.
@@ -592,9 +592,9 @@ def post_project_release(
         with open(ck_path) as f:
             existing_ck = ryaml.load(f) or {}
         existing_releases = existing_ck.get("releases") or {}
-        # The cloud-table check above only covers cloud releases. A name used by
+        # The hub-table check above only covers hub releases. A name used by
         # a release that lives only in calkit.yaml (CLI/external/imported, with
-        # no cloud row) must also fail rather than be silently overwritten.
+        # no hub row) must also fail rather than be silently overwritten.
         if release_in.name in existing_releases:
             raise HTTPException(
                 409,
@@ -1184,10 +1184,10 @@ def get_project_releases(
     )
     has_write = project.current_user_access in ("write", "admin", "owner")
     items: list[ReleaseListItem] = []
-    cloud_names: set[str] = set()
-    # Cloud (private) releases first -- newest first -- for write users only.
+    hub_names: set[str] = set()
+    # Hub (private) releases first -- newest first -- for write users only.
     if has_write:
-        cloud = session.exec(
+        hub_releases = session.exec(
             select(Release)
             .where(Release.project_id == project.id)
             # Eager-load the relationships the loop reads per row (active share
@@ -1198,12 +1198,12 @@ def get_project_releases(
             )
             .order_by(Release.created.desc())  # type: ignore[attr-defined]
         ).all()
-        for r in cloud:
-            cloud_names.add(r.name)
+        for r in hub_releases:
+            hub_names.add(r.name)
             active_shares = sum(1 for t in r.share_tokens if not t.revoked)
             items.append(
                 ReleaseListItem(
-                    source="cloud",
+                    source="hub",
                     name=r.name,
                     kind=r.kind,
                     path=r.path,
@@ -1242,7 +1242,7 @@ def get_project_releases(
     for name, rel in ck_releases.items():
         # repo is None only if get_repo raised, in which case ck_releases is
         # empty and we never get here; the guard also narrows the type.
-        if not isinstance(rel, dict) or name in cloud_names or repo is None:
+        if not isinstance(rel, dict) or name in hub_names or repo is None:
             continue
         git_rev = rel.get("git_rev")
         git_ref = rel.get("git_ref")
@@ -1395,7 +1395,7 @@ def create_release_github_release(
 ) -> ReleaseGithubResult:
     """Publish a Calkit release as a GitHub release, linking back to Calkit.
 
-    Creates a GitHub release for the cloud release's tag at its pinned commit,
+    Creates a GitHub release for the hub release's tag at its pinned commit,
     with a body that points back to the Calkit release page. If a GitHub release
     already exists for the tag, its URL is returned instead of creating a
     duplicate.

@@ -346,7 +346,7 @@ function LocalServer() {
                       {!statusQuery.isPending && !statusQuery.error ? (
                         <>
                           <Heading size="sm" mb={1} mt={4}>
-                            Cloud sync
+                            Hub sync
                           </Heading>
                           {commitsAhead ? (
                             <Flex alignItems="center">

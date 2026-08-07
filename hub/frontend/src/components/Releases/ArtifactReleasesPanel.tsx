@@ -66,9 +66,9 @@ const ArtifactReleasesPanel = ({
   // whole-project releases, which would otherwise flood every artifact's panel
   // (e.g. after importing many project releases from GitHub).
   const matching = (releasesQuery.data ?? []).filter((r) => r.path === path)
-  // Only cloud (Calkit-hosted) releases can be shared via a link; external ones
+  // Only hub (Calkit-hosted) releases can be shared via a link; external ones
   // live on a third-party venue.
-  const shareable = matching.filter((r) => r.source === "cloud")
+  const shareable = matching.filter((r) => r.source === "hub")
   const openShare = (name: string) => {
     setShareName(name)
     shareModal.onOpen()
@@ -197,7 +197,7 @@ const ArtifactReleasesPanel = ({
                 </>
               )
             })()}
-            {userHasWriteAccess && r.source === "cloud" && (
+            {userHasWriteAccess && r.source === "hub" && (
               <Tooltip label="Share">
                 <IconButton
                   aria-label="Share release"

@@ -79,7 +79,7 @@ def _get_uncached_out_paths(dvc_stage: dict | None) -> set[str]:
 
     DVC records these in dvc.yaml as ``{path: {cache: false, ...}}`` but not in
     dvc.lock. They are never pushed to the DVC cache/object storage and are
-    often gitignored, so the cloud can't observe them.
+    often gitignored, so the hub can't observe them.
     """
     paths: set[str] = set()
     if not isinstance(dvc_stage, dict):
@@ -424,7 +424,7 @@ def compute_stage_statuses(
             # Drop leftover matrix/foreach expansions: ``base@...`` entries from
             # old matrix combinations (or an older DVC naming scheme, e.g.
             # ``@1-3-1`` vs the current ``@_arg01``) that aren't in the current
-            # pipeline. Their objects are often gc'd, so the cloud would wrongly
+            # pipeline. Their objects are often gc'd, so the hub would wrongly
             # flag them stale even though a current entry produces the same
             # output. lock files drift into this state easily, so guard for it.
             continue
@@ -456,7 +456,7 @@ def compute_stage_statuses(
                 continue
             current = _resolve_current_dep_md5(dep_path, tree, outs_index)
             if current is None:
-                # The cloud can't observe this dep: it's not in the git tree,
+                # The hub can't observe this dep: it's not in the git tree,
                 # has no .dvc pointer, isn't another stage's out, and isn't in
                 # object storage. This is normal for gitignored calkit
                 # intermediates (e.g. cleaned notebooks, which calkit cleans
@@ -481,9 +481,9 @@ def compute_stage_statuses(
                 if _get_nested(current_params, key) != locked_val:
                     modified_inputs.append(f"{params_file}:{key}")
         # Outs marked ``cache: false`` in dvc.yaml are never pushed to object
-        # storage and are often gitignored, so the cloud can't observe them.
+        # storage and are often gitignored, so the hub can't observe them.
         # Their absence isn't evidence they're missing (calkit/DVC check the
-        # workspace file, which the cloud can't see), so don't flag stale --
+        # workspace file, which the hub can't see), so don't flag stale --
         # same rationale as the unobservable-dep case above.
         cache_false_outs = _get_uncached_out_paths(yaml_stage)
         for out in lock_stage.get("outs") or []:
@@ -521,7 +521,7 @@ def compute_stage_statuses(
         # A stage compiled with ``always_changed: true`` (calkit's
         # ``always_run``) re-executes every time by design, so its dependency
         # and output staleness is moot -- it always regenerates, and its
-        # outputs are often ephemeral / not pushed to the cloud. Always surface
+        # outputs are often ephemeral / not pushed to the hub. Always surface
         # it as ``always-run`` rather than letting a missing/changed output
         # flag it stale.
         always_changed = bool(

@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     from calkit import (  # noqa: F401
         calc,
         check,
-        cloud,
         conda,
         config,
         datasets,
@@ -49,7 +48,6 @@ if TYPE_CHECKING:
 _SUBMODULES = {
     "git",
     "dvc",
-    "cloud",
     "hub",
     "fs",
     "jupyter",

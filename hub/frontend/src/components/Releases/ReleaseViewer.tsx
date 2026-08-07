@@ -352,7 +352,7 @@ function CommentsPanel({
 
 // Comments for a calkit.yaml release, via the generic project-comment system
 // (artifact_type "release", keyed by the release name). Login required to post
-// -- these releases are members-only, unlike the token-shared cloud releases.
+// -- these releases are members-only, unlike the token-shared hub releases.
 function MemberCommentsPanel({
   loc,
   release,
@@ -683,7 +683,7 @@ function ReleaseUnavailable({
   )
 }
 
-// Resolves a release and renders the right view: a cloud (internal, hosted)
+// Resolves a release and renders the right view: a hub (internal, hosted)
 // release with its artifact/project browser and comments, or a release
 // declared in calkit.yaml (published to an external venue, or a CLI-made
 // snapshot) shown as metadata with a link to browse the project at its commit.
@@ -704,14 +704,14 @@ export default function ReleaseViewer({ loc, onClose }: ReleaseViewerProps) {
         releaseName: loc.releaseName,
         token: loc.token,
       }),
-    // A 404 means there's no cloud release for this name; fall back to the
+    // A 404 means there's no hub release for this name; fall back to the
     // calkit.yaml listing immediately. Other errors (transient 5xx/network)
     // are worth retrying, so a member viewing their own release doesn't get
     // bounced to the "unavailable" screen by a one-off hiccup.
     retry: (failureCount, error: ApiError) =>
       error?.status !== 404 && failureCount < 2,
   })
-  // calkit.yaml releases have no cloud row, so getReleaseView 404s; fall back
+  // calkit.yaml releases have no hub row, so getReleaseView 404s; fall back
   // to their metadata from the project's releases listing.
   const listQuery = useQuery({
     queryKey: [
@@ -737,7 +737,7 @@ export default function ReleaseViewer({ loc, onClose }: ReleaseViewerProps) {
     )
   if (listQuery.isPending) return <LoadingSpinner height="100%" />
   const calkit = (listQuery.data ?? []).find(
-    (r) => r.name === loc.releaseName && r.source !== "cloud",
+    (r) => r.name === loc.releaseName && r.source !== "hub",
   )
   if (calkit)
     return <CalkitReleaseView loc={loc} release={calkit} onClose={onClose} />
@@ -794,7 +794,7 @@ function CalkitReleaseView({
   const refLabel = release.git_ref ?? release.git_rev_abbrev ?? ""
   const isWholeProject = !release.path || release.path === "."
   // For a single-artifact release, fetch the file at the pinned commit via the
-  // project's contents API (no cloud row, so no release-content endpoint).
+  // project's contents API (no hub row, so no release-content endpoint).
   const contentQuery = useQuery({
     queryKey: [
       "projects",

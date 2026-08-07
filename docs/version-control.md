@@ -17,7 +17,7 @@ since Git was not designed for large and/or binary files,
 Calkit uses [DVC](https://dvc.org) to version these file types.
 
 [GitHub](https://github.com) is currently the most popular location to back up
-Git repositories, or repos, in the cloud, but like Git,
+Git repositories, or repos, remotely, but like Git,
 is primarily designed for software development.
 Similar to how Calkit is a layer on top of Git,
 The Calkit hub ([calkit.io](https://calkit.io))
@@ -35,11 +35,11 @@ for more complex operations.
 In order to start working on a project,
 the project repository must exist on your local machine.
 This can be achieved either by creating a new repo or
-downloading, or "cloning," an existing one from the cloud.
+downloading, or "cloning," an existing one from a remote.
 After a repo exists on your local machine,
 it is typical to repeat the cycle of
 committing new or changed files with a message describing them,
-and then pushing those commits to the cloud.
+and then pushing those commits to the remote.
 This can be achieved with three workflow variants that trade off
 automation for control.
 
@@ -47,7 +47,7 @@ The simplest and most hands-off uses `calkit save`,
 which will automatically make decisions about which files belong in Git
 which belong in DVC, which don't belong in either,
 commit them,
-and push them to the cloud all with a single command:
+and push them to the hub all with a single command:
 
 ```mermaid
 graph LR

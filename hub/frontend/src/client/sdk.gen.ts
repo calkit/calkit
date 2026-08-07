@@ -3916,7 +3916,7 @@ export class ReleasesService {
    * Create Release Github Release
    * Publish a Calkit release as a GitHub release, linking back to Calkit.
    *
-   * Creates a GitHub release for the cloud release's tag at its pinned commit,
+   * Creates a GitHub release for the hub release's tag at its pinned commit,
    * with a body that points back to the Calkit release page. If a GitHub release
    * already exists for the tag, its URL is returned instead of creating a
    * duplicate.

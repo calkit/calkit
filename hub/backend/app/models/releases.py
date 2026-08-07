@@ -1,6 +1,6 @@
 """Release-related models.
 
-Split out from ``core`` for locality: the cloud release feature (hosted
+Split out from ``core`` for locality: the hub release feature (hosted
 review releases, share tokens, comments, view tracking) owns a good chunk of
 the schema. The table classes register into ``SQLModel.metadata`` at import
 time just like the core ones, so Alembic autogenerate and app startup see
@@ -20,7 +20,7 @@ from app import utcnow
 from app.models.core import CommentHighlight, Project, User
 
 # Release ``kind`` mirrors calkit's release schema (the ``releases`` map in
-# calkit.yaml is keyed by tag). For this cloud feature the DB is the source of
+# calkit.yaml is keyed by tag). For this hub feature the DB is the source of
 # truth; private releases are not written to calkit.yaml.
 ReleaseKind = Literal["project", "publication", "dataset", "model", "figure"]
 
@@ -397,12 +397,12 @@ class ReleaseListItem(BaseModel):
     """A release row for the project releases page.
 
     Merges two sources: ``calkit`` releases declared in ``calkit.yaml`` (the
-    public, DOI-bearing ones produced via the CLI/Zenodo) and ``cloud``
+    public, DOI-bearing ones produced via the CLI/Zenodo) and ``hub``
     releases stored in this database (the private, secret-link ones). Fields
     that only apply to one source are optional.
     """
 
-    source: Literal["cloud", "calkit"]
+    source: Literal["hub", "calkit"]
     name: str
     kind: str | None = None
     path: str | None = None
@@ -411,27 +411,27 @@ class ReleaseListItem(BaseModel):
     git_rev: str | None = None
     git_rev_abbrev: str | None = None
     # calkit.yaml releases default to public (a missing key means public);
-    # cloud releases carry an explicit flag.
+    # hub releases carry an explicit flag.
     public: bool = True
     url: str | None = None
     doi: str | None = None
     # Where the artifact was declared released (e.g., arxiv, journal, zenodo,
     # caltechdata). Unified with the existing ``publisher`` key that Zenodo
-    # releases already use. ``None`` for hosted cloud secret-link releases.
+    # releases already use. ``None`` for hosted secret-link releases.
     publisher: str | None = None
-    # Release date as an ISO string (calkit.yaml ``date`` or cloud ``created``).
+    # Release date as an ISO string (calkit.yaml ``date`` or hub ``created``).
     date: str | None = None
     # An internal release: a frozen, pinned snapshot hosted for review rather
-    # than published to an archival service. True for all cloud releases and
+    # than published to an archival service. True for all hub releases and
     # for calkit.yaml entries with ``internal: true``.
     internal: bool = False
-    # Cloud-only fields.
+    # Hub-only fields.
     view_count: int | None = None
     comment_count: int | None = None
-    # Number of active (non-revoked) share links, for cloud releases.
+    # Number of active (non-revoked) share links, for hub releases.
     share_count: int | None = None
     # The GitHub release URL when this release has been published to GitHub. For
-    # cloud releases this is stored; for calkit.yaml releases imported from
+    # hub releases this is stored; for calkit.yaml releases imported from
     # GitHub it's the release's ``url``. ``None`` means not on GitHub (yet).
     github_release_url: str | None = None
 

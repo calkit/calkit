@@ -928,6 +928,16 @@ def update_slurm_env(
             "--set-default-setup", help="Replace default setup list."
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the queue "
+                "at once, or 0 to remove the limit."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Update a SLURM environment."""
     ck_info, env = _load_env(env_name)
@@ -959,6 +969,15 @@ def update_slurm_env(
         env["default_setup"] = cmds
     elif "default_setup" in env:
         del env["default_setup"]
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 is the way to clear the limit, since omitting the option means
+        # "leave it alone" rather than "unlimited".
+        if max_concurrent_jobs == 0:
+            env.pop("max_concurrent_jobs", None)
+        else:
+            env["max_concurrent_jobs"] = max_concurrent_jobs
     calkit.save_calkit_info(ck_info)
     typer.echo(f"Updated slurm environment '{env_name}'")
 

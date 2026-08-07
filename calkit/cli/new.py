@@ -1541,6 +1541,18 @@ def new_slurm_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the queue "
+                "at once. Submissions beyond this wait for a slot, so an "
+                "iterated stage does not flood a shared cluster's queue. "
+                "Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1581,6 +1593,10 @@ def new_slurm_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 1:
+            raise_error("--max-concurrent-jobs must be at least 1")
+        env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env
@@ -1630,6 +1646,18 @@ def new_pbs_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the queue "
+                "at once. Submissions beyond this wait for a slot, so an "
+                "iterated stage does not flood a shared cluster's queue. "
+                "Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1672,6 +1700,10 @@ def new_pbs_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 1:
+            raise_error("--max-concurrent-jobs must be at least 1")
+        env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env

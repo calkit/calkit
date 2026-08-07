@@ -3303,6 +3303,8 @@ Submit a batch job through the scheduler associated with the env.
 
 Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
 
+If the environment sets `max_concurrent_jobs`, submission waits until this project has fewer than that many jobs queued or running, so an iterated stage does not put all of its jobs into a shared cluster's queue at once.
+
 Usage:
 
 ```text

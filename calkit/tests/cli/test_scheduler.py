@@ -9,9 +9,11 @@ import pytest
 import typer
 
 from calkit.cli.scheduler import (
+    _active_job_ids,
     _build_job_command,
     _build_pbs_submit,
     _build_slurm_submit,
+    _count_queued_jobs,
     _finalize_job,
     _is_active,
     _load_jobs,
@@ -455,3 +457,134 @@ def test_record_job_result(tmp_dir):
     # A canceled-and-deleted job is not resurrected by a later result.
     _record_job_result("gone", 0)
     assert "gone" not in _load_jobs()
+
+
+def test_active_job_ids_slurm(monkeypatch):
+    import subprocess
+
+    import calkit.cli.scheduler as sched
+
+    calls: list[list[str]] = []
+    result: dict = {}
+
+    def _fake_run(cmd, *args, **kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd,
+            result["returncode"],
+            stdout=result.get("stdout", ""),
+            stderr=result.get("stderr", ""),
+        )
+
+    monkeypatch.setattr(sched.subprocess, "run", _fake_run)
+    # An empty set of jobs never queries the scheduler at all.
+    assert _active_job_ids("slurm", []) == set()
+    assert calls == []
+    # Occupancy for many jobs is answered by a single `squeue --me` call, and
+    # only the ids we asked about are returned.
+    result.update(returncode=0, stdout="1\n3\n99\n")
+    assert _active_job_ids("slurm", ["1", "2", "3"]) == {"1", "3"}
+    assert len(calls) == 1
+    assert calls[0][:2] == ["squeue", "--me"]
+    # Array and step ids belong to the job we recorded.
+    result.update(returncode=0, stdout="7_2\n8.batch\n")
+    assert _active_job_ids("slurm", ["7", "8"]) == {"7", "8"}
+    # If squeue fails we fall back to polling each job rather than reporting
+    # an empty queue we never confirmed---which would let submissions through.
+    calls.clear()
+    result.update(returncode=1, stdout="", stderr="squeue: error: timeout\n")
+    assert _active_job_ids("slurm", ["1", "2"]) == {"1", "2"}
+    assert len(calls) > 1
+
+
+def test_count_queued_jobs(tmp_dir, monkeypatch):
+    import calkit.cli.scheduler as sched
+
+    active = {"1", "2", "3", "4", "5"}
+    monkeypatch.setattr(
+        sched,
+        "_active_job_ids",
+        lambda kind, job_ids: {j for j in job_ids if j in active},
+    )
+    _record_job("a", {"kind": "slurm", "environment": "hpc", "job_id": "1"})
+    _record_job("b", {"kind": "slurm", "environment": "hpc", "job_id": "2"})
+    # A job in another environment does not count against this one's limit.
+    _record_job("c", {"kind": "slurm", "environment": "other", "job_id": "3"})
+    assert _count_queued_jobs("hpc", exclude="none") == 2
+    # Our own prior record is excluded, so a resubmission does not count
+    # itself against the limit.
+    assert _count_queued_jobs("hpc", exclude="a") == 1
+    # A job already observed to have finished is not in the queue, even if
+    # the scheduler still lists it.
+    _record_job(
+        "d",
+        {
+            "kind": "slurm",
+            "environment": "hpc",
+            "job_id": "4",
+            "exit_code": 0,
+        },
+    )
+    assert _count_queued_jobs("hpc", exclude="none") == 2
+    # Records predating environment tracking are counted rather than ignored:
+    # over-counting delays a submission, under-counting floods the queue.
+    _record_job("e", {"kind": "slurm", "job_id": "5"})
+    assert _count_queued_jobs("hpc", exclude="none") == 3
+
+
+def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):
+    import calkit.cli.scheduler as sched
+
+    # No limit means no waiting and no queue queries.
+    monkeypatch.setattr(
+        sched,
+        "_count_queued_jobs",
+        lambda *a, **kw: pytest.fail("should not check occupancy"),
+    )
+    with sched._queue_slot("hpc", "job", None):
+        pass
+
+    # With a limit, the slot is granted immediately when there is room.
+    counts = iter([0])
+    monkeypatch.setattr(
+        sched, "_count_queued_jobs", lambda *a, **kw: next(counts)
+    )
+    entered = False
+    with sched._queue_slot("hpc", "job", 2):
+        entered = True
+    assert entered
+
+    # A full queue blocks until a slot frees up, rather than submitting.
+    counts = iter([2, 2, 1])
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        sched, "_count_queued_jobs", lambda *a, **kw: next(counts)
+    )
+    monkeypatch.setattr(sched.time, "sleep", sleeps.append)
+    with sched._queue_slot("hpc", "job", 2):
+        pass
+    assert len(sleeps) == 2
+
+
+def test_queue_lock_is_exclusive(tmp_dir):
+    import calkit.cli.scheduler as sched
+
+    # A second holder cannot enter while the first is inside the block, which
+    # is what stops concurrent submitters from claiming the same free slot.
+    order: list[str] = []
+
+    def _hold(label: str, hold_s: float) -> None:
+        with sched._queue_lock():
+            order.append(f"enter {label}")
+            time.sleep(hold_s)
+            order.append(f"exit {label}")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(_hold, "a", 0.3)
+        time.sleep(0.05)
+        second = executor.submit(_hold, "b", 0.0)
+        first.result()
+        second.result()
+    # Whoever went first finished before the other started.
+    assert order[0].startswith("enter")
+    assert order[1] == order[0].replace("enter", "exit")

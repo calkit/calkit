@@ -13,13 +13,15 @@ def test_use_hub(monkeypatch, tmp_dir):
     # Monkeypatch CALKIT_ENV first so its original value is restored on
     # teardown even though config.set_env mutates os.environ directly
     monkeypatch.setenv("CALKIT_ENV", "test")
-    # An environment alias is accepted directly
-    hub_cli._use_hub("staging")
+    # Environment names are deployment-internal vocabulary, not hubs
+    with pytest.raises(typer.Exit):
+        hub_cli._use_hub("staging")
+    # A known hub URL resolves, with or without scheme
+    hub_cli._use_hub("https://staging.calkit.io")
     assert os.environ["CALKIT_ENV"] == "staging"
-    # A known hub URL resolves to its environment
-    hub_cli._use_hub("https://calkit.io")
+    hub_cli._use_hub("calkit.io")
     assert os.environ["CALKIT_ENV"] == "production"
-    # An unknown hub URL is an error until per-hub config exists
+    # An unknown hub URL is an error until discovery exists
     with pytest.raises(typer.Exit):
         hub_cli._use_hub("https://other-calkit.io")
     # An explicitly set env is the source of truth when no option is passed

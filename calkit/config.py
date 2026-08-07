@@ -11,7 +11,7 @@ from typing import get_args as get_type_args
 
 import keyring
 import keyring.errors
-from pydantic import GetCoreSchemaHandler
+from pydantic import GetCoreSchemaHandler, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from pydantic_settings import (
@@ -97,20 +97,27 @@ def get_hub() -> str:
     """Return the active hub key: a built-in environment name or an
     arbitrary hub URL.
 
-    ``CALKIT_HUB`` takes precedence and accepts a built-in environment
-    name, a built-in hub URL (with or without scheme), or an arbitrary
-    hub URL; then an explicitly set environment (``CALKIT_ENV``); then
-    the ``default_hub`` config value; then production (calkit.io).
+    ``CALKIT_HUB`` takes precedence and must be a hub URL (with or
+    without scheme), e.g., ``https://staging.calkit.io``; environment
+    names belong to ``CALKIT_ENV``. Then an explicitly set environment;
+    then the ``default_hub`` config value (also a URL); then production
+    (calkit.io).
     """
     hub = os.getenv("CALKIT_HUB")
+    source = "CALKIT_HUB"
     if not hub and os.getenv("CALKIT_ENV"):
         return get_env()
     if not hub:
         hub = _get_default_hub()
+        source = "default_hub"
     if not hub:
         return "production"
     if hub in ["test", "local", "staging", "production"]:
-        return hub
+        raise ValueError(
+            f"{source} must be a hub URL like https://calkit.io, not an "
+            f"environment name ('{hub}'); use CALKIT_ENV for environment "
+            "names"
+        )
     # Map built-in hub URLs to their environment names so they share
     # config with the env-based spellings
     from calkit.hub import env_for_hub
@@ -245,6 +252,18 @@ class Settings(BaseSettings):
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
+
+    @field_validator("default_hub")
+    @classmethod
+    def _validate_default_hub(cls, v: str | None) -> str | None:
+        # Environment names are deployment-internal vocabulary; the hub
+        # is identified by its URL
+        if v in ["test", "local", "staging", "production"]:
+            raise ValueError(
+                "default_hub must be a hub URL like https://calkit.io, "
+                "not an environment name"
+            )
+        return v
 
     @classmethod
     def settings_customise_sources(

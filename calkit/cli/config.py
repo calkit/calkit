@@ -24,10 +24,9 @@ def config_main(
         typer.Option(
             "--hub",
             help=(
-                "Hub whose config to operate on: an environment name "
-                "(production, staging, local) or a hub URL, e.g., "
+                "URL of the hub whose config to operate on, e.g., "
                 "other-calkit.io. Config is kept separately per hub. "
-                "Defaults to the active environment's hub."
+                "Defaults to the active hub."
             ),
         ),
     ] = None,
@@ -36,6 +35,10 @@ def config_main(
     # The active hub drives the config file path, keyring service name,
     # and env var prefix; see calkit.config.get_hub
     if hub is not None:
+        if hub in ["test", "local", "staging", "production"]:
+            raise_error(
+                "--hub takes a hub URL, e.g., https://staging.calkit.io"
+            )
         os.environ["CALKIT_HUB"] = hub
 
 

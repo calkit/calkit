@@ -26,7 +26,7 @@ calkit config set default_hub https://your-hub.example.edu
 ```
 
 Commands that take a `--hub` option, like `calkit new project`, can also
-target an instance one-off, e.g., `--hub staging`.
+target an instance one-off, e.g., `--hub staging.calkit.io`.
 
 Like the rest of Calkit, the hub is free and open source, so
 [you can run your own](self-hosting.md).

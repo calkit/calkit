@@ -59,10 +59,9 @@ def new_project(
             "--cloud",
             help=(
                 "Create this project on a Calkit hub (and GitHub). "
-                "Optionally takes a hub URL or environment name; bare "
-                "--hub (or the special value 'default') uses the "
-                "default_hub config value, else calkit.io. --cloud is a "
-                "deprecated alias."
+                "Optionally takes a hub URL; bare --hub (or the special "
+                "value 'default') uses the default_hub config value, "
+                "else calkit.io. --cloud is a deprecated alias."
             ),
         ),
     ] = None,
@@ -131,6 +130,10 @@ def new_project(
     # (a bare --hub) keeps the normal resolution: CALKIT_HUB/CALKIT_ENV if
     # set, else the default_hub config value, else calkit.io
     if hub is not None and hub != "default":
+        if hub in ["test", "local", "staging", "production"]:
+            raise_error(
+                "--hub takes a hub URL, e.g., https://staging.calkit.io"
+            )
         os.environ["CALKIT_HUB"] = hub
         try:
             calkit.hub.get_base_url()

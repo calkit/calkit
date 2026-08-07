@@ -845,18 +845,18 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                     |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                                                   |
-| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                                                  |
-| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                                            |
-| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL or environment name; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
-| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                                                |
-| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                                            |
-| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                                        |
-| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                                                   |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                                        |
-| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                           |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
 
 <a id="subcommand-new-create-figure-fig"></a>
 
@@ -3264,9 +3264,9 @@ Arguments:
 
 Options:
 
-| Option  | Type | Required | Default | Description                                                                                                                                                                                 |
-| ------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | text | no       |         | Hub to target: an environment name (production, staging, local) or a known hub URL, e.g., https://calkit.io. Defaults to the working directory project's hub, if declared, else production. |
+| Option  | Type | Required | Default | Description                                                                                                                              |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 
 <a id="subcommand-hub-cloud-login"></a>
 
@@ -3284,10 +3284,10 @@ calkit hub|cloud login [OPTIONS]
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                                                                                                                 |
-| --------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub`         | text    | no       |         | Hub to target: an environment name (production, staging, local) or a known hub URL, e.g., https://calkit.io. Defaults to the working directory project's hub, if declared, else production. |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                                                                          |
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
 
 <a id="command-group-scheduler-sch"></a>
 

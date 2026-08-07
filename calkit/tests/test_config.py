@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import calkit.config as config
 
 
@@ -11,9 +13,11 @@ def test_get_hub(monkeypatch):
     assert config.get_hub() == "test"
     monkeypatch.setenv("CALKIT_ENV", "staging")
     assert config.get_hub() == "staging"
-    # CALKIT_HUB takes precedence and accepts an environment name
+    # CALKIT_HUB takes precedence and must be a URL; environment names
+    # are deployment-internal vocabulary and are rejected
     monkeypatch.setenv("CALKIT_HUB", "production")
-    assert config.get_hub() == "production"
+    with pytest.raises(ValueError, match="must be a hub URL"):
+        config.get_hub()
     # Built-in hub URLs map to their environment names, with or without
     # scheme, so they share config with the env-based spellings
     monkeypatch.setenv("CALKIT_HUB", "https://staging.calkit.io")
@@ -33,6 +37,10 @@ def test_get_hub(monkeypatch):
     assert config.get_hub() == "staging"
     monkeypatch.setattr(config, "_get_default_hub", lambda: None)
     assert config.get_hub() == "production"
+    # An environment name in default_hub is rejected too
+    monkeypatch.setattr(config, "_get_default_hub", lambda: "staging")
+    with pytest.raises(ValueError, match="default_hub must be a hub URL"):
+        config.get_hub()
     # An explicitly set environment beats default_hub
     monkeypatch.setattr(
         config, "_get_default_hub", lambda: "https://staging.calkit.io"
@@ -46,7 +54,7 @@ def test_per_hub_config_naming(monkeypatch):
     monkeypatch.delenv("CALKIT_HUB", raising=False)
     assert config.get_env_suffix() == "-test"
     assert config.get_app_name() == "calkit-test"
-    monkeypatch.setenv("CALKIT_HUB", "production")
+    monkeypatch.setenv("CALKIT_ENV", "production")
     assert config.get_env_suffix() == ""
     assert config.get_app_name() == "calkit"
     monkeypatch.setenv("CALKIT_HUB", "http://localhost:5173")

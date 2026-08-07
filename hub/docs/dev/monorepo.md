@@ -247,10 +247,12 @@ exists on the `merge-hub` branch.
 ## Per-hub CLI config
 
 **Done.** The env key generalized to a hub key exactly as planned:
-`get_hub()` resolves `CALKIT_HUB` (an env alias, a built-in hub URL, or an
-arbitrary hub URL) falling back to `CALKIT_ENV`, and `get_env_suffix()` keys
-off it, so `CALKIT_ENV=staging` and existing config files keep working while
-`calkit config --hub other-calkit.io set token` is the general form. Hub
+`get_hub()` resolves `CALKIT_HUB` (a hub URL; environment names are
+deployment-internal vocabulary the CLI's hub surfaces don't accept) falling
+back to `CALKIT_ENV`, then the `default_hub` config value, and
+`get_env_suffix()` keys off it, so `CALKIT_ENV=staging` and existing config
+files keep working while `calkit config --hub other-calkit.io set token` is
+the general form. Hub
 keys are slugified before becoming filenames, keyring service names, or env
 var prefixes (`localhost:5173` cannot appear in a Windows filename, and CI
 runs windows-latest). DVC remote naming was left alone per the original

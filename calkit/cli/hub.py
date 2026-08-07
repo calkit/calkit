@@ -13,9 +13,8 @@ from calkit.cli import raise_error
 hub_app = typer.Typer(no_args_is_help=True)
 
 _HUB_OPTION_HELP = (
-    "Hub to target: an environment name (production, staging, local) or a "
-    "known hub URL, e.g., https://calkit.io. Defaults to the working "
-    "directory project's hub, if declared, else production."
+    "URL of the hub to target, e.g., https://staging.calkit.io. Defaults "
+    "to the working directory project's hub, if declared, else calkit.io."
 )
 
 
@@ -23,19 +22,22 @@ def _use_hub(hub: str | None) -> None:
     """Point subsequent hub API calls at the requested instance.
 
     Resolution order: the ``--hub`` option, then ``CALKIT_ENV``, then the
-    working directory project's declared ``hub``, then production.
+    working directory project's declared ``hub``, then calkit.io.
     """
     from calkit import config
 
     if hub is not None:
-        if hub in ["production", "staging", "local"]:
-            config.set_env(hub)  # type: ignore[arg-type]
-            return
-        env = calkit.hub.env_for_hub(hub)
+        if hub in ["test", "local", "staging", "production"]:
+            raise_error(
+                "--hub takes a hub URL, e.g., https://staging.calkit.io"
+            )
+        env = calkit.hub.env_for_hub(hub) or calkit.hub.env_for_hub(
+            "https://" + hub
+        )
         if env is None:
             raise_error(
                 f"Unknown hub '{hub}'; arbitrary hub URLs are not yet "
-                "supported (only production, staging, and local)"
+                "supported"
             )
         config.set_env(env)  # type: ignore[arg-type]
         return

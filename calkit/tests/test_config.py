@@ -23,6 +23,22 @@ def test_get_hub(monkeypatch):
     # Arbitrary hubs pass through, normalized
     monkeypatch.setenv("CALKIT_HUB", "https://hub.example.edu/")
     assert config.get_hub() == "https://hub.example.edu"
+    # The default_hub config value fills in when neither CALKIT_HUB nor
+    # CALKIT_ENV is set, falling back to production without it
+    monkeypatch.delenv("CALKIT_HUB", raising=False)
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
+    monkeypatch.setattr(
+        config, "_get_default_hub", lambda: "https://staging.calkit.io"
+    )
+    assert config.get_hub() == "staging"
+    monkeypatch.setattr(config, "_get_default_hub", lambda: None)
+    assert config.get_hub() == "production"
+    # An explicitly set environment beats default_hub
+    monkeypatch.setattr(
+        config, "_get_default_hub", lambda: "https://staging.calkit.io"
+    )
+    monkeypatch.setenv("CALKIT_ENV", "local")
+    assert config.get_hub() == "local"
 
 
 def test_per_hub_config_naming(monkeypatch):

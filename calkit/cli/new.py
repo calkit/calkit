@@ -15,10 +15,14 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
 from calkit.core import ryaml
 
 new_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+
+class _NewProjectCommand(OptionalValueCommand):
+    optional_value_options = {"--hub": "default", "--cloud": "default"}
 
 
 def _check_path_dir(path: str):
@@ -28,7 +32,7 @@ def _check_path_dir(path: str):
         os.makedirs(dirname, exist_ok=True)
 
 
-@new_app.command(name="project")
+@new_app.command(name="project", cls=_NewProjectCommand)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
     name: Annotated[
@@ -48,18 +52,24 @@ def new_project(
     description: Annotated[
         str | None, typer.Option("--description", help="Project description.")
     ] = None,
-    cloud: Annotated[
-        bool,
+    hub: Annotated[
+        str | None,
         typer.Option(
+            "--hub",
             "--cloud",
-            help=("Create this project in the cloud (Calkit and GitHub.)"),
+            help=(
+                "Create this project on a hub (and GitHub). Optionally "
+                "takes a hub URL or environment name; bare --hub (or the "
+                "special value 'default') uses the default_hub config "
+                "value, else calkit.io. --cloud is a deprecated alias."
+            ),
         ),
-    ] = False,
+    ] = None,
     public: Annotated[
         bool,
         typer.Option(
             "--public",
-            help="Create as a public project if --cloud is selected.",
+            help="Create as a public project if --hub is selected.",
         ),
     ] = False,
     git_repo_url: Annotated[
@@ -116,6 +126,15 @@ def new_project(
         "Next, you'll probably want to start building your pipeline.\n\n"
         f"Check out the docs at {docs_url}."
     )
+    # Point subsequent hub API calls at the requested instance; 'default'
+    # (a bare --hub) keeps the normal resolution: CALKIT_HUB/CALKIT_ENV if
+    # set, else the default_hub config value, else calkit.io
+    if hub is not None and hub != "default":
+        os.environ["CALKIT_HUB"] = hub
+        try:
+            calkit.hub.get_base_url()
+        except ValueError as e:
+            raise_error(str(e))
     abs_path = os.path.abspath(path)
     if template and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --template")
@@ -146,10 +165,10 @@ def new_project(
                 raise_error(
                     f"Could not detect Git repo URL from existing repo: {e}"
                 )
-        elif not cloud:
+        elif hub is None:
             raise_error(
                 "Existing Git repo has no remotes; "
-                "specify --git-url or use --cloud to create one"
+                "specify --git-url or use --hub to create one"
             )
         # We don't have a project name but do have a Git repo URL, the
         # project name will be the Git repo name lowercased, since that's
@@ -198,8 +217,8 @@ def new_project(
     if title is None:
         title = typer.prompt("Enter a title (ex: 'My research project')")
     typer.echo(f"Using title: {title}")
-    if cloud:
-        # Cloud should allow None, which will allow us to post just the name
+    if hub is not None:
+        # The hub should allow None, which will allow us to post just the name
         # NOTE: This will fail if the user hasn't logged into the hub
         # in 6 months, since their GitHub refresh token stored is expired
         # Strip control characters (e.g., stray newlines) the API rejects
@@ -225,7 +244,7 @@ def new_project(
                 ),
             )
         except Exception as e:
-            msg = f"Posting new project to cloud failed: {e}"
+            msg = f"Posting new project to the hub failed: {e}"
             if (
                 git_repo_url is not None
                 and "Can only create projects for yourself" in str(e)
@@ -296,9 +315,9 @@ def new_project(
                     repo.git.commit(
                         ["calkit.yaml", "-m", "Update calkit.yaml"]
                     )
-            # Set Git remote URL to match the one used in the cloud repo
+            # Set Git remote URL to match the one used in the hub repo
             if repo.remotes:
-                typer.echo("Updating Git remote URL to match cloud repo")
+                typer.echo("Updating Git remote URL to match hub repo")
                 # Use origin if present, otherwise fall back to the first remote
                 remote_names = [r.name for r in repo.remotes]
                 existing_remote = repo.remotes[
@@ -316,7 +335,7 @@ def new_project(
                     )
                 repo.git.remote(["set-url", existing_remote.name, new_url])
             else:
-                typer.echo("Adding Git remote URL for cloud repo")
+                typer.echo("Adding Git remote URL for hub repo")
                 repo.git.remote(["add", "origin", resp["git_repo_url"]])
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
@@ -331,7 +350,8 @@ def new_project(
         except Exception:
             warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)
-        add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
+        hub_url = calkit.hub.get_hub_url()
+        add_msg = f"\n\nYou can view your project at {hub_url}/{prj}"
         typer.echo(success_message + add_msg)
         return
     # If using a template, clone it first

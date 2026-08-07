@@ -151,7 +151,7 @@ calkit new project . \
     --name my-phd-research \
     --title "Experimental investigation of something" \
     --description "Investigating the effects of a thing." \
-    --cloud
+    --hub
 ```
 
 In this command, the `.` means the current working directory,
@@ -163,7 +163,7 @@ the title should be sentence or title case,
 and the description should include punctuation,
 kind of like an abstract.
 
-The `--cloud` flag is going to create a GitHub repo and hub project
+The `--hub` flag is going to create a GitHub repo and hub project
 for us, which will be linked together.
 In the next step,
 when we put the files in version control,

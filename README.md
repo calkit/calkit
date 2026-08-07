@@ -274,10 +274,10 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [a hub connection](https://docs.calkit.org/hub)
+Note the `--hub` flag requires [a hub connection](https://docs.calkit.org/hub)
 to be set up, but can be omitted if the project doesn't need to be backed up to
 the cloud or shared with collaborators.
 Cloud integration can also be set up later.

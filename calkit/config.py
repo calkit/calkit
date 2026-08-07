@@ -73,18 +73,42 @@ def set_env(name: Literal["local", "staging", "production"]) -> None:
     os.environ["CALKIT_ENV"] = name
 
 
+def _get_default_hub() -> str | None:
+    """Read ``default_hub`` from the base (unsuffixed) config file.
+
+    Read directly rather than through ``Settings``, since the active hub
+    determines which config file ``Settings`` reads, which would recurse.
+    """
+    import yaml
+
+    fpath = os.path.join(os.path.expanduser("~"), ".calkit", "config.yaml")
+    try:
+        with open(fpath) as f:
+            data = yaml.safe_load(f) or {}
+    except (FileNotFoundError, yaml.YAMLError):
+        return None
+    val = data.get("default_hub")
+    if isinstance(val, str) and val:
+        return val
+    return None
+
+
 def get_hub() -> str:
     """Return the active hub key: a built-in environment name or an
     arbitrary hub URL.
 
     ``CALKIT_HUB`` takes precedence and accepts a built-in environment
     name, a built-in hub URL (with or without scheme), or an arbitrary
-    hub URL; otherwise the environment (``CALKIT_ENV``) determines the
-    hub.
+    hub URL; then an explicitly set environment (``CALKIT_ENV``); then
+    the ``default_hub`` config value; then production (calkit.io).
     """
     hub = os.getenv("CALKIT_HUB")
-    if not hub:
+    if not hub and os.getenv("CALKIT_ENV"):
         return get_env()
+    if not hub:
+        hub = _get_default_hub()
+    if not hub:
+        return "production"
     if hub in ["test", "local", "staging", "production"]:
         return hub
     # Map built-in hub URLs to their environment names so they share
@@ -209,6 +233,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
     )
     email: str | None = None
+    # The hub commands target when no hub is otherwise specified; only
+    # consulted from the base (unsuffixed) config file
+    default_hub: str | None = None
     token: KeyringOptionalSecret | None = None
     access_token: KeyringOptionalSecret | None = None
     refresh_token: KeyringOptionalSecret | None = None

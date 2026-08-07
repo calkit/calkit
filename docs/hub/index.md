@@ -18,6 +18,16 @@ calkit hub login
 Note this will need to be done once per machine, e.g., once on your
 personal laptop and once on an HPC cluster.
 
+By default the CLI talks to calkit.io.
+To target a different hub by default, e.g., one run by your lab, set:
+
+```sh
+calkit config set default_hub https://your-hub.example.edu
+```
+
+Commands that take a `--hub` option, like `calkit new project`, can also
+target an instance one-off, e.g., `--hub staging`.
+
 Like the rest of Calkit, the hub is free and open source, so
 [you can run your own](self-hosting.md).
 

@@ -13,11 +13,20 @@ import calkit.hub as hub
 
 
 def test_get_base_url_env_override(monkeypatch):
-    monkeypatch.setenv("CALKIT_CLOUD_BASE_URL", "http://localhost:9999")
+    monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
+    monkeypatch.setenv("CALKIT_HUB_API_BASE_URL", "http://localhost:9999")
+    assert hub.get_base_url() == "http://localhost:9999"
+    # The old name still works, so existing setups don't break
+    monkeypatch.delenv("CALKIT_HUB_API_BASE_URL")
+    monkeypatch.setenv("CALKIT_CLOUD_BASE_URL", "http://localhost:8888")
+    assert hub.get_base_url() == "http://localhost:8888"
+    # ...but the new one wins when both are set
+    monkeypatch.setenv("CALKIT_HUB_API_BASE_URL", "http://localhost:9999")
     assert hub.get_base_url() == "http://localhost:9999"
 
 
 def test_get_base_url_no_override(monkeypatch):
+    monkeypatch.delenv("CALKIT_HUB_API_BASE_URL", raising=False)
     monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
     # CALKIT_ENV=test is set by pytest config → should return the test-env URL
     assert hub.get_base_url() == "http://api.localhost"

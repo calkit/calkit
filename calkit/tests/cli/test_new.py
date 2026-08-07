@@ -433,7 +433,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     # which would make a missing expectation take minutes to fail
     httpserver.no_handler_status_code = 404
     monkeypatch.setenv(
-        "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
+        "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
     )
     monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
     project_resp = {

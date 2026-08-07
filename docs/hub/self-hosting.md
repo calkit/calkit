@@ -46,11 +46,11 @@ commands.
 
 What doesn't exist yet is API URL discovery: the CLI cannot derive a
 hub's API URL from its web URL, so for now it must be supplied manually
-via the `CALKIT_CLOUD_BASE_URL` environment variable:
+via the `CALKIT_HUB_API_BASE_URL` environment variable:
 
 ```sh
 export CALKIT_HUB=https://your-hub.example.edu
-export CALKIT_CLOUD_BASE_URL=https://api.your-hub.example.edu
+export CALKIT_HUB_API_BASE_URL=https://api.your-hub.example.edu
 ```
 
 Eventually a project will declare which hub it belongs to via the `hub`

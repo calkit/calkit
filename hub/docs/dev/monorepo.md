@@ -310,3 +310,80 @@ chart. Hold the chart until someone asks.
 The workspace question is not a step of its own. It has to be settled as part
 of step 3, since the Docker build context and the dev compose mounts depend on
 the answer.
+
+## Manual changeover checklist
+
+Everything the code can't do: the GitHub settings and runner moves that
+remain before (and right after) merging the `merge-hub` PR. Work top to
+bottom; the order matters so the first push to main has somewhere to
+deploy. Delete this doc when the list is done.
+
+### calkit/calkit repo settings
+
+- [ ] Actions → General: set fork PR workflow approval to "Require
+      approval for all outside collaborators".
+- [ ] Actions → General: set default workflow permissions to read-only
+      and uncheck "Allow GitHub Actions to create and approve pull
+      requests". (Workflows also declare `permissions: contents: read`
+      themselves, but set the default anyway.)
+- [ ] Code security: enable secret scanning push protection.
+- [ ] Branch protection/ruleset on `main`: require PRs, require the
+      changes-gated status checks, block force pushes. This also guards
+      the invariant that no self-hosted-runner workflow ever gets a
+      `pull_request` trigger.
+
+### Environments and secrets
+
+- [ ] Create environments named `calkit.io` and `staging.calkit.io`
+      (matching `environment.name` in the deploy workflows) and copy the
+      secrets and variables from calkit-cloud's `production` and
+      `staging` environments. Keep all deploy secrets
+      environment-scoped; none belong at repo level.
+- [ ] Deployment branch/tag rules: `calkit.io` allows only tags matching
+      `hub/v*`; `staging.calkit.io` allows `main` plus any branches you
+      actually staging-deploy.
+- [ ] The one repo-level secret, `CALKIT_ZENODO_TOKEN` (used by
+      `test.yml`), moves over as-is; keep it a low-privilege sandbox
+      token since collaborator branches can read it.
+
+### Self-hosted runners
+
+On each runner machine (production, staging), from the runner directory:
+
+```sh
+./svc.sh stop && ./svc.sh uninstall
+./config.sh remove --token <removal-token-from-calkit-cloud-settings>
+./config.sh --url https://github.com/calkit/calkit \
+  --token <registration-token-from-calkit-calkit-settings> \
+  --labels production   # or: staging
+./svc.sh install && ./svc.sh start
+```
+
+Tokens come from each repo's Settings → Actions → Runners, or
+`gh api -X POST repos/calkit/calkit/actions/runners/registration-token`.
+Keep the labels `production`/`staging`; the workflows select on those.
+
+- [ ] Re-register the staging runner against calkit/calkit.
+- [ ] Re-register the production runner against calkit/calkit.
+
+### Merge and first deploys
+
+- [ ] Merge the PR with a merge commit (not squash, and never "Rebase and
+      merge", which would replay the ~2,200 imported commits onto main).
+      The push to main should trigger a staging deploy on the newly
+      registered runner.
+- [ ] Tag and publish a calkit-python release (`vX.Y.Z`) so up-to-date
+      CLIs know the `hub` field before hubs start writing it.
+- [ ] Tag and publish the first hub release (`hub/vX.Y.Z`), unchecking
+      "Set as the latest release", and confirm the production deploy runs
+      and the deployments list shows `calkit.io`.
+
+### Old repo wind-down
+
+- [ ] Transfer open calkit-cloud issues individually; re-create any open
+      PRs against calkit/calkit.
+- [ ] Archive calkit-cloud. Do NOT delete or rename it: old issue links
+      and the pre-monorepo history references point there.
+- [ ] Remove the old local dev checkout from regular use; run the stack
+      from `hub/` (or root `make dev`) only, since both resolve to the
+      same Compose project name.

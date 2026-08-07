@@ -20,7 +20,7 @@ from pydantic_settings import (
 )
 
 
-def supports_keyring() -> bool:
+def _probe_keyring() -> bool:
     """Check if the system supports the Python keyring library with a usable
     backend.
     """
@@ -55,7 +55,28 @@ def supports_keyring() -> bool:
         return False
 
 
-KEYRING_SUPPORTED = supports_keyring()
+_keyring_supported: bool | None = None
+
+
+def supports_keyring() -> bool:
+    """Whether a usable keyring backend exists, probed once and cached.
+
+    Deliberately lazy: the probe reads from the system keyring, which on
+    macOS can pop an unlock prompt. Most commands never touch a secret --
+    editors run things like ``calkit status`` on every file save -- so
+    probing at import made those prompt for nothing.
+    """
+    global _keyring_supported
+    if _keyring_supported is None:
+        _keyring_supported = _probe_keyring()
+    return _keyring_supported
+
+
+def __getattr__(name: str) -> Any:
+    # Keep the old module-level constant working, lazily
+    if name == "KEYRING_SUPPORTED":
+        return supports_keyring()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_env() -> Literal["test", "local", "staging", "production"]:
@@ -323,7 +344,7 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
         return (value, field_name, False)
 
     def __call__(self) -> dict[str, Any]:
-        if not KEYRING_SUPPORTED:
+        if not supports_keyring():
             return {}
         secrets = {}
         for field_name, field in self.settings_cls.model_fields.items():
@@ -393,7 +414,7 @@ class Settings(BaseSettings):
         cfg = self.model_dump()
         # Remove anything that should be in the keyring; hub-scoped
         # credentials get hub-namespaced usernames via set/delete_secret
-        if KEYRING_SUPPORTED:
+        if supports_keyring():
             for key, value in Settings.model_fields.items():
                 if (
                     KeyringOptionalSecret in get_type_args(value.annotation)

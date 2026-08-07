@@ -82,6 +82,23 @@ def test_get_hub(monkeypatch, tmp_dir):
     assert config.get_hub() == "production"
 
 
+def test_keyring_probe_is_lazy(monkeypatch):
+    # Probing the keyring can pop an unlock prompt on macOS, and editors
+    # run commands like `calkit status` on every file save, so importing
+    # the module must not touch it
+    calls = []
+    monkeypatch.setattr(config, "_keyring_supported", None)
+    monkeypatch.setattr(
+        config, "_probe_keyring", lambda: calls.append(1) or True
+    )
+    assert calls == []
+    assert config.supports_keyring() is True
+    assert len(calls) == 1
+    # And the result is cached rather than re-probed per secret
+    assert config.supports_keyring() is True
+    assert len(calls) == 1
+
+
 def test_config_naming(monkeypatch):
     # The test environment gets an isolated config file and keyring
     # service so tests never touch real credentials
@@ -124,7 +141,7 @@ def test_hub_scoped_settings(monkeypatch, tmp_path):
     # isolated file so this can't race CLI tests using the real one
     fpath = str(tmp_path / "config-test.yaml")
     monkeypatch.setattr(config, "get_config_yaml_fpath", lambda: fpath)
-    monkeypatch.setattr(config, "KEYRING_SUPPORTED", False)
+    monkeypatch.setattr(config, "supports_keyring", lambda: False)
     monkeypatch.delenv("CALKIT_HUB", raising=False)
     # The default hub stores credentials flat
     cfg = config.read()

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef } from "react"
 
 import { type Issue, ProjectsService } from "../client"
+import { dataOrNull } from "../lib/api"
 import { isAuthenticationError } from "../lib/auth"
 
 const useProject = (accountName: string, projectName: string, ref?: string) => {
@@ -47,7 +48,7 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
         owner_name: accountName,
         project_name: projectName,
         ref,
-      }).then((response) => response.data),
+      }).then(dataOrNull),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   })

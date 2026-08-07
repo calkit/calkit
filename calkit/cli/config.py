@@ -17,6 +17,28 @@ from calkit.cli.core import raise_error
 config_app = typer.Typer(no_args_is_help=True)
 
 
+@config_app.callback()
+def config_main(
+    hub: Annotated[
+        str | None,
+        typer.Option(
+            "--hub",
+            help=(
+                "Hub whose config to operate on: an environment name "
+                "(production, staging, local) or a hub URL, e.g., "
+                "other-calkit.io. Config is kept separately per hub. "
+                "Defaults to the active environment's hub."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Work with the local user configuration."""
+    # The active hub drives the config file path, keyring service name,
+    # and env var prefix; see calkit.config.get_hub
+    if hub is not None:
+        os.environ["CALKIT_HUB"] = hub
+
+
 @config_app.command(name="set")
 def set_config_value(key: str, value: str):
     """Set a value in the config."""

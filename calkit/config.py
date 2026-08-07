@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import warnings
 from typing import Any, Literal
 from typing import get_args as get_type_args
@@ -72,10 +73,52 @@ def set_env(name: Literal["local", "staging", "production"]) -> None:
     os.environ["CALKIT_ENV"] = name
 
 
+def get_hub() -> str:
+    """Return the active hub key: a built-in environment name or an
+    arbitrary hub URL.
+
+    ``CALKIT_HUB`` takes precedence and accepts a built-in environment
+    name, a built-in hub URL (with or without scheme), or an arbitrary
+    hub URL; otherwise the environment (``CALKIT_ENV``) determines the
+    hub.
+    """
+    hub = os.getenv("CALKIT_HUB")
+    if not hub:
+        return get_env()
+    if hub in ["test", "local", "staging", "production"]:
+        return hub
+    # Map built-in hub URLs to their environment names so they share
+    # config with the env-based spellings
+    from calkit.hub import env_for_hub
+
+    env = env_for_hub(hub) or env_for_hub("https://" + hub)
+    if env is not None:
+        return env
+    return hub.rstrip("/")
+
+
+def slugify_hub(hub: str, sep: str = "-") -> str:
+    """Make a hub key safe for filenames, keyring service names, and
+    environment variable prefixes.
+
+    For example, ``http://localhost:5173`` cannot appear in a Windows
+    filename, and calkit-python's CI runs on Windows.
+    """
+    slug = hub.lower().removeprefix("https://").removeprefix("http://")
+    slug = re.sub(r"[^a-z0-9.]+", sep, slug).strip(sep)
+    # Environment variable names can't contain dots either
+    if sep == "_":
+        slug = slug.replace(".", "_")
+    return slug
+
+
 def get_env_suffix(sep: str = "-") -> str:
-    if get_env() != "production":
-        return sep + get_env()
-    return ""
+    hub = get_hub()
+    if hub == "production":
+        return ""
+    if hub in ["test", "local", "staging"]:
+        return sep + hub
+    return sep + slugify_hub(hub, sep=sep)
 
 
 def get_app_name() -> str:
@@ -222,6 +265,10 @@ class Settings(BaseSettings):
 
 def read() -> Settings:
     """Read the config."""
-    # Update YAML file path in case environment has changed
+    # Update YAML file path and env prefix in case the active hub or
+    # environment has changed since import, e.g., via a --hub option
     Settings.model_config["yaml_file"] = get_config_yaml_fpath()
+    Settings.model_config["env_prefix"] = (
+        "CALKIT" + get_env_suffix(sep="_") + "_"
+    )
     return Settings()

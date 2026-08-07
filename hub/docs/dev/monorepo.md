@@ -246,30 +246,19 @@ exists on the `merge-hub` branch.
 
 ## Per-hub CLI config
 
-**Leaning: generalize the existing env key to a hub key.**
-
-The machinery already exists, keyed by the wrong thing:
-
-- `get_env_suffix()` gives `~/.calkit/config.yaml` vs `config-staging.yaml`.
-- `get_app_name()` namespaces the keyring service as `calkit` vs
-  `calkit-staging`.
-
-So config is already per-instance with a closed enum of three instances.
-Swapping the key from env name to hub, with `production`, `staging`, and
-`local` kept as built-in aliases, makes `CALKIT_ENV=staging` and existing
-config files keep working while `calkit config --hub other-calkit.io set token`
-becomes the general form.
-
-Two things to watch:
-
-- **Filenames.** `localhost:5173` cannot appear in a Windows filename, and
-  calkit-python's CI runs windows-latest. Slugify the hub key before it becomes
-  a path or keyring service name.
-- **DVC remote names.** `make_remote_name` derives from the app name, so
-  per-hub naming would produce `calkit-other-calkit.io` remotes. Skip that.
-  Since one project belongs to one hub, the remote stays `calkit` and the
-  project's declared `hub` supplies the endpoint, keeping `.dvc/config`
-  identical across instances.
+**Done.** The env key generalized to a hub key exactly as planned:
+`get_hub()` resolves `CALKIT_HUB` (an env alias, a built-in hub URL, or an
+arbitrary hub URL) falling back to `CALKIT_ENV`, and `get_env_suffix()` keys
+off it, so `CALKIT_ENV=staging` and existing config files keep working while
+`calkit config --hub other-calkit.io set token` is the general form. Hub
+keys are slugified before becoming filenames, keyring service names, or env
+var prefixes (`localhost:5173` cannot appear in a Windows filename, and CI
+runs windows-latest). DVC remote naming was left alone per the original
+reasoning: the remote stays `calkit` and the project's declared `hub` will
+supply the endpoint. `get_base_url()` now raises for a hub whose API URL it
+doesn't know (rather than silently sending its credentials to production),
+with `CALKIT_CLOUD_BASE_URL` as the manual override until well-known-URL
+discovery exists.
 
 ## Self-hosting
 
@@ -311,7 +300,7 @@ chart. Hold the chart until someone asks.
    transfer issues, and archive calkit-cloud.
 4. Add `hub` to `ProjectInfo`, release calkit-python, then write the key from
    the backend on project creation.
-5. Generalize the CLI config key from env to hub.
+5. ~~Generalize the CLI config key from env to hub.~~ Done.
 
 The workspace question is not a step of its own. It has to be settled as part
 of step 3, since the Docker build context and the dev compose mounts depend on

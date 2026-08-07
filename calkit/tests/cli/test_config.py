@@ -97,3 +97,58 @@ def test_get_set():
         assert "token" not in cfg
     else:
         assert cfg["token"] == "this-is-a-new-token"
+
+
+def test_config_hub_option():
+    # Per-hub config lives in its own file, keyed by the slugified hub
+    fpath = os.path.join(
+        os.path.expanduser("~"), ".calkit", "config-hub.example.edu.yaml"
+    )
+    if os.path.isfile(fpath):
+        os.remove(fpath)
+    email = f"{uuid.uuid4()}@example.com"
+    subprocess.check_call(
+        [
+            "calkit",
+            "config",
+            "--hub",
+            "https://hub.example.edu",
+            "set",
+            "email",
+            email,
+        ]
+    )
+    assert os.path.isfile(fpath)
+    out = (
+        subprocess.check_output(
+            [
+                "calkit",
+                "config",
+                "--hub",
+                "https://hub.example.edu",
+                "get",
+                "email",
+            ]
+        )
+        .decode()
+        .strip()
+    )
+    assert out == email
+    # The active (test) hub's config is unaffected
+    out = (
+        subprocess.check_output(["calkit", "config", "get", "email"])
+        .decode()
+        .strip()
+    )
+    assert out != email
+    # A built-in hub URL resolves to the same config as its env name
+    out = (
+        subprocess.check_output(
+            ["calkit", "config", "--hub", "calkit.io", "get", "email"],
+            env=os.environ | {"CALKIT_ENV": "production"},
+        )
+        .decode()
+        .strip()
+    )
+    assert out != email
+    os.remove(fpath)

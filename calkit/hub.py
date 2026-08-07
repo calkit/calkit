@@ -173,12 +173,25 @@ def get_base_url() -> str:
         "production": "https://api.calkit.io",
         "test": "http://api.localhost",
     }
-    return urls[config.get_env()]
+    hub = config.get_hub()
+    if hub not in urls:
+        # An arbitrary hub's API URL is not derivable from its web URL,
+        # and discovery doesn't exist yet; fail loudly rather than
+        # silently sending its credentials to a built-in instance
+        raise ValueError(
+            f"The API URL for hub {hub} is unknown; "
+            "set CALKIT_CLOUD_BASE_URL to specify it directly"
+        )
+    return urls[hub]
 
 
 def get_hub_url() -> str:
-    """Get the web app base URL for the currently active instance."""
-    return HUB_URLS[config.get_env()]
+    """Get the web app base URL for the currently active hub."""
+    hub = config.get_hub()
+    if hub in HUB_URLS:
+        return HUB_URLS[hub]
+    # Arbitrary hubs are identified by their web URL
+    return hub
 
 
 def env_for_hub(hub_url: str) -> str | None:

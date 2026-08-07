@@ -38,8 +38,19 @@ and continuous deployment, live with the code in
 
 ## Connecting the CLI
 
-The CLI currently only knows how to talk to the built-in instances
-(calkit.io, its staging environment, and a local development stack).
-Support for pointing it at an arbitrary hub, including per-hub token
-storage and API URL discovery, is in progress; a project will declare
-which hub it belongs to via the `hub` key in `calkit.yaml`.
+The CLI keeps its configuration, including tokens, separately per hub.
+`calkit config --hub your-hub.example.edu set token ...` operates on a
+specific hub's config, and the `CALKIT_HUB` environment variable selects
+the active hub for other commands.
+
+What doesn't exist yet is API URL discovery: the CLI cannot derive a
+hub's API URL from its web URL, so for now it must be supplied manually
+via the `CALKIT_CLOUD_BASE_URL` environment variable:
+
+```sh
+export CALKIT_HUB=https://your-hub.example.edu
+export CALKIT_CLOUD_BASE_URL=https://api.your-hub.example.edu
+```
+
+Eventually a project will declare which hub it belongs to via the `hub`
+key in `calkit.yaml`, and the CLI will discover the rest.

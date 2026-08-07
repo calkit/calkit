@@ -16,10 +16,6 @@ tex-engine: ## Download the TeX Live bundles for the LaTeX editor (idempotent).
 dev: tex-engine ## Start up all containers for development.
 	${DOCKER_COMPOSE_DEV} up
 
-.PHONY: frontend-dev
-frontend-dev: tex-engine ## Start the frontend dev server.
-	cd frontend && npm run dev
-
 .PHONY: api-dev
 api-dev: ## Start the backend alone using Docker Compose.
 	${DOCKER_COMPOSE_DEV} up backend

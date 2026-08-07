@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_ignore_empty=True, extra="ignore"
     )
+    # The project name is used in the default email sender name and in the
+    # default frontend title, so it should be something that makes sense to
+    # end users. It can be overridden in the frontend, but that would be
+    # a separate setting from the backend's project name, which is used in
+    # the default email sender name and in the default frontend title.
+    PROJECT_NAME: str
     API_V1_STR: str = ""
     SECRET_KEY: str = secrets.token_urlsafe(32)
     FERNET_KEY: str  # Can be generated with Fernet.generate_key()
@@ -90,7 +96,6 @@ class Settings(BaseSettings):
     BACKEND_CORS_ORIGINS: Annotated[
         list[AnyUrl] | str, BeforeValidator(parse_cors)
     ] = []
-    PROJECT_NAME: str
     SENTRY_DSN: HttpUrl | None = None
     POSTGRES_SERVER: str
     POSTGRES_PORT: int = 5432
@@ -170,6 +175,11 @@ class Settings(BaseSettings):
             return True
         if not email:
             return False
+        # The bootstrap superuser is created by prestart on every deploy,
+        # so an allowlist that omits it would break the deploy rather than
+        # lock down signups
+        if email.strip().lower() == self.FIRST_SUPERUSER.strip().lower():
+            return True
         return email.strip().lower() in {
             a.lower() for a in self.ALLOWED_USER_EMAILS
         }

@@ -1146,18 +1146,18 @@ def new_publication(
     title: Annotated[
         str, typer.Option("--title", help="The title of the publication.")
     ],
-    description: Annotated[
-        str,
-        typer.Option(
-            "--description", help="A description of the publication."
-        ),
-    ],
     kind: Annotated[
         str,
         typer.Option(
             "--kind", help="Kind of the publication, e.g., 'journal-article'."
         ),
     ],
+    description: Annotated[
+        str | None,
+        typer.Option(
+            "--description", help="A description of the publication."
+        ),
+    ] = None,
     stage_name: Annotated[
         str | None,
         typer.Option(
@@ -1264,9 +1264,11 @@ def new_publication(
         path=pathlib.Path(pub_fpath).as_posix(),
         kind=kind,
         title=title,
-        description=description,
         stage=stage_name,
     )
+    # Keep calkit.yaml free of null entries for optional fields
+    if description is not None:
+        pub["description"] = description
     pubs.append(pub)
     ck_info["publications"] = pubs
     repo = calkit.git.get_repo()

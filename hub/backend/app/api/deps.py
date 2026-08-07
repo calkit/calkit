@@ -96,7 +96,15 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                 detail="Could not validate credentials",
             )
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # The token parsed and verified but names a user that no longer
+        # exists (deleted account, restored database, wrong instance).
+        # That's the credential failing, not a missing resource, so send
+        # the detail clients already treat as "log out" -- a 404 here
+        # leaves them retrying a request that can never succeed.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     # Ensure that if this user has a paid subscription, it is valid
@@ -195,7 +203,15 @@ def get_current_user_with_token_scope(
                 detail="Could not validate credentials",
             )
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # The token parsed and verified but names a user that no longer
+        # exists (deleted account, restored database, wrong instance).
+        # That's the credential failing, not a missing resource, so send
+        # the detail clients already treat as "log out" -- a 404 here
+        # leaves them retrying a request that can never succeed.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
     return user

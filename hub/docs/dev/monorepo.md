@@ -330,38 +330,30 @@ deploy. Delete this doc when the list is done.
 
 ### calkit/calkit repo settings
 
-- [ ] Actions → General: set fork PR workflow approval to "Require
+- [x] Actions → General: set fork PR workflow approval to "Require
       approval for all outside collaborators".
-- [ ] Actions → General: set default workflow permissions to read-only
+- [x] Actions → General: set default workflow permissions to read-only
       and uncheck "Allow GitHub Actions to create and approve pull
       requests". (Workflows also declare `permissions: contents: read`
       themselves, but set the default anyway.)
 - [ ] Code security: enable secret scanning push protection.
-- [ ] Branch protection/ruleset on `main`: require PRs, require the
+- [x] Branch protection/ruleset on `main`: require PRs, require the
       changes-gated status checks, block force pushes. This also guards
       the invariant that no self-hosted-runner workflow ever gets a
       `pull_request` trigger.
 
 ### Environments and secrets
 
-- [ ] Create environments named `calkit.io` and `staging.calkit.io`
+- [x] Create environments named `calkit.io` and `staging.calkit.io`
       (matching `environment.name` in the deploy workflows) and copy the
       secrets and variables from calkit-cloud's `production` and
       `staging` environments. Keep all deploy secrets
       environment-scoped; none belong at repo level.
-- [ ] Deployment branch/tag rules: `calkit.io` allows only tags matching
+- [x] Deployment branch/tag rules: `calkit.io` allows only tags matching
       `hub/v*`; `staging.calkit.io` allows `main` plus any branches you
       actually staging-deploy. The rule is matched against `GITHUB_REF`,
       so a job on a PR branch can't reach the environment.
-- [ ] Required reviewers on both environments (yourself is enough). This
-      is the control that stops a collaborator from adding
-      `environment: calkit.io` to `test.yml` on a PR branch and printing
-      the secrets: GitHub documents that "a job cannot access
-      environment secrets until one of the required reviewers approves
-      it", and any job naming the environment shows up for approval,
-      regardless of which workflow file declared it. It lives in repo
-      settings, so a PR can't change it.
-- [ ] The one repo-level secret, `CALKIT_ZENODO_TOKEN` (used by
+- [x] The one repo-level secret, `CALKIT_ZENODO_TOKEN` (used by
       `test.yml`), moves over as-is; keep it a low-privilege sandbox
       token since collaborator branches can read it with no gate. Repo
       secrets have no equivalent of environment protection rules, so

@@ -378,7 +378,7 @@ say where its storage actually is. Unset means
 staging point at external storage and leave the profile off; a
 self-hosted instance can keep hosting its own by setting the profile.
 
-- [ ] `OBJECT_STORAGE_PREFIX` as an environment variable on both
+- [x] `OBJECT_STORAGE_PREFIX` as an environment variable on both
       `calkit.io` and `staging.calkit.io`: `gs://calkit-production`
       and `gs://calkit-staging`. This is the root the hub stores
       objects under, normally just the bucket; project DVC data goes
@@ -387,14 +387,14 @@ self-hosted instance can keep hosting its own by setting the profile.
       became configurable, so no objects move. The scheme picks the
       backend (`gs://` Google, `s3://` anything S3-compatible), so
       there is no separate type setting to keep in sync.
-- [ ] For an S3-compatible service, also set `OBJECT_STORAGE_ENDPOINT_URL`
+- [x] For an S3-compatible service, also set `OBJECT_STORAGE_ENDPOINT_URL`
       (leave unset for AWS itself) and `OBJECT_STORAGE_KEY`, plus the
       `OBJECT_STORAGE_SECRET` environment secret. These are one pair of
       credentials whichever side you're on: when the stack hosts its
       own storage they also configure the MinIO container, so the old
       `MINIO_ROOT_PASSWORD` secret becomes `OBJECT_STORAGE_SECRET`
       (same value). GCS keeps using `GOOGLE_CREDENTIALS`.
-- [ ] Migrate any objects still living in the deployed MinIO volumes
+- [x] Migrate any objects still living in the deployed MinIO volumes
       before the first deploy that drops those containers, and only then
       delete the now-unused `MINIO_ROOT_PASSWORD` secret from both
       environments.
@@ -404,7 +404,7 @@ self-hosted instance can keep hosting its own by setting the profile.
 
 ### Access control
 
-- [ ] Set `ALLOWED_USER_EMAILS` on `staging.calkit.io` to the people who
+- [x] Set `ALLOWED_USER_EMAILS` on `staging.calkit.io` to the people who
       should be able to use it, comma-separated. This replaces the old
       hardcoded staging gate (three GitHub usernames, GitHub login only),
       which let anyone sign up through Google or email. Leave it unset on

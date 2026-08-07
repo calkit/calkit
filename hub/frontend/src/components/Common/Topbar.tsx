@@ -14,6 +14,7 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { FaGithub, FaPlus } from "react-icons/fa"
 
 import useAuth from "../../hooks/useAuth"
@@ -60,6 +61,27 @@ export default function Topbar() {
   const { user } = useAuth()
   const newProjectModal = useDisclosure()
   const newOrgModal = useDisclosure()
+  // Reopen whichever creation modal sent the user off to connect GitHub,
+  // and drop the marker so a refresh doesn't reopen it again
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const toReopen = params.get("newProject")
+      ? newProjectModal
+      : params.get("newOrg")
+        ? newOrgModal
+        : null
+    if (toReopen) {
+      params.delete("newProject")
+      params.delete("newOrg")
+      const query = params.toString()
+      window.history.replaceState(
+        {},
+        "",
+        window.location.pathname + (query ? `?${query}` : ""),
+      )
+      toReopen.onOpen()
+    }
+  }, [])
   const navigate = useNavigate()
   const goToLoginWithRedirect = () => {
     const href =

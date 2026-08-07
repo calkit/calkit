@@ -18,6 +18,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
 
 
+def parse_allowed_emails(v: Any) -> list[str] | None:
+    """Parse the user allowlist, normalizing "no restriction" to None.
+
+    Unset, blank, and an empty list all mean the same thing, so they
+    collapse to a single sentinel rather than leaving callers to check
+    for both None and [].
+    """
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.split(",")
+    if isinstance(v, list):
+        emails = [str(i).strip() for i in v if str(i).strip()]
+        return emails or None
+    raise ValueError(v)
+
+
 def parse_cors(v: Any) -> list[str] | str:
     if isinstance(v, str) and not v.startswith("["):
         return [i.strip() for i in v.split(",")]
@@ -138,6 +155,24 @@ class Settings(BaseSettings):
     def object_storage_type(self) -> Literal["s3", "gcs"]:
         scheme = self.OBJECT_STORAGE_PREFIX.split("://")[0]
         return "gcs" if scheme == "gs" else "s3"
+
+    # Emails allowed to use this hub, as a comma-separated list. Unset
+    # (the default) means anyone can sign up and log in, which is what a
+    # public instance wants; a private or pre-release instance sets it to
+    # the people who should get in. Checked case-insensitively.
+    ALLOWED_USER_EMAILS: Annotated[
+        list[str] | None, BeforeValidator(parse_allowed_emails)
+    ] = None
+
+    def email_allowed(self, email: str | None) -> bool:
+        """Check an email against the allowlist, allowing all if unset."""
+        if self.ALLOWED_USER_EMAILS is None:
+            return True
+        if not email:
+            return False
+        return email.strip().lower() in {
+            a.lower() for a in self.ALLOWED_USER_EMAILS
+        }
 
     # Email configuration
     SMTP_TLS: bool = True

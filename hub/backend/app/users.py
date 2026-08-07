@@ -116,7 +116,22 @@ def save_external_credential(
     return credential
 
 
+def check_email_allowed(email: str | None) -> None:
+    """Refuse an email the hub's allowlist doesn't cover.
+
+    Enforced at every point where an identity enters or re-enters the
+    system, so a private instance can't be signed up for or logged into
+    by someone left off the list.
+    """
+    if not settings.email_allowed(email):
+        logger.info(f"Email not allowed on this hub: {email}")
+        raise HTTPException(
+            403, "This Calkit hub is not open to this email address"
+        )
+
+
 def create_user(*, session: Session, user_create: UserCreate) -> User:
+    check_email_allowed(user_create.email)
     account_name = user_create.account_name or user_create.github_username
     if not account_name:
         account_name = user_create.email.split("@")[0]

@@ -30,6 +30,7 @@ import { UsersService, type ApiError, type TokenPut } from "../../client"
 import UpdateOverleafToken from "./UpdateOverleafToken"
 import { appName } from "../../lib/core"
 import useCustomToast from "../../hooks/useCustomToast"
+import { startGitHubOAuth } from "../../lib/github"
 import { handleError } from "../../lib/errors"
 
 function ConnectedAccounts() {
@@ -160,7 +161,15 @@ function ConnectedAccounts() {
             {connectedAccountsQuery.data?.github ? (
               <Icon as={FaCheck} color="green.500" />
             ) : (
-              ""
+              // Accounts created through Google or email start without a
+              // GitHub identity, which project creation needs
+              <Button
+                size="xs"
+                variant="primary"
+                onClick={() => startGitHubOAuth()}
+              >
+                Connect
+              </Button>
             )}
             <Text>Installed for:</Text>
             {ghInstallQuery.data && ghInstallQuery.data.total_count > 0
@@ -204,7 +213,7 @@ function ConnectedAccounts() {
                 />
               </>
             ) : (
-              <Button variant="primary" size="sm" onClick={handleConnectZenodo}>
+              <Button variant="primary" size="xs" onClick={handleConnectZenodo}>
                 Connect
               </Button>
             )}
@@ -273,7 +282,7 @@ function ConnectedAccounts() {
             ) : (
               <Button
                 variant="primary"
-                size="sm"
+                size="xs"
                 onClick={overleafTokenModal.onOpen}
               >
                 Connect
@@ -296,7 +305,7 @@ function ConnectedAccounts() {
                 />
               </>
             ) : (
-              <Button variant="primary" size="sm" onClick={handleConnectGoogle}>
+              <Button variant="primary" size="xs" onClick={handleConnectGoogle}>
                 Connect
               </Button>
             )}
@@ -319,7 +328,7 @@ function ConnectedAccounts() {
             ) : (
               <Button
                 variant="primary"
-                size="sm"
+                size="xs"
                 onClick={() => connectZoteroMutation.mutate()}
                 isLoading={connectZoteroMutation.isPending}
               >

@@ -71,4 +71,4 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
-      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans

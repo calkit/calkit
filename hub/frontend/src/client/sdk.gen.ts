@@ -316,6 +316,8 @@ import type {
   PutUserOverleafTokenResponse,
   PostUserGoogleAuthData,
   PostUserGoogleAuthResponse,
+  PostUserGithubAuthData,
+  PostUserGithubAuthResponse,
   PostUserZoteroAuthStartResponse,
   PostUserZoteroAuthData,
   PostUserZoteroAuthResponse,
@@ -4695,6 +4697,32 @@ export class UsersService {
     return __request(OpenAPI, {
       method: "POST",
       url: "/user/google-auth",
+      body: data.requestBody,
+      mediaType: "application/json",
+      errors: {
+        422: "Validation Error",
+      },
+    })
+  }
+
+  /**
+   * Post User Github Auth
+   * Link a GitHub account to the signed-in user.
+   *
+   * This is how an account created some other way (Google, email) gains a
+   * GitHub identity; logging in through GitHub is a separate flow that
+   * resolves an account rather than attaching to one.
+   * @param data The data for the request.
+   * @param data.requestBody
+   * @returns Message Successful Response
+   * @throws ApiError
+   */
+  public static postUserGithubAuth(
+    data: PostUserGithubAuthData,
+  ): CancelablePromise<PostUserGithubAuthResponse> {
+    return __request(OpenAPI, {
+      method: "POST",
+      url: "/user/github-auth",
       body: data.requestBody,
       mediaType: "application/json",
       errors: {

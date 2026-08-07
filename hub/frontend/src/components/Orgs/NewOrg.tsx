@@ -14,11 +14,18 @@ import {
   ModalOverlay,
   Text,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 import mixpanel from "mixpanel-browser"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { type ApiError, type OrgPost, OrgsService } from "../../client"
+import {
+  type ApiError,
+  type OrgPost,
+  OrgsService,
+  UsersService,
+} from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -29,6 +36,14 @@ interface NewOrgProps {
 
 const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
   const queryClient = useQueryClient()
+  // Creating this needs a GitHub repo, which a Google- or email-created
+  // account can't do until it links a GitHub identity
+  const connectedAccountsQuery = useQuery({
+    queryKey: ["user", "connected-accounts"],
+    queryFn: () => UsersService.getUserConnectedAccounts(),
+  })
+  const needsGitHub =
+    connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github
   const showToast = useCustomToast()
   const {
     register,
@@ -76,41 +91,53 @@ const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
           <ModalHeader>New organization</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
-            <Text mb={4}>
-              To import an organization from GitHub,{" "}
-              <Link
-                variant="blue"
-                isExternal
-                href="https://github.com/apps/calkit/installations/select_target"
-              >
-                ensure the Calkit GitHub app is installed for the organization
-              </Link>
-              .
-            </Text>
-            <FormControl isRequired isInvalid={!!errors.github_name}>
-              <FormLabel htmlFor="github_name">Name (on GitHub)</FormLabel>
-              <Input
-                id="github_name"
-                {...register("github_name", {
-                  required: "Name is required.",
-                })}
-                type="text"
+            {needsGitHub ? (
+              <ConnectGitHubPrompt
+                action="create an organization"
+                returnTo={`${window.location.pathname}?newOrg=1`}
               />
-              {errors.github_name && (
-                <FormErrorMessage>
-                  {errors.github_name.message}
-                </FormErrorMessage>
-              )}
-            </FormControl>
+            ) : (
+              <>
+                <Text mb={4}>
+                  To import an organization from GitHub,{" "}
+                  <Link
+                    variant="blue"
+                    isExternal
+                    href="https://github.com/apps/calkit/installations/select_target"
+                  >
+                    ensure the Calkit GitHub app is installed for the
+                    organization
+                  </Link>
+                  .
+                </Text>
+                <FormControl isRequired isInvalid={!!errors.github_name}>
+                  <FormLabel htmlFor="github_name">Name (on GitHub)</FormLabel>
+                  <Input
+                    id="github_name"
+                    {...register("github_name", {
+                      required: "Name is required.",
+                    })}
+                    type="text"
+                  />
+                  {errors.github_name && (
+                    <FormErrorMessage>
+                      {errors.github_name.message}
+                    </FormErrorMessage>
+                  )}
+                </FormControl>
+              </>
+            )}
           </ModalBody>
           <ModalFooter gap={3}>
-            <Button
-              variant="primary"
-              type="submit"
-              isLoading={isSubmitting || mutation.isPending}
-            >
-              Save
-            </Button>
+            {!needsGitHub && (
+              <Button
+                variant="primary"
+                type="submit"
+                isLoading={isSubmitting || mutation.isPending}
+              >
+                Save
+              </Button>
+            )}
             <Button onClick={onClose}>Cancel</Button>
           </ModalFooter>
         </ModalContent>

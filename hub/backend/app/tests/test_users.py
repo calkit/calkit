@@ -1,11 +1,14 @@
 """Tests for ``app.users``."""
 
+from unittest import mock
+
 import pytest
 from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session
 
 from app import users
+from app.config import settings
 from app.models import User, UserCreate, UserUpdate
 from app.security import verify_password
 from app.tests import random_email, random_lower_string
@@ -18,6 +21,24 @@ def test_create_user(db: Session) -> None:
     user = users.create_user(session=db, user_create=user_in)
     assert user.email == email
     assert hasattr(user, "hashed_password")
+
+
+def test_create_user_email_allowlist(db: Session) -> None:
+    # An empty allowlist (the default) lets anyone in
+    email = random_email()
+    user_in = UserCreate(email=email, password=random_lower_string())
+    assert users.create_user(session=db, user_create=user_in).email == email
+    # With one set, only listed emails can be created, case-insensitively
+    allowed, denied = random_email(), random_email()
+    with mock.patch.object(settings, "ALLOWED_USER_EMAILS", [allowed.upper()]):
+        user_in = UserCreate(email=allowed, password=random_lower_string())
+        assert (
+            users.create_user(session=db, user_create=user_in).email == allowed
+        )
+        user_in = UserCreate(email=denied, password=random_lower_string())
+        with pytest.raises(HTTPException) as exc_info:
+            users.create_user(session=db, user_create=user_in)
+        assert exc_info.value.status_code == 403
 
 
 def test_create_user_reserved_account_names(db: Session) -> None:

@@ -22,7 +22,19 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 import { FaGithub, FaGoogle } from "react-icons/fa"
 import { z } from "zod"
 
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useNavigate } from "@tanstack/react-router"
+
 import Logo from "/assets/images/calkit-no-bg.svg"
+import { UsersService, type ApiError } from "../../client"
+import {
+  consumeGitHubOAuthState,
+  consumeGitHubReturnTo,
+  createGitHubOAuthState,
+  getGitHubRedirectUri,
+} from "../../lib/github"
+import useCustomToast from "../../hooks/useCustomToast"
+import { handleError } from "../../lib/errors"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { popPostLoginRedirect } from "../../lib/auth"
 import {
@@ -39,21 +51,17 @@ const githubAuthParamsSchema = z.object({
 export const Route = createFileRoute("/login/")({
   component: Login,
   beforeLoad: async () => {
-    if (isLoggedIn()) {
+    // A logged-in user arriving with an OAuth code is connecting GitHub to
+    // their existing account, not signing in, so let the component handle
+    // it rather than bouncing them away
+    const hasOAuthCode = new URLSearchParams(window.location.search).has("code")
+    if (isLoggedIn() && !hasOAuthCode) {
       const stored = popPostLoginRedirect()
       throw redirect({ to: stored || "/" })
     }
   },
   validateSearch: (search) => githubAuthParamsSchema.parse(search),
 })
-
-const OAUTH_STATE_KEY = "gh_oauth_state"
-
-function generateOAuthState(): string {
-  const bytes = new Uint8Array(16)
-  crypto.getRandomValues(bytes)
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("")
-}
 
 interface EmailLoginForm {
   username: string
@@ -80,22 +88,51 @@ function Login() {
     loginMutation.mutate(data)
   }
 
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const showToast = useCustomToast()
+  // The GitHub callback lands here for both intents; when already signed in
+  // we're linking GitHub to this account rather than logging in
+  const githubConnectMutation = useMutation({
+    mutationFn: (code: string) =>
+      UsersService.postUserGithubAuth({
+        requestBody: { code, redirect_uri: getGitHubRedirectUri() },
+      }),
+    onSuccess: () => {
+      showToast("Success!", "GitHub account connected.", "success")
+      queryClient.invalidateQueries({
+        queryKey: ["user", "connected-accounts"],
+      })
+      queryClient.invalidateQueries({ queryKey: ["currentUser"] })
+      // Back to whatever the user was doing, else the settings tab
+      const returnTo = consumeGitHubReturnTo()
+      if (returnTo) {
+        window.location.replace(returnTo)
+        return
+      }
+      navigate({ to: "/settings", search: { tab: "connected-accounts" } })
+    },
+    onError: (err: ApiError) => {
+      handleError(err, showToast)
+      setTimeout(() => {
+        navigate({ to: "/settings", search: { tab: "connected-accounts" } })
+      }, 3000)
+    },
+  })
+
   const clientId = import.meta.env.VITE_GH_CLIENT_ID
-  const getGitHubRedirectUri = () => {
-    const baseUrl =
-      import.meta.env.VITE_API_URL?.replace("/api", "") ||
-      window.location.origin
-    return `${baseUrl}/login`
-  }
 
   useEffect(() => {
     if (!isMounted.current) {
       isMounted.current = true
       if (ghAuthCode) {
-        const storedState = sessionStorage.getItem(OAUTH_STATE_KEY)
-        sessionStorage.removeItem(OAUTH_STATE_KEY)
+        const storedState = consumeGitHubOAuthState()
         if (ghAuthStateRecv && storedState && ghAuthStateRecv === storedState) {
           try {
+            if (isLoggedIn()) {
+              githubConnectMutation.mutate(ghAuthCode)
+              return
+            }
             loginGitHubMutation.mutate({
               code: ghAuthCode,
               redirectUri: getGitHubRedirectUri(),
@@ -112,8 +149,7 @@ function Login() {
 
   const handleLoginClicked = () => {
     mixpanel.track("Clicked login")
-    const state = generateOAuthState()
-    sessionStorage.setItem(OAUTH_STATE_KEY, state)
+    const state = createGitHubOAuthState()
     location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}`
   }
 

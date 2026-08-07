@@ -15,6 +15,7 @@ import { useState } from "react"
 import type { UserPublic } from "../../client"
 import Appearance from "../../components/UserSettings/Appearance"
 import ChangePassword from "../../components/UserSettings/ChangePassword"
+import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
 import UserInformation from "../../components/UserSettings/UserInformation"
 import UserTokens from "../../components/UserSettings/UserTokens"
@@ -24,6 +25,11 @@ import { isLoggedIn } from "../../hooks/useAuth"
 
 const tabsConfig = [
   { title: "My profile", component: UserInformation, slug: "profile" },
+  {
+    title: "Connected accounts",
+    component: ConnectedAccounts,
+    slug: "connected-accounts",
+  },
   { title: "Subscription", component: Subscription, slug: "subscription" },
   { title: "Password", component: ChangePassword, slug: "password" },
   { title: "Appearance", component: Appearance, slug: "appearance" },
@@ -49,7 +55,7 @@ function UserSettings() {
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
   const finalTabs = currentUser?.is_superuser
-    ? tabsConfig.slice(0, 5)
+    ? tabsConfig.filter((t) => t.slug !== "delete-account")
     : tabsConfig
   const { tab } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })

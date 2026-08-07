@@ -19,7 +19,9 @@ import {
   Switch,
 } from "@chakra-ui/react"
 import { useState } from "react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+
+import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import mixpanel from "mixpanel-browser"
 import { useNavigate } from "@tanstack/react-router"
@@ -30,6 +32,7 @@ import {
   type ProjectPost,
   type UserPublic,
   type ProjectPublic,
+  UsersService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -55,6 +58,14 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
     templates.push(defaultTemplate)
   }
   const queryClient = useQueryClient()
+  // Creating this needs a GitHub repo, which a Google- or email-created
+  // account can't do until it links a GitHub identity
+  const connectedAccountsQuery = useQuery({
+    queryKey: ["user", "connected-accounts"],
+    queryFn: () => UsersService.getUserConnectedAccounts(),
+  })
+  const needsGitHub =
+    connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github
   const showToast = useCustomToast()
   const navigate = useNavigate()
   const errorModal = useDisclosure()
@@ -176,99 +187,110 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
           <ModalHeader>New project</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
-            <FormControl display="flex" alignItems="center" mb={4}>
-              <FormLabel htmlFor="repo-exists" mb="0">
-                GitHub repo exists?
-              </FormLabel>
-              <Switch
-                id="repo-exists"
-                isChecked={repoExists}
-                onChange={(e) => setRepoExists(e.target.checked)}
-                colorScheme="teal"
+            {needsGitHub ? (
+              <ConnectGitHubPrompt
+                action="create a project"
+                returnTo={`${window.location.pathname}?newProject=1`}
               />
-            </FormControl>
-            <FormControl isRequired isInvalid={!!errors.title}>
-              <FormLabel htmlFor="title">Title</FormLabel>
-              <Input
-                id="title"
-                {...register("title", {
-                  required: "Title is required.",
-                })}
-                placeholder="Ex: Coherent structures in high Reynolds number boundary layers"
-                type="text"
-                onChange={!repoExists ? onTitleChange : undefined}
-                autoComplete="off"
-              />
-              {errors.title && (
-                <FormErrorMessage>{errors.title.message}</FormErrorMessage>
-              )}
-            </FormControl>
-            <FormControl mt={4}>
-              <FormLabel htmlFor="description">Description</FormLabel>
-              <Input
-                id="description"
-                {...register("description")}
-                placeholder="Description"
-                type="text"
-                autoComplete="off"
-              />
-            </FormControl>
-            {!repoExists && (
-              <FormControl mt={4}>
-                <FormLabel htmlFor="template">Template</FormLabel>
-                <Select
-                  id="template"
-                  placeholder="Select a template..."
-                  {...register("template", {})}
-                  defaultValue={defaultTemplate}
-                >
-                  {templates.map((template) => (
-                    <option key={template} value={template}>
-                      {template}
-                    </option>
-                  ))}
-                  <option key="none" value="">
-                    None
-                  </option>
-                </Select>
-              </FormControl>
-            )}
-            <FormControl mt={4} isInvalid={!!errors.git_repo_url}>
-              <FormLabel htmlFor="git_repo_url">GitHub repo URL</FormLabel>
-              <Input
-                id="git_repo_url"
-                {...register("git_repo_url", {
-                  required: "GitHub repo URL is required.",
-                  onChange: onGitRepoUrlChange,
-                })}
-                placeholder="Ex: https://github.com/your_name/your_repo"
-                type="text"
-                autoComplete="off"
-              />
-              {errors.git_repo_url && (
-                <FormErrorMessage>
-                  {errors.git_repo_url.message}
-                </FormErrorMessage>
-              )}
-            </FormControl>
-            {!repoExists && (
-              <Flex mt={4}>
-                <FormControl>
-                  <Checkbox {...register("is_public")} colorScheme="teal">
-                    Public?
-                  </Checkbox>
+            ) : (
+              <>
+                <FormControl display="flex" alignItems="center" mb={4}>
+                  <FormLabel htmlFor="repo-exists" mb="0">
+                    GitHub repo exists?
+                  </FormLabel>
+                  <Switch
+                    id="repo-exists"
+                    isChecked={repoExists}
+                    onChange={(e) => setRepoExists(e.target.checked)}
+                    colorScheme="teal"
+                  />
                 </FormControl>
-              </Flex>
+                <FormControl isRequired isInvalid={!!errors.title}>
+                  <FormLabel htmlFor="title">Title</FormLabel>
+                  <Input
+                    id="title"
+                    {...register("title", {
+                      required: "Title is required.",
+                    })}
+                    placeholder="Ex: Coherent structures in high Reynolds number boundary layers"
+                    type="text"
+                    onChange={!repoExists ? onTitleChange : undefined}
+                    autoComplete="off"
+                  />
+                  {errors.title && (
+                    <FormErrorMessage>{errors.title.message}</FormErrorMessage>
+                  )}
+                </FormControl>
+                <FormControl mt={4}>
+                  <FormLabel htmlFor="description">Description</FormLabel>
+                  <Input
+                    id="description"
+                    {...register("description")}
+                    placeholder="Description"
+                    type="text"
+                    autoComplete="off"
+                  />
+                </FormControl>
+                {!repoExists && (
+                  <FormControl mt={4}>
+                    <FormLabel htmlFor="template">Template</FormLabel>
+                    <Select
+                      id="template"
+                      placeholder="Select a template..."
+                      {...register("template", {})}
+                      defaultValue={defaultTemplate}
+                    >
+                      {templates.map((template) => (
+                        <option key={template} value={template}>
+                          {template}
+                        </option>
+                      ))}
+                      <option key="none" value="">
+                        None
+                      </option>
+                    </Select>
+                  </FormControl>
+                )}
+                <FormControl mt={4} isInvalid={!!errors.git_repo_url}>
+                  <FormLabel htmlFor="git_repo_url">GitHub repo URL</FormLabel>
+                  <Input
+                    id="git_repo_url"
+                    {...register("git_repo_url", {
+                      required: "GitHub repo URL is required.",
+                      onChange: onGitRepoUrlChange,
+                    })}
+                    placeholder="Ex: https://github.com/your_name/your_repo"
+                    type="text"
+                    autoComplete="off"
+                  />
+                  {errors.git_repo_url && (
+                    <FormErrorMessage>
+                      {errors.git_repo_url.message}
+                    </FormErrorMessage>
+                  )}
+                </FormControl>
+                {!repoExists && (
+                  <Flex mt={4}>
+                    <FormControl>
+                      <Checkbox {...register("is_public")} colorScheme="teal">
+                        Public?
+                      </Checkbox>
+                    </FormControl>
+                  </Flex>
+                )}
+              </>
             )}
           </ModalBody>
           <ModalFooter gap={3}>
-            <Button
-              variant="primary"
-              type="submit"
-              isLoading={isSubmitting || mutation.isPending}
-            >
-              Save
-            </Button>
+            {!needsGitHub && (
+              <Button
+                variant="primary"
+                type="submit"
+                isLoading={isSubmitting || mutation.isPending}
+              >
+                Save
+              </Button>
+            )}
             <Button onClick={onClose}>Cancel</Button>
           </ModalFooter>
         </ModalContent>

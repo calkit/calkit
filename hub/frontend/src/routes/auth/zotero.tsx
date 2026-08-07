@@ -68,7 +68,7 @@ function ZoteroAuth() {
       if (success) url.searchParams.set("import_zotero_open", "true")
       window.location.assign(url.pathname + url.search)
     } else {
-      navigate({ to: "/settings", search: { tab: "profile" } })
+      navigate({ to: "/settings", search: { tab: "connected-accounts" } })
     }
   }
 

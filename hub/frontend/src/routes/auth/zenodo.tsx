@@ -36,13 +36,13 @@ function ZenodoAuth() {
       queryClient.invalidateQueries({
         queryKey: ["user", "connected-accounts"],
       })
-      navigate({ to: "/settings", search: { tab: "profile" } })
+      navigate({ to: "/settings", search: { tab: "connected-accounts" } })
     },
     onError: (err: ApiError) => {
       handleError(err, showToast)
       // Still navigate back after showing error
       setTimeout(() => {
-        navigate({ to: "/settings", search: { tab: "profile" } })
+        navigate({ to: "/settings", search: { tab: "connected-accounts" } })
       }, 2000)
     },
   })

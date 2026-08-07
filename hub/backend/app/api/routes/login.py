@@ -94,6 +94,7 @@ def login_access_token(
         )
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    users.check_email_allowed(user.email)
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="password login"
     )
@@ -291,15 +292,7 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
             headers={"Authorization": f"Bearer {out['access_token']}"},
         ).json()[0]["email"]
         logger.info(f"Found GitHub email: {github_email}")
-    if settings.ENVIRONMENT == "staging" and github_username not in [
-        "petebachant",
-        "pbachant",
-        "abachant",
-    ]:
-        logger.warning(
-            f"GitHub user {github_username} attempting to log in on staging"
-        )
-        raise HTTPException(403, "Please log in at calkit.io")
+    users.check_email_allowed(github_email)
     # First check to find user based on their GitHub username
     user = users.get_user_by_github_username(
         session=session, github_username=github_username
@@ -383,13 +376,9 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
     if not email or not profile.get("email_verified"):
         raise HTTPException(400, "A verified Google email is required")
     full_name = profile.get("name")
+    users.check_email_allowed(email)
     user = users.get_user_by_email(session=session, email=email)
     if user is None:
-        if settings.ENVIRONMENT == "staging":
-            logger.warning(
-                f"Google user {email} attempting to sign up on staging"
-            )
-            raise HTTPException(403, "Please log in at calkit.io")
         logger.info("Creating new GitHub-less user via Google")
         try:
             user = users.create_user(

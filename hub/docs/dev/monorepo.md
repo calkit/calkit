@@ -402,6 +402,14 @@ self-hosted instance can keep hosting its own by setting the profile.
       to that deploy's Compose commands and point
       `OBJECT_STORAGE_ENDPOINT_URL` at it instead.)
 
+### Access control
+
+- [ ] Set `ALLOWED_USER_EMAILS` on `staging.calkit.io` to the people who
+      should be able to use it, comma-separated. This replaces the old
+      hardcoded staging gate (three GitHub usernames, GitHub login only),
+      which let anyone sign up through Google or email. Leave it unset on
+      `calkit.io`, which is open to everyone.
+
 ### Self-hosted runners
 
 On each runner machine (production, staging), from the runner directory:

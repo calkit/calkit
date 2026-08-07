@@ -23,6 +23,7 @@ from app.api.deps import (
 )
 from app.config import settings
 from app.core import utcnow
+from app.github import token_resp_text_to_dict
 from app.messaging import generate_new_account_email, send_email
 from app.models import (
     DiscountCode,
@@ -679,6 +680,84 @@ def post_user_google_auth(
     logger.info("Saving Google token")
     users.save_google_token(
         session=session, user=current_user, google_resp=google_resp
+    )
+    return Message(message="success")
+
+
+@router.post("/user/github-auth")
+def post_user_github_auth(
+    session: SessionDep,
+    current_user: CurrentUser,
+    req: OAuthCodeExchange,
+) -> Message:
+    """Link a GitHub account to the signed-in user.
+
+    This is how an account created some other way (Google, email) gains a
+    GitHub identity; logging in through GitHub is a separate flow that
+    resolves an account rather than attaching to one.
+    """
+    logger.info(f"Received GitHub auth request for user {current_user.email}")
+    resp = requests.get(
+        "https://github.com/login/oauth/access_token",
+        # No redirect_uri, matching login_with_github: the authorize
+        # request doesn't send one either, so GitHub uses the OAuth app's
+        # registered callback and sending it here can only mismatch
+        params=dict(
+            code=req.code,
+            client_id=settings.GH_CLIENT_ID,
+            client_secret=settings.GH_CLIENT_SECRET,
+        ),
+    )
+    if resp.status_code != 200:
+        raise HTTPException(400, "GitHub authentication failed")
+    github_resp = token_resp_text_to_dict(resp.text)
+    if "access_token" not in github_resp:
+        raise HTTPException(
+            400,
+            f"GitHub authentication failed: {github_resp.get('error')}",
+        )
+    gh_user = requests.get(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {github_resp['access_token']}"},
+    ).json()
+    github_username = gh_user.get("login")
+    if not github_username:
+        raise HTTPException(400, "Could not fetch your GitHub profile")
+    existing = users.get_user_by_github_username(
+        session=session, github_username=github_username
+    )
+    if existing is not None and existing.id != current_user.id:
+        logger.info(
+            f"GitHub account {github_username} already belongs to another user"
+        )
+        raise HTTPException(
+            409,
+            (
+                f"The GitHub account '{github_username}' is already "
+                "connected to a different Calkit account"
+            ),
+        )
+    current_github_username = current_user.github_username
+    if (
+        current_github_username is not None
+        and current_github_username != github_username
+    ):
+        raise HTTPException(
+            400,
+            (
+                f"This account is already connected to GitHub as "
+                f"'{current_github_username}'"
+            ),
+        )
+    # The account name is left alone; it identifies the account in URLs and
+    # need not match the GitHub username
+    current_user.account.github_name = github_username
+    session.add(current_user.account)
+    session.commit()
+    session.refresh(current_user)
+    logger.info(f"Linked GitHub account {github_username}")
+    users.save_github_token(
+        session=session, user=current_user, github_resp=github_resp
     )
     return Message(message="success")
 

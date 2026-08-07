@@ -2931,6 +2931,12 @@ export type PostUserGoogleAuthData = {
 
 export type PostUserGoogleAuthResponse = Message
 
+export type PostUserGithubAuthData = {
+  requestBody: OAuthCodeExchange
+}
+
+export type PostUserGithubAuthResponse = Message
+
 export type PostUserZoteroAuthStartResponse = ZoteroAuthStart
 
 export type PostUserZoteroAuthData = {

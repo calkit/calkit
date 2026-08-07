@@ -43,6 +43,9 @@ def test_create_user_email_allowlist(db: Session) -> None:
         with pytest.raises(HTTPException) as exc_info:
             users.create_user(session=db, user_create=user_in)
         assert exc_info.value.status_code == 403
+        # The bootstrap superuser is exempt: prestart recreates it on every
+        # deploy, so an allowlist omitting it would fail the deploy
+        users.check_email_allowed(settings.FIRST_SUPERUSER)
 
 
 def test_create_user_reserved_account_names(db: Session) -> None:

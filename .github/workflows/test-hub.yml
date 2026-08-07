@@ -46,12 +46,20 @@ jobs:
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
         with:
+          # Paths are listed positively rather than as 'hub/** minus
+          # frontend': negated patterns need the 'every' quantifier, which
+          # can't work for a filter whose patterns are alternatives.
           # The backend image builds calkit-python from the workspace, so
-          # package changes must run the backend tests too
+          # package changes must run the backend tests too.
           filters: |
             backend:
-              - 'hub/**'
-              - '!hub/frontend/**'
+              - 'hub/backend/**'
+              - 'hub/config/**'
+              - 'hub/scripts/**'
+              - 'hub/texmf-proxy/**'
+              - 'hub/docker-compose*.yml'
+              - 'hub/.env.example'
+              - 'hub/Makefile'
               - 'calkit/**'
               - 'agent-plugin/**'
               - 'pyproject.toml'

@@ -131,11 +131,20 @@ services:
     restart: "no"
     env_file:
       - .env
+    # Vite only exposes VITE_-prefixed variables to the browser, so the
+    # hub-level names are mapped here the same way the base file maps them
+    # to build args. Setting them at runtime means editing .env and
+    # restarting this service is enough, with no image rebuild.
     environment:
       - VITE_API_URL=http://api.localhost
       # The in-browser LaTeX engine fetches missing TeX files from here on a
       # kpathsea miss (full TeX Live coverage + on-demand fonts). See texmf-proxy.
       - VITE_TEXMF_PROXY=http://localhost:8771
+      - VITE_GH_CLIENT_ID=${GH_CLIENT_ID:-}
+      - VITE_GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - VITE_STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
+      - VITE_MIXPANEL_TOKEN=${MIXPANEL_TOKEN:-}
+      - VITE_ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID:-}
     build:
       context: ./frontend
       args:

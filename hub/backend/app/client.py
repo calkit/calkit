@@ -5,11 +5,11 @@ control over how the requests are made.
 """
 
 import string
-from typing import Annotated
+
+from sqlmodel.main import SQLModelMetaclass
 
 import app.api.routes.projects as projects  # TODO: Structure better
 from app import models
-from sqlmodel.main import SQLModelMetaclass
 
 
 def get_all_sql_models():

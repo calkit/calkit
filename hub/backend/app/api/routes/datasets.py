@@ -3,10 +3,11 @@
 import logging
 
 import sqlalchemy
+from fastapi import APIRouter
+from sqlmodel import SQLModel, and_, func, or_, select
+
 from app.api.deps import CurrentUserOptional, SessionDep
 from app.models import Dataset, Project, ProjectPublic
-from fastapi import APIRouter
-from sqlmodel import SQLModel, func, or_, select, and_
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -1,7 +1,8 @@
 """Functionality for working with orgs."""
 
-from app.models import Org
 from sqlmodel import Session, select
+
+from app.models import Org
 
 
 def get_org_from_db(org_name: str, session: Session) -> Org | None:

@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, Union
 
 import sqlalchemy
+
 from app import utcnow
 
 if TYPE_CHECKING:
@@ -13,14 +14,15 @@ if TYPE_CHECKING:
     # forward reference in Project.releases for type checkers without creating
     # a runtime circular import.
     from app.models.releases import Release
+from pydantic import BaseModel, EmailStr, computed_field
+from sqlmodel import Field, Relationship, SQLModel
+
 from app.subscriptions import (
     PLAN_IDS,
     PLAN_NAMES,
     get_private_projects_limit,
     get_storage_limit,
 )
-from pydantic import BaseModel, EmailStr, computed_field
-from sqlmodel import Field, Relationship, SQLModel
 
 
 class Account(SQLModel, table=True):

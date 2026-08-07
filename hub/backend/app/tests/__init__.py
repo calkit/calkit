@@ -6,11 +6,12 @@ This module contains helper functions that may be used in the tests.
 import random
 import string
 
+from fastapi.testclient import TestClient
+from sqlmodel import Session
+
 from app import users
 from app.config import settings
 from app.models import User, UserCreate, UserUpdate
-from fastapi.testclient import TestClient
-from sqlmodel import Session
 
 
 def user_authentication_headers(

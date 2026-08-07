@@ -18,13 +18,10 @@ from typing import Annotated, Literal, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
-import calkit
+import git
 import requests
 import sqlalchemy
 import yaml
-from calkit.check import ReproCheck, check_reproducibility
-from calkit.models import ProjectStatus
-from calkit.notebooks import get_executed_notebook_path
 from fastapi import (
     APIRouter,
     Depends,
@@ -43,6 +40,7 @@ from sqlmodel import Session, and_, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.projects
+import calkit
 from app import github, messaging, mixpanel, orgs, users, zotero
 from app.api.deps import (
     CurrentUser,
@@ -51,7 +49,6 @@ from app.api.deps import (
 )
 from app.api.routes.orgs import OrgPost, post_org
 from app.config import settings
-from app.security import generate_refresh_token, hash_refresh_token
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
@@ -64,12 +61,6 @@ from app.dvc import (
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
-)
-from app.pipeline import (
-    color_mermaid_by_status,
-    compute_stage_statuses,
-    find_stage_for_path,
-    calc_overall_pipeline_status,
 )
 from app.git import (
     get_ck_info,
@@ -96,6 +87,7 @@ from app.models import (
     Org,
     OrgSubscription,
     Pipeline,
+    Presentation,
     Project,
     ProjectComment,
     ProjectCommentPatch,
@@ -108,7 +100,6 @@ from app.models import (
     ProjectPost,
     ProjectPublic,
     ProjectsPublic,
-    Presentation,
     Publication,
     Question,
     QuestionEvidence,
@@ -135,12 +126,22 @@ from app.models.projects import (
     ShowcaseYaml,
     ShowcaseYamlFileInput,
 )
+from app.pipeline import (
+    calc_overall_pipeline_status,
+    color_mermaid_by_status,
+    compute_stage_statuses,
+    find_stage_for_path,
+)
+from app.security import generate_refresh_token, hash_refresh_token
 from app.storage import (
     get_object_fs,
     get_object_url,
     make_data_fpath,
     remove_gcs_content_type,
 )
+from calkit.check import ReproCheck, check_reproducibility
+from calkit.models import ProjectStatus
+from calkit.notebooks import get_executed_notebook_path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

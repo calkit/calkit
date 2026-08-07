@@ -5,11 +5,12 @@ first such feature is creating external releases (publishing to Zenodo, arXiv,
 etc.) from within Calkit rather than the CLI.
 """
 
+from fastapi import APIRouter, HTTPException
+from sqlmodel import func, select
+
 from app import mixpanel
 from app.api.deps import CurrentUser, SessionDep
 from app.models import FeatureVote, FeatureVoteStatus
-from fastapi import APIRouter, HTTPException
-from sqlmodel import func, select
 
 router = APIRouter()
 

@@ -4,8 +4,9 @@ import uuid
 from typing import Literal
 
 import stripe
-from app.config import settings
 from pydantic import EmailStr
+
+from app.config import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 

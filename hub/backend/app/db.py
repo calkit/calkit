@@ -2,9 +2,6 @@
 
 import logging
 
-from app import users
-from app.config import settings
-from app.models import User, UserCreate
 from sqlalchemy import Engine
 from sqlmodel import Session, create_engine, select
 from tenacity import (
@@ -14,6 +11,10 @@ from tenacity import (
     stop_after_attempt,
     wait_fixed,
 )
+
+from app import users
+from app.config import settings
+from app.models import User, UserCreate
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

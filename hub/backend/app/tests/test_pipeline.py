@@ -6,9 +6,9 @@ import git
 
 from app.git import get_repo_tree_for_ref
 from app.pipeline import (
+    calc_overall_pipeline_status,
     compute_stage_statuses,
     find_stage_for_path,
-    calc_overall_pipeline_status,
 )
 
 

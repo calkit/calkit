@@ -5,7 +5,6 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from app.models.core import UserPublic
 import requests
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel

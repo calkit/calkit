@@ -4,6 +4,13 @@ import os
 import uuid
 from typing import Literal
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from pydantic.networks import EmailStr
+from sqlalchemy.exc import DataError
+from sqlmodel import and_, or_, select
+from starlette.requests import Request
+
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -26,14 +33,8 @@ from app.models import (
     UserOrgMembership,
     UserProjectAccess,
 )
-from sqlmodel import and_, or_, select
 from app.stripe import stripe
 from app.subscriptions import SubscriptionPlan, get_plans
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from pydantic.networks import EmailStr
-from sqlalchemy.exc import DataError
-from starlette.requests import Request
 
 router = APIRouter()
 

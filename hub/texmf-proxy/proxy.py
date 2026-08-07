@@ -13,6 +13,7 @@ Runs inside a full-TeX-Live image, so kpsewhich is called locally (no docker
 exec). Configured via env: TEXMF_PROXY_PORT (default 8771) and
 TEXMF_PROXY_ALLOW_ORIGIN (CORS, default "*"; set to the site origin in prod).
 """
+
 import os
 import subprocess
 import urllib.parse
@@ -60,7 +61,7 @@ class Handler(BaseHTTPRequestHandler):
             self._cors()
             self.end_headers()
             return
-        name = urllib.parse.unquote(self.path[len("/f/"):])
+        name = urllib.parse.unquote(self.path[len("/f/") :])
         data = resolve(name)
         if data is None:
             self.send_response(404)

@@ -27,7 +27,6 @@ from urllib.parse import quote
 import git
 import requests  # type: ignore[import-untyped]
 import sqlalchemy
-from calkit.models import Release as CkRelease  # type: ignore[import-untyped]
 from fastapi import APIRouter, HTTPException
 from git.exc import GitCommandError
 from sqlalchemy.orm import selectinload
@@ -65,6 +64,7 @@ from app.models import (
     User,
 )
 from app.pipeline import compute_stage_statuses, find_stage_for_path
+from calkit.models import Release as CkRelease  # type: ignore[import-untyped]
 
 logger = logging.getLogger("uvicorn")
 

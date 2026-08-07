@@ -13,7 +13,6 @@ from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
 
-import calkit
 import git
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
@@ -21,6 +20,7 @@ from git.exc import GitCommandError
 from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
 
+import calkit
 from app import github, users
 from app.core import logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess

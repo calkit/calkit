@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import emails  # type: ignore
-from app.config import settings
 from jinja2 import Template
+
+from app.config import settings
 
 
 @dataclass

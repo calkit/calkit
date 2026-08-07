@@ -3,8 +3,9 @@
 import logging
 from typing import Literal
 
-import app.stripe
 from pydantic import BaseModel
+
+import app.stripe
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

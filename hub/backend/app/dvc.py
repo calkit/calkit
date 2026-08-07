@@ -10,11 +10,11 @@ import sys
 import tempfile
 from functools import lru_cache
 
-import calkit.dvc
 import ruamel.yaml
 from dvc.commands import dag
 from dvc.repo import Repo
 
+import calkit.dvc
 from app.storage import get_object_fs, make_data_fpath
 
 logging.basicConfig(level=logging.INFO)

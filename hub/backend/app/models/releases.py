@@ -13,10 +13,11 @@ from datetime import datetime
 from typing import Literal
 
 import sqlalchemy
-from app import utcnow
-from app.models.core import CommentHighlight, Project, User
 from pydantic import BaseModel, computed_field, field_validator
 from sqlmodel import Field, Relationship, SQLModel
+
+from app import utcnow
+from app.models.core import CommentHighlight, Project, User
 
 # Release ``kind`` mirrors calkit's release schema (the ``releases`` map in
 # calkit.yaml is keyed by tag). For this cloud feature the DB is the source of

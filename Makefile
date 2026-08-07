@@ -22,7 +22,7 @@ check: format ## Run code quality tools.
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
 	@uv lock --locked
 	@echo "🚀 Static type checking with mypy"
-	@uv run mypy .
+	@uv run --all-packages mypy
 	@echo "🚀 Checking for obsolete dependencies with deptry"
 	@uv run deptry .
 

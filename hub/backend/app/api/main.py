@@ -1,15 +1,16 @@
+from fastapi import APIRouter
+
 from app.api.routes import (
     accounts,
+    datasets,
     feature_votes,
     login,
     misc,
+    orgs,
     projects,
     users,
-    orgs,
-    datasets,
 )
 from app.api.routes.projects import releases
-from fastapi import APIRouter
 
 api_router = APIRouter()
 api_router.include_router(accounts.router, tags=["accounts"])

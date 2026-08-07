@@ -3,6 +3,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
 from app import users
 from app.config import settings
 from app.core import utcnow
@@ -12,8 +15,6 @@ from app.security import (
     hash_refresh_token,
     verify_password,
 )
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
 
 
 def test_get_access_token(client: TestClient) -> None:

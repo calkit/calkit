@@ -1,13 +1,14 @@
 """Tests for ``app.users``."""
 
 import pytest
+from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
+from sqlmodel import Session
+
 from app import users
 from app.models import User, UserCreate, UserUpdate
 from app.security import verify_password
 from app.tests import random_email, random_lower_string
-from fastapi import HTTPException
-from fastapi.encoders import jsonable_encoder
-from sqlmodel import Session
 
 
 def test_create_user(db: Session) -> None:

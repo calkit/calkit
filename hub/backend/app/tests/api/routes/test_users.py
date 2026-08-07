@@ -1,13 +1,14 @@
 import uuid
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
 from app import users
 from app.config import settings
 from app.models import User, UserCreate
 from app.security import verify_password
 from app.tests import random_email, random_lower_string
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
 
 
 def test_get_users_superuser_me(

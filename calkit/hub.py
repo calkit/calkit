@@ -100,8 +100,7 @@ def run_device_flow() -> str:
                 txt = str(e)
                 if "Device code has expired" in txt:
                     raise DeviceLoginError(
-                        "Device code has expired; "
-                        "Run 'calkit hub login' again"
+                        "Device code has expired; Run 'calkit hub login' again"
                     ) from e
                 if "Device code not found" in txt:
                     raise DeviceLoginError(

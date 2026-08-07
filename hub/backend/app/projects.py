@@ -14,13 +14,13 @@ import git
 import requests
 import sqlalchemy
 import yaml
-from calkit.notebooks import get_executed_notebook_path
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 import app.users
 from app.config import settings
+from calkit.notebooks import get_executed_notebook_path
 
 
 # libyaml's C loader is ~10x faster than the pure-Python SafeLoader on
@@ -30,14 +30,13 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
-from app.git import RepoTree, get_repo_tree_for_ref
 from app.core import CATEGORIES_PLURAL_TO_SINGULAR, params_from_url, ryaml
-from app.dvc import expand_dvc_lock_outs
-from app.dvc import get_data_fpath_for_md5
-from app.pipeline import find_stage_for_path
+from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
 from app.git import (
+    RepoTree,
     get_ck_info_from_repo,
     get_dvc_pipeline_from_repo,
+    get_repo_tree_for_ref,
 )
 from app.models import (
     ContentsItem,
@@ -50,6 +49,7 @@ from app.models import (
     User,
     UserProjectAccess,
 )
+from app.pipeline import find_stage_for_path
 from app.storage import (
     get_object_fs,
     get_object_url,

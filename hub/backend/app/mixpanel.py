@@ -1,8 +1,9 @@
 """Functionality for working with Mixpanel."""
 
+from mixpanel import Mixpanel
+
 from app.config import settings
 from app.models import User
-from mixpanel import Mixpanel
 
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
 

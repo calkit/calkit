@@ -1,8 +1,7 @@
-# Formatting is split by ownership: the root hooks cover the calkit package
-# and repo-wide files, while hub code is formatted by the hub projects' OWN
-# tools (uv-managed ruff for the backend, the pinned Biome for the frontend)
-# so the rules/versions match hub/backend/pyproject.toml and
-# hub/frontend/biome.json exactly -- no second, drifting copy to keep in sync.
+# Python linting/formatting runs the uv-managed ruff over the whole repo
+# with the root pyproject config, so the version and rules can't drift
+# between packages. The hub frontend is formatted by its own pinned Biome
+# to match hub/frontend/biome.json exactly.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v4.4.0"
@@ -22,14 +21,20 @@ repos:
         # The hub has JSONC files (tsconfig.json, .vscode/launch.json)
         exclude: ^hub/
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.6.3"
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--exit-non-zero-on-fix]
-        exclude: ^hub/
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: bash -c 'uv run ruff check --fix --exit-non-zero-on-fix .'
+        pass_filenames: false
+        files: \.pyi?$
       - id: ruff-format
-        exclude: ^hub/
+        name: ruff format
+        language: system
+        entry: bash -c 'uv run ruff format .'
+        pass_filenames: false
+        files: \.pyi?$
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
@@ -39,12 +44,6 @@ repos:
 
   - repo: local
     hooks:
-      - id: ruff-format-hub-backend
-        name: ruff format (hub backend)
-        language: system
-        entry: bash -c 'cd hub/backend && uv run ruff format'
-        pass_filenames: false
-        files: ^hub/backend/.*\.py$
       - id: biome-format-hub-frontend
         name: biome format (hub frontend)
         language: system

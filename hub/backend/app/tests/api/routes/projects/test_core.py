@@ -4,6 +4,9 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
+from fastapi.testclient import TestClient
+from sqlmodel import Session, select
+
 from app import users, zotero
 from app.api.routes.projects.core import get_project_comments
 from app.config import settings
@@ -12,8 +15,6 @@ from app.models import Project, UserCreate
 from app.models.core import ContentsItem, UserProjectAccess
 from app.projects import CkInfoAndOuts
 from app.tests import authentication_token_from_email, create_random_user
-from fastapi.testclient import TestClient
-from sqlmodel import Session, select
 
 
 def test_get_project_contents_forwards_ref(client: TestClient) -> None:

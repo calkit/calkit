@@ -11,19 +11,20 @@ from unittest.mock import patch
 
 import pytest
 import requests
+from fastapi.testclient import TestClient
+
 from app.api.routes.projects.releases import (
-    _parse_arxiv_id_from_url,
-    _parse_doi_from_url,
+    _build_stored_release_filename,
     _fetch_arxiv,
     _fetch_osf,
+    _parse_arxiv_id_from_url,
+    _parse_doi_from_url,
     _parse_osf_guid_from_url,
     _parse_release_url,
-    _build_stored_release_filename,
 )
 from app.config import settings
 from app.models import ReleaseStaleness, ReleaseUrlMetadata
 from app.pipeline import StageStatus
-from fastapi.testclient import TestClient
 
 
 def test_get_release_view_unknown_project_returns_404(

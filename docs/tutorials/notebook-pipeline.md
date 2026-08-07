@@ -205,4 +205,4 @@ with DVC (though the storage location is configurable).
 If you'd like to try this out or explore further,
 you can view this project up on
 [GitHub](https://github.com/calkit/example-notebook-pipeline)
-or the [Calkit cloud](https://calkit.io/calkit/example-notebook-pipeline).
+or the [hub](https://calkit.io/calkit/example-notebook-pipeline).

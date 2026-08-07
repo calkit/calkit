@@ -1,7 +1,7 @@
 # Local server for GUI interaction
 
 Calkit includes a local server for interacting with projects locally via the
-Calkit Cloud UI ([calkit.io](https://calkit.io)).
+Calkit hub UI ([calkit.io](https://calkit.io)).
 It can be launched with:
 
 ```sh
@@ -19,5 +19,5 @@ This feature is used in the [Microsoft Office tutorial](tutorials/office.md).
 
 ![Local server page](tutorials/img/office/pipeline-out-of-date.png){ width="450px" }
 /// caption
-The local server status widget on the Calkit Cloud UI.
+The local server status widget on the hub UI.
 ///

@@ -37,7 +37,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
-  - Cloud integration: cloud-integration.md
+  - The hub: hub/index.md
   - Use with AI tools: ai-tools.md
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md

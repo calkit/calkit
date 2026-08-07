@@ -20,7 +20,7 @@ Calkit uses [DVC](https://dvc.org) to version these file types.
 Git repositories, or repos, in the cloud, but like Git,
 is primarily designed for software development.
 Similar to how Calkit is a layer on top of Git,
-The Calkit Cloud ([calkit.io](https://calkit.io))
+The Calkit hub ([calkit.io](https://calkit.io))
 integrates with GitHub to add a more purpose-built
 interface for research projects.
 It also serves as a default DVC remote,
@@ -122,7 +122,7 @@ The multi-step equivalent would be:
 - `calkit config remote`
 - `dvc pull`
 
-If the project is hosted on the Calkit Cloud, it can be referenced by
+If the project is hosted on a hub, it can be referenced by
 name rather than Git repo URL. For example:
 
 ```sh

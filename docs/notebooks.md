@@ -110,7 +110,7 @@ pipeline:
       html_storage: dvc
       executed_ipynb_storage: null
       cleaned_ipynb_storage: git
-# Optional: Add to project notebooks so they can be viewed on Calkit Cloud
+# Optional: Add to project notebooks so they can be viewed on the hub
 notebooks:
   - path: notebooks/get-data.ipynb
     title: Get data

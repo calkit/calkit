@@ -20,7 +20,7 @@ as possible with reasonable defaults.
 Before we get started,
 make sure that Calkit is installed,
 you have an account on [calkit.io](https://calkit.io),
-and have [set a token in your local config](../cloud-integration.md).
+and have [set a token in your local config](../hub/index.md).
 
 The basic steps we'll take here are:
 
@@ -163,12 +163,12 @@ the title should be sentence or title case,
 and the description should include punctuation,
 kind of like an abstract.
 
-The `--cloud` flag is going to create a GitHub repo and Calkit Cloud project
+The `--cloud` flag is going to create a GitHub repo and hub project
 for us, which will be linked together.
 In the next step,
 when we put the files in version control,
 the code and text files will go to GitHub,
-and the larger data files will go to the Calkit Cloud.
+and the larger data files will go to the hub.
 This will be handled seamlessly and transparently.
 
 Note you can add a `--public` flag if you want the project to be public
@@ -180,7 +180,7 @@ so let's start with it private for now.
 To summarize, this command will:
 
 - Initialize a Git repository with GitHub as the remote
-- Initialize a DVC configuration with the Calkit Cloud as the remote
+- Initialize a DVC configuration with the hub as the remote
 - Create a `calkit.yaml` file for the project metadata
 - Create a dev container specification in `.devcontainer` for use with VS Code
   or GitHub Codespaces
@@ -298,7 +298,7 @@ command, after finding the offending commit with `git log`.
 ### Back up the project in the cloud
 
 After all relevant files are added and committed to the repo,
-we can push to both GitHub and the Calkit Cloud with `calkit push`:
+we can push to both GitHub and the hub with `calkit push`:
 
 ```sh
 $ calkit push

@@ -2,16 +2,13 @@ name: Deploy hub to production
 
 concurrency: production
 
+# To roll back, dispatch manually and pick the release tag to redeploy
+# from the ref selector
 on:
   release:
     types:
       - published
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Published release tag to deploy, e.g. hub/v1.2.3. Use this to roll back by redeploying a previous release."
-        required: true
-        type: string
 
 jobs:
   deploy:
@@ -69,17 +66,22 @@ jobs:
       ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
       GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
     steps:
-      - name: Resolve and validate release tag
-        id: tag
+      - name: Validate release tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # For release events the ref is the release tag; for manual
+        # dispatch it's whatever was picked in the ref selector, so
+        # check that it's a published hub release before deploying it
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ inputs.tag }}"
-          else
-            TAG="${{ github.event.release.tag_name }}"
-          fi
+          TAG="${{ github.ref_name }}"
           echo "Validating release tag: $TAG"
+          case "$TAG" in
+            hub/v*) ;;
+            *)
+              echo "::error::'$TAG' is not a hub release tag (hub/vX.Y.Z); pick one from the ref selector."
+              exit 1
+              ;;
+          esac
           status=$(curl -sS -o /dev/null -w '%{http_code}' \
             -H "Authorization: Bearer $GH_TOKEN" \
             -H "Accept: application/vnd.github+json" \
@@ -88,10 +90,7 @@ jobs:
             echo "::error::'$TAG' is not a published release (HTTP $status); only tagged releases can be deployed."
             exit 1
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          ref: ${{ steps.tag.outputs.tag }}
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d

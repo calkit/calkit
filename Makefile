@@ -8,6 +8,10 @@ install: ## Create the project's virtual environment.
 	@echo "🚀 Creating virtual environment"
 	@uv sync
 
+.PHONY: dev
+dev: ## Start up the hub containers for development.
+	@$(MAKE) -C hub dev
+
 .PHONY: format
 format: sync-docs ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"

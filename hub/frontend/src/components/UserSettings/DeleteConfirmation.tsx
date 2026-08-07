@@ -11,7 +11,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import React from "react"
 import { useForm } from "react-hook-form"
 
-import { type ApiError, UsersService } from "../../client"
+import type { AxiosError } from "axios"
+import { UsersService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -32,7 +33,8 @@ const DeleteConfirmation = ({ isOpen, onClose }: DeleteProps) => {
   const { logout } = useAuth()
 
   const mutation = useMutation({
-    mutationFn: () => UsersService.deleteCurrentUser(),
+    mutationFn: () =>
+      UsersService.deleteCurrentUser().then((response) => response.data),
     onSuccess: () => {
       showToast(
         "Success",
@@ -42,7 +44,7 @@ const DeleteConfirmation = ({ isOpen, onClose }: DeleteProps) => {
       logout()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

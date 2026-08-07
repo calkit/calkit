@@ -12,11 +12,12 @@ import { useMutation } from "@tanstack/react-query"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { type ApiError, LoginService, type NewPassword } from "../client"
+import type { AxiosError } from "axios"
+import { LoginService, type NewPassword } from "../client"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
-import { confirmPasswordRules, passwordRules } from "../lib/strings"
 import { handleError } from "../lib/errors"
+import { confirmPasswordRules, passwordRules } from "../lib/strings"
 
 interface NewPasswordForm extends NewPassword {
   confirm_password: string
@@ -54,8 +55,8 @@ function ResetPassword() {
     const token = new URLSearchParams(window.location.search).get("token")
     if (!token) return
     await LoginService.resetPassword({
-      requestBody: { new_password: data.new_password, token: token },
-    })
+      newPassword: { new_password: data.new_password, token: token },
+    }).then((response) => response.data)
   }
 
   const mutation = useMutation({
@@ -65,7 +66,7 @@ function ResetPassword() {
       reset()
       navigate({ to: "/login" })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

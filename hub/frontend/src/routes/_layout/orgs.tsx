@@ -1,3 +1,4 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Button,
   Container,
@@ -13,20 +14,19 @@ import {
   Thead,
   Tr,
 } from "@chakra-ui/react"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Link as RouterLink,
   createFileRoute,
   useNavigate,
-  Link as RouterLink,
 } from "@tanstack/react-router"
-import { z } from "zod"
 import { useEffect, useState } from "react"
 import { useDebounce } from "use-debounce"
+import { z } from "zod"
 
-import { capitalizeFirstLetter } from "../../lib/strings"
 import { OrgsService } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
+import { capitalizeFirstLetter } from "../../lib/strings"
 
 const orgsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -43,8 +43,8 @@ function getAllOrgsQueryOptions({
       OrgsService.getOrgs({
         offset: (page - 1) * PER_PAGE,
         limit: PER_PAGE,
-        searchFor: searchFor,
-      }),
+        search_for: searchFor,
+      }).then((response) => response.data),
     queryKey: ["orgs-all", { page, searchFor }],
   }
 }

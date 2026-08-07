@@ -26,8 +26,10 @@ export const clearTokens = () => {
 const shouldBypassRefreshForRequest = (requestUrl?: string): boolean => {
   if (!requestUrl) return false
 
-  const [path] = requestUrl.split("?")
-  return path === "/login/refresh"
+  // The URL may be a bare path or absolute (the generated client passes the
+  // full URL, base included, through its axios instance).
+  const path = new URL(requestUrl, "http://relative").pathname
+  return path.endsWith("/login/refresh")
 }
 
 const decodeBase64Url = (value: string): string => {
@@ -82,8 +84,8 @@ export const getValidAccessToken = async (
         const refreshToken = getRefreshToken()
         if (!refreshToken) return null
         const response = await LoginService.refreshAccessToken({
-          requestBody: { refresh_token: refreshToken },
-        })
+          refreshTokenRequest: { refresh_token: refreshToken },
+        }).then((response) => response.data)
         storeTokens(response.access_token, response.refresh_token)
         return response.access_token
       } catch {
@@ -124,8 +126,8 @@ export const forceRefreshAccessToken = async (): Promise<string | null> => {
   const priorAccess = getAccessToken()
   try {
     const response = await LoginService.refreshAccessToken({
-      requestBody: { refresh_token: refreshToken },
-    })
+      refreshTokenRequest: { refresh_token: refreshToken },
+    }).then((response) => response.data)
     storeTokens(response.access_token, response.refresh_token)
     return response.access_token
   } catch (e: any) {
@@ -156,7 +158,7 @@ export const forceRefreshAccessToken = async (): Promise<string | null> => {
 export const popPostLoginRedirect = (): string | null => {
   if (typeof window === "undefined") return null
   const target = localStorage.getItem("post_login_redirect")
-  if (target && target.startsWith("/") && !target.includes("..")) {
+  if (target?.startsWith("/") && !target.includes("..")) {
     localStorage.removeItem("post_login_redirect")
     return target
   }
@@ -196,7 +198,7 @@ const TOKEN_AUTH_DETAILS = new Set([
  * token-refresh flow, which clears tokens on failure.
  */
 export const isAuthenticationError = (error: any): boolean => {
-  const detail = error?.body?.detail ?? error?.response?.data?.detail
+  const detail = error?.response?.data?.detail
 
   return typeof detail === "string" && TOKEN_AUTH_DETAILS.has(detail)
 }

@@ -235,10 +235,10 @@ function ProjectPipeline() {
     queryKey: ["projects", accountName, projectName, "pipeline", ref],
     queryFn: () =>
       ProjectsService.getProjectPipeline({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   const { environmentsRequest } = useProjectEnvironments(
     accountName,

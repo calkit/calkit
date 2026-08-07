@@ -43,7 +43,10 @@ function Layout() {
   const isGithubUser = Boolean(user?.github_username)
   const ghAppInstalledQuery = useQuery({
     queryKey: ["user", "github-app-installations"],
-    queryFn: () => UsersService.getUserGithubAppInstallations(),
+    queryFn: () =>
+      UsersService.getUserGithubAppInstallations().then(
+        (response) => response.data,
+      ),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
     enabled: Boolean(user) && isGithubUser,

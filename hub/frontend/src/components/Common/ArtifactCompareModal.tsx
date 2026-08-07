@@ -31,7 +31,6 @@ import {
   VStack,
   useColorModeValue,
 } from "@chakra-ui/react"
-import Tooltip from "./Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { Suspense, lazy, useEffect, useState } from "react"
@@ -42,6 +41,7 @@ import {
   FaCodeBranch,
   FaLink,
 } from "react-icons/fa"
+import Tooltip from "./Tooltip"
 
 import {
   type ContentsItem,
@@ -221,57 +221,57 @@ function useArtifactAtRef(
     queryFn: async () => {
       if (kind === "file") {
         return ProjectsService.getProjectContents({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           path,
           ref,
-        })
+        }).then((response) => response.data)
       }
       if (kind === "figure") {
         const figs = await ProjectsService.getProjectFigures({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           ref,
-        })
+        }).then((response) => response.data)
         // Fall back to contents API if not declared in calkit.yaml
         const found = figs.find((f) => f.path === path)
         if (found) return found
         return ProjectsService.getProjectContents({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           path,
           ref,
-        })
+        }).then((response) => response.data)
       }
       if (kind === "publication") {
         const pubs = await ProjectsService.getProjectPublications({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           ref,
-        })
+        }).then((response) => response.data)
         const found = pubs.find((p) => p.path === path)
         if (found) return found
         return ProjectsService.getProjectContents({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           path,
           ref,
-        })
+        }).then((response) => response.data)
       }
       if (kind === "notebook") {
         const nbs = await ProjectsService.getProjectNotebooks({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           ref,
-        })
+        }).then((response) => response.data)
         const found = nbs.find((n) => n.path === path)
         if (found) return found
         return ProjectsService.getProjectContents({
-          ownerName,
-          projectName,
+          owner_name: ownerName,
+          project_name: projectName,
           path,
           ref,
-        })
+        }).then((response) => response.data)
       }
     },
     enabled,
@@ -389,45 +389,45 @@ function FigureComments({
     queryKey: ["projects", ownerName, projectName, "comments", "figure", path],
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName,
-        projectName,
-        artifactType: "figure",
-        artifactPath: path,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        artifact_type: "figure",
+        artifact_path: path,
+      }).then((response) => response.data),
   })
   const postMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
       ProjectsService.postProjectComment({
-        ownerName,
-        projectName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        projectCommentPost: {
           artifact_path: path,
           artifact_type: "figure",
           comment: vars.body,
           create_github_issue: vars.createIssue,
           git_ref: gitRef ?? null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: invalidate,
   })
   const replyMutation = useMutation({
     mutationFn: (vars: { commentId: string; body: string }) =>
       ProjectsService.postProjectCommentReply({
-        ownerName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { body: vars.body },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        commentReply: { body: vars.body },
+      }).then((response) => response.data),
     onSuccess: invalidate,
   })
   const resolveMutation = useMutation({
     mutationFn: (vars: { commentId: string; resolved: boolean }) =>
       ProjectsService.patchProjectComment({
-        ownerName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { resolved: vars.resolved },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        projectCommentPatch: { resolved: vars.resolved },
+      }).then((response) => response.data),
     onSuccess: invalidate,
   })
   const comments = commentsQuery.data ?? []
@@ -518,12 +518,12 @@ export function ArtifactCompareModal({
     ],
     queryFn: async () =>
       (await ProjectsService.getProjectFileHistory({
-        ownerName,
-        projectName,
+        owner_name: ownerName,
+        project_name: projectName,
         path,
         limit: 50,
         storage: artifactStorage ?? null,
-      })) as unknown as CommitHistory[],
+      }).then((response) => response.data)) as unknown as CommitHistory[],
     enabled: isOpen,
     staleTime: 5 * 60 * 1000,
   })
@@ -531,7 +531,10 @@ export function ArtifactCompareModal({
   const refsQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "refs"],
     queryFn: () =>
-      ProjectsService.searchProjectRefs({ ownerName, projectName }),
+      ProjectsService.searchProjectRefs({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     enabled: isOpen && branchesEnabled,
     staleTime: 5 * 60 * 1000,
   })

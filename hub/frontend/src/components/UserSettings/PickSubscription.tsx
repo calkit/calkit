@@ -1,4 +1,8 @@
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Card,
@@ -10,6 +14,14 @@ import {
   IconButton,
   Input,
   Link,
+  ListItem,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
   NumberDecrementStepper,
   NumberIncrementStepper,
   NumberInput,
@@ -20,40 +32,28 @@ import {
   Switch,
   Text,
   UnorderedList,
-  ListItem,
   useBoolean,
-  Alert,
-  AlertIcon,
-  AlertTitle,
-  AlertDescription,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalFooter,
-  ModalBody,
-  ModalCloseButton,
   useDisclosure,
 } from "@chakra-ui/react"
-import { MdCancel, MdCheck } from "react-icons/md"
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { useState } from "react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
+import { useState } from "react"
+import { MdCancel, MdCheck } from "react-icons/md"
 
+import type { AxiosError } from "axios"
+import mixpanel from "mixpanel-browser"
 import {
-  type ApiError,
-  type SubscriptionUpdate,
+  MiscService,
   type OrgSubscriptionUpdate,
+  OrgsService,
   type SubscriptionPlan,
+  type SubscriptionUpdate,
   type UserPublic,
   UsersService,
-  MiscService,
-  OrgsService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import { capitalizeFirstLetter } from "../../lib/strings"
 import { handleError } from "../../lib/errors"
-import mixpanel from "mixpanel-browser"
+import { capitalizeFirstLetter } from "../../lib/strings"
 
 interface PickSubscriptionProps {
   user?: UserPublic | null
@@ -77,7 +77,8 @@ const PickSubscription = ({
 
   const plansQuery = useQuery({
     queryKey: ["subscription-plans"],
-    queryFn: () => MiscService.getSubscriptionPlans(),
+    queryFn: () =>
+      MiscService.getSubscriptionPlans().then((response) => response.data),
   })
 
   const preferredPlanName = "standard"
@@ -132,16 +133,16 @@ const PickSubscription = ({
 
       if (newPlanValue > currentPlanValue) {
         return "Upgrade"
-      } else if (newPlanValue < currentPlanValue) {
+      }
+      if (newPlanValue < currentPlanValue) {
         return "Downgrade"
-      } else {
-        // Same plan level, different period
-        const currentPeriod =
-          user.subscription.period_months === 12 ? "annual" : "monthly"
-        const selectedPeriod = annual ? "annual" : "monthly"
-        if (currentPeriod !== selectedPeriod) {
-          return `Switch to ${selectedPeriod}`
-        }
+      }
+      // Same plan level, different period
+      const currentPeriod =
+        user.subscription.period_months === 12 ? "annual" : "monthly"
+      const selectedPeriod = annual ? "annual" : "monthly"
+      if (currentPeriod !== selectedPeriod) {
+        return `Switch to ${selectedPeriod}`
       }
     }
 
@@ -163,9 +164,9 @@ const PickSubscription = ({
     queryKey: ["discount-codes", discountCode, team, teamSize],
     queryFn: () =>
       MiscService.getDiscountCode({
-        discountCode,
-        nUsers: team ? teamSize : 1,
-      }),
+        discount_code: discountCode,
+        n_users: team ? teamSize : 1,
+      }).then((response) => response.data),
     enabled:
       Boolean(discountCode) && discountQueryEnabled && discountCodeVisible,
     retry: 1,
@@ -201,9 +202,14 @@ const PickSubscription = ({
         period: data.period,
       })
       if (team && "n_users" in data) {
-        return OrgsService.putOrgSubscription({ requestBody: data, orgName })
+        return OrgsService.putOrgSubscription({
+          orgSubscriptionUpdate: data,
+          org_name: orgName,
+        }).then((response) => response.data)
       }
-      return UsersService.putUserSubscription({ requestBody: data })
+      return UsersService.putUserSubscription({
+        subscriptionUpdate: data,
+      }).then((response) => response.data)
     },
     onSuccess: (data) => {
       if (onSuccess) {
@@ -223,7 +229,7 @@ const PickSubscription = ({
         queryClient.refetchQueries({ queryKey: ["users", "me"] })
       }
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

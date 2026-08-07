@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { Box, Flex, Alert, AlertIcon, Link } from "@chakra-ui/react"
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import { Alert, AlertIcon, Box, Flex, Link } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
+import { createFileRoute } from "@tanstack/react-router"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { ProjectsService } from "../../../../../client"
 
@@ -17,9 +17,9 @@ function ProjectApp() {
     queryKey: [accountName, projectName, "app"],
     queryFn: () =>
       ProjectsService.getProjectApp({
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
 
   return (

@@ -1,6 +1,12 @@
 import {
+  Badge,
   Box,
+  Button,
   Heading,
+  Menu,
+  MenuButton,
+  MenuItem,
+  MenuList,
   SkeletonText,
   Table,
   TableContainer,
@@ -8,28 +14,22 @@ import {
   Td,
   Th,
   Thead,
-  Badge,
-  Menu,
-  MenuItem,
-  MenuButton,
   Tr,
   useDisclosure,
-  Button,
-  MenuList,
 } from "@chakra-ui/react"
+import { useQuery } from "@tanstack/react-query"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { BsThreeDotsVertical } from "react-icons/bs"
 import { FiTrash } from "react-icons/fi"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useQuery } from "@tanstack/react-query"
 import { z } from "zod"
 
+import { ProjectsService } from "../../../../../client"
+import Delete from "../../../../../components/Common/DeleteAlert"
 import Navbar from "../../../../../components/Common/Navbar"
 import AddCollaborator from "../../../../../components/Projects/AddCollaborator"
 import InviteLinks from "../../../../../components/Projects/InviteLinks"
-import { ProjectsService } from "../../../../../client"
 import useAuth from "../../../../../hooks/useAuth"
 import useProject from "../../../../../hooks/useProject"
-import Delete from "../../../../../components/Common/DeleteAlert"
 
 const collaboratorsSearchSchema = z.object({
   add_collaborator: z.boolean().optional(),
@@ -103,9 +103,9 @@ function Collaborators() {
     queryKey: ["projects", accountName, projectName, "collaborators"],
     queryFn: () =>
       ProjectsService.getProjectCollaborators({
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
 
   return (

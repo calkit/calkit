@@ -1,49 +1,49 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import {
   Box,
   Flex,
-  Text,
-  Icon,
   Heading,
-  Tag,
-  TagLabel,
-  TagCloseButton,
-  useDisclosure,
+  Icon,
   IconButton,
+  Tag,
+  TagCloseButton,
+  TagLabel,
+  Text,
   useColorModeValue,
+  useDisclosure,
 } from "@chakra-ui/react"
-import Tooltip from "../../../../../components/Common/Tooltip"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { FiFolder, FiFile, FiDatabase } from "react-icons/fi"
-import { FaMarkdown, FaPlus, FaLock } from "react-icons/fa6"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useEffect, useState } from "react"
 import { AiOutlinePython } from "react-icons/ai"
-import { SiAnaconda, SiJupyter } from "react-icons/si"
-import { useState, useEffect } from "react"
+import { BsFiletypeYml } from "react-icons/bs"
 import {
   FaDocker,
+  FaHistory,
   FaList,
   FaRegFileImage,
   FaRegFolderOpen,
   FaSync,
-  FaHistory,
 } from "react-icons/fa"
-import { BsFiletypeYml } from "react-icons/bs"
+import { FaLock, FaMarkdown, FaPlus } from "react-icons/fa6"
+import { FiDatabase, FiFile, FiFolder } from "react-icons/fi"
+import { SiAnaconda, SiJupyter } from "react-icons/si"
 import { z } from "zod"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
-import { ProjectsService, type ContentsItem } from "../../../../../client"
-import UploadFile from "../../../../../components/Files/UploadFile"
+import { type ContentsItem, ProjectsService } from "../../../../../client"
+import {
+  ArtifactCompareModal,
+  type ArtifactKind,
+} from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
 import SelectedItemInfo, {
   inferKindFromPath,
 } from "../../../../../components/Files/SelectedItemInfo"
+import UploadFile from "../../../../../components/Files/UploadFile"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import useProject from "../../../../../hooks/useProject"
-import {
-  ArtifactCompareModal,
-  type ArtifactKind,
-} from "../../../../../components/Common/ArtifactCompareModal"
 
 const fileSearchSchema = z.object({
   path: z.string().catch(""),
@@ -99,11 +99,11 @@ function Item({ item, level, selectedPath, setSelectedPath }: ItemProps) {
     queryKey: ["projects", accountName, projectName, "files", item.path, ref],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         path: item.path,
         ref,
-      }),
+      }).then((response) => response.data),
     enabled: isExpanded,
   })
 
@@ -253,10 +253,10 @@ function Files() {
     queryKey: ["projects", accountName, projectName, "files", ref],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   const [selectedPath, setSelectedPath] = useState<string>(path)
   // Keep selectedPath in sync when the URL `path` param changes (e.g., back/forward)
@@ -274,11 +274,11 @@ function Files() {
     ],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         path: selectedPath,
         ref,
-      }),
+      }).then((response) => response.data),
     enabled: selectedPath !== undefined,
   })
   // Pre-fetch all ancestor directories so tree expansion doesn't waterfall.
@@ -301,11 +301,11 @@ function Files() {
         ],
         queryFn: () =>
           ProjectsService.getProjectContents({
-            ownerName: accountName,
-            projectName: projectName,
+            owner_name: accountName,
+            project_name: projectName,
             path: ancestorPath,
             ref,
-          }),
+          }).then((response) => response.data),
       })
     })
   }, [selectedPath, accountName, projectName, ref])

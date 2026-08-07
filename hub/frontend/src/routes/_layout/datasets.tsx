@@ -9,25 +9,25 @@ import {
   TableContainer,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
-  Text,
   Tr,
 } from "@chakra-ui/react"
-import Tooltip from "../../components/Common/Tooltip"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Link as RouterLink,
   createFileRoute,
   useNavigate,
-  Link as RouterLink,
 } from "@tanstack/react-router"
-import { z } from "zod"
 import { useEffect, useState } from "react"
 import { useDebounce } from "use-debounce"
+import { z } from "zod"
+import Tooltip from "../../components/Common/Tooltip"
 
-import { pageWidthNoSidebar } from "../../lib/layout"
 import { DatasetsService } from "../../client"
 import ClearableInput from "../../components/Common/ClearableInput"
+import { pageWidthNoSidebar } from "../../lib/layout"
 
 const datasetsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -44,8 +44,8 @@ function getAllDatasetsQueryOptions({
       DatasetsService.getDatasets({
         offset: (page - 1) * PER_PAGE,
         limit: PER_PAGE,
-        searchFor: searchFor,
-      }),
+        search_for: searchFor,
+      }).then((response) => response.data),
     queryKey: ["datasets-all", { page, searchFor }],
   }
 }

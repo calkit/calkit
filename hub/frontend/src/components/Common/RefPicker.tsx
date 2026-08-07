@@ -11,9 +11,9 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { useDebounce } from "use-debounce"
 import { useEffect, useRef, useState } from "react"
-import { ProjectsService, type GitRef } from "../../client"
+import { useDebounce } from "use-debounce"
+import { type GitRef, ProjectsService } from "../../client"
 
 interface RefPickerProps {
   ownerName: string
@@ -46,10 +46,10 @@ export function RefPicker({
     queryKey: ["search_refs", ownerName, projectName, debouncedSearch],
     queryFn: () =>
       ProjectsService.searchProjectRefs({
-        ownerName,
-        projectName,
+        owner_name: ownerName,
+        project_name: projectName,
         q: debouncedSearch || undefined,
-      }),
+      }).then((response) => response.data),
     staleTime: 1000 * 60 * 5, // 5 minutes
   })
 

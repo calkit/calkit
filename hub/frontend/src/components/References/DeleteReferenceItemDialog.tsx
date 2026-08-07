@@ -10,11 +10,8 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useRef } from "react"
 
-import {
-  type ApiError,
-  ProjectsService,
-  type ReferenceEntry,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { ProjectsService, type ReferenceEntry } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -41,11 +38,11 @@ const DeleteReferenceItemDialog = ({
   const mutation = useMutation({
     mutationFn: () =>
       ProjectsService.deleteProjectReferenceItem({
-        ownerName,
-        projectName,
-        bibKey: entry!.key,
+        owner_name: ownerName,
+        project_name: projectName,
+        bib_key: entry!.key,
         path: bibPath,
-      }),
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Reference deleted.", "success")
       queryClient.invalidateQueries({
@@ -53,7 +50,7 @@ const DeleteReferenceItemDialog = ({
       })
       onClose()
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   return (

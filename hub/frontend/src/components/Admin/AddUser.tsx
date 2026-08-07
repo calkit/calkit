@@ -17,11 +17,11 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { type UserCreate, UsersService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
-import { emailPattern } from "../../lib/strings"
 import { handleError } from "../../lib/errors"
+import { emailPattern } from "../../lib/strings"
 
 interface AddUserProps {
   isOpen: boolean
@@ -56,13 +56,15 @@ const AddUser = ({ isOpen, onClose }: AddUserProps) => {
 
   const mutation = useMutation({
     mutationFn: (data: UserCreate) =>
-      UsersService.createUser({ requestBody: data }),
+      UsersService.createUser({ userCreate: data }).then(
+        (response) => response.data,
+      ),
     onSuccess: () => {
       showToast("Success!", "User created successfully.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

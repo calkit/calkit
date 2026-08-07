@@ -15,16 +15,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import {
-  type ApiError,
-  type UserPublic,
-  type UserUpdateMe,
-  UsersService,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { type UserPublic, type UserUpdateMe, UsersService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
-import { emailPattern } from "../../lib/strings"
 import { handleError } from "../../lib/errors"
+import { emailPattern } from "../../lib/strings"
 
 const UserInformation = () => {
   const queryClient = useQueryClient()
@@ -53,11 +49,13 @@ const UserInformation = () => {
 
   const mutation = useMutation({
     mutationFn: (data: UserUpdateMe) =>
-      UsersService.updateCurrentUser({ requestBody: data }),
+      UsersService.updateCurrentUser({ userUpdateMe: data }).then(
+        (response) => response.data,
+      ),
     onSuccess: () => {
       showToast("Success!", "User updated successfully.", "success")
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {
@@ -151,7 +149,7 @@ const UserInformation = () => {
           </Flex>
         </Box>
       </Container>
-      <Container maxW="full" mt={6}></Container>
+      <Container maxW="full" mt={6} />
     </>
   )
 }

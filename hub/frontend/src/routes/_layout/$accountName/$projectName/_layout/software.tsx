@@ -11,9 +11,9 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useSearch } from "@tanstack/react-router"
 
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import { ProjectsService } from "../../../../../client"
 import type { SoftwareItem } from "../../../../../client"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/software",
@@ -50,10 +50,10 @@ function ProjectSoftware() {
     queryKey: ["projects", accountName, projectName, "software", ref],
     queryFn: () =>
       ProjectsService.getProjectSoftware({
-        ownerName: accountName,
-        projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
 
   const items = softwareQuery.data?.items ?? []

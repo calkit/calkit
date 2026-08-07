@@ -3,30 +3,30 @@ import {
   FormControl,
   FormErrorMessage,
   FormLabel,
+  Input,
   Modal,
   ModalBody,
   ModalCloseButton,
-  Input,
-  Textarea,
   ModalContent,
   ModalFooter,
   ModalHeader,
   ModalOverlay,
   Select,
+  Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
+import { useEffect } from "react"
 import {
-  ProjectsService,
   type ContentPatch,
   type ContentsItem,
+  ProjectsService,
 } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
-import { useEffect } from "react"
 
 interface EditFileProps {
   isOpen: boolean
@@ -69,18 +69,18 @@ const EditFileInfo = ({ isOpen, onClose, item }: EditFileProps) => {
         data.kind = null
       }
       return ProjectsService.patchProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         path: item.path,
-        requestBody: data,
-      })
+        contentPatch: data,
+      }).then((response) => response.data)
     },
     onSuccess: () => {
       showToast("Success!", "File info updated.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

@@ -14,11 +14,11 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -57,21 +57,21 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
   const mutation = useMutation({
     mutationFn: (data: FigurePostWithFile) =>
       ProjectsService.postProjectFigure({
-        formData: {
+        bodyProjectsPostProjectFigure: {
           title: data.title,
           path: data.path,
           description: data.description,
           file: data.file[0],
         },
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Figure uploaded successfully.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

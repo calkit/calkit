@@ -1,5 +1,7 @@
 import {
   Box,
+  Button,
+  Flex,
   IconButton,
   Popover,
   PopoverArrow,
@@ -10,8 +12,6 @@ import {
   PopoverTrigger,
   Text,
   VStack,
-  Button,
-  Flex,
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -28,20 +28,26 @@ export default function NotificationBell() {
 
   const notificationsQuery = useQuery({
     queryKey: ["notifications", "unread"],
-    queryFn: () => MiscService.getNotifications({ unreadOnly: true }),
+    queryFn: () =>
+      MiscService.getNotifications({ unread_only: true }).then(
+        (response) => response.data,
+      ),
     refetchInterval: 60_000,
   })
 
   const markReadMutation = useMutation({
     mutationFn: (id: string) =>
-      MiscService.markNotificationRead({ notificationId: id }),
+      MiscService.markNotificationRead({ notification_id: id }).then(
+        (response) => response.data,
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] })
     },
   })
 
   const markAllReadMutation = useMutation({
-    mutationFn: () => MiscService.markAllNotificationsRead(),
+    mutationFn: () =>
+      MiscService.markAllNotificationsRead().then((response) => response.data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["notifications"] })
     },

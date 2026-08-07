@@ -1,27 +1,27 @@
 import {
   Button,
+  Checkbox,
+  Code,
+  Flex,
   FormControl,
   FormErrorMessage,
   FormLabel,
+  Input,
   Modal,
   ModalBody,
   ModalCloseButton,
-  Input,
   ModalContent,
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Code,
-  Flex,
-  Checkbox,
   useDisclosure,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
 import axios from "axios"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
-import type { ApiError } from "../../client/core/ApiError"
+import type { AxiosError } from "axios"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -67,7 +67,7 @@ const AddPath = ({ path }: AddPathProps) => {
       reset()
       modalDisclosure.onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

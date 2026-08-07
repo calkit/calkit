@@ -1,35 +1,35 @@
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import ClearableInput from "../../../../../components/Common/ClearableInput"
 import {
+  Badge,
   Box,
-  Heading,
-  Flex,
-  Text,
   Button,
+  Flex,
+  Heading,
   Icon,
-  useDisclosure,
+  Image,
   Menu,
   MenuButton,
-  MenuList,
   MenuItem,
+  MenuList,
   SimpleGrid,
+  Text,
   useColorModeValue,
-  Image,
-  Badge,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
-import { FaPlus, FaRegFileImage, FaRegFilePdf, FaComment } from "react-icons/fa"
+import { FaComment, FaPlus, FaRegFileImage, FaRegFilePdf } from "react-icons/fa"
 import { FiFile } from "react-icons/fi"
 import { z } from "zod"
+import ClearableInput from "../../../../../components/Common/ClearableInput"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
-import UploadFigure from "../../../../../components/Figures/UploadFigure"
-import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
-import PdfCanvas from "../../../../../components/Common/PdfCanvas"
-import { ProjectsService, type Figure } from "../../../../../client"
-import useProject from "../../../../../hooks/useProject"
+import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
+import PdfCanvas from "../../../../../components/Common/PdfCanvas"
+import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
+import UploadFigure from "../../../../../components/Figures/UploadFigure"
+import useProject from "../../../../../hooks/useProject"
 
 const figuresSearchSchema = z.object({
   ref: z.string().optional(),
@@ -181,10 +181,10 @@ function ProjectFigures() {
     queryKey: ["projects", accountName, projectName, "figures", ref],
     queryFn: () =>
       ProjectsService.getProjectFigures({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()

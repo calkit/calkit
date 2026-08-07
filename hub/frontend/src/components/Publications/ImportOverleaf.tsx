@@ -1,10 +1,19 @@
 import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  DownloadIcon,
+} from "@chakra-ui/icons"
+import {
+  Box,
   Button,
   Checkbox,
+  Collapse,
   Flex,
   FormControl,
   FormErrorMessage,
   FormLabel,
+  HStack,
+  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -14,26 +23,17 @@ import {
   ModalHeader,
   ModalOverlay,
   Select,
-  Textarea,
   Switch,
-  HStack,
   Text,
-  IconButton,
-  Collapse,
-  Box,
+  Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { type SubmitHandler, useForm } from "react-hook-form"
 import { getRouteApi } from "@tanstack/react-router"
 import { useState } from "react"
-import {
-  DownloadIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-} from "@chakra-ui/icons"
+import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { ProjectsService, UsersService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -69,7 +69,8 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
   const routeApi = getRouteApi("/_layout/$accountName/$projectName")
   const { accountName, projectName } = routeApi.useParams()
   const connectedAccountsQuery = useQuery({
-    queryFn: () => UsersService.getUserConnectedAccounts(),
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
   const [importZip, setImportZip] = useState(false)
@@ -99,7 +100,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
   const mutation = useMutation({
     mutationFn: (data: OverleafImportPost) =>
       ProjectsService.postProjectOverleafPublication({
-        formData: {
+        bodyProjectsPostProjectOverleafPublication: {
           path: data.path,
           overleaf_project_url: data.overleaf_url,
           kind: data.kind,
@@ -112,9 +113,9 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
           overleaf_token: data.overleaf_token || undefined,
           file: data.file ? data.file[0] : null,
         },
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSuccess: (_pub, vars) => {
       showToast(
         "Success!",
@@ -125,7 +126,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
       setImportZip(false)
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {
@@ -202,7 +203,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                     return overleafUrl && overleafUrl.trim() !== "" ? (
                       <IconButton
                         as="a"
-                        href={overleafUrl + "/download/zip"}
+                        href={`${overleafUrl}/download/zip`}
                         target="_blank"
                         rel="noopener noreferrer"
                         aria-label="Download ZIP from Overleaf"

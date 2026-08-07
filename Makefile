@@ -12,6 +12,10 @@ install: ## Create the project's virtual environment.
 dev: ## Start up the hub containers for development.
 	@$(MAKE) -C hub dev
 
+.PHONY: frontend-client
+frontend-client: ## Regenerate the hub frontend's API client.
+	@$(MAKE) -C hub/frontend client
+
 .PHONY: format
 format: sync-docs ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"

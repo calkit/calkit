@@ -37,8 +37,8 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 
+import type { AxiosError } from "axios"
 import {
-  type ApiError,
   ProjectsService,
   type ReferenceEntry,
   type References as ReferencesCollection,
@@ -553,7 +553,8 @@ function References() {
   } = Route.useSearch()
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const connectedAccountsQuery = useQuery({
-    queryFn: () => UsersService.getUserConnectedAccounts(),
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
     queryKey: ["user", "connected-accounts"],
   })
   const zoteroConnected = Boolean(connectedAccountsQuery.data?.zotero)
@@ -561,7 +562,8 @@ function References() {
   // Zotero uses OAuth 1.0a, whose authorize URL must be signed server-side, so
   // the backend hands it back to us to redirect to.
   const connectZoteroMutation = useMutation({
-    mutationFn: () => UsersService.postUserZoteroAuthStart(),
+    mutationFn: () =>
+      UsersService.postUserZoteroAuthStart().then((response) => response.data),
     onSuccess: (data) => {
       mixpanel.track("Clicked connect Zotero", { source: "references import" })
       sessionStorage.setItem(
@@ -570,7 +572,7 @@ function References() {
       )
       location.href = data.authorize_url
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   const openImportZotero = () =>
     navigate({ search: (prev) => ({ ...prev, import_zotero_open: true }) })
@@ -633,10 +635,10 @@ function References() {
     queryKey: ["projects", accountName, projectName, "references", ref],
     queryFn: () =>
       ProjectsService.getProjectReferences({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   const fileViewModal = useDisclosure()
   const editItemModal = useDisclosure()

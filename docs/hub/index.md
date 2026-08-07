@@ -1,6 +1,7 @@
-# The Calkit hub
+# Calkit hubs
 
-A hub is where Calkit projects are shared, backed up, and collaborated on.
+A Calkit hub is where Calkit projects are shared, backed up,
+and collaborated on.
 It serves as a project management interface and a DVC remote for easily
 storing all versions of your data/code/figures/publications, interacting
 with your collaborators, reusing others' research artifacts, etc.
@@ -31,7 +32,7 @@ target an instance one-off, e.g., `--hub staging.calkit.io`.
 Like the rest of Calkit, the hub is free and open source, so
 [you can run your own](self-hosting.md).
 
-## Using DVC remotes other than the hub
+## Using DVC remotes other than a Calkit hub
 
 It's possible to configure DVC to use a different remote storage location,
 e.g., an AWS S3 bucket.

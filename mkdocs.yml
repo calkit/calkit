@@ -37,7 +37,7 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
-  - The hub:
+  - Sharing, collaboration, and backup (Calkit hub):
       - hub/index.md
       - Running your own: hub/self-hosting.md
   - Use with AI tools: ai-tools.md

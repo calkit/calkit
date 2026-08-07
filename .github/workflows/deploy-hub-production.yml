@@ -20,7 +20,11 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       startsWith(github.event.release.tag_name, 'hub/v')
-    environment: production
+    # Named for the deployed domain so the deployments list shows where
+    # this went; the app-level ENVIRONMENT below is a separate concept
+    environment:
+      name: calkit.io
+      url: https://calkit.io
     runs-on:
       - self-hosted
       - production

@@ -16,7 +16,11 @@ on:
 
 jobs:
   deploy:
-    environment: staging
+    # Named for the deployed domain so the deployments list shows where
+    # this went; the app-level ENVIRONMENT below is a separate concept
+    environment:
+      name: staging.calkit.io
+      url: https://staging.calkit.io
     runs-on:
       - self-hosted
       - staging

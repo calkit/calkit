@@ -64,7 +64,7 @@ function Learn() {
             discussion forum
           </Link>{" "}
           or on{" "}
-          <Link isExternal variant="blue" href="https://discord.gg/uhtbgXUu">
+          <Link isExternal variant="blue" href="https://discord.gg/m2MBC79HzD">
             Discord
           </Link>
           .

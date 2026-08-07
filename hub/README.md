@@ -26,7 +26,7 @@ resulting in more reliable knowledge.
 We welcome all kinds of contributions.
 
 - Participate in **[GitHub Discussions](https://github.com/calkit/discussions)**.
-- Join our [**Discord**](https://discord.gg/ubb7gAXc) for real-time collaboration.
+- Join our [**Discord**](https://discord.gg/m2MBC79HzD) for real-time collaboration.
 - Follow our updates on [**LinkedIn**](https://linkedin.com/company/calkit).
 
 ## Deploying your own hub

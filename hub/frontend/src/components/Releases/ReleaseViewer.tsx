@@ -26,6 +26,9 @@ import {
   FiX,
 } from "react-icons/fi"
 
+import type { AxiosError } from "axios"
+import SyntaxHighlighter from "react-syntax-highlighter"
+import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 import {
   type ContentsItem,
   type ProjectComment,
@@ -35,7 +38,6 @@ import {
   type ReleaseView,
   ReleasesService,
 } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
@@ -44,16 +46,14 @@ import {
   releaseDownloadName,
   releaseLocation,
 } from "../../lib/releases"
-import SyntaxHighlighter from "react-syntax-highlighter"
-import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 import { decodeBase64Utf8 } from "../../lib/strings"
 import SharedCommentsPanel, { type PanelComment } from "../Common/CommentsPanel"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 import { getLanguage, qmdToMarkdown } from "../Files/FileContent"
-import ProjectShowcase from "../Projects/ProjectShowcase"
 import PresentationView from "../Presentations/PresentationView"
+import ProjectShowcase from "../Projects/ProjectShowcase"
 import ReleasePdfAnnotator from "./ReleasePdfAnnotator"
 
 export interface ReleaseLocator {
@@ -232,11 +232,11 @@ function CommentsPanel({
     queryKey: commentsKey,
     queryFn: () =>
       ReleasesService.getReleaseComments({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
         token: loc.token,
-      }),
+      }).then((response) => response.data),
   })
   const postMutation = useMutation({
     mutationFn: (vars: {
@@ -245,16 +245,16 @@ function CommentsPanel({
       authorName: string | null
     }) =>
       ReleasesService.postReleaseComment({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
         token: loc.token,
-        requestBody: {
+        releaseCommentPost: {
           comment: vars.body,
           author_name: vars.authorName,
           parent_id: vars.parentId ?? null,
         },
-      }),
+      }).then((response) => response.data),
     // Write the server's comment straight into the cache instead of
     // invalidating, so the posted comment appears the moment the request
     // returns (and the composer closes) with no refetch gap in between.
@@ -265,17 +265,17 @@ function CommentsPanel({
         data,
       ])
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   const resolveMutation = useMutation({
     mutationFn: (vars: { id: string; resolved: boolean }) =>
       ReleasesService.resolveReleaseComment({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
-        commentId: vars.id,
-        requestBody: { resolved: vars.resolved },
-      }),
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
+        comment_id: vars.id,
+        releaseCommentResolvePost: { resolved: vars.resolved },
+      }).then((response) => response.data),
     onSuccess: (data, vars) => {
       showToast(
         "Success!",
@@ -294,7 +294,7 @@ function CommentsPanel({
         ),
       )
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   // The page payload already encodes whether this viewer may comment.
   const canComment =
@@ -352,7 +352,7 @@ function CommentsPanel({
 
 // Comments for a calkit.yaml release, via the generic project-comment system
 // (artifact_type "release", keyed by the release name). Login required to post
-// -- these releases are members-only, unlike the token-shared cloud releases.
+// -- these releases are members-only, unlike the token-shared hub releases.
 function MemberCommentsPanel({
   loc,
   release,
@@ -376,11 +376,11 @@ function MemberCommentsPanel({
     queryKey: commentsKey,
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        artifactType: "release",
-        artifactPath: release.name,
-      }),
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        artifact_type: "release",
+        artifact_path: release.name,
+      }).then((response) => response.data),
   })
   const postMutation = useMutation({
     mutationFn: (vars: {
@@ -390,22 +390,22 @@ function MemberCommentsPanel({
     }) =>
       vars.parentId
         ? ProjectsService.postProjectCommentReply({
-            ownerName: loc.ownerName,
-            projectName: loc.projectName,
-            commentId: vars.parentId,
-            requestBody: { body: vars.body },
-          })
+            owner_name: loc.ownerName,
+            project_name: loc.projectName,
+            comment_id: vars.parentId,
+            commentReply: { body: vars.body },
+          }).then((response) => response.data)
         : ProjectsService.postProjectComment({
-            ownerName: loc.ownerName,
-            projectName: loc.projectName,
-            requestBody: {
+            owner_name: loc.ownerName,
+            project_name: loc.projectName,
+            projectCommentPost: {
               comment: vars.body,
               artifact_type: "release",
               artifact_path: release.name,
               git_ref: release.git_rev ?? release.git_rev_abbrev ?? null,
               create_github_issue: vars.createIssue,
             },
-          }),
+          }).then((response) => response.data),
     // Write the server's comment straight into the cache instead of
     // invalidating, so it appears the moment the request returns (and the
     // composer closes) with no refetch gap in between.
@@ -416,16 +416,16 @@ function MemberCommentsPanel({
         data,
       ])
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   const resolveMutation = useMutation({
     mutationFn: (vars: { id: string; resolved: boolean }) =>
       ProjectsService.patchProjectComment({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        commentId: vars.id,
-        requestBody: { resolved: vars.resolved },
-      }),
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        comment_id: vars.id,
+        projectCommentPatch: { resolved: vars.resolved },
+      }).then((response) => response.data),
     onSuccess: (data, vars) => {
       // Reflect the returned state without a refetch; the backend cascades
       // resolve to replies, so mirror that onto this thread's replies too.
@@ -439,7 +439,7 @@ function MemberCommentsPanel({
         ),
       )
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
   const comments: PanelComment[] = (commentsQuery.data ?? []).map((c) => ({
     id: c.id ?? "",
@@ -512,12 +512,12 @@ function ProjectBrowser({ loc }: { loc: ReleaseLocator }) {
     ],
     queryFn: () =>
       ReleasesService.getReleaseContents({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
         token: loc.token,
         path,
-      }),
+      }).then((response) => response.data),
     retry: false,
   })
   const parts = path ? path.split("/") : []
@@ -624,10 +624,10 @@ function WholeProjectView({
     queryKey: ["projects", loc.ownerName, loc.projectName, "showcase", gitRev],
     queryFn: () =>
       ProjectsService.getProjectShowcase({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
         ref: gitRev,
-      }),
+      }).then((response) => response.data),
     retry: false,
   })
   if (showcaseQuery.isPending) return <LoadingSpinner height="100%" />
@@ -683,7 +683,7 @@ function ReleaseUnavailable({
   )
 }
 
-// Resolves a release and renders the right view: a cloud (internal, hosted)
+// Resolves a release and renders the right view: a hub (internal, hosted)
 // release with its artifact/project browser and comments, or a release
 // declared in calkit.yaml (published to an external venue, or a CLI-made
 // snapshot) shown as metadata with a link to browse the project at its commit.
@@ -699,19 +699,19 @@ export default function ReleaseViewer({ loc, onClose }: ReleaseViewerProps) {
     ],
     queryFn: () =>
       ReleasesService.getReleaseView({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
         token: loc.token,
-      }),
-    // A 404 means there's no cloud release for this name; fall back to the
+      }).then((response) => response.data),
+    // A 404 means there's no hub release for this name; fall back to the
     // calkit.yaml listing immediately. Other errors (transient 5xx/network)
     // are worth retrying, so a member viewing their own release doesn't get
     // bounced to the "unavailable" screen by a one-off hiccup.
-    retry: (failureCount, error: ApiError) =>
+    retry: (failureCount, error: AxiosError) =>
       error?.status !== 404 && failureCount < 2,
   })
-  // calkit.yaml releases have no cloud row, so getReleaseView 404s; fall back
+  // calkit.yaml releases have no hub row, so getReleaseView 404s; fall back
   // to their metadata from the project's releases listing.
   const listQuery = useQuery({
     queryKey: [
@@ -723,9 +723,9 @@ export default function ReleaseViewer({ loc, onClose }: ReleaseViewerProps) {
     ],
     queryFn: () =>
       ReleasesService.getProjectReleases({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-      }),
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+      }).then((response) => response.data),
     enabled: viewQuery.isError,
     retry: false,
   })
@@ -737,7 +737,7 @@ export default function ReleaseViewer({ loc, onClose }: ReleaseViewerProps) {
     )
   if (listQuery.isPending) return <LoadingSpinner height="100%" />
   const calkit = (listQuery.data ?? []).find(
-    (r) => r.name === loc.releaseName && r.source !== "cloud",
+    (r) => r.name === loc.releaseName && r.source !== "hub",
   )
   if (calkit)
     return <CalkitReleaseView loc={loc} release={calkit} onClose={onClose} />
@@ -794,7 +794,7 @@ function CalkitReleaseView({
   const refLabel = release.git_ref ?? release.git_rev_abbrev ?? ""
   const isWholeProject = !release.path || release.path === "."
   // For a single-artifact release, fetch the file at the pinned commit via the
-  // project's contents API (no cloud row, so no release-content endpoint).
+  // project's contents API (no hub row, so no release-content endpoint).
   const contentQuery = useQuery({
     queryKey: [
       "projects",
@@ -806,11 +806,11 @@ function CalkitReleaseView({
     ],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
         path: release.path,
         ref: gitRev,
-      }),
+      }).then((response) => response.data),
     enabled: !isWholeProject && Boolean(release.path),
     retry: false,
   })
@@ -1017,11 +1017,11 @@ function CloudReleaseView({
     ],
     queryFn: () =>
       ReleasesService.getReleaseContent({
-        ownerName: loc.ownerName,
-        projectName: loc.projectName,
-        releaseName: loc.releaseName,
+        owner_name: loc.ownerName,
+        project_name: loc.projectName,
+        release_name: loc.releaseName,
         token: loc.token,
-      }),
+      }).then((response) => response.data),
     enabled: Boolean(release.path) && !isWholeProject,
     retry: false,
   })

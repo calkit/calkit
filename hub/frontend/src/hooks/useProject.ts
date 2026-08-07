@@ -11,10 +11,10 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
     queryKey: ["projects", accountName, projectName],
     queryFn: () =>
       ProjectsService.getProject({
-        ownerName: accountName,
-        projectName: projectName,
-        getExtendedInfo: true,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        get_extended_info: true,
+      }).then((response) => response.data),
     retry: (failureCount, error) => {
       // A session/token error clears once the token layer refreshes (see the
       // rotation grace window server-side), so retry it a couple of times
@@ -44,10 +44,10 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
     queryKey: ["projects", accountName, projectName, "showcase", ref],
     queryFn: () =>
       ProjectsService.getProjectShowcase({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   })
@@ -55,9 +55,9 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
   const putDevcontainerMutation = useMutation({
     mutationFn: () =>
       ProjectsService.putProjectDevContainer({
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSettled: () =>
       queryClient.invalidateQueries({
         queryKey: ["projects", accountName, projectName, "repro-check"],
@@ -82,11 +82,11 @@ const useProjectReadme = (
     queryKey: ["projects", accountName, projectName, "readme", ref],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         path: "README.md",
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { readmeRequest }
 }
@@ -100,10 +100,10 @@ const useProjectQuestions = (
     queryKey: ["projects", accountName, projectName, "questions", ref],
     queryFn: () =>
       ProjectsService.getProjectQuestions({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { questionsRequest }
 }
@@ -117,10 +117,10 @@ const useProjectFigures = (
     queryKey: ["projects", accountName, projectName, "figures", ref],
     queryFn: () =>
       ProjectsService.getProjectFigures({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { figuresRequest }
 }
@@ -134,10 +134,10 @@ const useProjectResults = (
     queryKey: ["projects", accountName, projectName, "results", ref],
     queryFn: () =>
       ProjectsService.getProjectResults({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { resultsRequest }
 }
@@ -147,9 +147,9 @@ const useProjectFiles = (accountName: string, projectName: string) => {
     queryKey: ["projects", accountName, projectName, "files"],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   return { filesRequest }
 }
@@ -163,10 +163,10 @@ const useProjectDatasets = (
     queryKey: ["projects", accountName, projectName, "datasets", ref],
     queryFn: () =>
       ProjectsService.getProjectDatasets({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
 
   return { datasetsRequest }
@@ -181,10 +181,10 @@ const useProjectEnvironments = (
     queryKey: ["projects", accountName, projectName, "environments", ref],
     queryFn: () =>
       ProjectsService.getProjectEnvironments({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
 
   return { environmentsRequest }
@@ -199,10 +199,10 @@ const useProjectPublications = (
     queryKey: ["projects", accountName, projectName, "publications", ref],
     queryFn: () =>
       ProjectsService.getProjectPublications({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { publicationsRequest }
 }
@@ -216,10 +216,10 @@ const useProjectPresentations = (
     queryKey: ["projects", accountName, projectName, "presentations", ref],
     queryFn: () =>
       ProjectsService.getProjectPresentations({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         ref,
-      }),
+      }).then((response) => response.data),
   })
   return { presentationsRequest }
 }
@@ -263,10 +263,10 @@ const useProjectIssues = (accountName: string, projectName: string) => {
     let server: Issue[]
     try {
       server = await ProjectsService.getProjectIssues({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         state: "all",
-      })
+      }).then((response) => response.data)
     } catch {
       return // Leave the optimistic cache as-is; try again later.
     }
@@ -313,10 +313,10 @@ const useProjectIssues = (accountName: string, projectName: string) => {
     queryKey: issuesKey,
     queryFn: () =>
       ProjectsService.getProjectIssues({
-        ownerName: accountName,
-        projectName: projectName,
+        owner_name: accountName,
+        project_name: projectName,
         state: "all",
-      }),
+      }).then((response) => response.data),
     refetchOnWindowFocus: false,
     refetchOnMount: false,
   })
@@ -329,11 +329,11 @@ const useProjectIssues = (accountName: string, projectName: string) => {
   const issueStateMutation = useMutation({
     mutationFn: (data: IssueStateChange) =>
       ProjectsService.patchProjectIssue({
-        ownerName: accountName,
-        projectName: projectName,
-        issueNumber: data.issueNumber,
-        requestBody: { state: data.state },
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        issue_number: data.issueNumber,
+        issuePatch: { state: data.state },
+      }).then((response) => response.data),
     // Optimistically flip the issue's state so the UI updates instantly
     // despite GitHub's eventual consistency.
     onMutate: async (data: IssueStateChange) => {

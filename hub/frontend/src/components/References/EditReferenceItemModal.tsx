@@ -16,11 +16,8 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 
-import {
-  type ApiError,
-  ProjectsService,
-  type ReferenceEntry,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { ProjectsService, type ReferenceEntry } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { cleanLatex } from "../../lib/bibtex"
 import { handleError } from "../../lib/errors"
@@ -157,16 +154,16 @@ const EditReferenceItemModal = ({
       const body = { path: bibPath, type, key: key.trim(), fields: changed }
       return isEdit
         ? ProjectsService.putProjectReferenceItem({
-            ownerName,
-            projectName,
-            bibKey: entry!.key,
-            requestBody: body,
-          })
+            owner_name: ownerName,
+            project_name: projectName,
+            bib_key: entry!.key,
+            referenceItemPut: body,
+          }).then((response) => response.data)
         : ProjectsService.postProjectReferenceItem({
-            ownerName,
-            projectName,
-            requestBody: body,
-          })
+            owner_name: ownerName,
+            project_name: projectName,
+            referenceItemPost: body,
+          }).then((response) => response.data)
     },
     onSuccess: () => {
       showToast(
@@ -179,7 +176,7 @@ const EditReferenceItemModal = ({
       })
       onClose()
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   return (

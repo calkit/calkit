@@ -1,27 +1,27 @@
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Container,
   Flex,
   Heading,
-  Text,
-  Stack,
-  Alert,
-  AlertIcon,
-  AlertTitle,
-  AlertDescription,
-  Spinner,
   Modal,
-  ModalOverlay,
+  ModalBody,
+  ModalCloseButton,
   ModalContent,
   ModalHeader,
-  ModalCloseButton,
-  ModalBody,
+  ModalOverlay,
+  Spinner,
+  Stack,
+  Text,
   useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 
-import { type SubscriptionPlan, MiscService } from "../../client"
+import { MiscService, type SubscriptionPlan } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { formatTimestamp } from "../../lib/strings"
 import PickSubscription from "./PickSubscription"
@@ -33,7 +33,8 @@ const Subscription = () => {
   // Fetch available subscription plans
   const plansQuery = useQuery({
     queryKey: ["subscription-plans"],
-    queryFn: () => MiscService.getSubscriptionPlans(),
+    queryFn: () =>
+      MiscService.getSubscriptionPlans().then((response) => response.data),
   })
 
   // Current subscription from user data

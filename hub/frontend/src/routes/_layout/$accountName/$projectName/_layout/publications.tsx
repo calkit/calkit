@@ -19,7 +19,6 @@ import {
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
-import Tooltip from "../../../../../components/Common/Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Link as RouterLink,
@@ -33,10 +32,11 @@ import { FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
+import type { AxiosError } from "axios"
 import type { Publication } from "../../../../../client"
 import { ProjectsService } from "../../../../../client"
-import type { ApiError } from "../../../../../client/core/ApiError"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import CommentsPanel, {
   projectCommentToPanelComment,
@@ -108,10 +108,10 @@ function PubInfo({
   const overleafSyncMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectOverleafSync({
-        ownerName,
-        projectName,
-        requestBody: { path: publication.path },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        overleafSyncPost: { path: publication.path },
+      }).then((response) => response.data),
     onSuccess: (data) => {
       let message = "Synced with Overleaf."
       if (data.commits_from_overleaf > 0)
@@ -131,7 +131,7 @@ function PubInfo({
         queryKey: ["projects", ownerName, projectName, "publications"],
       })
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
   })
 
   return (
@@ -359,11 +359,11 @@ function Publications() {
     ],
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName: accountName,
-        projectName,
-        artifactType: "publication",
-        artifactPath: selectedPub!.path,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        artifact_type: "publication",
+        artifact_path: selectedPub!.path,
+      }).then((response) => response.data),
     enabled: !!selectedPub,
   })
 
@@ -387,36 +387,36 @@ function Publications() {
       resolved: boolean
     }) =>
       ProjectsService.patchProjectComment({
-        ownerName: accountName,
-        projectName,
-        commentId,
-        requestBody: { resolved },
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: commentId,
+        projectCommentPatch: { resolved },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const postCommentMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
       ProjectsService.postProjectComment({
-        ownerName: accountName,
-        projectName,
-        requestBody: {
+        owner_name: accountName,
+        project_name: projectName,
+        projectCommentPost: {
           artifact_path: selectedPub!.path,
           artifact_type: "publication",
           comment: vars.body,
           create_github_issue: vars.createIssue,
           git_ref: ref ?? null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const replyCommentMutation = useMutation({
     mutationFn: (vars: { commentId: string; body: string }) =>
       ProjectsService.postProjectCommentReply({
-        ownerName: accountName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { body: vars.body },
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        commentReply: { body: vars.body },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
 

@@ -26,7 +26,7 @@ The basic steps we'll take here are:
 
 1. Organize the project folder.
 1. Create a new Calkit project.
-1. Add all existing files to version control and back them up in the cloud.
+1. Add all existing files to version control and back them up on the hub.
 1. Add all computational processes to the pipeline, ensuring they run in
    defined environments.
 1. Define the project artifacts for presentation and consumption.
@@ -189,7 +189,7 @@ To summarize, this command will:
 ## Put everything in version control
 
 Now that we have everything in one project folder
-and we have the project created in the cloud,
+and we have the project created on the hub,
 it's time to add files to version control.
 If you run `calkit status`,
 you'll see an output like:
@@ -295,7 +295,7 @@ you can use the `--to=git` or `--to=dvc` option.
 Also, if you make a mistake along the way you can use the `git revert`
 command, after finding the offending commit with `git log`.
 
-### Back up the project in the cloud
+### Back up the project on the hub
 
 After all relevant files are added and committed to the repo,
 we can push to both GitHub and the hub with `calkit push`:
@@ -462,7 +462,7 @@ If you have other kinds of stages, e.g., MATLAB, R, or shell scripts to run,
 see the output of `calkit new --help` for information on how to
 create those.
 
-### Check that the pipeline runs and push outputs to the cloud
+### Check that the pipeline runs and push outputs to the hub
 
 Now that the pipeline is built,
 we can check that it runs properly by calling:
@@ -472,7 +472,7 @@ calkit run
 ```
 
 If there are no errors,
-we can commit the outputs and push them up to the cloud with `calkit save`:
+we can commit the outputs and push them up to the hub with `calkit save`:
 
 ```sh
 calkit save -am "Run pipeline"

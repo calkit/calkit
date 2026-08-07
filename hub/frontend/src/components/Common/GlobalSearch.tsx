@@ -1,3 +1,4 @@
+import { CloseIcon } from "@chakra-ui/icons"
 import {
   Box,
   Flex,
@@ -11,11 +12,10 @@ import {
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { CloseIcon } from "@chakra-ui/icons"
 import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
-import { FaSearch, FaFlask, FaUsers, FaDatabase } from "react-icons/fa"
+import { FaDatabase, FaFlask, FaSearch, FaUsers } from "react-icons/fa"
 
 import { MiscService, type SearchResults } from "../../client"
 
@@ -78,7 +78,10 @@ export default function GlobalSearch() {
 
   const { data, isFetching, isSuccess } = useQuery({
     queryKey: ["global-search", debouncedQuery],
-    queryFn: () => MiscService.globalSearch({ q: debouncedQuery }),
+    queryFn: () =>
+      MiscService.globalSearch({ q: debouncedQuery }).then(
+        (response) => response.data,
+      ),
     enabled: debouncedQuery.length >= 2,
     staleTime: 30_000,
   })

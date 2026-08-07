@@ -191,7 +191,7 @@ working with Git/GitHub is different from other systems
 like Google Docs, Overleaf, or Dropbox.
 Rather than syncing our files automatically,
 we need to deliberately "commit" changes to create a snapshot
-and then sync or "push" them to the cloud.
+and then sync or "push" them to the hub.
 This can be a stumbling block when first getting started,
 but one major benefit is that it makes one stop and think about how to
 describe a given set of changes.
@@ -220,12 +220,12 @@ write a commit message, and click commit.
 
 ![Staging the changes.](img/latex-codespaces/stage.png)
 
-After committing we'll see a button to sync the changes with the cloud,
+After committing we'll see a button to sync the changes with the remote,
 which we can go ahead and click.
 This will first pull from and then push our commits up to GitHub,
 which our collaborators will then be able to pull into their own workspaces.
 
-### Push the PDF to the cloud
+### Push the PDF to the hub
 
 The default behavior of DVC is to not save
 pipeline outputs like our compiled PDF to Git,
@@ -236,7 +236,7 @@ to back them up and make them available to others with access to the project.
 
 If we go down to the terminal and run `calkit push`,
 we'll push our DVC artifacts (just the PDF at this point)
-up to the cloud as well,
+up to the hub as well,
 which will make our PDF visible in the publications section of
 the project homepage.
 Note that `calkit push` will also send the Git changes to GitHub,
@@ -248,7 +248,7 @@ Later on,
 if you end up adding things like large data files for analysis,
 or even photos and videos from an experiment,
 these can also be versioned with DVC and
-backed up in the cloud.
+backed up on the hub.
 
 ## Collaborate concurrently
 

@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query"
 import React from "react"
 import { useForm } from "react-hook-form"
 
-import { UsersService, ProjectsService } from "../../client"
+import { ProjectsService, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 
 interface DeleteProps {
@@ -46,25 +46,27 @@ const Delete = ({
   const deleteEntity = async (id: string) => {
     if (type === "Project") {
       await ProjectsService.deleteProjectById({
-        projectId: id,
-      })
+        project_id: id,
+      }).then((response) => response.data)
     } else if (type === "User") {
-      await UsersService.deleteUser({ userId: id })
+      await UsersService.deleteUser({ user_id: id }).then(
+        (response) => response.data,
+      )
     } else if (type === "Collaborator" && projectOwner && projectName) {
       // GitHub collaborators are keyed by username; GitHub-less (native)
       // members by user id.
       if (id) {
         await ProjectsService.deleteProjectCollaborator({
-          githubUsername: id,
-          ownerName: projectOwner,
-          projectName: projectName,
-        })
+          github_username: id,
+          owner_name: projectOwner,
+          project_name: projectName,
+        }).then((response) => response.data)
       } else if (userId) {
         await ProjectsService.deleteProjectNativeCollaborator({
-          userId: userId,
-          ownerName: projectOwner,
-          projectName: projectName,
-        })
+          user_id: userId,
+          owner_name: projectOwner,
+          project_name: projectName,
+        }).then((response) => response.data)
       } else {
         throw new Error("No collaborator identifier")
       }

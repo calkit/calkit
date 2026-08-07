@@ -14,12 +14,12 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation } from "@tanstack/react-query"
+import { getRouteApi } from "@tanstack/react-router"
 import { useRef } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
-import { getRouteApi } from "@tanstack/react-router"
 
+import type { AxiosError } from "axios"
 import { type Issue, ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -56,17 +56,17 @@ const CreateIssue = ({ isOpen, onClose, onCreated }: CreateIssueProps) => {
   const mutation = useMutation({
     mutationFn: (data: IssuePost) =>
       ProjectsService.postProjectIssue({
-        ownerName: accountName,
-        projectName: projectName,
-        requestBody: data,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        issuePost: data,
+      }).then((response) => response.data),
     onSuccess: (createdIssue) => {
       showToast("Success!", "Issue created successfully.", "success")
       reset()
       onClose()
       onCreated(createdIssue)
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

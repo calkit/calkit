@@ -68,14 +68,22 @@ describe("getValidAccessToken", () => {
 
     const refreshAccessTokenMock = vi.mocked(LoginService.refreshAccessToken)
     refreshAccessTokenMock.mockResolvedValue({
-      access_token: "new-access",
-      refresh_token: "new-refresh",
-      token_type: "bearer",
-    })
+      data: {
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        token_type: "bearer",
+      },
+    } as any)
 
     const token = await getValidAccessToken("/login/refresh")
 
     expect(token).toBe(expiredAccessToken)
+    // The generated client passes the absolute URL through its axios instance
+    const tokenAbs = await getValidAccessToken(
+      "http://localhost:8000/login/refresh?foo=1",
+    )
+
+    expect(tokenAbs).toBe(expiredAccessToken)
     expect(refreshAccessTokenMock).not.toHaveBeenCalled()
   })
 
@@ -85,10 +93,12 @@ describe("getValidAccessToken", () => {
 
     const refreshAccessTokenMock = vi.mocked(LoginService.refreshAccessToken)
     refreshAccessTokenMock.mockResolvedValue({
-      access_token: "new-access",
-      refresh_token: "new-refresh",
-      token_type: "bearer",
-    })
+      data: {
+        access_token: "new-access",
+        refresh_token: "new-refresh",
+        token_type: "bearer",
+      },
+    } as any)
 
     const token = await getValidAccessToken("/projects")
 
@@ -110,13 +120,17 @@ describe("isAuthenticationError", () => {
     expect(
       isAuthenticationError({
         status: 401,
-        body: { detail: "User needs to authenticate with GitHub" },
+        response: {
+          data: { detail: "User needs to authenticate with GitHub" },
+        },
       }),
     ).toBe(false)
     expect(
       isAuthenticationError({
         status: 401,
-        body: { detail: "User needs to authenticate with Google" },
+        response: {
+          data: { detail: "User needs to authenticate with Google" },
+        },
       }),
     ).toBe(false)
   })
@@ -130,9 +144,9 @@ describe("isAuthenticationError", () => {
       "Token has expired",
       "Token invalid",
     ]) {
-      expect(isAuthenticationError({ status: 403, body: { detail } })).toBe(
-        true,
-      )
+      expect(
+        isAuthenticationError({ status: 403, response: { data: { detail } } }),
+      ).toBe(true)
     }
   })
 
@@ -140,12 +154,15 @@ describe("isAuthenticationError", () => {
     // The key fix: GitHub-less users hit ordinary 403s (forbidden) that must
     // not end the session.
     expect(
-      isAuthenticationError({ status: 403, body: { detail: "Forbidden" } }),
+      isAuthenticationError({
+        status: 403,
+        response: { data: { detail: "Forbidden" } },
+      }),
     ).toBe(false)
     expect(
       isAuthenticationError({
         status: 403,
-        body: { detail: "User is not authenticated" },
+        response: { data: { detail: "User is not authenticated" } },
       }),
     ).toBe(false)
     expect(isAuthenticationError({ status: 403 })).toBe(false)

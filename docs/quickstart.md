@@ -64,8 +64,8 @@ calkit new project my-research \
 
 Note the `--hub` flag requires [a hub connection](hub/index.md)
 to be set up, but can be omitted if the project doesn't need to be backed up to
-the cloud or shared with collaborators.
-Cloud integration can also be set up later.
+the hub or shared with collaborators.
+Hub integration can also be set up later.
 
 Next, move into the project folder and run the pipeline,
 which consists of several stages defined in `calkit.yaml`:

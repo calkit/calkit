@@ -13,7 +13,7 @@ If you then navigate to the project homepage on
 tab,
 you'll be able to visually perform tasks like committing and ignoring files,
 running the pipeline, adding stages to the pipeline,
-and pushing to the cloud.
+and pushing to the hub.
 
 This feature is used in the [Microsoft Office tutorial](tutorials/office.md).
 

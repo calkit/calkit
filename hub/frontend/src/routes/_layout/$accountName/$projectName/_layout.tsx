@@ -115,10 +115,10 @@ function SwitchVersionModal({
     queryKey: ["projects", accountName, projectName, "git-history-all"],
     queryFn: async () =>
       (await ProjectsService.getProjectHistory({
-        ownerName: accountName,
-        projectName,
+        owner_name: accountName,
+        project_name: projectName,
         limit: 100,
-      })) as unknown as CommitHistory[],
+      }).then((response) => response.data)) as unknown as CommitHistory[],
     enabled: isOpen,
   })
 
@@ -286,12 +286,7 @@ function ProjectMenu({
   return (
     <>
       <Menu>
-        <MenuButton
-          as={IconButton}
-          icon={<BsThreeDots />}
-          size="xs"
-          mr={1}
-        ></MenuButton>
+        <MenuButton as={IconButton} icon={<BsThreeDots />} size="xs" mr={1} />
         <Portal>
           <MenuList zIndex="popover">
             <MenuItem
@@ -391,9 +386,9 @@ function ProjectLayout() {
     queryKey: ["projects", accountName, projectName, "refs"],
     queryFn: () =>
       ProjectsService.searchProjectRefs({
-        ownerName: accountName,
-        projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
     enabled: !isPending,
   })
   const branches = (refsQuery.data ?? []).filter(

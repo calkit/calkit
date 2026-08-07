@@ -25,18 +25,19 @@ import { z } from "zod"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
 
+import type { AxiosError } from "axios"
 import Logo from "/assets/images/calkit-no-bg.svg"
-import { UsersService, type ApiError } from "../../client"
+import { UsersService } from "../../client"
+import useAuth, { isLoggedIn } from "../../hooks/useAuth"
+import useCustomToast from "../../hooks/useCustomToast"
+import { popPostLoginRedirect } from "../../lib/auth"
+import { handleError } from "../../lib/errors"
 import {
   consumeGitHubOAuthState,
   consumeGitHubReturnTo,
   createGitHubOAuthState,
   getGitHubRedirectUri,
 } from "../../lib/github"
-import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
-import useAuth, { isLoggedIn } from "../../hooks/useAuth"
-import { popPostLoginRedirect } from "../../lib/auth"
 import {
   createGoogleOAuthState,
   getGoogleAuthUrl,
@@ -96,8 +97,8 @@ function Login() {
   const githubConnectMutation = useMutation({
     mutationFn: (code: string) =>
       UsersService.postUserGithubAuth({
-        requestBody: { code, redirect_uri: getGitHubRedirectUri() },
-      }),
+        oAuthCodeExchange: { code, redirect_uri: getGitHubRedirectUri() },
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "GitHub account connected.", "success")
       queryClient.invalidateQueries({
@@ -112,7 +113,7 @@ function Login() {
       }
       navigate({ to: "/settings", search: { tab: "connected-accounts" } })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
       setTimeout(() => {
         navigate({ to: "/settings", search: { tab: "connected-accounts" } })

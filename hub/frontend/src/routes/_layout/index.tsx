@@ -1,3 +1,4 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
@@ -10,29 +11,28 @@ import {
   TableContainer,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
   Tr,
-  Text,
 } from "@chakra-ui/react"
-import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Link as RouterLink,
   createFileRoute,
   useNavigate,
-  Link as RouterLink,
 } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { z } from "zod"
 import { useDebounce } from "use-debounce"
+import { z } from "zod"
 
 import { ProjectsService } from "../../client"
 import ActionsMenu from "../../components/Common/ActionsMenu"
+import ClearableInput from "../../components/Common/ClearableInput"
 import Navbar from "../../components/Common/Navbar"
 import NewProject from "../../components/Projects/NewProject"
-import { pageWidthNoSidebar } from "../../lib/layout"
 import useAuth from "../../hooks/useAuth"
-import ClearableInput from "../../components/Common/ClearableInput"
+import { pageWidthNoSidebar } from "../../lib/layout"
 
 const projectsSearchSchema = z.object({
   page: z.number().catch(1),
@@ -53,8 +53,8 @@ function getOwnedProjectsQueryOptions({
       ProjectsService.getOwnedProjects({
         offset: (page - 1) * PER_PAGE,
         limit: PER_PAGE,
-        searchFor,
-      }),
+        search_for: searchFor,
+      }).then((response) => response.data),
     queryKey: ["projects", { page, searchFor }],
   }
 }
@@ -181,7 +181,7 @@ function PublicProjectsTable() {
     queryFn: () =>
       ProjectsService.getProjects({
         limit: 5,
-      }),
+      }).then((response) => response.data),
   })
   const isPending = projectsRequest.isPending
   const projects = projectsRequest.data
@@ -262,9 +262,9 @@ function Projects() {
             👋 Hi there!
           </Heading>
           <Text>
-            Welcome to the Calkit Cloud, where you can create, discover, share,
-            and collaborate on research projects. If you're ready to get
-            started, click the button below:
+            Welcome to Calkit, where you can create, discover, share, and
+            collaborate on research projects. If you're ready to get started,
+            click the button below:
           </Text>
           <Box
             alignItems="center"

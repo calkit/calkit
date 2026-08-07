@@ -1,42 +1,42 @@
 import {
   Button,
+  Checkbox,
+  Flex,
   FormControl,
   FormErrorMessage,
   FormLabel,
   Input,
+  Link,
   Modal,
   ModalBody,
   ModalCloseButton,
   ModalContent,
-  Flex,
-  Checkbox,
   ModalFooter,
   ModalHeader,
   ModalOverlay,
   Select,
-  Link,
-  useDisclosure,
   Switch,
+  useDisclosure,
 } from "@chakra-ui/react"
-import { useState } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useState } from "react"
 
-import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
-import { type SubmitHandler, useForm } from "react-hook-form"
-import mixpanel from "mixpanel-browser"
 import { useNavigate } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
+import { type SubmitHandler, useForm } from "react-hook-form"
+import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 
+import type { AxiosError } from "axios"
 import {
-  type ApiError,
-  ProjectsService,
   type ProjectPost,
-  type UserPublic,
   type ProjectPublic,
+  ProjectsService,
+  type UserPublic,
   UsersService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
 import { appName } from "../../lib/core"
+import { handleError } from "../../lib/errors"
 
 interface NewProjectProps {
   isOpen: boolean
@@ -62,7 +62,8 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
   // account can't do until it links a GitHub identity
   const connectedAccountsQuery = useQuery({
     queryKey: ["user", "connected-accounts"],
-    queryFn: () => UsersService.getUserConnectedAccounts(),
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
   })
   const needsGitHub =
     connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github
@@ -106,7 +107,9 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
       if (repoExists) {
         data.template = null
       }
-      return ProjectsService.postProject({ requestBody: data })
+      return ProjectsService.postProject({ projectPost: data }).then(
+        (response) => response.data,
+      )
     },
     onSuccess: (data: ProjectPublic) => {
       mixpanel.track("Created new project")
@@ -123,13 +126,13 @@ const NewProject = ({ isOpen, onClose, defaultTemplate }: NewProjectProps) => {
         params: { accountName, projectName },
       })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       // If the error indicates that the Calkit GitHub App is not enabled,
       // show an error modal with the link to install it
       const msg = (err?.message || "").toLowerCase()
       const bodyDetail =
-        typeof (err as any)?.body?.detail === "string"
-          ? ((err as any).body.detail as string).toLowerCase()
+        typeof (err as any)?.response?.data?.detail === "string"
+          ? ((err as any).response.data.detail as string).toLowerCase()
           : ""
       if (
         msg.includes("calkit github app not enabled") ||

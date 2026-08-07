@@ -16,16 +16,12 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 import mixpanel from "mixpanel-browser"
 import { type SubmitHandler, useForm } from "react-hook-form"
+import ConnectGitHubPrompt from "../Common/ConnectGitHubPrompt"
 
-import {
-  type ApiError,
-  type OrgPost,
-  OrgsService,
-  UsersService,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { type OrgPost, OrgsService, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -40,7 +36,8 @@ const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
   // account can't do until it links a GitHub identity
   const connectedAccountsQuery = useQuery({
     queryKey: ["user", "connected-accounts"],
-    queryFn: () => UsersService.getUserConnectedAccounts(),
+    queryFn: () =>
+      UsersService.getUserConnectedAccounts().then((response) => response.data),
   })
   const needsGitHub =
     connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github
@@ -59,7 +56,9 @@ const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
   })
   const mutation = useMutation({
     mutationFn: (data: OrgPost) => {
-      return OrgsService.postOrg({ requestBody: data })
+      return OrgsService.postOrg({ orgPost: data }).then(
+        (response) => response.data,
+      )
     },
     onSuccess: () => {
       mixpanel.track("Created new organization")
@@ -67,7 +66,7 @@ const NewOrg = ({ isOpen, onClose }: NewOrgProps) => {
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

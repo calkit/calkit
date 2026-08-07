@@ -15,12 +15,12 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { getRouteApi } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
-import { getRouteApi } from "@tanstack/react-router"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -80,7 +80,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
   const mutation = useMutation({
     mutationFn: (data: PublicationPostWithFile) =>
       ProjectsService.postProjectPublication({
-        formData: {
+        bodyProjectsPostProjectPublication: {
           title: data.title,
           path: data.path,
           description: data.description || undefined,
@@ -90,15 +90,15 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
           environment: data.environment,
           file: data.file ? data.file[0] : null,
         },
-        ownerName: accountName,
-        projectName: projectName,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Publication created.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

@@ -15,8 +15,8 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -51,10 +51,10 @@ const NewReferencesCollection = ({
   const mutation = useMutation({
     mutationFn: (data: FormValues) =>
       ProjectsService.postProjectReferences({
-        ownerName,
-        projectName,
-        requestBody: { path: data.path },
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        referencesPost: { path: data.path },
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "References collection created.", "success")
       queryClient.invalidateQueries({
@@ -63,7 +63,7 @@ const NewReferencesCollection = ({
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

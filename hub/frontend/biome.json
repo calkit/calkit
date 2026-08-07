@@ -27,6 +27,14 @@
   "formatter": {
     "indentStyle": "space"
   },
+  "overrides": [
+    {
+      "include": ["src/client/**"],
+      "linter": {
+        "enabled": false
+      }
+    }
+  ],
   "javascript": {
     "formatter": {
       "quoteStyle": "double",

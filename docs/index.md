@@ -41,7 +41,7 @@ without the cognitive overhead.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud platform](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so

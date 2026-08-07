@@ -26,7 +26,6 @@ import {
   useDisclosure,
   useToast,
 } from "@chakra-ui/react"
-import Tooltip from "../Common/Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useState } from "react"
@@ -40,9 +39,10 @@ import {
   FaTrash,
 } from "react-icons/fa"
 import { FiExternalLink, FiShare2 } from "react-icons/fi"
+import Tooltip from "../Common/Tooltip"
 
+import type { AxiosError } from "axios"
 import { type ReleaseListItem, ReleasesService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import {
@@ -121,7 +121,7 @@ const ReleasesTable = ({
   const confirmDelete = useDisclosure()
   const shareModal = useDisclosure()
   const [toDelete, setToDelete] = useState<ReleaseListItem | null>(null)
-  // The cloud release whose share links are being managed.
+  // The hub release whose share links are being managed.
   const [active, setActive] = useState<ReleaseListItem | null>(null)
   const openShare = (r: ReleaseListItem) => {
     setActive(r)
@@ -145,21 +145,24 @@ const ReleasesTable = ({
   const releasesQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "releases", undefined],
     queryFn: () =>
-      ReleasesService.getProjectReleases({ ownerName, projectName }),
+      ReleasesService.getProjectReleases({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
   const deleteMutation = useMutation({
     mutationFn: (name: string) =>
       ReleasesService.deleteProjectRelease({
-        ownerName,
-        projectName,
-        releaseName: name,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: name,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success", "Release deleted.", "success")
       confirmDelete.onClose()
       setToDelete(null)
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],
@@ -168,11 +171,14 @@ const ReleasesTable = ({
   })
   const importMutation = useMutation({
     mutationFn: () =>
-      ReleasesService.importGithubReleases({ ownerName, projectName }),
+      ReleasesService.importGithubReleases({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     onSuccess: (msg) => {
       showToast("Success", msg.message, "success")
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],
@@ -182,10 +188,10 @@ const ReleasesTable = ({
   const githubMutation = useMutation({
     mutationFn: (releaseName: string) =>
       ReleasesService.createReleaseGithubRelease({
-        ownerName,
-        projectName,
-        releaseName,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
+      }).then((response) => response.data),
     onSuccess: (data) => {
       toast({
         title: data.created
@@ -201,7 +207,7 @@ const ReleasesTable = ({
         position: "bottom-right",
       })
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: ["projects", ownerName, projectName, "releases"],
@@ -413,7 +419,7 @@ const ReleasesTable = ({
                             </Link>
                           </Tooltip>
                         )
-                      if (r.source === "cloud" && userHasWriteAccess)
+                      if (r.source === "hub" && userHasWriteAccess)
                         return (
                           <Tooltip label="Release to GitHub">
                             <IconButton
@@ -438,7 +444,7 @@ const ReleasesTable = ({
                   </Td>
                   {userHasWriteAccess && (
                     <Td>
-                      {r.source === "cloud" && (
+                      {r.source === "hub" && (
                         <HStack spacing={0} justify="flex-end">
                           <Tooltip
                             label={

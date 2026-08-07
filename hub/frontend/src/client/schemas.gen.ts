@@ -487,12 +487,8 @@ export const CommentHighlightSchema = {
   type: "object",
   required: ["position"],
   title: "CommentHighlight",
-  description: `Portable anchor for a highlighted region within an artifact.
-
-Currently used for PDF text highlights (react-pdf-highlighter format).
-\`\`position\`\` and \`\`content\`\` are kept as free-form dicts so the schema
-can accommodate future anchor types (image regions, notebook cells, etc.)
-without a migration.`,
+  description:
+    "Portable anchor for a highlighted region within an artifact.\n\nCurrently used for PDF text highlights (react-pdf-highlighter format).\n``position`` and ``content`` are kept as free-form dicts so the schema\ncan accommodate future anchor types (image regions, notebook cells, etc.)\nwithout a migration.",
 } as const
 
 export const CommentReplySchema = {
@@ -703,22 +699,8 @@ export const DVCImportSchema = {
   type: "object",
   required: ["outs"],
   title: "DVCImport",
-  description: `The necessary information to import a DVC object, which can be saved to
-a .dvc file.
-
-For example:
-
-    outs:
-      - md5: 46ce259ab949ecb23751eb88ec753ff2
-        size: 83344240
-        hash: md5
-        path: time-ave-profiles.h5
-        remote: calkit:petebachant/boundary-layer-turbulence-modeling
-        push: false
-
-Note this is different from the file that would be produced by
-\`\`dvc import\`\`, since they bundle in Git repo information to fetch from
-the original project's remote.`,
+  description:
+    "The necessary information to import a DVC object, which can be saved to\na .dvc file.\n\nFor example:\n\n    outs:\n      - md5: 46ce259ab949ecb23751eb88ec753ff2\n        size: 83344240\n        hash: md5\n        path: time-ave-profiles.h5\n        remote: calkit:petebachant/boundary-layer-turbulence-modeling\n        push: false\n\nNote this is different from the file that would be produced by\n``dvc import``, since they bundle in Git repo information to fetch from\nthe original project's remote.",
 } as const
 
 export const DVCOutSchema = {
@@ -1601,11 +1583,8 @@ export const ExternalReleasePostSchema = {
   type: "object",
   required: ["name"],
   title: "ExternalReleasePost",
-  description: `A release declared as published to an external venue.
-
-Recorded loosely in \`\`calkit.yaml\`\` (not hosted by Calkit); used to track
-that an artifact was, e.g., posted to arXiv or published in a journal. The
-\`\`publisher\`\` key matches what Zenodo releases already write.`,
+  description:
+    "A release declared as published to an external venue.\n\nRecorded loosely in ``calkit.yaml`` (not hosted by Calkit); used to track\nthat an artifact was, e.g., posted to arXiv or published in a journal. The\n``publisher`` key matches what Zenodo releases already write.",
 } as const
 
 export const ExternalTokenResponseSchema = {
@@ -2039,8 +2018,8 @@ export const FsOpResponseSchema = {
   type: "object",
   required: ["backend"],
   title: "FsOpResponse",
-  description: `Response describing how to perform a file system operation
-(get/put/exists/list) for a given path within the project.`,
+  description:
+    "Response describing how to perform a file system operation\n(get/put/exists/list) for a given path within the project.",
 } as const
 
 export const GitHubInstallationsSchema = {
@@ -2923,12 +2902,8 @@ export const NotificationSchema = {
   type: "object",
   required: ["user_id", "project_id", "message", "link"],
   title: "Notification",
-  description: `In-app notification delivered to a user when a comment is posted on
-their project (or a project they collaborate on).
-
-Designed to be lightweight: no fan-out to external services here.
-\`\`link\`\` stores a frontend URL (e.g., \`\`/owner/project/publications?path=…\`\`)
-so the notification can deep-link directly to the relevant item.`,
+  description:
+    "In-app notification delivered to a user when a comment is posted on\ntheir project (or a project they collaborate on).\n\nDesigned to be lightweight: no fan-out to external services here.\n``link`` stores a frontend URL (e.g., ``/owner/project/publications?path=…``)\nso the notification can deep-link directly to the relevant item.",
 } as const
 
 export const OAuthCodeExchangeSchema = {
@@ -3878,19 +3853,8 @@ export const ProjectCommentSchema = {
     "user_email",
   ],
   title: "ProjectComment",
-  description: `A unified comment on any project artifact or on the project itself.
-
-\`\`artifact_type\`\` is one of 'figure', 'publication', 'notebook', 'file',
-or None for a project-level comment. \`\`artifact_path\`\` is the repo-relative
-path of the artifact (None for project-level comments).
-
-\`\`highlight\`\` carries a portable anchor position and is only populated for
-comments tied to a specific region (e.g., a PDF text selection). See
-\`\`CommentHighlight\`\` for the schema.
-
-\`\`parent_id\`\` enables flat one-level threading: replies point to the
-top-level comment. No nested replies are stored beyond one level in the UI,
-though the schema permits it for future use.`,
+  description:
+    "A unified comment on any project artifact or on the project itself.\n\n``artifact_type`` is one of 'figure', 'publication', 'notebook', 'file',\nor None for a project-level comment. ``artifact_path`` is the repo-relative\npath of the artifact (None for project-level comments).\n\n``highlight`` carries a portable anchor position and is only populated for\ncomments tied to a specific region (e.g., a PDF text selection). See\n``CommentHighlight`` for the schema.\n\n``parent_id`` enables flat one-level threading: replies point to the\ntop-level comment. No nested replies are stored beyond one level in the UI,\nthough the schema permits it for future use.",
 } as const
 
 export const ProjectCommentPatchSchema = {
@@ -5822,7 +5786,7 @@ export const ReleaseListItemSchema = {
   properties: {
     source: {
       type: "string",
-      enum: ["cloud", "calkit"],
+      enum: ["hub", "calkit"],
       title: "Source",
     },
     name: {
@@ -5997,12 +5961,8 @@ export const ReleaseListItemSchema = {
   type: "object",
   required: ["source", "name"],
   title: "ReleaseListItem",
-  description: `A release row for the project releases page.
-
-Merges two sources: \`\`calkit\`\` releases declared in \`\`calkit.yaml\`\` (the
-public, DOI-bearing ones produced via the CLI/Zenodo) and \`\`cloud\`\`
-releases stored in this database (the private, secret-link ones). Fields
-that only apply to one source are optional.`,
+  description:
+    "A release row for the project releases page.\n\nMerges two sources: ``calkit`` releases declared in ``calkit.yaml`` (the\npublic, DOI-bearing ones produced via the CLI/Zenodo) and ``hub``\nreleases stored in this database (the private, secret-link ones). Fields\nthat only apply to one source are optional.",
 } as const
 
 export const ReleasePostSchema = {
@@ -6486,11 +6446,8 @@ export const ReleaseStalenessSchema = {
   },
   type: "object",
   title: "ReleaseStaleness",
-  description: `Whether the pipeline stage that produces a release path is up-to-date.
-
-Used to warn before creating a release of a possibly non-reproducible
-artifact. \`\`stage\`\` is None when the path isn't produced by any pipeline
-stage (staleness doesn't apply), in which case \`\`up_to_date\`\` stays True.`,
+  description:
+    "Whether the pipeline stage that produces a release path is up-to-date.\n\nUsed to warn before creating a release of a possibly non-reproducible\nartifact. ``stage`` is None when the path isn't produced by any pipeline\nstage (staleness doesn't apply), in which case ``up_to_date`` stays True.",
 } as const
 
 export const ReleaseUrlImportSchema = {
@@ -6585,12 +6542,8 @@ export const ReleaseUrlMetadataSchema = {
   },
   type: "object",
   title: "ReleaseUrlMetadata",
-  description: `Metadata parsed from an external release URL/DOI.
-
-Returned by the parse-url lookup so the create modal can pre-fill the
-declare-external form. The user reviews/edits it, then submits via the
-external release endpoint. \`\`git_rev\`\` is intentionally absent -- imports
-can't know the producing commit, so it's left for the user to set later.`,
+  description:
+    "Metadata parsed from an external release URL/DOI.\n\nReturned by the parse-url lookup so the create modal can pre-fill the\ndeclare-external form. The user reviews/edits it, then submits via the\nexternal release endpoint. ``git_rev`` is intentionally absent -- imports\ncan't know the producing commit, so it's left for the user to set later.",
 } as const
 
 export const ReleaseViewSchema = {
@@ -6711,12 +6664,8 @@ export const ReleaseViewSchema = {
     "permission",
   ],
   title: "ReleaseView",
-  description: `Release as rendered on its page, for a member or a share-token holder.
-
-Deliberately omits internal identifiers; exposes only what the viewer page
-needs to render the artifact, the provenance note, and comments. The
-viewer's effective \`\`permission\`\` says whether they may comment or manage
-the release, so the UI can adapt without leaking the share tokens.`,
+  description:
+    "Release as rendered on its page, for a member or a share-token holder.\n\nDeliberately omits internal identifiers; exposes only what the viewer page\nneeds to render the artifact, the provenance note, and comments. The\nviewer's effective ``permission`` says whether they may comment or manage\nthe release, so the UI can adapt without leaking the share tokens.",
 } as const
 
 export const ReproCheckSchema = {
@@ -8417,4 +8366,595 @@ export const _ContentsItemBaseSchema = {
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],
   title: "_ContentsItemBase",
+} as const
+
+export const FileLockWritableSchema = {
+  properties: {
+    project_id: {
+      type: "string",
+      format: "uuid",
+      title: "Project Id",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+  },
+  type: "object",
+  required: ["project_id", "path", "user_id"],
+  title: "FileLock",
+} as const
+
+export const OrgSubscriptionWritableSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    period_months: {
+      type: "integer",
+      title: "Period Months",
+    },
+    price: {
+      type: "number",
+      title: "Price",
+    },
+    paid_until: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Paid Until",
+    },
+    plan_id: {
+      type: "integer",
+      maximum: 2,
+      minimum: 0,
+      title: "Plan Id",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    processor: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor",
+    },
+    processor_product_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Product Id",
+    },
+    processor_price_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Price Id",
+    },
+    processor_subscription_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Subscription Id",
+    },
+    org_id: {
+      type: "string",
+      format: "uuid",
+      title: "Org Id",
+    },
+    n_users: {
+      type: "integer",
+      minimum: 1,
+      title: "N Users",
+    },
+    subscriber_user_id: {
+      type: "string",
+      format: "uuid",
+      title: "Subscriber User Id",
+    },
+  },
+  type: "object",
+  required: [
+    "period_months",
+    "price",
+    "plan_id",
+    "org_id",
+    "n_users",
+    "subscriber_user_id",
+  ],
+  title: "OrgSubscription",
+} as const
+
+export const ProjectCommentWritableSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    project_id: {
+      type: "string",
+      format: "uuid",
+      title: "Project Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    updated: {
+      type: "string",
+      format: "date-time",
+      title: "Updated",
+    },
+    comment: {
+      type: "string",
+      title: "Comment",
+    },
+    artifact_path: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 512,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Artifact Path",
+    },
+    artifact_type: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 50,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Artifact Type",
+    },
+    highlight: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Highlight",
+    },
+    parent_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Parent Id",
+    },
+    external_url: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "External Url",
+    },
+    resolved: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Resolved",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 256,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 40,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+  },
+  type: "object",
+  required: ["project_id", "user_id", "comment"],
+  title: "ProjectComment",
+  description:
+    "A unified comment on any project artifact or on the project itself.\n\n``artifact_type`` is one of 'figure', 'publication', 'notebook', 'file',\nor None for a project-level comment. ``artifact_path`` is the repo-relative\npath of the artifact (None for project-level comments).\n\n``highlight`` carries a portable anchor position and is only populated for\ncomments tied to a specific region (e.g., a PDF text selection). See\n``CommentHighlight`` for the schema.\n\n``parent_id`` enables flat one-level threading: replies point to the\ntop-level comment. No nested replies are stored beyond one level in the UI,\nthough the schema permits it for future use.",
+} as const
+
+export const ReproCheckWritableSchema = {
+  properties: {
+    has_pipeline: {
+      type: "boolean",
+      title: "Has Pipeline",
+    },
+    has_readme: {
+      type: "boolean",
+      title: "Has Readme",
+    },
+    instructions_in_readme: {
+      type: "boolean",
+      title: "Instructions In Readme",
+    },
+    is_dvc_repo: {
+      type: "boolean",
+      title: "Is Dvc Repo",
+    },
+    is_git_repo: {
+      type: "boolean",
+      title: "Is Git Repo",
+    },
+    has_calkit_info: {
+      type: "boolean",
+      title: "Has Calkit Info",
+    },
+    has_dev_container: {
+      type: "boolean",
+      title: "Has Dev Container",
+    },
+    n_environments: {
+      type: "integer",
+      title: "N Environments",
+    },
+    n_stages: {
+      type: "integer",
+      title: "N Stages",
+    },
+    stages_with_env: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Stages With Env",
+    },
+    stages_without_env: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Stages Without Env",
+    },
+    n_datasets: {
+      type: "integer",
+      title: "N Datasets",
+    },
+    n_datasets_no_import_or_stage: {
+      type: "integer",
+      title: "N Datasets No Import Or Stage",
+    },
+    n_figures: {
+      type: "integer",
+      title: "N Figures",
+    },
+    n_figures_no_import_or_stage: {
+      type: "integer",
+      title: "N Figures No Import Or Stage",
+    },
+    n_publications: {
+      type: "integer",
+      title: "N Publications",
+    },
+    n_publications_no_import_or_stage: {
+      type: "integer",
+      title: "N Publications No Import Or Stage",
+    },
+    n_dvc_remotes: {
+      type: "integer",
+      title: "N Dvc Remotes",
+    },
+  },
+  type: "object",
+  required: [
+    "has_pipeline",
+    "has_readme",
+    "instructions_in_readme",
+    "is_dvc_repo",
+    "is_git_repo",
+    "has_calkit_info",
+    "has_dev_container",
+    "n_environments",
+    "n_stages",
+    "stages_with_env",
+    "stages_without_env",
+    "n_datasets",
+    "n_datasets_no_import_or_stage",
+    "n_figures",
+    "n_figures_no_import_or_stage",
+    "n_publications",
+    "n_publications_no_import_or_stage",
+    "n_dvc_remotes",
+  ],
+  title: "ReproCheck",
+} as const
+
+export const UpdateSubscriptionResponseWritableSchema = {
+  properties: {
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscriptionWritable",
+        },
+        {
+          $ref: "#/components/schemas/OrgSubscriptionWritable",
+        },
+      ],
+      title: "Subscription",
+    },
+    stripe_session_client_secret: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stripe Session Client Secret",
+    },
+  },
+  type: "object",
+  required: ["subscription", "stripe_session_client_secret"],
+  title: "UpdateSubscriptionResponse",
+} as const
+
+export const UserPublicWritableSchema = {
+  properties: {
+    email: {
+      type: "string",
+      maxLength: 255,
+      format: "email",
+      title: "Email",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    is_superuser: {
+      type: "boolean",
+      title: "Is Superuser",
+      default: false,
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 255,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    github_username: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Github Username",
+    },
+    subscription: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/UserSubscriptionWritable",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["email", "id", "github_username", "subscription"],
+  title: "UserPublic",
+} as const
+
+export const UserSubscriptionWritableSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    period_months: {
+      type: "integer",
+      title: "Period Months",
+    },
+    price: {
+      type: "number",
+      title: "Price",
+    },
+    paid_until: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date-time",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Paid Until",
+    },
+    plan_id: {
+      type: "integer",
+      maximum: 2,
+      minimum: 0,
+      title: "Plan Id",
+    },
+    is_active: {
+      type: "boolean",
+      title: "Is Active",
+      default: true,
+    },
+    processor: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor",
+    },
+    processor_product_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Product Id",
+    },
+    processor_price_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Price Id",
+    },
+    processor_subscription_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Processor Subscription Id",
+    },
+    user_id: {
+      type: "string",
+      format: "uuid",
+      title: "User Id",
+    },
+  },
+  type: "object",
+  required: ["period_months", "price", "plan_id", "user_id"],
+  title: "UserSubscription",
+} as const
+
+export const UsersPublicWritableSchema = {
+  properties: {
+    data: {
+      items: {
+        $ref: "#/components/schemas/UserPublicWritable",
+      },
+      type: "array",
+      title: "Data",
+    },
+    count: {
+      type: "integer",
+      title: "Count",
+    },
+  },
+  type: "object",
+  required: ["data", "count"],
+  title: "UsersPublic",
 } as const

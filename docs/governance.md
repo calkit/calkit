@@ -125,10 +125,10 @@ The project is sustained through a combination of:
 - **Volunteer contributions** from the community.
 - **Institutional support** through allocated work time.
 - **calkit.io** optional paid plans to help cover infrastructure costs
-  for the cloud storage and compute service hosted at
+  for the storage and compute service hosted at
   [calkit.io](https://calkit.io).
 
-The cloud service operates on a freemium model:
+The hosted service operates on a freemium model:
 a generous free tier for most users,
 with paid options for those who need additional storage or compute resources.
 This helps ensure the service remains available and reliable
@@ -138,4 +138,5 @@ All Calkit software remains MIT-licensed and can be self-hosted
 and used with any compatible storage backend.
 In fact, we would prefer institutions host their own instance
 as part of a
-[decentralized, federated network](https://github.com/calkit/calkit-cloud/issues/190).
+[decentralized, federated network](https://github.com/calkit/calkit-cloud/issues/190)
+of hubs.

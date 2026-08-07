@@ -94,10 +94,10 @@ const PathPicker = ({
     queryKey: ["projects", ownerName, projectName, "contents", dir],
     queryFn: () =>
       ProjectsService.getProjectContents({
-        ownerName,
-        projectName,
+        owner_name: ownerName,
+        project_name: projectName,
         path: dir || undefined,
-      }),
+      }).then((response) => response.data),
     enabled: isOpen,
     retry: false,
   })
@@ -105,7 +105,10 @@ const PathPicker = ({
   const pathsQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "content-paths"],
     queryFn: () =>
-      ProjectsService.getProjectContentPaths({ ownerName, projectName }),
+      ProjectsService.getProjectContentPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
     enabled: isOpen,
     retry: false,
   })

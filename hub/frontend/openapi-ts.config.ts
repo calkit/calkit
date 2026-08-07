@@ -1,33 +1,29 @@
-import { defineConfig } from "@hey-api/openapi-ts";
+import { defineConfig } from "@hey-api/openapi-ts"
 
 export default defineConfig({
   input: "./openapi.json",
   output: "./src/client",
   plugins: [
-    "legacy/axios",
+    {
+      name: "@hey-api/client-axios",
+      // Throw AxiosError on non-2xx responses (like the legacy client did)
+      // instead of returning an error field alongside the response.
+      throwOnError: true,
+    },
     {
       name: "@hey-api/sdk",
       // Keep class-based exports (UsersService, ProjectsService, etc.)
-      asClass: true,
-      operationId: true,
-      classNameBuilder: "{{name}}Service",
-      methodNameBuilder: (operation) => {
-        // The plugin augments this object shape at runtime.
-        // @ts-expect-error runtime shape from openapi-ts plugin
-        let name: string = operation.name;
-        // @ts-expect-error runtime shape from openapi-ts plugin
-        const service: string = operation.service;
-
-        if (service && name.toLowerCase().startsWith(service.toLowerCase())) {
-          name = name.slice(service.length);
-        }
-
-        return name.charAt(0).toLowerCase() + name.slice(1);
+      operations: {
+        strategy: "byTags",
+        containerName: "{{name}}Service",
       },
+      // Merge path/query/body parameters into a single object per call,
+      // matching the legacy calling convention.
+      paramsStructure: "flat",
     },
     {
       name: "@hey-api/schemas",
       type: "json",
     },
   ],
-});
+})

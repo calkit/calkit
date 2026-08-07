@@ -17,15 +17,11 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import {
-  type ApiError,
-  type UserPublic,
-  type UserUpdate,
-  UsersService,
-} from "../../client"
+import type { AxiosError } from "axios"
+import { type UserPublic, type UserUpdate, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import { emailPattern } from "../../lib/strings"
 import { handleError } from "../../lib/errors"
+import { emailPattern } from "../../lib/strings"
 
 interface EditUserProps {
   user: UserPublic
@@ -55,12 +51,14 @@ const EditUser = ({ user, isOpen, onClose }: EditUserProps) => {
 
   const mutation = useMutation({
     mutationFn: (data: UserUpdateForm) =>
-      UsersService.updateUser({ userId: user.id, requestBody: data }),
+      UsersService.updateUser({ user_id: user.id, userUpdate: data }).then(
+        (response) => response.data,
+      ),
     onSuccess: () => {
       showToast("Success!", "User updated successfully.", "success")
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

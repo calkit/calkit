@@ -25,13 +25,13 @@ import {
   Text,
   useClipboard,
 } from "@chakra-ui/react"
-import Tooltip from "../Common/Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 import { FaTrash } from "react-icons/fa"
+import Tooltip from "../Common/Tooltip"
 
+import type { AxiosError } from "axios"
 import { type ReleaseShareTokenCreated, ReleasesService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import { releasePageUrl } from "../../lib/releases"
@@ -123,10 +123,10 @@ const ShareDialog = ({
     queryKey: sharesKey,
     queryFn: () =>
       ReleasesService.listReleaseShares({
-        ownerName,
-        projectName,
-        releaseName,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
+      }).then((response) => response.data),
     enabled: isOpen,
   })
   const invalidate = () =>
@@ -135,35 +135,35 @@ const ShareDialog = ({
   const createMutation = useMutation({
     mutationFn: () =>
       ReleasesService.createReleaseShare({
-        ownerName,
-        projectName,
-        releaseName,
-        requestBody: {
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
+        releaseShareTokenPost: {
           email: email.trim() || null,
           permission: permission as "view" | "comment",
           note: note.trim() || null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: (data) => {
       setMinted(data)
       setEmail("")
       setNote("")
     },
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: invalidate,
   })
 
   const deleteMutation = useMutation({
     mutationFn: (tokenId: string) =>
       ReleasesService.deleteReleaseShare({
-        ownerName,
-        projectName,
-        releaseName,
-        tokenId,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        release_name: releaseName,
+        token_id: tokenId,
+      }).then((response) => response.data),
     onSuccess: () =>
       showToast("Revoked", "The share link no longer works.", "success"),
-    onError: (err: ApiError) => handleError(err, showToast),
+    onError: (err: AxiosError) => handleError(err, showToast),
     onSettled: invalidate,
   })
 

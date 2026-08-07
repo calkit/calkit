@@ -18,9 +18,9 @@ import {
 } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import Logo from "/assets/images/calkit-no-bg.svg"
 import { LoginService, UsersService } from "../client"
-import type { ApiError } from "../client/core/ApiError"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
 import { popPostLoginRedirect, storeTokens } from "../lib/auth"
@@ -55,16 +55,19 @@ function SignUp() {
   const mutation = useMutation({
     mutationFn: async (data: SignUpForm) => {
       await UsersService.registerUser({
-        requestBody: {
+        userRegister: {
           email: data.email,
           password: data.password,
           full_name: data.full_name,
           account_name: data.account_name,
         },
-      })
-      const resp = await LoginService.accessToken({
-        formData: { username: data.email, password: data.password },
-      })
+      }).then((response) => response.data)
+      const resp = await LoginService.loginAccessToken({
+        bodyLoginLoginAccessToken: {
+          username: data.email,
+          password: data.password,
+        },
+      }).then((response) => response.data)
       storeTokens(resp.access_token, resp.refresh_token)
     },
     onSuccess: () => {
@@ -76,7 +79,7 @@ function SignUp() {
       const redirectTo = popPostLoginRedirect()
       navigate({ to: redirectTo || "/" })
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
   })

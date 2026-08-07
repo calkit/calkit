@@ -34,12 +34,12 @@ import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiCopy, FiTrash } from "react-icons/fi"
 
+import type { AxiosError } from "axios"
 import {
   type ProjectInvitationCreated,
   type ProjectInvitationPost,
   ProjectsService,
 } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -119,10 +119,10 @@ const CreateInviteModal = ({
         email: data.email || null,
       }
       return ProjectsService.postProjectInvitation({
-        ownerName,
-        projectName,
-        requestBody,
-      })
+        owner_name: ownerName,
+        project_name: projectName,
+        projectInvitationPost: requestBody,
+      }).then((response) => response.data)
     },
     onSuccess: (invite) => {
       showToast(
@@ -136,7 +136,7 @@ const CreateInviteModal = ({
       onClose()
       onCreated(invite)
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {
@@ -252,20 +252,23 @@ const InviteLinks = ({
   const { isPending, data: invitations } = useQuery({
     queryKey: ["projects", ownerName, projectName, "invitations"],
     queryFn: () =>
-      ProjectsService.getProjectInvitations({ ownerName, projectName }),
+      ProjectsService.getProjectInvitations({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
   })
 
   const revokeMutation = useMutation({
     mutationFn: (invitationId: string) =>
       ProjectsService.deleteProjectInvitation({
-        ownerName,
-        projectName,
-        invitationId,
-      }),
+        owner_name: ownerName,
+        project_name: projectName,
+        invitation_id: invitationId,
+      }).then((response) => response.data),
     onSuccess: () => {
       showToast("Success!", "Invite link revoked.", "success")
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

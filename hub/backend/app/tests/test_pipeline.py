@@ -252,7 +252,7 @@ def test_zip_stored_output_is_not_stale(tmp_path):
 
 def test_cache_false_output_not_flagged_stale(tmp_path):
     """An out declared ``cache: false`` (e.g. calkit map-paths dir-to-dir) is
-    never pushed to object storage and is often gitignored, so the cloud can't
+    never pushed to object storage and is often gitignored, so the hub can't
     observe it. It must not be flagged missing (calkit checks the workspace
     file and reports up to date)."""
     repo = _init_repo(tmp_path / "repo")
@@ -565,7 +565,7 @@ def test_cache_token_short_circuits_recompute(tmp_path):
 
 
 def test_unobservable_dep_does_not_make_stage_stale(tmp_path):
-    """A dep the cloud can't see -- not in git, no .dvc pointer, not another
+    """A dep the hub can't see -- not in git, no .dvc pointer, not another
     stage's out, not in object storage -- must not mark the stage stale. This
     mirrors calkit cleaned notebooks, which are gitignored and cleaned on the
     fly, so they never appear in the pushed repo or remote."""
@@ -637,7 +637,7 @@ def test_always_run_stage_is_not_stale(tmp_path):
 def test_always_run_stage_stays_always_run_despite_changes(tmp_path):
     """An always_run stage re-runs every time, so its staleness is moot: even a
     modified cmd and missing outputs read as ``always-run``, not stale (these
-    stages often produce ephemeral outputs that aren't pushed to the cloud)."""
+    stages often produce ephemeral outputs that aren't pushed to the hub)."""
     repo = _init_repo(tmp_path / "repo")
     script = "print('hi')\n"
     _commit(repo, {"script.py": script, "out.txt": "result\n"}, "init")

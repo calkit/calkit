@@ -1,21 +1,28 @@
 import { ChakraProvider } from "@chakra-ui/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { RouterProvider, createRouter } from "@tanstack/react-router"
-import ReactDOM from "react-dom/client"
 import mixpanel from "mixpanel-browser"
+import ReactDOM from "react-dom/client"
 
-import { routeTree } from "./routeTree.gen"
 import { StrictMode } from "react"
-import { OpenAPI } from "./client"
-import theme from "./theme"
+import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
-import { getValidAccessToken } from "./lib/auth"
 import { initAnalytics } from "./lib/analytics"
+import { getValidAccessToken } from "./lib/auth"
+import { routeTree } from "./routeTree.gen"
+import theme from "./theme"
 
-OpenAPI.BASE = import.meta.env.VITE_API_URL
-OpenAPI.TOKEN = async (options) => {
-  return (await getValidAccessToken(options.url)) ?? ""
-}
+client.setConfig({ baseURL: import.meta.env.VITE_API_URL })
+// The token resolver needs the request URL to avoid refreshing recursively
+// when requesting the refresh endpoint itself, so attach it with an axios
+// interceptor rather than the client's auth callback.
+client.instance.interceptors.request.use(async (config) => {
+  const token = await getValidAccessToken(config.url)
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
 
 const mixpanelToken = import.meta.env.VITE_MIXPANEL_TOKEN
 mixpanel.init(mixpanelToken, {

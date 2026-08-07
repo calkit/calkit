@@ -12,7 +12,6 @@ import {
   VStack,
   useColorModeValue,
 } from "@chakra-ui/react"
-import Tooltip from "../../../../../components/Common/Tooltip"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Link as RouterLink,
@@ -23,9 +22,13 @@ import {
 import { useRef, useState } from "react"
 import { FiDownload, FiFile } from "react-icons/fi"
 import { z } from "zod"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
 import type { Presentation } from "../../../../../client"
 import { ProjectsService } from "../../../../../client"
+import CommentsPanel, {
+  projectCommentToPanelComment,
+} from "../../../../../components/Common/CommentsPanel"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import PresentationView from "../../../../../components/Presentations/PresentationView"
@@ -33,14 +36,11 @@ import PdfAnnotator, {
   commentToHighlight,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
-import CommentsPanel, {
-  projectCommentToPanelComment,
-} from "../../../../../components/Common/CommentsPanel"
+import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
 import useAuth from "../../../../../hooks/useAuth"
 import useProject, {
   useProjectPresentations,
 } from "../../../../../hooks/useProject"
-import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
 
 const presSearchSchema = z.object({
   path: z.string().optional(),
@@ -174,11 +174,11 @@ function Presentations() {
     ],
     queryFn: () =>
       ProjectsService.getProjectComments({
-        ownerName: accountName,
-        projectName,
-        artifactType: "presentation",
-        artifactPath: selectedPres!.path,
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        artifact_type: "presentation",
+        artifact_path: selectedPres!.path,
+      }).then((response) => response.data),
     enabled: !!selectedPres,
   })
 
@@ -202,36 +202,36 @@ function Presentations() {
       resolved: boolean
     }) =>
       ProjectsService.patchProjectComment({
-        ownerName: accountName,
-        projectName,
-        commentId,
-        requestBody: { resolved },
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: commentId,
+        projectCommentPatch: { resolved },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const postCommentMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
       ProjectsService.postProjectComment({
-        ownerName: accountName,
-        projectName,
-        requestBody: {
+        owner_name: accountName,
+        project_name: projectName,
+        projectCommentPost: {
           artifact_path: selectedPres!.path,
           artifact_type: "presentation",
           comment: vars.body,
           create_github_issue: vars.createIssue,
           git_ref: ref ?? null,
         },
-      }),
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
   const replyCommentMutation = useMutation({
     mutationFn: (vars: { commentId: string; body: string }) =>
       ProjectsService.postProjectCommentReply({
-        ownerName: accountName,
-        projectName,
-        commentId: vars.commentId,
-        requestBody: { body: vars.body },
-      }),
+        owner_name: accountName,
+        project_name: projectName,
+        comment_id: vars.commentId,
+        commentReply: { body: vars.body },
+      }).then((response) => response.data),
     onSuccess: invalidateComments,
   })
 

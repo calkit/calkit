@@ -15,8 +15,8 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
+import type { AxiosError } from "axios"
 import { OrgsService } from "../../client"
-import type { ApiError } from "../../client/core/ApiError"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -46,13 +46,15 @@ const AddMember = ({ isOpen, onClose, orgName }: AddMemberProps) => {
 
   const mutation = useMutation({
     mutationFn: (data: Form) =>
-      OrgsService.addOrgMember({ orgName, requestBody: data }),
+      OrgsService.addOrgMember({ org_name: orgName, orgMemberPost: data }).then(
+        (response) => response.data,
+      ),
     onSuccess: () => {
       showToast("Success!", "Member added to org.", "success")
       reset()
       onClose()
     },
-    onError: (err: ApiError) => {
+    onError: (err: AxiosError) => {
       handleError(err, showToast)
     },
     onSettled: () => {

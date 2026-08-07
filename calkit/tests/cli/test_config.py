@@ -155,6 +155,9 @@ def _check_hub_scoping():
         .strip()
     )
     assert not out
+    # Both spellings reach the same commands
+    out = subprocess.check_output(["calkit", "config", "hub", "list"]).decode()
+    assert "token" in out
     # Environment names are rejected as hub values
     result = subprocess.run(
         ["calkit", "hub", "config", "get", "token", "--hub", "staging"],

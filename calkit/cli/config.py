@@ -17,8 +17,14 @@ from calkit.cli.core import raise_error
 config_app = typer.Typer(no_args_is_help=True)
 
 
-# Registered under the hub CLI group as 'calkit hub config'
+# Registered under the hub CLI group as 'calkit hub config', and below
+# as 'calkit config hub' so both spellings work
 hub_config_app = typer.Typer(no_args_is_help=True)
+config_app.add_typer(
+    hub_config_app,
+    name="hub",
+    help="Work with per-hub credentials (alias for 'calkit hub config').",
+)
 
 _HUB_OPTION = typer.Option(
     "--hub",

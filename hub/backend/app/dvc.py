@@ -177,7 +177,7 @@ def expand_dvc_lock_outs(
 ) -> dict:
     """Expand all outs in a DVC lock file.
 
-    Will only pick up those in cloud storage, i.e., not ones that are
+    Will only pick up those in object storage, i.e., not ones that are
     committed to Git.
 
     Output dictionary structure will look like:
@@ -292,7 +292,7 @@ def expand_dvc_lock_outs(
         for out in stage.get("outs", []):
             outpath = out["path"]
             md5 = out.get("md5", "")
-            # If this is a directory, try to fetch its file from cloud storage
+            # If this is a directory, try to fetch its file from object storage
             # so we can read off all of the sub-outs
             if md5 and md5.endswith(".dir"):
                 if md5 in md5_to_contents:

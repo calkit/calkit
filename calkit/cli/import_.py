@@ -107,7 +107,7 @@ def import_dataset(
             params=params,
         )
     except Exception as e:
-        raise_error(f"Failed to fetch dataset info from cloud: {e}")
+        raise_error(f"Failed to fetch dataset info from the hub: {e}")
     dvc_import, git_import = resp["dvc_import"], resp["git_import"]
     if dest_path is not None:
         typer.echo(f"Importing to destination path: {dest_path}")
@@ -285,13 +285,13 @@ def import_environment(
         except Exception as e:
             raise_error(f"Could not detect source project name: {e}")
     else:
-        typer.echo("Importing from Cloud project")
+        typer.echo("Importing from hub project")
         try:
             resp = calkit.hub.get(  # noqa: F841 TODO: Use this variable
                 f"/projects/{project}/environments/{env_name}"
             )
         except Exception as e:
-            raise_error(f"Failed to fetch environment info from cloud: {e}")
+            raise_error(f"Failed to fetch environment info from the hub: {e}")
         src_project_name = project
         # TODO: Parse information we need from the response
     # Write environment into current Calkit info

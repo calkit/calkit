@@ -73,7 +73,7 @@ const LOCATION_LABELS: Record<string, string> = {
 export const releaseLocation = (
   r: ReleaseListItem,
 ): { label: string; internal: boolean; href: string | null } => {
-  // Cloud (hosted) releases always carry internal=true, so the flag alone
+  // Hub (hosted) releases always carry internal=true, so the flag alone
   // decides this -- no need to special-case the source.
   if (r.internal) return { label: "Calkit", internal: true, href: null }
   const label = r.publisher
@@ -83,7 +83,7 @@ export const releaseLocation = (
   return { label, internal: false, href }
 }
 
-// The openable link for a release, if any: the Calkit-hosted page for a cloud
+// The openable link for a release, if any: the Calkit-hosted page for a hub
 // release, otherwise the declared external URL or a DOI resolver. ``internal``
 // marks the in-app page (same origin) vs an off-site link. Returns null when
 // the release has no openable link.
@@ -92,7 +92,7 @@ export const releaseExternalLink = (
   ownerName?: string,
   projectName?: string,
 ): { href: string; label: string; internal: boolean } | null => {
-  if (r.source === "cloud" && ownerName && projectName)
+  if (r.source === "hub" && ownerName && projectName)
     return {
       href: releasePagePath(ownerName, projectName, r.name),
       label: "release page",
@@ -109,7 +109,7 @@ export const releaseExternalLink = (
   return null
 }
 
-// Format a release date for display, rounded to the nearest minute. Cloud
+// Format a release date for display, rounded to the nearest minute. Hub
 // releases carry a full timestamp (created.isoformat()); calkit.yaml releases
 // carry a plain YYYY-MM-DD, which is shown as a date only.
 export const formatReleaseDate = (date?: string | null): string => {
@@ -119,7 +119,7 @@ export const formatReleaseDate = (date?: string | null): string => {
   // date so it isn't shifted a day for users west of UTC. (new Date("2026-06-24")
   // is UTC midnight, which toLocaleDateString() would render as the prior day.)
   // Match the date portion of the timestamped case below (dateStyle: "medium")
-  // so tag/calkit.yaml releases and cloud releases read the same, just without
+  // so tag/calkit.yaml releases and hub releases read the same, just without
   // a time.
   if (!hasTime) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date.trim())

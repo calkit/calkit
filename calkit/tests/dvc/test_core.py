@@ -276,7 +276,7 @@ def test_add_external_remote(monkeypatch):
         "set_remote_auth",
         lambda name: auth_calls.append(name),
     )
-    # HTTP case: builds URL from cloud base, sets custom auth
+    # HTTP case: builds URL from hub base, sets custom auth
     monkeypatch.setattr(
         calkit.hub, "get_base_url", lambda: "https://example.com"
     )

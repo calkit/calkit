@@ -75,7 +75,7 @@ calkit overleaf sync
 
 After syncing, you'll probably want to ensure the local PDF is up-to-date
 by calling `calkit run`, and if anything has changed,
-commit and push those changes to the cloud with
+commit and push those changes to the hub with
 `calkit save -am "Run pipeline"`.
 
 ### A clean working tree is required

@@ -121,7 +121,7 @@ const ReleasesTable = ({
   const confirmDelete = useDisclosure()
   const shareModal = useDisclosure()
   const [toDelete, setToDelete] = useState<ReleaseListItem | null>(null)
-  // The cloud release whose share links are being managed.
+  // The hub release whose share links are being managed.
   const [active, setActive] = useState<ReleaseListItem | null>(null)
   const openShare = (r: ReleaseListItem) => {
     setActive(r)
@@ -413,7 +413,7 @@ const ReleasesTable = ({
                             </Link>
                           </Tooltip>
                         )
-                      if (r.source === "cloud" && userHasWriteAccess)
+                      if (r.source === "hub" && userHasWriteAccess)
                         return (
                           <Tooltip label="Release to GitHub">
                             <IconButton
@@ -438,7 +438,7 @@ const ReleasesTable = ({
                   </Td>
                   {userHasWriteAccess && (
                     <Td>
-                      {r.source === "cloud" && (
+                      {r.source === "hub" && (
                         <HStack spacing={0} justify="flex-end">
                           <Tooltip
                             label={

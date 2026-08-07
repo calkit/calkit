@@ -5822,7 +5822,7 @@ export const ReleaseListItemSchema = {
   properties: {
     source: {
       type: "string",
-      enum: ["cloud", "calkit"],
+      enum: ["hub", "calkit"],
       title: "Source",
     },
     name: {
@@ -6000,7 +6000,7 @@ export const ReleaseListItemSchema = {
   description: `A release row for the project releases page.
 
 Merges two sources: \`\`calkit\`\` releases declared in \`\`calkit.yaml\`\` (the
-public, DOI-bearing ones produced via the CLI/Zenodo) and \`\`cloud\`\`
+public, DOI-bearing ones produced via the CLI/Zenodo) and \`\`hub\`\`
 releases stored in this database (the private, secret-link ones). Fields
 that only apply to one source are optional.`,
 } as const

@@ -1,5 +1,5 @@
 """A filesystem-like object that follows ``fsspec`` and interacts with Calkit
-cloud storage to unify operations between private and public storage.
+object storage to unify operations between private and public storage.
 
 The basic operation is as follows:
 1. Make a request to the Calkit API over HTTP to get file operation info.
@@ -20,7 +20,7 @@ Supported storage backends (via the Calkit hub API):
     - Box - OAuth + API
     - Other storage providers as configured in the hub
 
-Multi-cloud support:
+Multi-backend support:
     By default, the filesystem routes to the Calkit hub API endpoint
     configured by CALKIT_ENV (production, staging, etc.). To use a different
     Calkit hub:
@@ -151,7 +151,7 @@ class CalkitFileSystem(AbstractFileSystem):
     - Users can create subdirectories for organization (data/, models/, etc.)
     - Files can be stored at the project root
 
-    Cloud endpoints are configured via:
+    Endpoints are configured via:
 
     - endpointurl parameter (for DVC remotes): Route to different Calkit
       instances
@@ -163,7 +163,7 @@ class CalkitFileSystem(AbstractFileSystem):
     This design allows for:
 
     - Multiple storage backend support without client-side changes
-    - Multi-cloud support with configurable endpoints
+    - Multiple storage backends with configurable endpoints
     - Future protocol upgrades (e.g., SFTP) without breaking API compatibility
     - Unified interface regardless of underlying storage provider
 
@@ -1104,7 +1104,7 @@ class CalkitFile(AbstractBufferedFile):
         return resp.content
 
     def _upload_chunk(self, final: bool = False) -> int | bool:
-        """Upload buffered data to cloud storage."""
+        """Upload buffered data to object storage."""
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
             return False

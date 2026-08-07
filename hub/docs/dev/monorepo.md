@@ -298,8 +298,13 @@ chart. Hold the chart until someone asks.
    step is the GitHub settings half: move environments, secrets, and
    variables, register the self-hosted runners against calkit/calkit,
    transfer issues, and archive calkit-cloud.
-4. Add `hub` to `ProjectInfo`, release calkit-python, then write the key from
-   the backend on project creation.
+4. ~~Add `hub` to `ProjectInfo`, release calkit-python, then write the key
+   from the backend on project creation.~~ Done: the backend writes
+   `hub: settings.frontend_host` into calkit.yaml on creation. The
+   release-first ordering turned out not to be blocking (released CLIs back
+   through at least 0.39.0 validate unknown ProjectInfo keys fine,
+   verified empirically), though a release before the production deploy is
+   still wanted so up-to-date CLIs can make use of the field.
 5. ~~Generalize the CLI config key from env to hub.~~ Done.
 
 The workspace question is not a step of its own. It has to be settled as part

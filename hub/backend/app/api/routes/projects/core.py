@@ -551,6 +551,9 @@ def post_project(
                 "name": project.name,
                 "title": project.title,
                 "description": project.description,
+                # The hub this project belongs to; makes bare ck:// paths
+                # resolvable against a known instance
+                "hub": settings.frontend_host,
                 "git_repo_url": project.git_repo_url,
             }
             if project_in.template is not None:

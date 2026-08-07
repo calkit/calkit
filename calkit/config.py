@@ -290,10 +290,7 @@ class CalkitYamlSource(PydanticBaseSettingsSource):
     def __call__(self) -> dict[str, Any]:
         import yaml
 
-        fpath = (
-            self.settings_cls.model_config.get("yaml_file")
-            or get_config_yaml_fpath()
-        )
+        fpath = get_config_yaml_fpath()
         try:
             with open(fpath) as f:  # type: ignore[arg-type]
                 data = yaml.safe_load(f) or {}
@@ -339,7 +336,6 @@ class KeyringSecretsSource(PydanticBaseSettingsSource):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        yaml_file=get_config_yaml_fpath(),
         extra="ignore",
         env_prefix="CALKIT" + get_env_suffix(sep="_") + "_",
         env_file=".env",
@@ -391,9 +387,7 @@ class Settings(BaseSettings):
     def write(self) -> None:
         import yaml
 
-        fpath = str(
-            self.model_config.get("yaml_file") or get_config_yaml_fpath()
-        )
+        fpath = get_config_yaml_fpath()
         base_dir = os.path.dirname(fpath)
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()
@@ -452,9 +446,8 @@ class Settings(BaseSettings):
 
 def read() -> Settings:
     """Read the config."""
-    # Update YAML file path and env prefix in case the active hub or
-    # environment has changed since import, e.g., via a --hub option
-    Settings.model_config["yaml_file"] = get_config_yaml_fpath()
+    # Update the env prefix in case the environment has changed since
+    # import; the YAML source resolves its file path itself
     Settings.model_config["env_prefix"] = (
         "CALKIT" + get_env_suffix(sep="_") + "_"
     )

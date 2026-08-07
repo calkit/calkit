@@ -1,4 +1,4 @@
-"""Main FastAPI application and entry point for the Calkit Cloud backend."""
+"""Main FastAPI application and entry point for the Calkit hub backend."""
 
 import logging
 import os

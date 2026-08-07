@@ -233,7 +233,7 @@ def import_environment(
             help=(
                 "Environment location and name, e.g., "
                 "someone/some-project:env-name. If not present, the Calkit "
-                "Cloud will be queried."
+                "API will be queried."
             )
         ),
     ],

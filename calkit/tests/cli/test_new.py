@@ -490,7 +490,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     repo = git.Repo()
     assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
     assert not repo.is_dirty(untracked_files=True)
-    # Test 403: remote owner is an org not in Calkit Cloud; error should
+    # Test 403: remote owner is an org not in Calkit hub; error should
     # surface the detected org name and a helpful hint
     httpserver.expect_ordered_request(
         "/projects", method="POST"

@@ -262,9 +262,9 @@ function Projects() {
             👋 Hi there!
           </Heading>
           <Text>
-            Welcome to the Calkit Cloud, where you can create, discover, share,
-            and collaborate on research projects. If you're ready to get
-            started, click the button below:
+            Welcome to Calkit, where you can create, discover, share, and
+            collaborate on research projects. If you're ready to get started,
+            click the button below:
           </Text>
           <Box
             alignItems="center"

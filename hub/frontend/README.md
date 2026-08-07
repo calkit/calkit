@@ -9,12 +9,19 @@ live reload enabled, so `make dev` from the `hub` directory is all that is
 needed; edits are picked up without rebuilding, and Node does not have to
 be installed on the host.
 
-Running the Vite server directly on the host is not supported: the
-client-side settings (`VITE_*`) are supplied as Docker build args derived
-from the hub-level `.env` (see the `frontend` service in
-`docker-compose.yml`), not from a file in this directory. Because they are
-build args, changing one of those values in `hub/.env` takes effect only
-after a rebuild, e.g. `docker compose up -d --build frontend`.
+Client-side settings (`VITE_*`) come from the hub-level `.env`, since Vite
+only exposes variables with that prefix to the browser and the hub-level
+file uses unprefixed names. The two Compose files map them differently:
+
+* In development, `docker-compose.override.yml` sets them in the
+  service's `environment`, so changing a value in `hub/.env` takes effect
+  after `docker compose up -d frontend` -- a restart, no rebuild.
+* In deployments, `docker-compose.yml` passes them as Docker build args,
+  which the Dockerfile promotes to `ENV`, so they are baked into the
+  image at build time.
+
+Running the Vite server directly on the host is not supported; there are
+no Compose settings to supply any of the above.
 
 Node tooling that does run on the host, like the linter and unit tests, is
 invoked through the `hub` Makefile.

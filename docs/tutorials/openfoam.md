@@ -44,7 +44,7 @@ generate one for use with the API, and copy it to your clipboard.
 Then we can set that token in our Calkit configuration with:
 
 ```sh
-calkit config hub set token YOUR_TOKEN_HERE
+calkit hub config set token YOUR_TOKEN_HERE
 ```
 
 Next, clone the repo to your local machine with (filling in your username):

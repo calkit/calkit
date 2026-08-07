@@ -17,12 +17,8 @@ from calkit.cli.core import raise_error
 config_app = typer.Typer(no_args_is_help=True)
 
 
+# Registered under the hub CLI group as 'calkit hub config'
 hub_config_app = typer.Typer(no_args_is_help=True)
-config_app.add_typer(
-    hub_config_app,
-    name="hub",
-    help="Work with per-hub credentials (tokens).",
-)
 
 _HUB_OPTION = typer.Option(
     "--hub",
@@ -51,7 +47,7 @@ def _check_shared_key(key: str) -> None:
     ]
     if key in config.HUB_SCOPED_FIELDS:
         raise_error(
-            f"'{key}' is stored per hub; use 'calkit config hub' commands"
+            f"'{key}' is stored per hub; use 'calkit hub config' commands"
         )
     if key not in keys:
         raise_error(f"Invalid config key: '{key}'; Valid keys are: {keys}")
@@ -120,6 +116,15 @@ def unset_config_value(key: str) -> None:
     _unset_config_value(key)
 
 
+@hub_config_app.command(name="list")
+def list_hub_config_keys() -> None:
+    """List per-hub credential keys."""
+    from calkit import config
+
+    for key in config.HUB_SCOPED_FIELDS:
+        typer.echo(key)
+
+
 @hub_config_app.command(name="set")
 def set_hub_config_value(
     key: str,
@@ -174,8 +179,8 @@ def setup_remote(
         ),
     ] = False,
 ):
-    """Setup the Calkit cloud as the default DVC remote and store a token in
-    the local config.
+    """Set up the Calkit hub as the default DVC remote and store a token
+    in the local config.
     """
     from git.exc import InvalidGitRepositoryError
 
@@ -207,7 +212,7 @@ def setup_remote(
 @config_app.command(name="setup-remote-auth", help="Alias for 'remote-auth'.")
 @config_app.command(name="remote-auth")
 def setup_remote_auth():
-    """Store a Calkit cloud token in the local DVC config for all Calkit
+    """Store a Calkit hub token in the local DVC config for all Calkit
     remotes.
     """
     from calkit.dvc import get_remotes, set_remote_auth
@@ -230,7 +235,7 @@ def list_config_keys():
     cfg = config.read()
     for key in cfg.model_dump():
         if key in config.HUB_SCOPED_FIELDS:
-            typer.echo(f"{key} (per hub; see 'calkit config hub')")
+            typer.echo(f"{key} (per hub; see 'calkit hub config')")
         else:
             typer.echo(key)
 

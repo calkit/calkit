@@ -9,8 +9,14 @@ import typer
 
 import calkit
 from calkit.cli import raise_error
+from calkit.cli.config import hub_config_app
 
 hub_app = typer.Typer(no_args_is_help=True)
+hub_app.add_typer(
+    hub_config_app,
+    name="config",
+    help="Work with per-hub credentials (tokens).",
+)
 
 _HUB_OPTION_HELP = (
     "URL of the hub to target, e.g., https://staging.calkit.io. Defaults "

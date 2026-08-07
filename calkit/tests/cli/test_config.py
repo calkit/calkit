@@ -50,12 +50,12 @@ def test_get_set():
         text=True,
     )
     assert result.returncode != 0
-    assert "calkit config hub" in result.stderr
+    assert "calkit hub config" in result.stderr
     # Check with secrets, which live under the hub subcommand
-    subprocess.check_call(["calkit", "config", "hub", "unset", "token"])
+    subprocess.check_call(["calkit", "hub", "config", "unset", "token"])
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
@@ -63,22 +63,22 @@ def test_get_set():
     assert not out
     test_token = str(uuid.uuid4())
     subprocess.check_call(
-        ["calkit", "config", "hub", "set", "token", test_token],
+        ["calkit", "hub", "config", "set", "token", test_token],
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
     )
     assert out == test_token
     subprocess.check_call(
-        ["calkit", "config", "hub", "unset", "token"],
+        ["calkit", "hub", "config", "unset", "token"],
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
@@ -90,14 +90,14 @@ def test_get_set():
         calkit.ryaml.dump({"token": "this-was-in-the-config-file"}, f)
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
     )
     assert out == "this-was-in-the-config-file"
     subprocess.check_call(
-        ["calkit", "config", "hub", "set", "token", "this-is-a-new-token"],
+        ["calkit", "hub", "config", "set", "token", "this-is-a-new-token"],
     )
     with open(fpath, "r") as f:
         cfg = calkit.ryaml.load(f)
@@ -116,18 +116,18 @@ def _check_hub_scoping():
     # one config file
     hub_token = f"hub-scoped-{uuid.uuid4()}"
     subprocess.check_call(
-        ["calkit", "config", "hub", "set", "token", hub_token, "--hub", hub]
+        ["calkit", "hub", "config", "set", "token", hub_token, "--hub", hub]
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token", "--hub", hub]
+            ["calkit", "hub", "config", "get", "token", "--hub", hub]
         )
         .decode()
         .strip()
     )
     assert out == hub_token
     out = (
-        subprocess.check_output(["calkit", "config", "hub", "get", "token"])
+        subprocess.check_output(["calkit", "hub", "config", "get", "token"])
         .decode()
         .strip()
     )
@@ -145,11 +145,11 @@ def _check_hub_scoping():
     )
     assert out == email
     subprocess.check_call(
-        ["calkit", "config", "hub", "unset", "token", "--hub", hub]
+        ["calkit", "hub", "config", "unset", "token", "--hub", hub]
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "hub", "get", "token", "--hub", hub]
+            ["calkit", "hub", "config", "get", "token", "--hub", hub]
         )
         .decode()
         .strip()
@@ -157,7 +157,7 @@ def _check_hub_scoping():
     assert not out
     # Environment names are rejected as hub values
     result = subprocess.run(
-        ["calkit", "config", "hub", "get", "token", "--hub", "staging"],
+        ["calkit", "hub", "config", "get", "token", "--hub", "staging"],
         capture_output=True,
         text=True,
     )

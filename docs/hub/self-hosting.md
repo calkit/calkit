@@ -39,7 +39,7 @@ and continuous deployment, live with the code in
 ## Connecting the CLI
 
 The CLI shares one configuration across hubs, with credentials (tokens)
-scoped per hub. `calkit config hub set token ... --hub
+scoped per hub. `calkit hub config set token ... --hub
 your-hub.example.edu` operates on a specific hub's credentials, and the
 `CALKIT_HUB` environment variable selects the active hub for other
 commands.

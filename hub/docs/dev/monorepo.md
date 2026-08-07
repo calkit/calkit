@@ -254,7 +254,7 @@ exists on the `merge-hub` branch.
 deployment-internal vocabulary the CLI's hub surfaces don't accept) falling
 back to `CALKIT_ENV`, then the `default_hub` config value, and
 `get_env_suffix()` keys off it, so `CALKIT_ENV=staging` and existing config
-files keep working while `calkit config hub set token ... --hub
+files keep working while `calkit hub config set token ... --hub
 other-calkit.io` is the general form. Config later unified into a single
 file and keyring service (plus an isolated test-environment one), with
 only the credential fields (token, access_token, refresh_token,

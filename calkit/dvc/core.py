@@ -553,7 +553,7 @@ def configure_remote(
         repo.remote()
     except ValueError:
         warn("No Git remote defined; querying the hub")
-        # Try to fetch Git repo URL from Calkit cloud
+        # Try to fetch Git repo URL from the hub
         try:
             project = calkit.hub.get(f"/projects/{project_name}")
             url = project["git_repo_url"]

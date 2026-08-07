@@ -652,17 +652,16 @@ Options:
 
 Configure Calkit.
 
-| Command                                                   | Description                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                              |
-| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                  |
-| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                   |
-| [`remote`](#subcommand-config-remote)                     | Setup the Calkit cloud as the default DVC remote and store a token in the local config. |
-| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit cloud token in the local DVC config for all Calkit remotes.              |
-| [`list`](#subcommand-config-list)                         | List keys in the config.                                                                |
-| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                                |
-| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                           |
-| [`hub`](#subcommand-config-hub)                           | Work with per-hub credentials (tokens).                                                 |
+| Command                                                   | Description                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                             |
+| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                 |
+| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                  |
+| [`remote`](#subcommand-config-remote)                     | Set up the Calkit hub as the default DVC remote and store a token in the local config. |
+| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit hub token in the local DVC config for all Calkit remotes.               |
+| [`list`](#subcommand-config-list)                         | List keys in the config.                                                               |
+| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                               |
+| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                          |
 
 <a id="subcommand-config-set"></a>
 
@@ -723,7 +722,7 @@ Arguments:
 
 #### `calkit config remote`
 
-Setup the Calkit cloud as the default DVC remote and store a token in the local config.
+Set up the Calkit hub as the default DVC remote and store a token in the local config.
 
 Usage:
 
@@ -742,7 +741,7 @@ Options:
 
 #### `calkit config remote-auth`
 
-Store a Calkit cloud token in the local DVC config for all Calkit remotes.
+Store a Calkit hub token in the local DVC config for all Calkit remotes.
 
 Usage:
 
@@ -788,18 +787,6 @@ Usage:
 
 ```text
 calkit config github-codespace
-```
-
-<a id="subcommand-config-hub"></a>
-
-#### `calkit config hub`
-
-Work with per-hub credentials (tokens).
-
-Usage:
-
-```text
-calkit config hub COMMAND [ARGS]...
 ```
 
 <a id="command-group-new-create"></a>
@@ -3252,10 +3239,11 @@ Arguments:
 
 Interact with a Calkit hub.
 
-| Command                                | Description                      |
-| -------------------------------------- | -------------------------------- |
-| [`get`](#subcommand-hub-cloud-get)     | Get a resource from the hub API. |
-| [`login`](#subcommand-hub-cloud-login) | Log in to a Calkit hub.          |
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
 
 <a id="subcommand-hub-cloud-get"></a>
 
@@ -3301,6 +3289,18 @@ Options:
 | --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
 | `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
+
+<a id="subcommand-hub-cloud-config"></a>
+
+#### `calkit hub|cloud config`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit hub|cloud config COMMAND [ARGS]...
+```
 
 <a id="command-group-scheduler-sch"></a>
 

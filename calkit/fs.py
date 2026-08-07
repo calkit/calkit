@@ -130,7 +130,7 @@ def _parse_path(path: str) -> tuple[str, str, str]:
 
 
 class CalkitFileSystem(AbstractFileSystem):
-    """An fsspec-compatible filesystem for Calkit cloud storage.
+    """An fsspec-compatible filesystem for Calkit hub storage.
 
     This filesystem makes requests to the Calkit API to get file operation
     information, then uses the appropriate method to interact with the
@@ -989,7 +989,7 @@ class CalkitFileSystem(AbstractFileSystem):
         mode="overwrite",
         **kwargs,
     ):
-        """Upload a local file to Calkit cloud storage.
+        """Upload a local file to Calkit hub storage.
 
         Overrides the default fsspec implementation to report progress based
         on actual bytes uploaded rather than bytes written to the local buffer.
@@ -1024,7 +1024,7 @@ class CalkitFileSystem(AbstractFileSystem):
 
 
 class CalkitFile(AbstractBufferedFile):
-    """A file-like object for reading/writing from Calkit cloud storage.
+    """A file-like object for reading/writing from Calkit hub storage.
 
     This class handles buffering and delegates actual I/O to the underlying
     storage backend (GCS, S3, Google Drive, Box, etc.) via the Calkit API.

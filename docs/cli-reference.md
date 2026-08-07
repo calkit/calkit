@@ -1118,8 +1118,8 @@ Options:
 | Option                   | Type    | Required | Default | Description                                                                            |
 | ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `--title`                | text    | yes      |         | The title of the publication.                                                          |
-| `--description`          | text    | yes      |         | A description of the publication.                                                      |
 | `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | text    | no       |         | A description of the publication.                                                      |
 | `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
 | `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |

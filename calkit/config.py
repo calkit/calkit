@@ -290,7 +290,10 @@ class CalkitYamlSource(PydanticBaseSettingsSource):
     def __call__(self) -> dict[str, Any]:
         import yaml
 
-        fpath = self.settings_cls.model_config["yaml_file"]
+        fpath = (
+            self.settings_cls.model_config.get("yaml_file")
+            or get_config_yaml_fpath()
+        )
         try:
             with open(fpath) as f:  # type: ignore[arg-type]
                 data = yaml.safe_load(f) or {}
@@ -388,8 +391,10 @@ class Settings(BaseSettings):
     def write(self) -> None:
         import yaml
 
-        fpath = self.model_config["yaml_file"]
-        base_dir = os.path.dirname(fpath)  # type: ignore[arg-type]
+        fpath = str(
+            self.model_config.get("yaml_file") or get_config_yaml_fpath()
+        )
+        base_dir = os.path.dirname(fpath)
         os.makedirs(base_dir, exist_ok=True)
         cfg = self.model_dump()
         # Remove anything that should be in the keyring; hub-scoped
@@ -410,7 +415,7 @@ class Settings(BaseSettings):
                             pass
         # Preserve other hubs' credential sub-maps from the existing file
         try:
-            with open(fpath) as f:  # type: ignore[arg-type]
+            with open(fpath) as f:
                 existing = yaml.safe_load(f) or {}
         except (FileNotFoundError, yaml.YAMLError):
             existing = {}
@@ -439,10 +444,10 @@ class Settings(BaseSettings):
                     cfg[k] = existing[k]
         if hubs:
             cfg["hubs"] = hubs
-        with open(fpath, "w") as f:  # type: ignore[arg-type]
+        with open(fpath, "w") as f:
             yaml.safe_dump(cfg, f)
         # Ensure permissions are user read/write only
-        os.chmod(fpath, 0o600)  # type: ignore[arg-type]
+        os.chmod(fpath, 0o600)
 
 
 def read() -> Settings:

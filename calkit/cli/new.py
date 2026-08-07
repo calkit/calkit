@@ -58,10 +58,11 @@ def new_project(
             "--hub",
             "--cloud",
             help=(
-                "Create this project on a hub (and GitHub). Optionally "
-                "takes a hub URL or environment name; bare --hub (or the "
-                "special value 'default') uses the default_hub config "
-                "value, else calkit.io. --cloud is a deprecated alias."
+                "Create this project on a Calkit hub (and GitHub). "
+                "Optionally takes a hub URL or environment name; bare "
+                "--hub (or the special value 'default') uses the "
+                "default_hub config value, else calkit.io. --cloud is a "
+                "deprecated alias."
             ),
         ),
     ] = None,

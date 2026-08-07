@@ -13,7 +13,7 @@ from sqlmodel import Session, select
 import app.stripe
 from app import utcnow
 from app.config import settings
-from app.core import INVALID_ACCOUNT_NAMES
+from app.core import INVALID_ACCOUNT_NAMES, ORG_ONLY_ACCOUNT_NAMES
 from app.github import token_resp_text_to_dict
 from app.models import (
     Account,
@@ -138,7 +138,9 @@ def create_user(*, session: Session, user_create: UserCreate) -> User:
     # Only set a GitHub name when the user actually has a GitHub account;
     # GitHub-less (email/Google) signups leave it null.
     github_name = user_create.github_username
-    if account_name.lower() in INVALID_ACCOUNT_NAMES:
+    if account_name.lower() in (
+        INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES
+    ):
         raise HTTPException(422, "Invalid account name")
     existing = session.exec(
         select(Account).where(Account.name == account_name.lower())

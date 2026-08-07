@@ -32,16 +32,18 @@ CATEGORIES_SINGULAR_TO_PLURAL = {
 CATEGORIES_PLURAL_TO_SINGULAR = {
     v: k for k, v in CATEGORIES_SINGULAR_TO_PLURAL.items()
 }
+# Names no account may take, since they'd collide with app routes or
+# product vocabulary at the URL root
 INVALID_ACCOUNT_NAMES = [
     "actions",
     "admin",
+    "analytics",
     "anonymous",
     # OAuth callbacks live under /auth/{provider} so only this name is taken
     "auth",
     "browse",
     "calcs",
     "calculations",
-    "calkit",
     "checks",
     "cloud",
     "clouds",
@@ -57,8 +59,10 @@ INVALID_ACCOUNT_NAMES = [
     "figures",
     "git",
     "github",
+    "history",
     "hub",
     "hubs",
+    "latex",
     "login",
     "new",
     "notifications",
@@ -66,9 +70,12 @@ INVALID_ACCOUNT_NAMES = [
     "orgs",
     "pipeline",
     "pipelines",
+    "posters",
+    "presentations",
     "projects",
     "publications",
     "pubs",
+    "references",
     "register",
     "replicate",
     "replications",
@@ -76,6 +83,9 @@ INVALID_ACCOUNT_NAMES = [
     "repros",
     "reproduce",
     "reproductions",
+    "research",
+    "results",
+    "science",
     "search",
     "settings",
     "signup",
@@ -89,6 +99,11 @@ INVALID_ACCOUNT_NAMES = [
     "users",
     "workflows",
 ]
+
+# Names reserved for organizations, so a user can't claim the product's
+# own name as a personal account while hub operators can still create
+# an org under it
+ORG_ONLY_ACCOUNT_NAMES = ["calkit"]
 
 
 def utcnow() -> datetime:

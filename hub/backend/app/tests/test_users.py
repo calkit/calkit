@@ -9,6 +9,10 @@ from sqlmodel import Session
 
 from app import users
 from app.config import settings
+from app.core import (
+    INVALID_ACCOUNT_NAMES,
+    ORG_ONLY_ACCOUNT_NAMES,
+)
 from app.models import User, UserCreate, UserUpdate
 from app.security import verify_password
 from app.tests import random_email, random_lower_string
@@ -42,8 +46,12 @@ def test_create_user_email_allowlist(db: Session) -> None:
 
 
 def test_create_user_reserved_account_names(db: Session) -> None:
-    # Route segments and product vocabulary can't be account names, in any
-    # casing, since account names live at the URL root
+    # Route segments can't be account names, in any casing, since account
+    # names live at the URL root. 'calkit' is reserved from users too, but
+    # only so it stays available as an org (see ORG_ONLY_ACCOUNT_NAMES),
+    # which org creation still permits.
+    assert "calkit" not in INVALID_ACCOUNT_NAMES
+    assert "calkit" in ORG_ONLY_ACCOUNT_NAMES
     for name in ["hub", "cloud", "calkit", "Hub", "CLOUD", "settings"]:
         user_in = UserCreate(
             email=random_email(),

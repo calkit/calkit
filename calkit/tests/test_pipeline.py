@@ -2052,9 +2052,9 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
-            assert not _paths_overlap(
-                dep, out
-            ), f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            assert not _paths_overlap(dep, out), (
+                f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            )
 
 
 def test_expand_dep_excluding_subprojects(tmp_dir):

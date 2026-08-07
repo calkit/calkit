@@ -44,7 +44,7 @@ generate one for use with the API, and copy it to your clipboard.
 Then we can set that token in our Calkit configuration with:
 
 ```sh
-calkit config set token YOUR_TOKEN_HERE
+calkit hub config set token YOUR_TOKEN_HERE
 ```
 
 Next, clone the repo to your local machine with (filling in your username):
@@ -59,7 +59,7 @@ GitHub.
 ![Cloning the repo.](img/openfoam/clone.png)
 
 `calkit clone` is a simple wrapper around `git clone` that sets up the
-necessary configuration to use the Calkit Cloud as a DVC remote,
+necessary configuration to use the Calkit hub as a DVC remote,
 the place where we're going to push our data,
 while our code goes to GitHub.
 
@@ -204,7 +204,7 @@ calkit save -am "Run simulations"
 ```
 
 In this case, the outputs of the simulations were pushed up to the DVC remote
-in the Calkit Cloud.
+on the hub.
 
 We are defining an output for each simulation as the `postProcessing` folder,
 which we will cache and push to the cloud for backup,

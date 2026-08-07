@@ -1,5 +1,9 @@
 name: Publish VS Code extension
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   release:
     types: [published]

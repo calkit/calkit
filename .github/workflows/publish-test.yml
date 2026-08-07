@@ -1,5 +1,9 @@
 name: Publish to TestPyPI
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   release:
     types: [published]
@@ -16,7 +20,11 @@ jobs:
         with:
           python-version: "3.x"
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -60,6 +68,6 @@ jobs:
           name: python-package-distributions
           path: dist/
       - name: Publish distribution 📦 to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/

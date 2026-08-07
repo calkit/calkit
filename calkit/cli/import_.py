@@ -102,7 +102,7 @@ def import_dataset(
     if filter_paths is not None:
         params = {"filter_paths": filter_paths}
     try:
-        resp = calkit.cloud.get(
+        resp = calkit.hub.get(
             f"/projects/{owner_name}/{project_name}/datasets/{path}",
             params=params,
         )
@@ -166,7 +166,7 @@ def import_dataset(
             os.makedirs(dest_path, exist_ok=True)
         for f in tqdm(files):
             # Fetch content from API
-            resp_i = calkit.cloud.get(
+            resp_i = calkit.hub.get(
                 f"/projects/{owner_name}/{project_name}/contents/{f}"
             )
             content = resp_i.get("content")
@@ -193,7 +193,7 @@ def import_dataset(
                         f.write(chunk)
             repo.git.add(out_path)
     else:
-        raise_error("Could not fetch import info from Calkit Cloud")
+        raise_error("Could not fetch import info from the hub")
     # Add to datasets in calkit.yaml
     typer.echo("Adding dataset to calkit.yaml")
     new_ds = calkit.models.ImportedDataset(
@@ -287,7 +287,7 @@ def import_environment(
     else:
         typer.echo("Importing from Cloud project")
         try:
-            resp = calkit.cloud.get(  # noqa: F841 TODO: Use this variable
+            resp = calkit.hub.get(  # noqa: F841 TODO: Use this variable
                 f"/projects/{project}/environments/{env_name}"
             )
         except Exception as e:

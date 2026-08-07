@@ -231,7 +231,7 @@ The default behavior of DVC is to not save
 pipeline outputs like our compiled PDF to Git,
 but instead commit them to DVC,
 since Git is not particularly good at handling large and/or binary files.
-The Calkit Cloud serves as a "DVC remote" for us to push these artifacts
+The Calkit hub serves as a "DVC remote" for us to push these artifacts
 to back them up and make them available to others with access to the project.
 
 If we go down to the terminal and run `calkit push`,

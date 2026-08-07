@@ -124,7 +124,7 @@ The project is sustained through a combination of:
 
 - **Volunteer contributions** from the community.
 - **Institutional support** through allocated work time.
-- **Calkit Cloud** optional paid plans to help cover infrastructure costs
+- **calkit.io** optional paid plans to help cover infrastructure costs
   for the cloud storage and compute service hosted at
   [calkit.io](https://calkit.io).
 

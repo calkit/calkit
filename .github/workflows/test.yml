@@ -1,12 +1,35 @@
 name: Run tests
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on: pull_request
 
 env:
   CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
 
 jobs:
+  # Always runs so the gated job below can be a branch protection required
+  # check; hub-only PRs are covered by test-hub.yml instead
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+    steps:
+      - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        id: filter
+        with:
+          filters: |
+            cli:
+              - "**"
+              - "!hub/**"
+
   main:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -22,19 +45,23 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
         with:
           miniforge-version: latest
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.6
+        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@v2
+        uses: julia-actions/install-juliaup@ec16ad5cb2e4afb0ca4ea6895e35867a269769a7 # v2
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       - name: Setup Node.js
@@ -42,7 +69,7 @@ jobs:
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -62,7 +89,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

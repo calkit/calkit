@@ -1,0 +1,158 @@
+# Name the dev stack for the product rather than the directory it lives
+# in, since Compose project names are global on the machine and 'hub'
+# is ambiguous. Production and staging pass --project-name explicitly,
+# so this only affects dev.
+name: calkit
+
+services:
+  proxy:
+    image: traefik:v3.6.2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "80:80"
+      - "8090:8080"
+    # Duplicate the command from docker-compose.yml to add --api.insecure=true
+    command:
+      # Enable Docker in Traefik, so that it reads labels from Docker services
+      - --providers.docker
+      # Add a constraint to only use services with the label for this stack
+      - --providers.docker.constraints=Label(`traefik.constraint-label`, `traefik-public`)
+      # Do not expose all Docker services, only the ones explicitly exposed
+      - --providers.docker.exposedbydefault=false
+      # Create an entrypoint "http" listening on port 80
+      - --entrypoints.http.address=:80
+      # Create an entrypoint "https" listening on port 443
+      - --entrypoints.https.address=:443
+      # Enable the access log, with HTTP requests
+      - --accesslog
+      # Enable the Traefik log, for configurations and errors
+      - --log
+      # Enable debug logging for local development
+      - --log.level=DEBUG
+      # Enable the Dashboard and API
+      - --api
+      # Enable the Dashboard and API in insecure mode for local development
+      - --api.insecure=true
+    labels:
+      # Enable Traefik for this service, to make it available in the public network
+      - traefik.enable=true
+      - traefik.constraint-label=traefik-public
+      # Dummy https-redirect middleware that doesn't really redirect, only to
+      # allow running it locally
+      - traefik.http.middlewares.https-redirect.contenttype.autodetect=false
+    networks:
+      - traefik-public
+      - default
+
+  db:
+    restart: "no"
+    env_file:
+      - .env
+    ports:
+      - "5433:5432"
+
+  adminer:
+    restart: "no"
+    ports:
+      - "8080:8080"
+
+  prestart:
+    env_file:
+      - .env
+
+  backend:
+    restart: "no"
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    # Mount the repo root so edits to both the backend and the calkit
+    # package on the host are live in the container
+    volumes:
+      - ../:/app
+      - /app/.venv
+    build:
+      context: ..
+      dockerfile: hub/backend/Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    command:
+      - fastapi
+      - run
+      - --reload
+      - "app/main.py"
+    environment:
+      SMTP_HOST: "mailcatcher"
+      SMTP_PORT: "1025"
+      SMTP_TLS: "false"
+      EMAILS_FROM_EMAIL: "noreply@example.com"
+
+  backend-dvc:
+    restart: "no"
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    # Mount the repo root so edits to both the backend and the calkit
+    # package on the host are live in the container
+    volumes:
+      - ../:/app
+      - /app/.venv
+    build:
+      context: ..
+      dockerfile: hub/backend/Dockerfile
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+    command:
+      - fastapi
+      - run
+      - --reload
+      - "app/main.py"
+
+  mailcatcher:
+    image: schickling/mailcatcher
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+
+  texmf-proxy:
+    restart: "no"
+    build:
+      context: ./texmf-proxy
+    ports:
+      - "8771:8771"
+    # Override the base compose's production CORS origin (https://${DOMAIN}); in
+    # dev the frontend is served over http from a different port, so allow any.
+    environment:
+      - TEXMF_PROXY_ALLOW_ORIGIN=*
+
+  frontend:
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      - VITE_API_URL=http://api.localhost
+      # The in-browser LaTeX engine fetches missing TeX files from here on a
+      # kpathsea miss (full TeX Live coverage + on-demand fonts). See texmf-proxy.
+      - VITE_TEXMF_PROXY=http://localhost:8771
+    build:
+      context: ./frontend
+      args:
+        - NODE_ENV=development
+      target: build-stage
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend/:/app
+      # Do not mount node_modules from host, use container's node_modules
+      - /app/node_modules
+    command:
+      - sh
+      - -c
+      - "npm install && npm run dev"
+
+networks:
+  traefik-public:
+    # For local dev, don't expect an external Traefik network
+    external: false

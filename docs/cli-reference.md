@@ -46,7 +46,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -652,16 +652,16 @@ Options:
 
 Configure Calkit.
 
-| Command                                                   | Description                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                              |
-| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                  |
-| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                   |
-| [`remote`](#subcommand-config-remote)                     | Setup the Calkit cloud as the default DVC remote and store a token in the local config. |
-| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit cloud token in the local DVC config for all Calkit remotes.              |
-| [`list`](#subcommand-config-list)                         | List keys in the config.                                                                |
-| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                                |
-| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                           |
+| Command                                                   | Description                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                             |
+| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                 |
+| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                  |
+| [`remote`](#subcommand-config-remote)                     | Set up the Calkit hub as the default DVC remote and store a token in the local config. |
+| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit hub token in the local DVC config for all Calkit remotes.               |
+| [`list`](#subcommand-config-list)                         | List keys in the config.                                                               |
+| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                               |
+| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                          |
 
 <a id="subcommand-config-set"></a>
 
@@ -722,7 +722,7 @@ Arguments:
 
 #### `calkit config remote`
 
-Setup the Calkit cloud as the default DVC remote and store a token in the local config.
+Set up the Calkit hub as the default DVC remote and store a token in the local config.
 
 Usage:
 
@@ -741,7 +741,7 @@ Options:
 
 #### `calkit config remote-auth`
 
-Store a Calkit cloud token in the local DVC config for all Calkit remotes.
+Store a Calkit hub token in the local DVC config for all Calkit remotes.
 
 Usage:
 
@@ -845,18 +845,18 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                   |
-| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided. |
-| `--title`           | text    | no       |         | Project title.                                                                |
-| `--description`     | text    | no       |         | Project description.                                                          |
-| `--cloud`           | boolean | no       | False   | Create this project in the cloud (Calkit and GitHub.)                         |
-| `--public`          | boolean | no       | False   | Create as a public project if --cloud is selected.                            |
-| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.          |
-| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.      |
-| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                 |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                      |
-| `--verbose`         | boolean | no       | False   | Print verbose output.                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
 
 <a id="subcommand-new-create-figure-fig"></a>
 
@@ -1118,8 +1118,8 @@ Options:
 | Option                   | Type    | Required | Default | Description                                                                            |
 | ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `--title`                | text    | yes      |         | The title of the publication.                                                          |
-| `--description`          | text    | yes      |         | A description of the publication.                                                      |
 | `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | text    | no       |         | A description of the publication.                                                      |
 | `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
 | `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |
@@ -3233,27 +3233,28 @@ Arguments:
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
 
-<a id="command-group-cloud"></a>
+<a id="command-group-hub-cloud"></a>
 
-### `calkit cloud`
+### `calkit hub|cloud`
 
-Interact with a Calkit Cloud.
+Interact with a Calkit hub.
 
-| Command                            | Description                        |
-| ---------------------------------- | ---------------------------------- |
-| [`get`](#subcommand-cloud-get)     | Get a resource from the Cloud API. |
-| [`login`](#subcommand-cloud-login) | Login to the Calkit Cloud.         |
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
 
-<a id="subcommand-cloud-get"></a>
+<a id="subcommand-hub-cloud-get"></a>
 
-#### `calkit cloud get`
+#### `calkit hub|cloud get`
 
-Get a resource from the Cloud API.
+Get a resource from the hub API.
 
 Usage:
 
 ```text
-calkit cloud get ENDPOINT
+calkit hub|cloud get [OPTIONS] ENDPOINT
 ```
 
 Arguments:
@@ -3262,25 +3263,44 @@ Arguments:
 | ---------- | ---- | -------- | ------- | ------------ |
 | `endpoint` | text | yes      |         | API endpoint |
 
-<a id="subcommand-cloud-login"></a>
+Options:
 
-#### `calkit cloud login`
+| Option  | Type | Required | Default | Description                                                                                                                              |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 
-Login to the Calkit Cloud.
+<a id="subcommand-hub-cloud-login"></a>
+
+#### `calkit hub|cloud login`
+
+Log in to a Calkit hub.
 
 First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
 
 Usage:
 
 ```text
-calkit cloud login [OPTIONS]
+calkit hub|cloud login [OPTIONS]
 ```
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                        |
-| --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
+
+<a id="subcommand-hub-cloud-config"></a>
+
+#### `calkit hub|cloud config`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit hub|cloud config COMMAND [ARGS]...
+```
 
 <a id="command-group-scheduler-sch"></a>
 

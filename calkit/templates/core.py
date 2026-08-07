@@ -81,7 +81,6 @@ def use_template(name: str, dest_dir: str, **kwargs):
             template.kind,
             template.name,
         )
-        print(loc)
     else:
         loc = template.loc
     if loc.startswith("http://") or loc.startswith("https://"):

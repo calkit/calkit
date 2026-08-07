@@ -110,12 +110,12 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit.io)
+If you want to use a [Calkit hub](https://docs.calkit.org/hub)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](https://docs.calkit.org/cloud-integration) with:
+you can [connect to the hub](https://docs.calkit.org/hub) with:
 
 ```sh
-calkit cloud login
+calkit hub login
 ```
 
 If you use AI agents like Claude, Copilot, or Codex,
@@ -274,10 +274,10 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+Note the `--hub` flag requires [a hub connection](https://docs.calkit.org/hub)
 to be set up, but can be omitted if the project doesn't need to be backed up to
 the cloud or shared with collaborators.
 Cloud integration can also be set up later.

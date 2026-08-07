@@ -217,6 +217,52 @@ def test_new_publication(tmp_dir):
     assert stage["environment"] == "my-latex-env"
     assert stage["target_path"] == "my-paper/paper.tex"
     assert stage["outputs"] == ["my-paper/paper.pdf"]
+    # A duplicate path fails cleanly rather than partially applying
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "Again",
+            "--stage",
+            "build-latex-article",
+            "--environment",
+            "my-latex-env",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    # The description is optional and stays out of calkit.yaml when absent
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper-2",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "No description",
+            "--stage",
+            "build-latex-article-2",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pub2 = ck_info["publications"][1]
+    assert pub2["path"] == "my-paper-2/paper.pdf"
+    assert "description" not in pub2
 
 
 def test_new_uv_env(tmp_dir):
@@ -475,7 +521,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     )
     assert result.returncode != 0
     assert "some-org" in result.stderr
-    assert "organization exists in Calkit Cloud" in result.stderr
+    assert "organization exists on the hub" in result.stderr
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"

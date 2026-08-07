@@ -1,0 +1,26 @@
+# The hub backend image builds with this directory as its context so it can
+# install the calkit-python workspace member; keep everything it doesn't need
+# out of the context
+.git
+.venv
+.env
+**/__pycache__
+*.pyc
+**/.mypy_cache
+**/.pytest_cache
+**/node_modules
+**/.venv
+.coverage
+coverage.xml
+htmlcov
+dist
+site
+docs
+examples
+test
+calk9
+jupyterlab-ext
+vscode-ext
+hub/frontend
+hub/texmf-proxy
+hub/node_modules

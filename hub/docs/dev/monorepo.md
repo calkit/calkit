@@ -402,25 +402,49 @@ self-hosted instance can keep hosting its own by setting the profile.
       which let anyone sign up through Google or email. Leave it unset on
       `calkit.io`, which is open to everyone.
 
-### Self-hosted runners
+### Self-hosted runner
 
-On each runner machine (production, staging), from the runner directory:
+Both sites run on one VM, so one runner registration serves both, carrying
+both role labels. A job only lands on a runner that has *every* label in
+its `runs-on`, so a runner labeled only `production` would leave staging
+deploys queued forever.
+
+From the runner directory:
 
 ```sh
-./svc.sh stop && ./svc.sh uninstall
+# svc.sh needs root on Linux (it manages a systemd unit); config.sh must
+# NOT be run as root, and the runner refuses if you try
+sudo ./svc.sh stop && sudo ./svc.sh uninstall
 ./config.sh remove --token <removal-token-from-calkit-cloud-settings>
 ./config.sh --url https://github.com/calkit/calkit \
   --token <registration-token-from-calkit-calkit-settings> \
-  --labels production   # or: staging
-./svc.sh install && ./svc.sh start
+  --labels production,staging
+sudo ./svc.sh install && sudo ./svc.sh start
 ```
+
+On macOS the runner installs a launchd agent instead and `svc.sh` needs no
+`sudo`. `svc.sh install` takes an optional username to run the service as;
+under `sudo` it uses the invoking user, which is what you want so the
+service runs as whoever configured it rather than as root.
 
 Tokens come from each repo's Settings → Actions → Runners, or
 `gh api -X POST repos/calkit/calkit/actions/runners/registration-token`.
-Keep the labels `production`/`staging`; the workflows select on those.
+Keep the labels `production`/`staging` rather than naming them after the
+domains: labels route jobs to a machine, while the environment names the
+target, and keeping them separate means splitting the sites onto two VMs
+later is a runner-side change with no workflow edits.
 
-- [ ] Re-register the staging runner against calkit/calkit.
-- [ ] Re-register the production runner against calkit/calkit.
+One runner runs one job at a time, so a production deploy queues behind a
+staging deploy already in flight, including a rollback. If that ever
+matters more than the simplicity, register a second runner (same
+machine is fine) and give each one label.
+
+The two stacks stay separate through `--project-name ${{ vars.STACK_NAME }}`,
+not through the labels: Compose scopes containers, networks, volumes, and
+`--remove-orphans` to the project, so make sure `STACK_NAME` differs
+between the two environments.
+
+- [ ] Re-register the runner against calkit/calkit with both labels.
 
 ### Merge and first deploys
 

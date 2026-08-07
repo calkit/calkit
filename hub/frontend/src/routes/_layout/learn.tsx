@@ -35,6 +35,14 @@ function Learn() {
           .
         </Text>
         <Text mb={4}>
+          To learn more about how this app fits into the bigger picture, and how
+          to connect the CLI to it, see the{" "}
+          <Link isExternal variant="blue" href="https://docs.calkit.org/hub/">
+            hub documentation
+          </Link>
+          .
+        </Text>
+        <Text mb={4}>
           If you notice a bug or have a suggestion for a new feature, submit a
           new issue to the{" "}
           <Link

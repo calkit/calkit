@@ -37,7 +37,9 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
-  - The hub: hub/index.md
+  - The hub:
+      - hub/index.md
+      - Running your own: hub/self-hosting.md
   - Use with AI tools: ai-tools.md
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md

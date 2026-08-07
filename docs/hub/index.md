@@ -19,7 +19,7 @@ Note this will need to be done once per machine, e.g., once on your
 personal laptop and once on an HPC cluster.
 
 Like the rest of Calkit, the hub is free and open source, so
-[you can host your own](https://github.com/calkit/calkit/tree/main/hub).
+[you can run your own](self-hosting.md).
 
 ## Using DVC remotes other than the hub
 

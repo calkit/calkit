@@ -71,11 +71,11 @@ Frontend docs: [frontend/README.md](./frontend/README.md).
 
 ## Deployment
 
-Deployment docs: [deployment.md](./deployment.md).
+Deployment docs: [deployment.md](./docs/dev/deployment.md).
 
 ## Development
 
-General development docs: [development.md](./development.md).
+General development docs: [development.md](./docs/dev/development.md).
 
 This includes using Docker Compose, custom local domains, `.env`
 configurations, etc.

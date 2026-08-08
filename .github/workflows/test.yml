@@ -60,7 +60,7 @@ jobs:
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@5185adfbffb4bd703da3010310260805d89ebb11 # v0.9.6
+        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           run-install: false
       - name: Install Juliaup

@@ -428,6 +428,9 @@ export class CalkitSidebarProvider
         String(index),
       );
       item.iconPath = new vscode.ThemeIcon("question");
+      if (typeof question !== "string" && question.answer) {
+        item.description = "answered";
+      }
       item.tooltip = text;
       item.contextValue = "question";
       return item;

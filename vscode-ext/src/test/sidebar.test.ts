@@ -92,3 +92,40 @@ test("sidebar provider does not throw on object-form inputs in getStageProps", (
   const hasRawCsv = children.some((c) => c.description === "data/raw.csv");
   assert.ok(hasRawCsv, "Should find input row with description data/raw.csv");
 });
+
+test("question items mark only answered entries while preserving expansion", () => {
+  const provider = new CalkitSidebarProvider();
+  provider.refresh(
+    "/workspace",
+    {
+      questions: [
+        { question: "Answered question", answer: "A result" },
+        { question: "Question with hypothesis", hypothesis: "An idea" },
+        { question: "Question with empty answer", answer: "" },
+        "Plain question",
+      ],
+    },
+    undefined,
+    new Set(),
+  );
+  const section = new SidebarItem(
+    "Questions",
+    vscodeStub.TreeItemCollapsibleState.Collapsed,
+    "section-questions",
+  );
+  const items = provider.getChildren(section);
+  assert.deepEqual(
+    items.map((item) => [item.label, item.description]),
+    [
+      ["Answered question", "answered"],
+      ["Question with hypothesis", undefined],
+      ["Question with empty answer", undefined],
+      ["Plain question", undefined],
+    ],
+  );
+  assert.equal(
+    items[0].collapsibleState,
+    vscodeStub.TreeItemCollapsibleState.Collapsed,
+  );
+  assert.equal(provider.getChildren(items[0])[0].description, "A result");
+});

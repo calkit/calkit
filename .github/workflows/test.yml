@@ -79,7 +79,7 @@ jobs:
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Setup R
@@ -111,7 +111,7 @@ jobs:
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Install JupyterLab extension dependencies
@@ -146,7 +146,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: npm

@@ -12,6 +12,7 @@ import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Mermaid from "../../../../../components/Common/Mermaid"
 import { useProjectEnvironments } from "../../../../../hooks/useProject"
+import { dataOrNull } from "../../../../../lib/api"
 import {
   extractEnvRefs,
   extractFilePaths,
@@ -238,7 +239,7 @@ function ProjectPipeline() {
         owner_name: accountName,
         project_name: projectName,
         ref,
-      }).then((response) => response.data),
+      }).then(dataOrNull),
   })
   const { environmentsRequest } = useProjectEnvironments(
     accountName,

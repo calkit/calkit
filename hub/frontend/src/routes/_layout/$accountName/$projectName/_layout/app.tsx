@@ -4,6 +4,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { ProjectsService } from "../../../../../client"
+import { dataOrNull } from "../../../../../lib/api"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/app",
@@ -19,7 +20,7 @@ function ProjectApp() {
       ProjectsService.getProjectApp({
         owner_name: accountName,
         project_name: projectName,
-      }).then((response) => response.data),
+      }).then(dataOrNull),
   })
 
   return (

@@ -40,6 +40,7 @@ import {
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
+import { dataOrNull } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import {
   formatReleaseDate,
@@ -627,7 +628,7 @@ function WholeProjectView({
         owner_name: loc.ownerName,
         project_name: loc.projectName,
         ref: gitRev,
-      }).then((response) => response.data),
+      }).then(dataOrNull),
     retry: false,
   })
   if (showcaseQuery.isPending) return <LoadingSpinner height="100%" />

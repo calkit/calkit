@@ -26,6 +26,7 @@ import {
   ProjectsService,
 } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { dataOrNull } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 
 interface EditFileProps {
@@ -73,7 +74,7 @@ const EditFileInfo = ({ isOpen, onClose, item }: EditFileProps) => {
         project_name: projectName,
         path: item.path,
         contentPatch: data,
-      }).then((response) => response.data)
+      }).then(dataOrNull)
     },
     onSuccess: () => {
       showToast("Success!", "File info updated.", "success")

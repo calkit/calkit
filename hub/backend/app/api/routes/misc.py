@@ -454,22 +454,38 @@ def get_arxiv_pdf(arxiv_id: str, current_user: CurrentUser) -> Response:
     except requests.RequestException as e:
         logger.warning(f"Failed to fetch arXiv PDF {arxiv_id}: {e}")
         raise HTTPException(502, "Could not reach arXiv")
-    if resp.status_code == 404:
-        raise HTTPException(404, "No PDF for this arXiv ID")
-    if not resp.ok:
-        logger.warning(f"arXiv returned {resp.status_code} for PDF {arxiv_id}")
-        raise HTTPException(502, "arXiv could not provide this PDF")
-    if "pdf" not in resp.headers.get("Content-Type", ""):
-        # A withdrawn or unreleased paper answers with an HTML notice
-        raise HTTPException(404, "No PDF for this arXiv ID")
+    # Anything that gives up before streaming has to close the response
+    # itself; once streaming starts, the generator below owns it
+    try:
+        if resp.status_code == 404:
+            raise HTTPException(404, "No PDF for this arXiv ID")
+        if not resp.ok:
+            logger.warning(
+                f"arXiv returned {resp.status_code} for PDF {arxiv_id}"
+            )
+            raise HTTPException(502, "arXiv could not provide this PDF")
+        if "pdf" not in resp.headers.get("Content-Type", ""):
+            # A withdrawn or unreleased paper answers with an HTML notice
+            raise HTTPException(404, "No PDF for this arXiv ID")
+    except HTTPException:
+        resp.close()
+        raise
     headers = {
         # A paper at a given version never changes, so let the browser keep it
         "Cache-Control": "private, max-age=86400",
     }
     if length := resp.headers.get("Content-Length"):
         headers["Content-Length"] = length
+
+    def stream():
+        # Closed however the download ends, including a client that
+        # disconnects part way through, so the connection goes back to
+        # the pool instead of leaking
+        try:
+            yield from resp.iter_content(chunk_size=64 * 1024)
+        finally:
+            resp.close()
+
     return StreamingResponse(
-        resp.iter_content(chunk_size=64 * 1024),
-        media_type="application/pdf",
-        headers=headers,
+        stream(), media_type="application/pdf", headers=headers
     )

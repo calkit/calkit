@@ -26,10 +26,18 @@ def test_get_arxiv_pdf_rejects_a_non_id(
     get.assert_not_called()
 
 
+def _fake_response(**kwargs) -> SimpleNamespace:
+    """An arXiv response that records whether it was closed."""
+    closed = []
+    resp = SimpleNamespace(closed=closed, **kwargs)
+    resp.close = lambda: closed.append(True)
+    return resp
+
+
 def test_get_arxiv_pdf_streams_the_paper(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
-    fake = SimpleNamespace(
+    fake = _fake_response(
         status_code=200,
         ok=True,
         headers={"Content-Type": "application/pdf", "Content-Length": "5"},
@@ -43,6 +51,9 @@ def test_get_arxiv_pdf_streams_the_paper(
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
     assert resp.content == b"%PDF-"
+    # Closed once the download ends, so the connection goes back to the
+    # pool rather than leaking
+    assert fake.closed == [True]
     # An old-style ID keeps its slash, and the version suffix names the exact
     # PDF the citation refers to
     assert get.call_args.args[0] == "https://arxiv.org/pdf/math.GT/0309136v2"
@@ -52,7 +63,7 @@ def test_get_arxiv_pdf_when_there_is_no_pdf(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     """A withdrawn paper answers with an HTML notice, not a PDF."""
-    fake = SimpleNamespace(
+    fake = _fake_response(
         status_code=200,
         ok=True,
         headers={"Content-Type": "text/html"},
@@ -64,3 +75,5 @@ def test_get_arxiv_pdf_when_there_is_no_pdf(
             headers=normal_user_token_headers,
         )
     assert resp.status_code == 404
+    # Giving up before streaming has to close it too
+    assert fake.closed == [True]

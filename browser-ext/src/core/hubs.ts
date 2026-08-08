@@ -8,9 +8,12 @@ export interface Hub {
   apiUrl: string;
 }
 
-// A hub's API URL isn't derivable from its web URL by any convention, so
-// both are declared for each built-in instance, matching calkit.hub in the
-// Python package.
+// The built-in instances declare both URLs rather than deriving the API
+// one with apiUrlFromHubUrl: local development predates the api-subdomain
+// rule and doesn't follow it (localhost:5173 is served by api.localhost),
+// and production's is a prefix of a host that also serves the web app.
+// A self-hosted hub does follow the rule, which is why its URL alone is
+// enough. This matches calkit.hub in the Python package.
 export const HUBS: Record<string, Hub> = {
   production: {
     name: "production",

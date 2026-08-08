@@ -105,10 +105,10 @@ in inside the larger project.
 Note: If you haven't installed the Calkit GitHub app for the repo in question,
 you'll need to do that.
 
-After connecting things all together. You can now easily sync between them.
-The Overleaf document will become a Calkit pipeline stage with explicit
-inputs for the figures, allowing them to be checked for staleness,
-synced, and easily built offline and pushed back up to the web.
+Once everything is connected, syncing between them is a single action.
+The Overleaf document becomes a Calkit pipeline stage with explicit
+inputs for the figures, so they can be checked for staleness,
+synced, and built offline and pushed back up to the web.
 
 ## GitHub
 
@@ -152,9 +152,9 @@ That list will never be complete, so for anything not on it, open the Calkit
 toolbar popup: it reads the page you're on directly and detects the reference
 the same way.
 
-If it's not present you can add it, then view/edit noted on the item.
-If you'd like to add it to a different project, you can select a different
-active project from the dropdown and add it there.
+If it isn't there you can add it, then read and edit the notes on it.
+To save it under a different project, select that project from the dropdown
+and add it there.
 
 ## Releasing
 
@@ -172,74 +172,3 @@ secrets (an OAuth client for the Web Store API, authorized for the
 publishing account).
 Until that variable exists the upload step is skipped and the release's zip
 is uploaded by hand, so the workflow is useful before the listing is.
-
-## TODO
-
-Delete this list before merging!
-
-- [x] When hovering over a DVC tracked file on GitHub, I see my profile
-      popup. This should link us to the all files page on Calkit.
-      The extension panel also has no way to go "back" from viewing the
-      file in the panel.
-- [x] GitHub PR workflow.
-- [x] Images, PDFs, and Plotly figures should be able to be viewed as modals
-      on GitHub when they are DVC tracked. Maybe even notebook HTML.
-      (Images render in the panel; everything else opens in the extension's
-      own viewer page, since GitHub's content security policy forbids the
-      frames and objects a PDF or notebook needs. Plotly links to the hub
-      rather than shipping the library.)
-- [x] Private repos: the PR view reads its refs from the GitHub API
-      unauthenticated, so it can't see them. Route through the hub, which
-      holds a token.
-      (`GET /projects/{owner}/{project}/github-pulls/{number}` returns the
-      head and base refs. The extension no longer asks GitHub for anything
-      directly, so its GitHub host permission is gone.)
-- [x] "Changed" in the PR view compares file size, the only comparable the
-      contents listing carries. Exposing the DVC md5 would make it exact.
-      (The contents listing now carries the DVC md5, and the comparison
-      uses it, falling back to size only where a hash is missing.)
-- [x] When an item is in a Zotero collection, disable the add to collection
-      button unless the user changes to a hub, project, collection where it
-      doesn't exist. That is, don't allow duplicates.
-- [x] Should work on arvix html pages like https://arxiv.org/html/2608.06314v1.
-      (Also /pdf/ URLs, which resolve to the same paper.)
-- [x] Show spinner while overleaf sync status is being fetched.
-- [x] Saving on overleaf should trigger a sync status refresh.
-      (Listens for an explicit save, then re-checks once Overleaf has had a
-      moment to write it.)
-- [x] Overleaf project that needs syncing should show as yellow on calkit
-      extension button to draw attention.
-- [x] Add some sort of build/deploy pipeline for the browser extension.
-      (`browser-ext/vX.Y.Z` tags build, test, stamp the version into the
-      manifest, and attach a store-ready zip to the release. Uploading to
-      the Chrome Web Store is still manual, pending store credentials.)
-- [x] On cambridge.org/core papers, their feedback thing is on top of the
-      calkit extension button.
-      (The launcher lifts above it. There's no way to detect another site's
-      floating widget, so the hosts known to collide are listed in
-      `launcherPosition`, which is easy to extend.)
-- [x] Arxiv html page doesn't pick up metadata even though it's in a ref
-      collection on Calkit. Just shows Untitled and the arxiv number.
-      (Two causes. The rendered HTML at `/html/` publishes no citation meta
-      tags at all, unlike the `/abs/` page, so the title, authors, and year
-      are now read from the paper's own title block. And the collection
-      lookup only recognized an arXiv entry by its `eprint` field, so an
-      entry written with just an arxiv.org URL or an arXiv DOI never
-      matched.)
-- [x] Publish to CWS, perhaps with https://github.com/marketplace/actions/publish-chrome-extension-to-chrome-web-store.
-      (Added to the release workflow, switched on by setting the
-      `CHROME_EXTENSION_ID` repository variable; see Releasing below.)
-- [x] Only https artifact URLs can be viewed -- what about an exception for localhost ones?
-      (Plain http is allowed for loopback hosts, which includes the
-      `objects.localhost` subdomain the local stack serves artifacts from.)
-- [x] GitHub PR view should be more integrated, not just in the bottom right.
-      We can actually put content into the main body, e.g., a little button
-      at the bottom allowing us to view the artifact, optionally
-      side-by-side with base branch.
-      (A card at the end of the conversation, without waiting for the panel
-      to be opened, with View and Compare per changed output. Compare opens
-      both versions in one overlay.)
-- [x] When switching hubs, if not logged in, we can't go back and switch to
-      a different hub.
-      (The signed-out state now carries a hub picker along with the sign-in
-      button, everywhere it's shown.)

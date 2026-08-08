@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import get_args
 
 import keyring
@@ -224,6 +225,11 @@ def fake_keyring(monkeypatch):
     keyring.set_keyring(backend)
     monkeypatch.setattr(config, "_keyring_supported", True)
     monkeypatch.setattr(config, "_secret_cache", {})
+    # A secret can also come from the environment, and CI sets some of
+    # these; the keyring is what's under test here
+    for field in config.KEYRING_FIELDS:
+        for prefix in ["CALKIT_", "CALKIT_TEST_"]:
+            monkeypatch.delenv(f"{prefix}{field.upper()}", raising=False)
     yield backend
     keyring.set_keyring(original)
 
@@ -287,8 +293,10 @@ def test_write_keeps_secrets_it_never_read(
     cfg = config.read()
     cfg.email = "someone@example.com"
     cfg.write()
-    assert fake_keyring.store[(app, "github_token")] == "gh-secret"
     monkeypatch.setattr(config, "_secret_cache", {})
+    # Through get_secret rather than the store, since what's stored is
+    # bytes on Linux
+    assert config.get_secret("github_token") == "gh-secret"
     reread = config.read()
     assert reread.email == "someone@example.com"
     assert reread.github_token == "gh-secret"
@@ -296,3 +304,23 @@ def test_write_keeps_secrets_it_never_read(
     reread.github_token = None
     reread.write()
     assert (app, "github_token") not in fake_keyring.store
+
+
+def test_secrets_round_trip_on_linux(fake_keyring, monkeypatch, tmp_path):
+    # Linux stores the value as bytes, so what comes back out of the
+    # keyring -- and out of the cache -- has to be the string either way.
+    # CI is Linux and the developers' machines aren't, so it's faked here
+    # rather than left to the platform the tests happen to run on.
+    monkeypatch.setattr(
+        config, "platform", SimpleNamespace(system=lambda: "Linux")
+    )
+    monkeypatch.setattr(
+        config, "get_config_yaml_fpath", lambda: str(tmp_path / "config.yaml")
+    )
+    config.set_secret("github_token", "gh-secret")
+    app = config.get_app_name()
+    assert fake_keyring.store[(app, "github_token")] == b"gh-secret"
+    assert config.get_secret("github_token") == "gh-secret"
+    monkeypatch.setattr(config, "_secret_cache", {})
+    assert config.get_secret("github_token") == "gh-secret"
+    assert config.read().github_token == "gh-secret"

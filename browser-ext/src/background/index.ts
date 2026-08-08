@@ -76,11 +76,16 @@ async function fetchDataUrl(
     throw new Error("Artifact is too large to view here; download it instead");
   }
   const buffer = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (const byte of buffer) {
-    binary += String.fromCharCode(byte);
+  // In chunks, because appending a character at a time reallocates the
+  // string on every byte -- fine for a thumbnail, minutes of a frozen
+  // service worker for the 25 MB a PDF is allowed to be. The chunk stays
+  // well under the argument limit String.fromCharCode has when spread.
+  const CHUNK = 0x8000;
+  const parts: string[] = [];
+  for (let i = 0; i < buffer.length; i += CHUNK) {
+    parts.push(String.fromCharCode(...buffer.subarray(i, i + CHUNK)));
   }
-  return `data:${blob.type};base64,${btoa(binary)}`;
+  return `data:${blob.type};base64,${btoa(parts.join(""))}`;
 }
 
 /**

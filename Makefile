@@ -83,4 +83,4 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 .PHONY: browser-ext
 browser-ext: ## Build the browser extension.
 	@echo "🚀 Building the browser extension"
-	@cd browser-ext && npm install && npm run build
+	@cd browser-ext && npm ci && npm run build

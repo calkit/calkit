@@ -15,6 +15,8 @@ gets covered at all: CI and the machines we develop on aren't Windows.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import keyring
 import keyring.errors
 import pytest
@@ -74,6 +76,12 @@ class _FakeWin32Cred:
 @pytest.fixture
 def windows_keyring(monkeypatch):
     """Point calkit's secret storage at a faked Credential Manager."""
+    # set_secret encodes to bytes on Linux, which the Windows backend
+    # would then store as the repr of a bytes object. These are Windows
+    # tests, so they say so.
+    monkeypatch.setattr(
+        config, "platform", SimpleNamespace(system=lambda: "Windows")
+    )
     fake = _FakeWin32Cred()
     monkeypatch.setattr(windows_backend, "win32cred", fake, raising=False)
     monkeypatch.setattr(

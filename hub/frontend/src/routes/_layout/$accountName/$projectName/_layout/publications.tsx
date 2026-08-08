@@ -58,6 +58,7 @@ import useProject, {
   useProjectPublications,
 } from "../../../../../hooks/useProject"
 import { handleError } from "../../../../../lib/errors"
+import { getLatexSourcePath } from "../../../../../lib/latexProject"
 
 const pubSearchSchema = z.object({
   path: z.string().optional(),
@@ -98,12 +99,7 @@ function PubInfo({
   const navigate = useNavigate({ from: Route.fullPath })
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
-  // Derive the LaTeX source path from the publication output path
-  // (e.g. paper.pdf -> paper.tex). Phase-1 heuristic; a later version can
-  // resolve the source from the publication's pipeline-stage deps.
-  const texPath = publication.path
-    ? publication.path.replace(/\.[^/.]+$/, ".tex")
-    : null
+  const texPath = getLatexSourcePath(publication)
 
   const overleafSyncMutation = useMutation({
     mutationFn: () =>
@@ -318,11 +314,7 @@ function Publications() {
   ])
 
   const isPdf = selectedPub?.path?.endsWith(".pdf") ?? false
-  // Derive the LaTeX source path from the output path (e.g. paper.pdf ->
-  // paper.tex), matching the heuristic used by the editor in the info panel.
-  const texPath = selectedPub?.path
-    ? selectedPub.path.replace(/\.[^/.]+$/, ".tex")
-    : null
+  const texPath = selectedPub ? getLatexSourcePath(selectedPub) : null
   const canEditLatex = userHasWriteAccess && !!texPath
   const isStale = selectedPub?.stage_status?.status === "stale"
   const toolbarAction =

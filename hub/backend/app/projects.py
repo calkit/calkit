@@ -851,6 +851,12 @@ def get_publication_from_repo(
             # Prioritize URL defined in the publication itself
             if "url" not in pub:
                 pub["url"] = item.url
+            if pub.get("stage"):
+                pub["calkit_stage"] = (
+                    (ck_info.get("pipeline") or {})
+                    .get("stages", {})
+                    .get(pub["stage"])
+                )
             return Publication.model_validate(pub)
     raise HTTPException(404, "Publication not found")
 

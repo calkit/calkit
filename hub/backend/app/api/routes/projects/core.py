@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal, Optional, cast
+from typing import Annotated, Any, Literal, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -3407,6 +3407,11 @@ def get_project_publications(
                 pub["stage"] = auto_stage
         if pub.get("stage"):
             pub["stage_info"] = pipeline.get("stages", {}).get(pub["stage"])
+            pub["calkit_stage"] = (
+                (ck_info.get("pipeline") or {})
+                .get("stages", {})
+                .get(pub["stage"])
+            )
             if pub["stage"] in stage_statuses:
                 pub["stage_status"] = stage_statuses[pub["stage"]].model_dump()
         # See if we can fetch the content for this publication
@@ -4303,10 +4308,42 @@ def get_project_pipeline(
     # always reflects the default branch (get_repo only fetches a ref, it
     # does not check it out).
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
-    if not tree.is_file("dvc.yaml"):
-        return
-    dvc_content = tree.read_text("dvc.yaml")
-    dvc_pipeline = ryaml.load(dvc_content)
+    # See if we can read a Calkit pipeline
+    calkit_content = None
+    ck_info: dict[str, Any] = {}
+    if tree.is_file("calkit.yaml"):
+        ck_info = ryaml.load(tree.read_text("calkit.yaml")) or {}
+        if "pipeline" in ck_info:
+            stream = io.StringIO()
+            ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
+            calkit_content = stream.getvalue()
+    if tree.is_file("dvc.yaml"):
+        dvc_content = tree.read_text("dvc.yaml")
+        dvc_pipeline = ryaml.load(dvc_content)
+    elif (ck_info.get("pipeline") or {}).get("stages"):
+        # A Calkit pipeline can be declared before it has ever been run,
+        # e.g., right after creating a publication from a template, in which
+        # case no dvc.yaml has been compiled and committed yet. Compile in
+        # memory so the pipeline still shows up.
+        try:
+            stages = calkit.pipeline.to_dvc(
+                ck_info=ck_info,
+                wdir=str(repo.working_dir),
+                write=False,
+                manage_gitignore=False,
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to compile Calkit pipeline for "
+                f"{owner_name}/{project_name}: {e}"
+            )
+            return None
+        dvc_pipeline = {"stages": stages}
+        stream = io.StringIO()
+        ryaml.dump(dvc_pipeline, stream)
+        dvc_content = stream.getvalue()
+    else:
+        return None
     # Pop off any private stages
     for stage_name in list(dvc_pipeline.get("stages", {}).keys()):
         if stage_name.startswith("_"):
@@ -4320,14 +4357,6 @@ def get_project_pipeline(
     logger.info(
         f"Created Mermaid diagram for {owner_name}/{project_name}:\n{mermaid}"
     )
-    # See if we can read a Calkit pipeline
-    calkit_content = None
-    if tree.is_file("calkit.yaml"):
-        ck_info = ryaml.load(tree.read_text("calkit.yaml"))
-        if "pipeline" in ck_info:
-            stream = io.StringIO()
-            ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
-            calkit_content = stream.getvalue()
     # Compute per-stage staleness against the committed dvc.lock
     stage_statuses: dict = {}
     overall_status = "unknown"
@@ -7048,6 +7077,17 @@ def get_project_showcase(
                     )
                     if auto_stage is not None:
                         pub.stage = auto_stage
+                if pub.stage and pub.calkit_stage is None:
+                    # Auto-detected stages miss the calkit_stage lookup in
+                    # get_publication_from_repo, so patch it in here
+                    ck_info = app.projects.get_ck_info_for_ref(
+                        project=project, repo=repo, ref=ref
+                    )
+                    pub.calkit_stage = (
+                        (ck_info.get("pipeline") or {})
+                        .get("stages", {})
+                        .get(pub.stage)
+                    )
                 if pub.stage and pub.stage in showcase_stage_statuses:
                     pub.stage_status = showcase_stage_statuses[pub.stage]
             except Exception as e:

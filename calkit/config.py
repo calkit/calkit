@@ -10,7 +10,7 @@ from typing import get_args as get_type_args
 
 import keyring
 import keyring.errors
-from pydantic import GetCoreSchemaHandler, field_validator
+from pydantic import GetCoreSchemaHandler, PrivateAttr, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_core import core_schema
 from pydantic_settings import (
@@ -80,16 +80,23 @@ def __getattr__(name: str) -> Any:
 
 
 def get_env() -> Literal["test", "local", "staging", "production"]:
-    env = os.getenv("CALKIT_ENV", "production")
-    if env not in ["test", "local", "staging", "production"]:
-        raise ValueError(f"{env} is not a valid environment name")
-    return env  # type: ignore
+    """Return the deployment environment serving the active hub.
+
+    Internal vocabulary: a hub is named by its URL everywhere the user
+    can see. This maps the built-in hub URLs onto the names the code uses
+    to pick API URLs and sandbox credentials.
+    """
+    if os.getenv("CALKIT_ENV") == "test":
+        return "test"
+    hub = get_hub()
+    if hub in ["test", "local", "staging", "production"]:
+        return hub  # type: ignore[return-value]
+    return "production"
 
 
-def set_env(name: Literal["local", "staging", "production"]) -> None:
-    if name not in ["local", "staging", "production"]:
-        raise ValueError(f"{name} is not a valid environment name")
-    os.environ["CALKIT_ENV"] = name
+def set_hub(hub_url: str) -> None:
+    """Point subsequent commands in this process at a hub."""
+    os.environ["CALKIT_HUB"] = normalize_hub_url(hub_url)
 
 
 def normalize_hub_url(hub: str) -> str:
@@ -160,16 +167,25 @@ def get_hub() -> str:
     arbitrary hub URL.
 
     ``CALKIT_HUB`` takes precedence and must be a hub URL (with or
-    without scheme), e.g., ``https://staging.calkit.io``; environment
-    names belong to ``CALKIT_ENV``. Then an explicitly set environment;
-    then the working directory project's declared ``hub``; then the
+    without scheme), e.g., ``https://staging.calkit.io``. Then the
+    working directory project's declared ``hub``; then the
     ``default_hub`` config value (also a URL); then production
     (calkit.io).
+
+    A hub is named by its URL, never by a deployment environment name:
+    "staging" is the hub operator's word for one of its own instances,
+    not something a project or a user's shell should have to know.
+    ``CALKIT_ENV`` therefore doesn't select a hub; it's reserved for the
+    test suite, whose environment gets its own isolated config.
     """
     hub = os.getenv("CALKIT_HUB")
     source = "CALKIT_HUB"
-    if not hub and os.getenv("CALKIT_ENV"):
-        return get_env()
+    if not hub and os.getenv("CALKIT_ENV") == "test":
+        # The test environment has its own hub, and its own isolated
+        # config and keyring service to go with it. Checked after
+        # CALKIT_HUB so a test can still exercise real resolution
+        # without giving up that isolation.
+        return "test"
     if not hub:
         hub = _get_project_hub()
         source = "the project's hub"
@@ -181,8 +197,7 @@ def get_hub() -> str:
     if hub in ["test", "local", "staging", "production"]:
         raise ValueError(
             f"{source} must be a hub URL like https://calkit.io, not an "
-            f"environment name ('{hub}'); use CALKIT_ENV for environment "
-            "names"
+            f"environment name ('{hub}')"
         )
     # Map built-in hub URLs to their environment names so they share
     # config with the env-based spellings
@@ -212,6 +227,18 @@ def get_env_suffix(sep: str = "-") -> str:
 # The fields that are per-hub credentials; everything else in the config
 # is shared across hubs
 HUB_SCOPED_FIELDS = ["token", "access_token", "refresh_token", "dvc_token"]
+# Every field whose value may live in the system keyring. Kept as a
+# constant rather than derived from the model at each access, since it's
+# consulted on every attribute read; a test keeps the two in step.
+KEYRING_FIELDS = frozenset(
+    HUB_SCOPED_FIELDS
+    + [
+        "github_token",
+        "zenodo_token",
+        "caltechdata_token",
+        "overleaf_token",
+    ]
+)
 
 
 def _hub_storage_key() -> str | None:
@@ -253,6 +280,12 @@ def get_config_yaml_fpath() -> str:
     )
 
 
+# Secrets already fetched from the keyring this process, keyed by
+# (service, username). Reading one is a keychain authorization prompt on
+# macOS, and a command that reads the config twice shouldn't ask twice.
+_secret_cache: dict[tuple[str, str], str | None] = {}
+
+
 def set_secret(key: str, value: str) -> None:
     """Sets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
@@ -262,20 +295,29 @@ def set_secret(key: str, value: str) -> None:
         keyring.set_password(service_name, username, value_bytes)  # type: ignore
     else:
         keyring.set_password(service_name, username, value)
+    _secret_cache[(service_name, username)] = value
 
 
 def get_secret(key: str) -> str | None:
     """Gets a secret using keyring, handling byte conversion for Linux."""
     service_name = get_app_name()
-    password = keyring.get_password(service_name, _keyring_username(key))
+    username = _keyring_username(key)
+    cache_key = (service_name, username)
+    if cache_key in _secret_cache:
+        return _secret_cache[cache_key]
+    password = keyring.get_password(service_name, username)
     if platform.system() == "Linux" and isinstance(password, bytes):
-        return password.decode("utf-8")
+        password = password.decode("utf-8")
+    _secret_cache[cache_key] = password
     return password
 
 
 def delete_secret(key: str) -> None:
     """Delete a secret using keyring."""
-    keyring.delete_password(get_app_name(), _keyring_username(key))
+    service_name = get_app_name()
+    username = _keyring_username(key)
+    _secret_cache.pop((service_name, username), None)
+    keyring.delete_password(service_name, username)
 
 
 class KeyringOptionalSecret(str):
@@ -334,27 +376,6 @@ class CalkitYamlSource(PydanticBaseSettingsSource):
         return out
 
 
-class KeyringSecretsSource(PydanticBaseSettingsSource):
-    """A Pydantic settings source that tries to load KeyringOptionalSecret
-    values from the system keyring.
-    """
-
-    def get_field_value(self, field: FieldInfo, field_name: str):
-        value = get_secret(field_name)
-        return (value, field_name, False)
-
-    def __call__(self) -> dict[str, Any]:
-        if not supports_keyring():
-            return {}
-        secrets = {}
-        for field_name, field in self.settings_cls.model_fields.items():
-            if KeyringOptionalSecret in get_type_args(field.annotation):
-                secrets[field_name] = self.get_field_value(field, field_name)[
-                    0
-                ]
-        return secrets
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="ignore",
@@ -375,6 +396,57 @@ class Settings(BaseSettings):
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None
+
+    # Which fields have been resolved from the keyring, so a secret that
+    # is genuinely absent isn't looked up again, and an assignment (even
+    # of None) isn't overwritten by what's still stored
+    _resolved_secrets: set[str] = PrivateAttr(default_factory=set)
+
+    def __getattribute__(self, name: str) -> Any:
+        """Fetch a secret from the keyring the first time it's read.
+
+        Fetching one costs a keychain authorization prompt on macOS, and
+        reading the config used to fetch all eight up front -- so opening
+        a project prompted eight times for secrets no command wanted.
+        Most commands need one of them, and plenty need none.
+        """
+        if name not in KEYRING_FIELDS:
+            return super().__getattribute__(name)
+        value = super().__getattribute__(name)
+        if value is not None:
+            return value
+        # A private attribute doesn't live in __dict__, so it's reached by
+        # ordinary lookup (which falls through to pydantic) rather than by
+        # asking object for it directly
+        resolved = self._resolved_secrets
+        if name in resolved:
+            return None
+        resolved.add(name)
+        secret = get_secret(name) if supports_keyring() else None
+        if secret is not None:
+            # Straight into __dict__ so model_dump sees it too: write()
+            # reads an absent value as "delete this from the keyring"
+            super().__getattribute__("__dict__")[name] = secret
+        return secret
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Dump the settings, resolving any secret not yet read.
+
+        Serialization reads ``__dict__`` rather than going through
+        attribute access, so an unresolved secret would dump as None --
+        which ``write`` reads as "delete this credential", and callers
+        read as "there isn't one".
+        """
+        for key in KEYRING_FIELDS:
+            getattr(self, key)
+        return super().model_dump(*args, **kwargs)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name in KEYRING_FIELDS:
+            # An explicit value wins over the keyring, including a None
+            # meaning "forget this credential"
+            self._resolved_secrets.add(name)
+        super().__setattr__(name, value)
 
     @field_validator("default_hub")
     @classmethod
@@ -402,7 +474,6 @@ class Settings(BaseSettings):
             env_settings,
             dotenv_settings,
             CalkitYamlSource(settings_cls),
-            KeyringSecretsSource(settings_cls),
         )  # type: ignore
 
     def write(self) -> None:

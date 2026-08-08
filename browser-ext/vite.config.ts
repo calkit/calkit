@@ -11,6 +11,13 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     target: "chrome114",
+    // No <link rel="modulepreload"> hints. The viewer page is loaded in a
+    // frame on a host page, where Chrome refuses to use a preload fetched
+    // in the page's world for a module the extension's world imports --
+    // "cross-world extension resource mismatch" -- so the hint is dead
+    // weight that only shows up as a console error. The chunk still
+    // loads normally when the entry imports it.
+    modulePreload: false,
     rollupOptions: {
       // The pages live at the root so they're served from
       // chrome-extension://<id>/popup.html rather than a path under src/,

@@ -35,7 +35,7 @@ def test_get_base_url_no_override(monkeypatch):
 def test_hub_urls(monkeypatch):
     # CALKIT_ENV=test is set by pytest config → the local dev web app URL
     assert hub.get_hub_url() == "http://localhost:5173"
-    monkeypatch.setenv("CALKIT_ENV", "production")
+    monkeypatch.setenv("CALKIT_HUB", "calkit.io")
     assert hub.get_hub_url() == "https://calkit.io"
     # Known hub URLs map back to their environment names, tolerating a
     # trailing slash; arbitrary hubs are not yet resolvable
@@ -83,8 +83,7 @@ def test_api_url_from_hub_url(monkeypatch):
     monkeypatch.delenv("CALKIT_ENV", raising=False)
     monkeypatch.setenv("CALKIT_HUB", "https://calkit.example.edu")
     assert hub.get_base_url() == "https://api.calkit.example.edu"
-    monkeypatch.delenv("CALKIT_HUB")
-    monkeypatch.setenv("CALKIT_ENV", "production")
+    monkeypatch.setenv("CALKIT_HUB", "calkit.io")
     assert hub.get_base_url() == "https://api.calkit.io"
 
 

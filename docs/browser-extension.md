@@ -206,3 +206,10 @@ Delete this list before merging!
       entry written with just an arxiv.org URL or an arXiv DOI never
       matched.)
 - [ ] Publish to CWS, perhaps with https://github.com/marketplace/actions/publish-chrome-extension-to-chrome-web-store.
+- [ ] Only https artifact URLs can be viewed -- what about an exception for localhost ones?
+- [ ] GitHub PR view should be more integrated, not just in the bottom right.
+      We can actually put content into the main body, e.g., a little button
+      at the bottom allowing us to view the artifact, optionally
+      side-by-side with base branch.
+- [ ] When switching hubs, if not logged in, we can't go back and switch to
+      a different hub.

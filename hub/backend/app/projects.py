@@ -767,18 +767,27 @@ def get_ck_info_for_ref(
     ref: str | None = None,
     process_includes: bool = False,
 ) -> dict:
-    """Return Calkit metadata for the requested ref, if provided."""
+    """Return Calkit metadata for the requested ref, if provided.
+
+    Always returns a dict; an empty one when calkit.yaml doesn't exist at
+    the ref or doesn't hold a mapping.
+    """
     if ref is None:
         return get_ck_info_from_repo(
             repo=repo,
             process_includes=process_includes,
         )
-    ck_item = get_contents_from_repo(
-        project=project,
-        repo=repo,
-        path="calkit.yaml",
-        ref=ref,
-    )
+    try:
+        ck_item = get_contents_from_repo(
+            project=project,
+            repo=repo,
+            path="calkit.yaml",
+            ref=ref,
+        )
+    except HTTPException as e:
+        if e.status_code == 404:
+            return {}
+        raise
     if ck_item.content is None:
         return {}
     ck_info = yaml.safe_load(base64.b64decode(ck_item.content))

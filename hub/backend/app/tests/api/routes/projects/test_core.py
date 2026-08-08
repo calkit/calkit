@@ -691,6 +691,10 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
             "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
             return_value=fake_tree,
         ) as mock_get_tree,
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ) as mock_get_ck_info,
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
@@ -705,6 +709,8 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
     # ...and to get_repo_tree_for_ref so files are read at that snapshot
     # rather than from the live working-tree checkout
     mock_get_tree.assert_called_once_with(fake_repo, "some-branch")
+    # ...and to the Calkit metadata read for the same reason
+    assert mock_get_ck_info.call_args.kwargs["ref"] == "some-branch"
 
 
 class _EmptyTree:

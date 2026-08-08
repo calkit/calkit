@@ -205,3 +205,4 @@ Delete this list before merging!
       lookup only recognized an arXiv entry by its `eprint` field, so an
       entry written with just an arxiv.org URL or an arXiv DOI never
       matched.)
+- [ ] Publish to CWS, perhaps with https://github.com/marketplace/actions/publish-chrome-extension-to-chrome-web-store.

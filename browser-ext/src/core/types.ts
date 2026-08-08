@@ -101,6 +101,18 @@ export interface ContentsItemBase {
   stage?: string | null;
 }
 
+/** A DVC-tracked output as it stands at one Git ref. */
+export interface DvcOutput {
+  path: string;
+  name: string;
+  type?: string | null;
+  size?: number | null;
+  md5?: string | null;
+  storage?: "dvc" | "dvc-zip" | null;
+  /** Presigned, and specific to this ref's version of the artifact. */
+  url?: string | null;
+}
+
 export interface ContentsItem extends ContentsItemBase {
   dir_items?: ContentsItemBase[] | null;
 }

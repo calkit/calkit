@@ -765,6 +765,42 @@ export type DvcForeachStage = {
 }
 
 /**
+ * DvcOutput
+ *
+ * A DVC-tracked output as it stands at one Git ref.
+ */
+export type DvcOutput = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Type
+   */
+  type?: string
+  /**
+   * Size
+   */
+  size?: number | null
+  /**
+   * Md5
+   */
+  md5?: string | null
+  /**
+   * Storage
+   */
+  storage?: string
+  /**
+   * Url
+   */
+  url?: string | null
+}
+
+/**
  * DvcPipelineStage
  */
 export type DvcPipelineStage = {
@@ -7549,6 +7585,53 @@ export type PutProjectContentsResponses = {
 
 export type PutProjectContentsResponse =
   PutProjectContentsResponses[keyof PutProjectContentsResponses]
+
+export type GetProjectDvcOutputsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Ttl
+     */
+    ttl?: number | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dvc-outputs"
+}
+
+export type GetProjectDvcOutputsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDvcOutputsError =
+  GetProjectDvcOutputsErrors[keyof GetProjectDvcOutputsErrors]
+
+export type GetProjectDvcOutputsResponses = {
+  /**
+   * Response Projects-Get Project Dvc Outputs
+   *
+   * Successful Response
+   */
+  200: Array<DvcOutput>
+}
+
+export type GetProjectDvcOutputsResponse =
+  GetProjectDvcOutputsResponses[keyof GetProjectDvcOutputsResponses]
 
 export type GetProjectContentPathsData = {
   body?: never

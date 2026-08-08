@@ -59,6 +59,7 @@ from app.core import (
 )
 from app.dvc import (
     expand_dvc_lock_outs,
+    get_data_fpath_for_md5,
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
@@ -1300,6 +1301,124 @@ def get_project_contents(
         path=path,
         ref=ref,
     )
+
+
+class DvcOutput(BaseModel):
+    """A DVC-tracked output as it stands at one Git ref."""
+
+    path: str
+    name: str
+    type: str = "file"
+    size: int | None = None
+    md5: str | None = None
+    storage: str = "dvc"
+    # Presigned, and specific to this ref's version of the artifact. None
+    # when the object was never pushed to storage, or for a directory.
+    url: str | None = None
+
+
+@router.get("/projects/{owner_name}/{project_name}/dvc-outputs")
+def get_project_dvc_outputs(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUserOptional,
+    ref: str | None = None,
+    ttl: int | None = DEFAULT_REPO_TTL,
+) -> list[DvcOutput]:
+    """List every DVC-tracked output in the project at a given ref.
+
+    The contents endpoint lists one directory at a time, and only
+    presigns a URL when asked for a single path. Comparing two refs --
+    a pull request against its base -- would mean walking the whole tree
+    twice and then fetching each artifact individually, so the whole set
+    comes back here at once, each with the URL of that ref's version.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=ttl,
+        ref=ref,
+    )
+    tree = app.projects.get_repo_tree_for_ref(repo, ref)
+    ck_info_and_outs = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    )
+    outs: dict[str, dict] = dict(ck_info_and_outs.dvc_lock_outs)
+
+    # Files tracked with `dvc add` have no dvc.lock entry, only a pointer
+    # file next to them, so the tree is walked for those as well
+    def walk(dirname: str) -> list[str]:
+        found = []
+        for name in tree.listdir(dirname or None):
+            path = os.path.join(dirname, name) if dirname else name
+            if path in [".git", ".dvc"]:
+                continue
+            if tree.is_dir(path):
+                found += walk(path)
+            elif path.endswith(".dvc"):
+                found.append(path)
+        return found
+
+    for pointer_path in walk(""):
+        try:
+            data = yaml.safe_load(tree.read_text(pointer_path))
+            out = (data.get("outs") or [{}])[0]
+        except Exception as e:
+            logger.warning(f"Failed to read DVC pointer {pointer_path}: {e}")
+            continue
+        if not isinstance(out, dict) or not out.get("md5"):
+            continue
+        declared = out.get("path")
+        path = (
+            os.path.normpath(
+                os.path.join(os.path.dirname(pointer_path), declared)
+            )
+            if declared
+            else pointer_path[: -len(".dvc")]
+        )
+        outs.setdefault(path, out)
+    fs = get_object_fs()
+    resp = []
+    for path, out in sorted(outs.items()):
+        md5 = out.get("md5") or ""
+        is_dir = out.get("type") == "dir" or md5.endswith(".dir")
+        url = None
+        if md5 and not is_dir:
+            fpath = get_data_fpath_for_md5(
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                md5=md5,
+                fs=fs,
+            )
+            if fpath is not None:
+                url = get_object_url(
+                    fpath, fname=os.path.basename(path), fs=fs
+                )
+        resp.append(
+            DvcOutput(
+                path=path,
+                name=os.path.basename(path),
+                type="dir" if is_dir else "file",
+                size=out.get("size"),
+                md5=md5 or None,
+                storage=(
+                    "dvc-zip"
+                    if path in ck_info_and_outs.zip_path_map
+                    else "dvc"
+                ),
+                url=url,
+            )
+        )
+    return resp
 
 
 @router.get("/projects/{owner_name}/{project_name}/contents-paths")

@@ -4,6 +4,7 @@ import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   CalkitYamlInfo,
   ContentsItem,
+  DvcOutput,
   Figure,
   GithubRepo,
   OverleafLinkPublic,
@@ -83,6 +84,13 @@ export type Request =
       /** Git ref to read at, for comparing a branch against its base. */
       ref?: string;
     } & HubScoped)
+  | ({
+      type: "project.dvcOutputs";
+      owner: string;
+      project: string;
+      /** Git ref to read at; the artifact URLs are that ref's versions. */
+      ref?: string;
+    } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
@@ -158,6 +166,7 @@ export interface ResponseMap {
   "github.repos": GithubRepo[];
   "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
+  "project.dvcOutputs": DvcOutput[];
   "project.figures": Figure[];
   "content.imageDataUrl": string;
   "content.dataUrl": string;

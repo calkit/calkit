@@ -38,25 +38,33 @@ async function render(): Promise<void> {
   const url = params.get("url");
   const path = params.get("path") ?? "artifact";
   const hubFileUrl = params.get("hubUrl");
+  // Embedded in an overlay on the page the artifact was opened from, the
+  // surrounding frame already names the file and offers the same links
+  const embedded = params.get("embedded") === "1";
   const name = path.split("/").pop() ?? path;
   document.title = `${name} · Calkit`;
-  clear(app).append(
-    el("header", {}, [
-      el("span", { text: name }),
-      el("span", { class: "spacer" }),
-      hubFileUrl
-        ? el("a", {
-            class: "small",
-            text: "Open in Calkit",
-            href: hubFileUrl,
-            style: { color: "#ffffff" },
-          })
-        : null,
-    ]),
-  );
+  clear(app);
+  if (!embedded) {
+    app.append(
+      el("header", {}, [
+        el("span", { text: name }),
+        el("span", { class: "spacer" }),
+        hubFileUrl
+          ? el("a", {
+              class: "small",
+              text: "Open in Calkit",
+              href: hubFileUrl,
+              style: { color: "#ffffff" },
+            })
+          : null,
+      ]),
+    );
+  }
   const main = el("main", { class: "stack" });
   app.append(main);
-  main.append(el("div", { class: "dim small", text: path }));
+  if (!embedded) {
+    main.append(el("div", { class: "dim small", text: path }));
+  }
   if (!url) {
     main.append(
       errorMessage("No artifact URL was given. Open this from the panel."),
@@ -130,7 +138,9 @@ async function render(): Promise<void> {
   const frame = el("iframe", {
     style: {
       width: "100%",
-      height: "80vh",
+      // Filling the overlay rather than leaving room for a header it
+      // doesn't draw
+      height: embedded ? "calc(100vh - 24px)" : "80vh",
       border: "1px solid var(--ck-border)",
       borderRadius: "6px",
     },

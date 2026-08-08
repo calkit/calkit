@@ -7,20 +7,31 @@ import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import { renderFailure } from "../core/pickers";
-import type { ContentsItemBase, ProjectPublic } from "../core/types";
+import type { ContentsItemBase, DvcOutput, ProjectPublic } from "../core/types";
 import {
   clear,
   el,
   launcherPosition,
   errorMessage,
   loading,
+  mountOverlay,
   mountPanel,
   signInPrompt,
   textInput,
   type Panel,
 } from "../core/ui";
 
+/** The little an overlay needs to show a file: where it is and its bytes. */
+interface Viewable {
+  path: string;
+  name: string;
+  url?: string | null;
+  size?: number | null;
+  storage?: string | null;
+}
+
 const PANEL_ID = "calkit-github-panel";
+const OVERLAY_ID = "calkit-github-overlay";
 const LAUNCHER_ID = "calkit-github-launcher";
 const ARTIFACT_ROW_ATTR = "data-calkit-artifact";
 
@@ -185,10 +196,16 @@ function openArtifact(
     el("div", { class: "actions" }, [
       // Anything that isn't a plain image needs frames or objects that
       // GitHub's content security policy forbids in this panel, so it
-      // opens in a page of ours where it can simply be rendered
+      // renders in a page of ours -- laid over this one, or in its own tab
+      el("button", {
+        class: "action secondary",
+        text: "View",
+        onClick: () =>
+          openOverlay(project, hubUrl, [{ label: item.name, item }]),
+      }),
       el("a", {
         class: "small",
-        text: "Open viewer",
+        text: "Open in a tab",
         href: viewerUrl(project, item, hubUrl),
       }),
       el("a", { class: "small", text: "Download", href: item.url }),
@@ -474,7 +491,6 @@ async function renderPullRequest(
   body: HTMLElement,
   project: ProjectPublic,
   hubUrl: string,
-  repo: string,
   number: number,
 ): Promise<void> {
   clear(body).append(loading("Reading the pull request"));
@@ -492,21 +508,22 @@ async function renderPullRequest(
     return;
   }
   clear(body).append(loading("Comparing DVC outputs"));
+  // Every output at a ref in one call, each carrying that version's own
+  // presigned URL. Listing the tree a directory at a time would miss
+  // anything nested, which is where outputs usually live, and would have
+  // no URL to view the artifact with.
   const read = async (ref: string) => {
-    const contents = await send({
-      type: "project.contents",
+    const outputs = await send({
+      type: "project.dvcOutputs",
       owner: project.owner_account_name,
       project: project.name,
       ref,
       hubUrl,
     });
-    const items = (contents.dir_items ?? [contents]).filter(
-      (item) => item.storage === "dvc" || item.storage === "dvc-zip",
-    );
-    return new Map(items.map((item) => [item.path, item]));
+    return new Map(outputs.map((item) => [item.path, item]));
   };
-  let head: Map<string, ContentsItemBase>;
-  let base: Map<string, ContentsItemBase>;
+  let head: Map<string, DvcOutput>;
+  let base: Map<string, DvcOutput>;
   try {
     [head, base] = await Promise.all([
       read(refs.head_sha),
@@ -548,6 +565,10 @@ async function renderPullRequest(
   }
   for (const item of changed) {
     const before = base.get(item.path);
+    const versions = [
+      { label: refs.head_ref, item },
+      ...(before ? [{ label: refs.base_ref, item: before }] : []),
+    ];
     body.append(
       el("div", { class: "row" }, [
         el("div", { class: "grow" }, [
@@ -555,98 +576,96 @@ async function renderPullRequest(
           el("div", {
             class: "dim small",
             text: before
-              ? `changed \u00b7 ${describe(item)}`
-              : `new \u00b7 ${describe(item)}`,
+              ? `changed \u00b7 ${describeOutput(item)}`
+              : `new \u00b7 ${describeOutput(item)}`,
           }),
         ]),
         el("button", {
           class: "action secondary",
-          text: before ? "Compare" : "View",
-          onClick: () => {
-            if (before) {
-              openComparison(item, before, () => {
-                panel = mountPanel({
-                  id: PANEL_ID,
-                  title: `Calkit \u00b7 #${number}`,
-                });
-                void renderPullRequest(
-                  panel.body,
-                  project,
-                  hubUrl,
-                  repo,
-                  number,
-                );
-              });
-            } else {
-              openArtifact(project, item, hubUrl, () => {
-                panel = mountPanel({
-                  id: PANEL_ID,
-                  title: `Calkit \u00b7 #${number}`,
-                });
-                void renderPullRequest(
-                  panel.body,
-                  project,
-                  hubUrl,
-                  repo,
-                  number,
-                );
-              });
-            }
-          },
+          text: "View",
+          disabled: !item.url,
+          title: item.url
+            ? undefined
+            : "This version hasn't been pushed to storage yet",
+          onClick: () => openOverlay(project, hubUrl, versions),
         }),
       ]),
     );
   }
 }
 
-/** Show this branch's version of an output beside the base branch's. */
-function openComparison(
-  head: ContentsItemBase,
-  base: ContentsItemBase,
-  onBack: () => void,
+/**
+ * Show an artifact over the page it was opened from.
+ *
+ * A pull request is read on GitHub, so the figure or paper it changes is
+ * worth seeing without leaving it. The versions are the same artifact at
+ * each ref, so switching between them is switching branches.
+ */
+function openOverlay(
+  project: ProjectPublic,
+  hubUrl: string,
+  versions: { label: string; item: Viewable }[],
 ): void {
-  panel = mountPanel({ id: PANEL_ID, title: head.name });
-  const body = panel.body;
-  clear(body).append(
-    el("div", { class: "actions", style: { marginTop: "0" } }, [
-      el("button", {
-        class: "action secondary",
-        text: "\u2190 Back",
-        onClick: onBack,
-      }),
-    ]),
-    el("div", { class: "name", text: head.path }),
-  );
-  for (const [label, item] of [
-    ["This branch", head],
-    ["Base branch", base],
-  ] as const) {
-    body.append(
-      el("div", { style: { marginTop: "8px" } }, [
-        el("div", {
-          class: "small",
-          style: { fontWeight: "600" },
-          text: label,
-        }),
-        el("div", { class: "dim small", text: describe(item) }),
-      ]),
-    );
-    if (item.url && isPreviewable(item.path)) {
-      const preview = el("img", {
-        style: { display: "block", maxWidth: "100%", marginTop: "4px" },
-      });
-      body.append(preview);
-      void send({ type: "content.imageDataUrl", url: item.url })
-        .then((dataUrl) => {
-          preview.src = dataUrl;
-        })
-        .catch(() => preview.remove());
-    } else if (item.url) {
-      body.append(
-        el("a", { class: "small", text: "Download", href: item.url }),
+  const first = versions[0];
+  const overlay = mountOverlay({ id: OVERLAY_ID, title: first.item.name });
+  const show = (version: { label: string; item: Viewable }) => {
+    for (const button of buttons) {
+      button.setAttribute(
+        "aria-pressed",
+        String(button.dataset.label === version.label),
       );
     }
-  }
+    clear(details).append(
+      document.createTextNode(describeOutput(version.item)),
+    );
+    download.href = version.item.url ?? "";
+    tab.href = overlayViewerUrl(project, version.item, hubUrl);
+    overlay.frame.src = `${tab.href}&embedded=1`;
+  };
+  const buttons = versions.map((version) => {
+    const button = el("button", {
+      class: "chip",
+      text: version.label,
+      onClick: () => show(version),
+    });
+    button.dataset.label = version.label;
+    return button;
+  });
+  const details = el("span", { class: "dim small" });
+  const tab = el("a", { class: "small", text: "Open in a tab", href: "#" });
+  const download = el("a", { class: "small", text: "Download", href: "#" });
+  overlay.toolbar.append(
+    el("span", { class: "name", text: first.item.path }),
+    // Only worth a switch when there's another version to switch to
+    ...(versions.length > 1 ? buttons : []),
+    details,
+    el("span", { class: "spacer" }),
+    tab,
+    download,
+  );
+  show(first);
+}
+
+function overlayViewerUrl(
+  project: ProjectPublic,
+  item: Viewable,
+  hubUrl: string,
+): string {
+  const params = new URLSearchParams({
+    url: item.url ?? "",
+    path: item.path,
+    hubUrl: filesUrl(project, item.path, hubUrl),
+  });
+  return `${chrome.runtime.getURL("viewer.html")}?${params.toString()}`;
+}
+
+function describeOutput(item: Viewable): string {
+  return [
+    item.storage === "dvc-zip" ? "DVC (zipped)" : "DVC",
+    formatSize(item.size),
+  ]
+    .filter(Boolean)
+    .join(" \u00b7 ");
 }
 
 async function openPanel(state: RepoState): Promise<void> {
@@ -707,7 +726,6 @@ async function openPanel(state: RepoState): Promise<void> {
           body,
           state.project,
           state.hubWebUrl,
-          state.repo,
           pullNumber,
         );
         return;

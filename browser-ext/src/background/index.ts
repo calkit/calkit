@@ -12,6 +12,7 @@ import {
 import type {
   CalkitYamlInfo,
   ContentsItem,
+  DvcOutput,
   Figure,
   GithubRepo,
   OverleafLinkPublic,
@@ -176,6 +177,11 @@ async function handle(message: Request): Promise<unknown> {
           query: { path: message.path, ref: message.ref },
           hub: hubFor(message),
         },
+      );
+    case "project.dvcOutputs":
+      return request<DvcOutput[]>(
+        `${projectPath(message.owner, message.project)}/dvc-outputs`,
+        { query: { ref: message.ref }, hub: hubFor(message) },
       );
     case "project.figures":
       return request<Figure[]>(

@@ -216,6 +216,61 @@ label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
   animation: ck-spin 0.7s linear infinite;
 }
 @keyframes ck-spin { to { transform: rotate(360deg); } }
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.overlay {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: 100%;
+  background: var(--ck-bg);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+}
+.overlay .header { cursor: default; }
+.overlay .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--ck-border);
+  background: var(--ck-subtle-bg);
+  font-size: 12px;
+  color: var(--ck-fg);
+  flex-wrap: wrap;
+}
+.overlay .toolbar .spacer { flex: 1; }
+.overlay .frame {
+  flex: 1;
+  min-height: 0;
+  border: 0;
+  width: 100%;
+  background: var(--ck-bg);
+}
+button.chip {
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  border: 1px solid var(--ck-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.chip[aria-pressed="true"] {
+  background: var(--ck-main);
+  border-color: var(--ck-main);
+  color: #ffffff;
+  font-weight: 600;
+}
 `;
 
 export interface Panel {
@@ -282,6 +337,81 @@ export function mountPanel(options: {
     },
     remove: () => host.remove(),
   };
+}
+
+export interface Overlay {
+  host: HTMLElement;
+  /** A row above the frame, for the caller's own controls. */
+  toolbar: HTMLElement;
+  frame: HTMLIFrameElement;
+  remove: () => void;
+}
+
+/**
+ * Mount a full-page overlay showing one of the extension's own pages.
+ *
+ * A big artifact is worth looking at without leaving what you were
+ * reading, but a PDF or a notebook can't be rendered into the host page:
+ * its content security policy governs any frame a content script injects.
+ * An extension page is exempt from that policy, since Chrome treats a
+ * web-accessible resource as ours rather than the page's, so the artifact
+ * renders in a frame of ours laid over the page.
+ */
+export function mountOverlay(options: {
+  id: string;
+  title: string;
+  onClose?: () => void;
+}): Overlay {
+  document.getElementById(options.id)?.remove();
+  const host = el("div", { attrs: { id: options.id } });
+  Object.assign(host.style, {
+    position: "fixed",
+    inset: "0",
+    zIndex: "2147483001",
+  });
+  const root = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = STYLES;
+  const close = el("button", { text: "×", title: "Close" });
+  const toolbar = el("div", { class: "toolbar" });
+  const frame = el("iframe", { class: "frame" });
+  const card = el("div", { class: "overlay" }, [
+    el("div", { class: "header" }, [
+      el("span", { text: options.title }),
+      el("span", { class: "spacer" }),
+      close,
+    ]),
+    toolbar,
+    frame,
+  ]);
+  const backdrop = el("div", { class: "backdrop" }, [card]);
+  const remove = () => {
+    host.remove();
+    document.removeEventListener("keydown", onKeyDown, true);
+  };
+  const dismiss = () => {
+    remove();
+    options.onClose?.();
+  };
+  function onKeyDown(event: KeyboardEvent): void {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      dismiss();
+    }
+  }
+  close.addEventListener("click", dismiss);
+  backdrop.addEventListener("click", (event) => {
+    // Only the backdrop itself, so a click inside the card -- or a drag
+    // that happens to end on it -- doesn't close what you're reading
+    if (event.target === backdrop) {
+      dismiss();
+    }
+  });
+  // Captured, since the host page may well stop keydown before it bubbles
+  document.addEventListener("keydown", onKeyDown, true);
+  root.append(style, backdrop);
+  document.body.append(host);
+  return { host, toolbar, frame, remove };
 }
 
 function makeDraggable(host: HTMLElement, handle: HTMLElement): void {

@@ -111,6 +111,8 @@ import type {
   GetProjectDatasetsResponses,
   GetProjectDvcFileErrors,
   GetProjectDvcFileResponses,
+  GetProjectDvcOutputsErrors,
+  GetProjectDvcOutputsResponses,
   GetProjectEnvironmentsErrors,
   GetProjectEnvironmentsResponses,
   GetProjectErrors,
@@ -2930,6 +2932,56 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Dvc Outputs
+   *
+   * List every DVC-tracked output in the project at a given ref.
+   *
+   * The contents endpoint lists one directory at a time, and only
+   * presigns a URL when asked for a single path. Comparing two refs --
+   * a pull request against its base -- would mean walking the whole tree
+   * twice and then fetching each artifact individually, so the whole set
+   * comes back here at once, each with the URL of that ref's version.
+   */
+  public static getProjectDvcOutputs<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      ttl?: number | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDvcOutputsResponses,
+    GetProjectDvcOutputsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "ttl" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDvcOutputsResponses,
+      GetProjectDvcOutputsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dvc-outputs",
+      ...options,
+      ...params,
     })
   }
 

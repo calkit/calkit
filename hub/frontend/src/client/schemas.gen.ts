@@ -1344,6 +1344,66 @@ export const DvcForeachStageSchema = {
   title: "DvcForeachStage",
 } as const
 
+export const DvcOutputSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    type: {
+      type: "string",
+      title: "Type",
+      default: "file",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
+    },
+    storage: {
+      type: "string",
+      title: "Storage",
+      default: "dvc",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+  },
+  type: "object",
+  required: ["path", "name"],
+  title: "DvcOutput",
+  description: "A DVC-tracked output as it stands at one Git ref.",
+} as const
+
 export const DvcPipelineStageSchema = {
   properties: {
     cmd: {

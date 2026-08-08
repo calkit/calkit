@@ -35,6 +35,38 @@ export const HUBS: Record<string, Hub> = {
 export const DEFAULT_HUB_NAME = "production";
 
 /**
+ * Who sees the staging instance offered as a hub.
+ *
+ * Staging exists for the people who develop Calkit, and offering it to
+ * everyone else invites picking it by mistake and wondering where their
+ * projects went. This only decides what the pickers list: staging is a
+ * public URL and gating it here is tidiness, not a security boundary.
+ */
+const STAGING_EMAILS = ["petebachant@gmail.com"];
+
+/**
+ * Hubs worth offering to this user.
+ *
+ * The hub currently in use is always included, so someone already on a
+ * hub they'd no longer be offered isn't stranded on a picker that can't
+ * represent where they are.
+ */
+export function visibleHubs(
+  email: string | null,
+  currentHubName: string,
+): Hub[] {
+  return Object.values(HUBS).filter((hub) => {
+    if (hub.name === currentHubName) {
+      return true;
+    }
+    if (hub.name === "staging") {
+      return Boolean(email && STAGING_EMAILS.includes(email.toLowerCase()));
+    }
+    return true;
+  });
+}
+
+/**
  * Derive a hub's API base URL from its web URL.
  *
  * A hub serves its API from the ``api`` subdomain of the host serving its
@@ -43,12 +75,26 @@ export const DEFAULT_HUB_NAME = "production";
  * instances are declared explicitly above, since local development
  * predates the rule and doesn't follow it.
  */
+/**
+ * Put a hub URL in the one form everything else compares against.
+ *
+ * calkit.yaml may carry a hub with no scheme, or with a trailing slash,
+ * and a project written by the CLI and one written by hand shouldn't
+ * resolve to different hubs. Local hosts get http, since they have no
+ * certificates; this matches ``config.normalize_hub_url`` in the Python
+ * package.
+ */
+export function normalizeHubUrl(hubUrl: string): string {
+  const trimmed = hubUrl.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//.test(trimmed)) {
+    return trimmed;
+  }
+  const local = /^(localhost|127\.)/.test(trimmed);
+  return `${local ? "http" : "https"}://${trimmed}`;
+}
+
 export function apiUrlFromHubUrl(hubUrl: string): string {
-  const trimmed = hubUrl.trim();
-  const withScheme = /^https?:\/\//.test(trimmed)
-    ? trimmed
-    : `${/^(localhost|127\.)/.test(trimmed) ? "http" : "https"}://${trimmed}`;
-  const parsed = new URL(withScheme);
+  const parsed = new URL(normalizeHubUrl(hubUrl));
   if (!parsed.hostname) {
     throw new Error(`Cannot determine the API URL for hub '${hubUrl}'`);
   }
@@ -62,13 +108,11 @@ export function apiUrlFromHubUrl(hubUrl: string): string {
 
 /** Build a custom hub entry from just its web URL. */
 export function customHubFromUrl(hubUrl: string): Hub {
-  const apiUrl = apiUrlFromHubUrl(hubUrl);
-  const webUrl = hubUrl.trim().replace(/\/+$/, "");
   return {
     name: "custom",
-    label: new URL(apiUrl).hostname.replace(/^api\./, ""),
-    webUrl: /^https?:\/\//.test(webUrl) ? webUrl : `https://${webUrl}`,
-    apiUrl,
+    label: new URL(normalizeHubUrl(hubUrl)).host,
+    webUrl: normalizeHubUrl(hubUrl),
+    apiUrl: apiUrlFromHubUrl(hubUrl),
   };
 }
 
@@ -99,9 +143,9 @@ export function getHub(name: string, custom?: Hub | null): Hub {
  * the options page can ask for.
  */
 export function resolveHubByWebUrl(webUrl: string): Hub {
-  const normalized = webUrl.trim().replace(/\/+$/, "");
+  const normalized = normalizeHubUrl(webUrl);
   for (const hub of Object.values(HUBS)) {
-    if (hub.webUrl.replace(/\/+$/, "") === normalized) {
+    if (normalizeHubUrl(hub.webUrl) === normalized) {
       return hub;
     }
   }

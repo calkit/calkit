@@ -190,6 +190,8 @@ import type {
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSyncErrors,
+  GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
   GetUserReferenceMatchesErrors,
   GetUserReferenceMatchesResponses,
@@ -3925,10 +3927,9 @@ export class ProjectsService {
    *
    * Find the projects that sync a folder with an Overleaf project.
    *
-   * Only projects the user can read are returned. The index this reads is
-   * refreshed whenever a project's Overleaf sync status is checked or a sync
-   * runs, so a project linked outside the hub appears here once either has
-   * happened for it.
+   * Reads the index only. Prefer
+   * ``/user/overleaf-syncs/{overleaf_project_id}``, which falls back to
+   * looking through the user's projects when the index has nothing yet.
    */
   public static getOverleafLinks<ThrowOnError extends boolean = true>(
     parameters: {
@@ -3952,6 +3953,57 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/overleaf-links",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get User Overleaf Sync
+   *
+   * Find which of the user's projects syncs with an Overleaf project.
+   *
+   * The index answers immediately once a project has been looked at. When
+   * it doesn't, the user's projects are read one at a time until the one
+   * that syncs with this Overleaf project turns up, and what's found is
+   * indexed on the way so the next lookup is a single query.
+   *
+   * ``active_project`` is searched first, since the project someone is
+   * working in is overwhelmingly the one their Overleaf document belongs
+   * to, and finding it there avoids reading anything else.
+   */
+  public static getUserOverleafSync<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleaf_project_id: string
+      active_project?: string | null
+      refresh?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserOverleafSyncResponses,
+    GetUserOverleafSyncErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "overleaf_project_id" },
+            { in: "query", key: "active_project" },
+            { in: "query", key: "refresh" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetUserOverleafSyncResponses,
+      GetUserOverleafSyncErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-syncs/{overleaf_project_id}",
       ...options,
       ...params,
     })

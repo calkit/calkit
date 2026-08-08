@@ -1,4 +1,4 @@
-import { HUBS } from "./hubs";
+import { HUBS, normalizeHubUrl } from "./hubs";
 
 /**
  * The hub a calkit.yaml says its project belongs to.
@@ -20,5 +20,5 @@ export function hubUrlFromCalkitYaml(text: string): string {
   if (!declared) {
     return HUBS.production.webUrl;
   }
-  return declared.replace(/\/+$/, "");
+  return normalizeHubUrl(declared);
 }

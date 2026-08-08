@@ -6,6 +6,12 @@ import {
   Flex,
   Heading,
   Link,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
   Text,
   VStack,
   useColorModeValue,
@@ -19,7 +25,8 @@ import type { AxiosError } from "axios"
 import { ProjectsService, type References } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
+import { handleError, isProviderNotConnected } from "../../lib/errors"
+import ConnectZoteroPrompt from "../Common/ConnectZoteroPrompt"
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../Common/CommentsPanel"
@@ -54,6 +61,7 @@ const ReferencesInfoPanel = ({
   const showToast = useCustomToast()
   const { user } = useAuth()
   const deleteDisclosure = useDisclosure()
+  const connectZoteroDisclosure = useDisclosure()
   const path = references.path
   const stages = references.stages ?? []
   const zoteroSyncMutation = useMutation({
@@ -75,7 +83,16 @@ const ReferencesInfoPanel = ({
         queryKey: ["projects", ownerName, projectName, "references"],
       })
     },
-    onError: (err: AxiosError) => handleError(err, showToast),
+    onError: (err: AxiosError) => {
+      // A missing Zotero connection isn't an error to report, it's a
+      // connect button; the modal below offers it in place of a toast
+      // that says what's wrong but not what to do.
+      if (isProviderNotConnected(err, "Zotero")) {
+        connectZoteroDisclosure.onOpen()
+        return
+      }
+      handleError(err, showToast)
+    },
   })
   const commentsKey = [
     "projects",
@@ -219,6 +236,20 @@ const ReferencesInfoPanel = ({
           </Button>
         ) : null}
       </Box>
+      <Modal
+        isOpen={connectZoteroDisclosure.isOpen}
+        onClose={connectZoteroDisclosure.onClose}
+        isCentered
+      >
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Connect Zotero</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody pb={6}>
+            <ConnectZoteroPrompt action="sync this collection" />
+          </ModalBody>
+        </ModalContent>
+      </Modal>
       {userHasWriteAccess ? (
         <DeleteReferencesCollectionDialog
           isOpen={deleteDisclosure.isOpen}

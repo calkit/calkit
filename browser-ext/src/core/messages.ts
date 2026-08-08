@@ -6,6 +6,7 @@ import type {
   ContentsItem,
   Figure,
   OverleafLinkPublic,
+  OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
@@ -71,6 +72,13 @@ export type Request =
   | { type: "content.imageDataUrl"; url: string }
   | { type: "overleaf.links"; overleafProjectId: string }
   | {
+      type: "overleaf.lookup";
+      overleafProjectId: string;
+      /** Searched first, being where the document most likely belongs. */
+      activeProject?: string;
+      refresh?: boolean;
+    }
+  | {
       type: "overleaf.status";
       owner: string;
       project: string;
@@ -135,6 +143,7 @@ export interface ResponseMap {
   "project.figures": Figure[];
   "content.imageDataUrl": string;
   "overleaf.links": OverleafLinkPublic[];
+  "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];
   "overleaf.sync": OverleafSyncResponse;
   "overleaf.import": { path: string; title: string };

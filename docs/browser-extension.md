@@ -93,6 +93,23 @@ Linked Overleaf projects are indexed on the hub the first time a sync or a
 status check runs for them, which is what lets the extension go from an
 Overleaf URL back to your project.
 
+If you already have a GitHub repo for your code, data, figures, etc.,
+you can integrate the Overleaf and GitHub projects into a Calkit project.
+From Overleaf, open the Calkit extension panel and click
+"attach to new project".
+From there, select the switch for "exists on GitHub",
+then start typing your GitHub repo name.
+You'll see an option for what folder you want the Overleaf project to live
+in inside the larger project.
+
+Note: If you haven't installed the Calkit GitHub app for the repo in question,
+you'll need to do that.
+
+After connecting things all together. You can now easily sync between them.
+The Overleaf document will become a Calkit pipeline stage with explicit
+inputs for the figures, allowing them to be checked for staleness,
+synced, and easily built offline and pushed back up to the web.
+
 ## GitHub
 
 On a repository page, the Calkit button in the lower right indicates if the
@@ -106,7 +123,7 @@ The button knows which state it's in before you click it.
 It first reads the repo's `calkit.yaml`, if GitHub is serving one, since that
 file names the hub the project belongs to.
 That way a project on a hub other than the one you're signed in to is
-recognised as a Calkit project rather than looking like it isn't one, and the
+recognized as a Calkit project rather than looking like it isn't one, and the
 panel points you at the hub it actually lives on.
 A private repo won't serve its `calkit.yaml` anonymously, so those fall back to
 asking your hub whether it knows the repo.

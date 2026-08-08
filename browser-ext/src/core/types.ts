@@ -71,6 +71,13 @@ export interface OverleafLinkPublic {
   current_user_access?: "read" | "write" | "admin" | "owner" | null;
 }
 
+export interface OverleafLookup {
+  links: OverleafLinkPublic[];
+  /** Projects read during this lookup, and how many were left. */
+  projects_scanned: number;
+  projects_remaining: number;
+}
+
 export interface OverleafSyncResponse {
   commits_from_overleaf: number;
   overleaf_commit: string;

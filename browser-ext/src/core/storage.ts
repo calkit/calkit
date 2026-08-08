@@ -41,6 +41,7 @@ export interface SettingsUpdate {
 
 const SETTINGS_KEY = "settings";
 const CREDENTIALS_KEY = "credentials";
+const EMAILS_KEY = "knownEmails";
 
 export const DEFAULT_SETTINGS: Settings = {
   hubName: DEFAULT_HUB_NAME,
@@ -120,4 +121,30 @@ export async function setCredentials(
     store[apiUrl] = credentials;
   }
   await chrome.storage.local.set({ [CREDENTIALS_KEY]: store });
+}
+
+/**
+ * Who was last seen signed in to a hub, remembered per hub.
+ *
+ * Cached so anything that only needs to know who the user is, such as
+ * deciding which hubs to offer, doesn't cost a request every time a panel
+ * opens. Refreshed whenever the signed-in state is genuinely checked.
+ */
+export async function getKnownEmail(apiUrl: string): Promise<string | null> {
+  const stored = await chrome.storage.local.get(EMAILS_KEY);
+  return (stored[EMAILS_KEY] ?? {})[apiUrl] ?? null;
+}
+
+export async function setKnownEmail(
+  apiUrl: string,
+  email: string | null,
+): Promise<void> {
+  const stored = await chrome.storage.local.get(EMAILS_KEY);
+  const emails: Record<string, string> = stored[EMAILS_KEY] ?? {};
+  if (email === null) {
+    delete emails[apiUrl];
+  } else {
+    emails[apiUrl] = email;
+  }
+  await chrome.storage.local.set({ [EMAILS_KEY]: emails });
 }

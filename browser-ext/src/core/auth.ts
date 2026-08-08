@@ -1,6 +1,11 @@
 import { NotSignedInError, request } from "./api";
 import type { Hub } from "./hubs";
-import { getCredentials, getCurrentHub, setCredentials } from "./storage";
+import {
+  getCredentials,
+  getCurrentHub,
+  setCredentials,
+  setKnownEmail,
+} from "./storage";
 import type { UserPublic } from "./types";
 
 interface DeviceAuthResponse {
@@ -124,6 +129,7 @@ async function pollForToken(
 export async function signOut(): Promise<AuthState> {
   const hub = await getCurrentHub();
   await setCredentials(hub.apiUrl, null);
+  await setKnownEmail(hub.apiUrl, null);
   return getAuthState();
 }
 
@@ -136,13 +142,16 @@ export async function getAuthState(requested?: Hub): Promise<AuthState> {
     hubWebUrl: hub.webUrl,
   };
   if (!(await getCredentials(hub.apiUrl))) {
+    await setKnownEmail(hub.apiUrl, null);
     return base;
   }
   try {
     const user = await request<UserPublic>("/user", { hub });
+    await setKnownEmail(hub.apiUrl, user.email);
     return { ...base, signedIn: true, user };
   } catch (e) {
     if (e instanceof NotSignedInError) {
+      await setKnownEmail(hub.apiUrl, null);
       return base;
     }
     throw e;

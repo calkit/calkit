@@ -1,8 +1,10 @@
 """Tests for Overleaf link indexing, lookup, and reference search."""
 
+import io
 import json
 import os
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import git
@@ -16,6 +18,12 @@ from app.core import ryaml
 from app.models import OverleafLink, Project, UserCreate
 from app.models.core import ROLE_IDS, UserProjectAccess
 from app.tests import authentication_token_from_email
+
+
+def ryaml_dumps(data: dict) -> str:
+    buffer = io.StringIO()
+    ryaml.dump(data, buffer)
+    return buffer.getvalue()
 
 
 def _make_owner_with_project(
@@ -379,3 +387,75 @@ def test_post_reference_item_creates_missing_collection(
     assert "smith2025" in bib_path.read_text()
     ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
     assert ck_info["references"] == [{"path": "references.bib"}]
+
+
+def test_get_user_overleaf_sync_scans_lazily(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    url = f"{settings.API_V1_STR}/user/overleaf-syncs/54b68eff0ee71ad2767b704a"
+    ck_info = {
+        "overleaf_sync": {
+            "paper2": {
+                "url": "https://www.overleaf.com/project/54b68eff0ee71ad2767b704a"
+            },
+            "report": {
+                "url": "https://www.overleaf.com/project/699f2a0fb20a38960a52bc26"
+            },
+        }
+    }
+
+    def _lookup(**params):
+        # The scan reads calkit.yaml from GitHub rather than cloning, so a
+        # stubbed response stands in for the repo
+        with (
+            patch(
+                "app.projects.requests.get",
+                return_value=SimpleNamespace(
+                    status_code=200, text=ryaml_dumps(ck_info)
+                ),
+            ),
+            patch(
+                "app.projects.app.users.get_github_token",
+                return_value="gh-token",
+            ),
+        ):
+            return client.get(url, params=params, headers=headers)
+
+    # Nothing is indexed yet, so the lookup finds it by reading the project
+    resp = _lookup()
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 1
+    assert [link["path"] for link in data["links"]] == ["paper2"]
+    assert data["links"][0]["project_name"] == project.name
+    # Both syncs declared in one calkit.yaml are indexed together, so the
+    # second Overleaf project resolves without reading anything again
+    resp = client.get(
+        f"{settings.API_V1_STR}/user/overleaf-syncs/699f2a0fb20a38960a52bc26",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["projects_scanned"] == 0
+    assert [link["path"] for link in data["links"]] == ["report"]
+    # A second lookup is answered from the index, without scanning again
+    resp = _lookup()
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 0
+    # A project already scanned isn't re-read until the TTL lapses, so an
+    # Overleaf project nobody syncs with doesn't cost a scan per lookup
+    resp = client.get(
+        f"{settings.API_V1_STR}/user/overleaf-syncs/nonexistent",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "links": [],
+        "projects_scanned": 0,
+        "projects_remaining": 0,
+    }
+    # refresh re-reads regardless, for a link that was only just added
+    resp = _lookup(refresh=True)
+    assert resp.status_code == 200
+    assert resp.json()["projects_scanned"] == 1

@@ -40,6 +40,8 @@ interface RepoState {
   hubWebUrl: string;
   /** Whether that hub has credentials stored for it. */
   signedIn: boolean;
+  /** How the hub names itself, which shows which instance was reached. */
+  hubLabel: string;
 }
 
 let panel: Panel | null = null;
@@ -94,11 +96,13 @@ async function resolveRepo(repo: string): Promise<RepoState> {
     declaresCalkit: Boolean(info?.present),
     hubWebUrl: target,
     signedIn: false,
+    hubLabel: hubHost(target),
   };
   const auth = await send({ type: "auth.state", hubUrl: target }).catch(
     () => null,
   );
   state.signedIn = Boolean(auth?.signedIn);
+  state.hubLabel = auth?.hubLabel ?? hubHost(target);
   const projects = await send({
     type: "projects.byGithubRepo",
     githubRepo: repo,
@@ -390,9 +394,9 @@ async function openPanel(state: RepoState): Promise<void> {
           el("div", {
             class: "dim small",
             text:
-              `This project belongs to ${hubHost(state.hubWebUrl)}. Sign in ` +
-              "to that hub to work with it here; it stays separate from " +
-              "whichever hub the extension uses by default.",
+              `This project belongs to ${state.hubLabel}, and there are no ` +
+              "credentials stored for it. Signing in here stays separate " +
+              "from whichever hub the extension uses by default.",
           }),
         ]),
       );
@@ -546,6 +550,7 @@ async function refresh(repo: string): Promise<void> {
       declaresCalkit: false,
       hubWebUrl,
       signedIn: false,
+      hubLabel: hubHost(hubWebUrl),
     };
   }
   if (currentRepo !== repo) {

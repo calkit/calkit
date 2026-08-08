@@ -1937,6 +1937,24 @@ export type OverleafLinkPublic = {
 }
 
 /**
+ * OverleafLookup
+ */
+export type OverleafLookup = {
+  /**
+   * Links
+   */
+  links: Array<OverleafLinkPublic>
+  /**
+   * Projects Scanned
+   */
+  projects_scanned: number
+  /**
+   * Projects Remaining
+   */
+  projects_remaining: number
+}
+
+/**
  * OverleafSyncPost
  */
 export type OverleafSyncPost = {
@@ -8443,6 +8461,47 @@ export type GetOverleafLinksResponses = {
 
 export type GetOverleafLinksResponse =
   GetOverleafLinksResponses[keyof GetOverleafLinksResponses]
+
+export type GetUserOverleafSyncData = {
+  body?: never
+  path: {
+    /**
+     * Overleaf Project Id
+     */
+    overleaf_project_id: string
+  }
+  query?: {
+    /**
+     * Active Project
+     */
+    active_project?: string | null
+    /**
+     * Refresh
+     */
+    refresh?: boolean
+  }
+  url: "/user/overleaf-syncs/{overleaf_project_id}"
+}
+
+export type GetUserOverleafSyncErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserOverleafSyncError =
+  GetUserOverleafSyncErrors[keyof GetUserOverleafSyncErrors]
+
+export type GetUserOverleafSyncResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafLookup
+}
+
+export type GetUserOverleafSyncResponse =
+  GetUserOverleafSyncResponses[keyof GetUserOverleafSyncResponses]
 
 export type PostProjectSyncData = {
   body?: never

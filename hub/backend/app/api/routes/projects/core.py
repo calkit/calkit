@@ -210,37 +210,10 @@ def get_projects(
             raise HTTPException(403, "User is not authenticated")
         where_clause = Project.is_public
     elif min_access_level == "write":
-        # Mirrors the access rules get_project applies per project, so a
-        # project listed here is one the user can actually write to: they
-        # own it, hold a write-or-better grant (native or GitHub-derived),
-        # or administer the owning org. Note that GitHub-derived access is
-        # only present once it has been resolved and cached for this user,
-        # so a GitHub collaborator who has never opened the project won't
-        # appear until they do.
-        where_clause = or_(
-            Project.owner_account_id == current_user.account.id,
-            and_(
-                UserProjectAccess.user_id == current_user.id,
-                or_(
-                    UserProjectAccess.role_id >= ROLE_IDS["write"],  # type: ignore
-                    UserProjectAccess.github_access.in_(["write", "admin"]),  # type: ignore
-                ),
-            ),
-            Project.owner_account.has(  # type: ignore
-                and_(
-                    Account.org_id.is_not(None),  # type: ignore
-                    select(UserOrgMembership)
-                    .where(
-                        UserOrgMembership.user_id == current_user.id,
-                        UserOrgMembership.org_id == Account.org_id,
-                        # A plain org member only gets read on the org's
-                        # projects; admins and owners get full access
-                        UserOrgMembership.role_id >= ROLE_IDS["admin"],
-                    )
-                    .exists(),
-                )
-            ),
-        )
+        # GitHub-derived access is only present once it has been resolved
+        # and cached for this user, so a GitHub collaborator who has never
+        # opened the project won't appear until they do.
+        where_clause = app.projects.writable_project_clause(current_user)
     else:
         where_clause = or_(
             Project.is_public,
@@ -4470,19 +4443,10 @@ class OverleafLinkPublic(BaseModel):
     current_user_access: Literal["read", "write", "admin", "owner"] | None
 
 
-@router.get("/overleaf-links")
-def get_overleaf_links(
-    current_user: CurrentUser,
-    session: SessionDep,
-    overleaf_project_id: str,
+def _indexed_overleaf_links(
+    session: Session, current_user: User, overleaf_project_id: str
 ) -> list[OverleafLinkPublic]:
-    """Find the projects that sync a folder with an Overleaf project.
-
-    Only projects the user can read are returned. The index this reads is
-    refreshed whenever a project's Overleaf sync status is checked or a sync
-    runs, so a project linked outside the hub appears here once either has
-    happened for it.
-    """
+    """Read the index, dropping projects the user can't see."""
     links = session.exec(
         select(OverleafLink).where(
             OverleafLink.overleaf_project_id == overleaf_project_id
@@ -4512,6 +4476,112 @@ def get_overleaf_links(
             )
         )
     return resp
+
+
+@router.get("/overleaf-links")
+def get_overleaf_links(
+    current_user: CurrentUser,
+    session: SessionDep,
+    overleaf_project_id: str,
+) -> list[OverleafLinkPublic]:
+    """Find the projects that sync a folder with an Overleaf project.
+
+    Reads the index only. Prefer
+    ``/user/overleaf-syncs/{overleaf_project_id}``, which falls back to
+    looking through the user's projects when the index has nothing yet.
+    """
+    return _indexed_overleaf_links(session, current_user, overleaf_project_id)
+
+
+class OverleafLookup(BaseModel):
+    links: list[OverleafLinkPublic]
+    # How much of the search happened, so a caller can tell "no project
+    # syncs with this" apart from "not all of them have been looked at"
+    projects_scanned: int
+    projects_remaining: int
+
+
+# A project's Overleaf links change about as often as its calkit.yaml, so
+# a scan stays good for a day. ``refresh`` overrides it for the case where
+# the link was only just added.
+OVERLEAF_SCAN_TTL = timedelta(hours=24)
+# Each unscanned project costs one GitHub request, so a single lookup does
+# a bounded amount of work and reports what it left for the next one.
+MAX_OVERLEAF_SCANS = 25
+
+
+@router.get("/user/overleaf-syncs/{overleaf_project_id}")
+def get_user_overleaf_sync(
+    overleaf_project_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    active_project: str | None = None,
+    refresh: bool = False,
+) -> OverleafLookup:
+    """Find which of the user's projects syncs with an Overleaf project.
+
+    The index answers immediately once a project has been looked at. When
+    it doesn't, the user's projects are read one at a time until the one
+    that syncs with this Overleaf project turns up, and what's found is
+    indexed on the way so the next lookup is a single query.
+
+    ``active_project`` is searched first, since the project someone is
+    working in is overwhelmingly the one their Overleaf document belongs
+    to, and finding it there avoids reading anything else.
+    """
+    if not refresh:
+        links = _indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        )
+        if links:
+            return OverleafLookup(
+                links=links, projects_scanned=0, projects_remaining=0
+            )
+    candidates = session.exec(
+        select(Project)
+        .distinct()
+        .join(Project.user_access_records, isouter=True)  # type: ignore
+        .where(app.projects.writable_project_clause(current_user))
+        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+    ).all()
+    cutoff = utcnow() - OVERLEAF_SCAN_TTL
+    to_scan = [
+        project
+        for project in candidates
+        if refresh
+        or project.overleaf_scanned is None
+        or project.overleaf_scanned < cutoff
+    ]
+    if active_project and active_project.count("/") == 1:
+        hint_owner, hint_name = active_project.split("/")
+        to_scan.sort(
+            key=lambda project: (
+                project.owner_account_name.lower() != hint_owner.lower()
+                or project.name.lower() != hint_name.lower()
+            )
+        )
+    scanned = 0
+    for project in to_scan[:MAX_OVERLEAF_SCANS]:
+        app.projects.scan_overleaf_links(
+            session=session, project=project, user=current_user
+        )
+        scanned += 1
+        links = _indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        )
+        if links:
+            return OverleafLookup(
+                links=links,
+                projects_scanned=scanned,
+                projects_remaining=max(len(to_scan) - scanned, 0),
+            )
+    return OverleafLookup(
+        links=_indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        ),
+        projects_scanned=scanned,
+        projects_remaining=max(len(to_scan) - scanned, 0),
+    )
 
 
 @router.post("/projects/{owner_name}/{project_name}/syncs")

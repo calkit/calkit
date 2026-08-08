@@ -3267,6 +3267,29 @@ export const OverleafLinkPublicSchema = {
   title: "OverleafLinkPublic",
 } as const
 
+export const OverleafLookupSchema = {
+  properties: {
+    links: {
+      items: {
+        $ref: "#/components/schemas/OverleafLinkPublic",
+      },
+      type: "array",
+      title: "Links",
+    },
+    projects_scanned: {
+      type: "integer",
+      title: "Projects Scanned",
+    },
+    projects_remaining: {
+      type: "integer",
+      title: "Projects Remaining",
+    },
+  },
+  type: "object",
+  required: ["links", "projects_scanned", "projects_remaining"],
+  title: "OverleafLookup",
+} as const
+
 export const OverleafSyncPostSchema = {
   properties: {
     path: {

@@ -1,14 +1,20 @@
 import { NotSignedInError, request } from "../core/api";
 import { getAuthState, signIn, signOut } from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
-import { HUBS, resolveHubByWebUrl, type Hub } from "../core/hubs";
+import { resolveHubByWebUrl, visibleHubs, type Hub } from "../core/hubs";
 import type { Envelope, Request } from "../core/messages";
-import { getCurrentHub, getSettingsView, setSettings } from "../core/storage";
+import {
+  getCurrentHub,
+  getKnownEmail,
+  getSettingsView,
+  setSettings,
+} from "../core/storage";
 import type {
   CalkitYamlInfo,
   ContentsItem,
   Figure,
   OverleafLinkPublic,
+  OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
@@ -101,8 +107,17 @@ async function handle(message: Request): Promise<unknown> {
       return getSettingsView();
     case "settings.set":
       return setSettings(message.update);
-    case "hubs.get":
-      return { hubs: Object.values(HUBS), current: await getCurrentHub() };
+    case "hubs.get": {
+      const current = await getCurrentHub();
+      const settings = await getSettingsView();
+      return {
+        hubs: visibleHubs(
+          await getKnownEmail(current.apiUrl),
+          settings.hubName,
+        ),
+        current,
+      };
+    }
     case "projects.list":
       return request<ProjectsPublic>("/projects", {
         query: {
@@ -143,6 +158,16 @@ async function handle(message: Request): Promise<unknown> {
       );
     case "content.imageDataUrl":
       return fetchImageDataUrl(message.url);
+    case "overleaf.lookup":
+      return request<OverleafLookup>(
+        `/user/overleaf-syncs/${encodeURIComponent(message.overleafProjectId)}`,
+        {
+          query: {
+            active_project: message.activeProject,
+            refresh: message.refresh,
+          },
+        },
+      );
     case "overleaf.links":
       return request<OverleafLinkPublic[]>("/overleaf-links", {
         query: { overleaf_project_id: message.overleafProjectId },

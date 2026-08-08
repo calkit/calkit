@@ -1,6 +1,13 @@
 import { describe, expect, test } from "vitest";
 
-import { apiUrlFromHubUrl, customHubFromUrl, getHub, HUBS } from "./hubs";
+import {
+  apiUrlFromHubUrl,
+  customHubFromUrl,
+  getHub,
+  HUBS,
+  resolveHubByWebUrl,
+  visibleHubs,
+} from "./hubs";
 
 describe("apiUrlFromHubUrl", () => {
   test("puts the API on the api subdomain of the hub's host", () => {
@@ -43,6 +50,29 @@ describe("apiUrlFromHubUrl", () => {
   });
 });
 
+describe("resolveHubByWebUrl", () => {
+  test("matches a built-in however the hub URL was written", () => {
+    // calkit.yaml may carry the hub with no scheme or a trailing slash,
+    // and all of them have to land on the built-in local hub, whose API
+    // is api.localhost. Deriving api.localhost:5173 instead points at a
+    // host no credentials are stored under, which reads as "not signed in"
+    for (const written of [
+      "http://localhost:5173",
+      "http://localhost:5173/",
+      "localhost:5173",
+    ]) {
+      expect(resolveHubByWebUrl(written)).toBe(HUBS.local);
+    }
+    expect(resolveHubByWebUrl("https://calkit.io/")).toBe(HUBS.production);
+  });
+
+  test("derives a hub it doesn't know", () => {
+    const hub = resolveHubByWebUrl("calkit.example.edu");
+    expect(hub.apiUrl).toBe("https://api.calkit.example.edu");
+    expect(hub.webUrl).toBe("https://calkit.example.edu");
+  });
+});
+
 describe("customHubFromUrl", () => {
   test("builds a hub entry from just the web URL", () => {
     expect(customHubFromUrl("https://calkit.example.edu/")).toEqual({
@@ -70,5 +100,28 @@ describe("getHub", () => {
     // leaving the extension with no API URL at all
     expect(getHub("custom", null)).toBe(HUBS.production);
     expect(getHub("nonexistent")).toBe(HUBS.production);
+  });
+});
+
+describe("visibleHubs", () => {
+  const names = (email: string | null, current = "production") =>
+    visibleHubs(email, current).map((hub) => hub.name);
+
+  test("offers staging only to the people who work on Calkit", () => {
+    expect(names("petebachant@gmail.com")).toContain("staging");
+    expect(names("PeteBachant@Gmail.com")).toContain("staging");
+    expect(names("someone@university.edu")).not.toContain("staging");
+    expect(names(null)).not.toContain("staging");
+  });
+
+  test("keeps the hub in use listed even when it wouldn't be offered", () => {
+    // Otherwise someone already on staging gets a picker that can't
+    // represent where they are
+    expect(names("someone@university.edu", "staging")).toContain("staging");
+  });
+
+  test("leaves the other hubs alone", () => {
+    expect(names(null)).toContain("production");
+    expect(names(null)).toContain("local");
   });
 });

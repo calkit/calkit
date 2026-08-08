@@ -28,6 +28,17 @@ describe("hubUrlFromCalkitYaml", () => {
     ).toBe("https://calkit.example.edu");
   });
 
+  test("normalises a hub written without a scheme", () => {
+    // Otherwise a hand-written calkit.yaml resolves to a different hub
+    // than one the CLI wrote, and credentials are stored per hub
+    expect(hubUrlFromCalkitYaml("hub: localhost:5173\n")).toBe(
+      "http://localhost:5173",
+    );
+    expect(hubUrlFromCalkitYaml("hub: calkit.example.edu\n")).toBe(
+      "https://calkit.example.edu",
+    );
+  });
+
   test("ignores a hub key that isn't top level", () => {
     // Nested keys belong to something else, e.g. an entry that happens to
     // carry its own hub field

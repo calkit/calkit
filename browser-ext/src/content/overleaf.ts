@@ -1,4 +1,5 @@
 import { getOverleafProjectId } from "../core/detect";
+import { renderHubPicker, renderProjectPicker } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
@@ -352,14 +353,55 @@ async function load(overleafProjectId: string): Promise<void> {
   const reload = () => void load(overleafProjectId);
   try {
     hubWebUrl = await getHubWebUrl();
-    const links = await send({
-      type: "overleaf.links",
+    const settings = await send({ type: "settings.get" });
+    const pickers = el(
+      "div",
+      { class: "muted-box stack", style: { marginBottom: "8px" } },
+      [
+        await renderHubPicker(reload),
+        await renderProjectPicker({
+          activeProject: settings.activeProject,
+          onChange: reload,
+        }),
+      ],
+    );
+    clear(body).append(pickers, loading("Looking for the linked project"));
+    // The index answers at once when this Overleaf project has been seen
+    // before; otherwise the hub reads through the user's projects, active
+    // one first, and remembers what it finds
+    const lookup = await send({
+      type: "overleaf.lookup",
       overleafProjectId,
+      activeProject: settings.activeProject ?? undefined,
     });
+    const links = lookup.links;
     if (!links.length) {
-      await renderPicker(body, overleafProjectId, reload);
+      clear(body).append(pickers);
+      if (lookup.projects_remaining > 0) {
+        body.append(
+          el("div", { class: "dim small" }, [
+            document.createTextNode(
+              `Checked ${lookup.projects_scanned} project(s); ` +
+                `${lookup.projects_remaining} left to look through.`,
+            ),
+          ]),
+          el("div", { class: "actions" }, [
+            el("button", {
+              class: "action secondary",
+              text: "Keep looking",
+              onClick: reload,
+            }),
+          ]),
+        );
+      }
+      const chooser = el("div");
+      body.append(chooser);
+      await renderPicker(chooser, overleafProjectId, reload);
       return;
     }
+    clear(body).append(pickers);
+    const content = el("div");
+    body.append(content);
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
@@ -371,7 +413,7 @@ async function load(overleafProjectId: string): Promise<void> {
       path: link.path,
     });
     if (!statuses.length) {
-      clear(body).append(
+      clear(content).append(
         el("div", {
           class: "dim small",
           text:
@@ -381,9 +423,9 @@ async function load(overleafProjectId: string): Promise<void> {
       );
       return;
     }
-    renderStatus(body, link, statuses[0], reload);
+    renderStatus(content, link, statuses[0], reload);
     if (links.length > 1) {
-      body.append(
+      content.append(
         el("div", {
           class: "dim small",
           style: { marginTop: "8px" },

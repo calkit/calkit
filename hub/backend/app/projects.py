@@ -17,7 +17,7 @@ import sqlalchemy
 import yaml
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, or_, select
 
 import app.users
 from app.config import settings
@@ -45,6 +45,7 @@ from app.git import (
     get_repo_tree_for_ref,
 )
 from app.models import (
+    Account,
     ContentsItem,
     Figure,
     ItemLock,
@@ -54,8 +55,10 @@ from app.models import (
     Project,
     Publication,
     User,
+    UserOrgMembership,
     UserProjectAccess,
 )
+from app.models.core import ROLE_IDS
 from app.pipeline import find_stage_for_path
 from app.storage import (
     get_object_fs,
@@ -263,6 +266,39 @@ def get_contents_from_repo(
         project=project,
         tree=get_repo_tree_for_ref(repo, ref),
         path=path,
+    )
+
+
+def writable_project_clause(current_user: User):
+    """Projects the user can write to, as a SQL predicate.
+
+    Shared rather than inlined at each call site because it restates the
+    access rules get_project applies per project, and two copies of an
+    access rule drift into two different answers about who can write.
+    """
+    return or_(
+        Project.owner_account_id == current_user.account.id,
+        and_(
+            UserProjectAccess.user_id == current_user.id,
+            or_(
+                UserProjectAccess.role_id >= ROLE_IDS["write"],  # type: ignore
+                UserProjectAccess.github_access.in_(["write", "admin"]),  # type: ignore
+            ),
+        ),
+        Project.owner_account.has(  # type: ignore
+            and_(
+                Account.org_id.is_not(None),  # type: ignore
+                select(UserOrgMembership)
+                .where(
+                    UserOrgMembership.user_id == current_user.id,
+                    UserOrgMembership.org_id == Account.org_id,
+                    # A plain org member only gets read on the org's
+                    # projects; admins and owners get full access
+                    UserOrgMembership.role_id >= ROLE_IDS["admin"],
+                )
+                .exists(),
+            )
+        ),
     )
 
 

@@ -1,5 +1,6 @@
 import { getOverleafProjectId } from "../core/detect";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import type {
   OverleafLinkPublic,
@@ -15,6 +16,7 @@ import {
   mountPanel,
   signInPrompt,
   type Panel,
+  textInput,
 } from "../core/ui";
 
 const PANEL_ID = "calkit-overleaf-panel";
@@ -203,14 +205,8 @@ async function renderPicker(
         "link hasn't been seen by the hub. Pick a project to check or link.",
     }),
   );
-  const search = el("input", {
-    type: "text",
+  const search = textInput({
     placeholder: "Search your projects",
-    attrs: {
-      autocomplete: "off",
-      "data-form-type": "other",
-      "data-lpignore": "true",
-    },
   });
   const results = el("div", { class: "stack", style: { marginTop: "6px" } });
   const message = el("div", { class: "small" });
@@ -296,10 +292,8 @@ function renderImportForm(
   overleafProjectId: string,
   reload: () => void,
 ): HTMLElement[] {
-  const path = el("input", {
-    type: "text",
+  const path = textInput({
     value: "paper",
-    attrs: { autocomplete: "off", "data-lpignore": "true" },
   });
   const kind = el("select");
   for (const [value, label] of [
@@ -451,14 +445,11 @@ function sync(): void {
   void load(overleafProjectId);
 }
 
-// Overleaf is a single-page app, so the project ID can change without a
-// navigation the extension would otherwise hear about
-let lastUrl = window.location.href;
-setInterval(() => {
-  if (window.location.href !== lastUrl) {
-    lastUrl = window.location.href;
-    sync();
-  }
-}, 1000);
-
-sync();
+runContentScript({
+  id: "overleaf",
+  sync,
+  teardown: () => {
+    panel?.remove();
+    panel = null;
+  },
+});

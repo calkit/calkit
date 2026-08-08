@@ -226,3 +226,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Keep the message channel open for the async response above
   return true;
 });
+
+// Tell a tab when its URL changes, including single-page-app navigation that
+// fires no document load. Content scripts used to poll window.location on an
+// interval for this; letting the browser report it means no timer runs in
+// any page the extension touches.
+// Only the two single-page apps need this; everywhere else a URL change
+// comes with a document load that starts the content script afresh.
+const SPA_HOSTS = ["github.com", "www.overleaf.com", "overleaf.com"];
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (!changeInfo.url) {
+    return;
+  }
+  let host: string;
+  try {
+    host = new URL(changeInfo.url).hostname;
+  } catch {
+    return;
+  }
+  if (!SPA_HOSTS.includes(host)) {
+    return;
+  }
+  chrome.tabs
+    .sendMessage(tabId, { type: "url.changed", url: changeInfo.url })
+    // The tab may not have a content script of ours listening yet
+    .catch(() => undefined);
+});

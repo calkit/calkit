@@ -48,12 +48,38 @@ async function runSignIn(): Promise<AuthState> {
     body: { hostname: "Chrome extension" },
     anonymous: true,
   });
-  await chrome.tabs.create({ url: auth.verification_uri });
+  const tab = await chrome.tabs.create({ url: auth.verification_uri });
+  // An abandoned sign-in would otherwise keep polling for the full
+  // expiry window, and every request resets the service worker's idle
+  // timer, so the worker stays alive and busy long after the user has
+  // moved on. Closing the tab is how they say they're done.
+  let abandoned = false;
+  const onTabClosed = (closedTabId: number) => {
+    if (closedTabId === tab.id) {
+      abandoned = true;
+    }
+  };
+  chrome.tabs.onRemoved.addListener(onTabClosed);
+  try {
+    return await pollForToken(hub.apiUrl, auth, () => abandoned);
+  } finally {
+    chrome.tabs.onRemoved.removeListener(onTabClosed);
+  }
+}
+
+async function pollForToken(
+  apiUrl: string,
+  auth: DeviceAuthResponse,
+  isAbandoned: () => boolean,
+): Promise<AuthState> {
   const deadline = Date.now() + auth.expires_in * 1000;
   const intervalMs = Math.max(auth.interval, 1) * 1000;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    const resp = await fetch(`${hub.apiUrl}/login/device/token`, {
+    if (isAbandoned()) {
+      throw new Error("Sign-in was cancelled");
+    }
+    const resp = await fetch(`${apiUrl}/login/device/token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ device_code: auth.device_code }),
@@ -70,7 +96,7 @@ async function runSignIn(): Promise<AuthState> {
     if (!token.access_token) {
       continue;
     }
-    await setCredentials(hub.apiUrl, {
+    await setCredentials(apiUrl, {
       accessToken: token.access_token,
       refreshToken: token.refresh_token ?? null,
       expiresAt: Date.now() + (token.expires_in ?? 1800) * 1000,

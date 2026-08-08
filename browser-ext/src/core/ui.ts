@@ -333,3 +333,28 @@ export function loading(text = "Loading"): HTMLElement {
 export function errorMessage(message: string): HTMLElement {
   return el("div", { class: "error small", text: message });
 }
+
+/**
+ * A text input that password managers leave alone.
+ *
+ * None of the fields in these panels hold credentials, so autofill on them
+ * is never right. Each manager reads its own opt-out: Dashlane and others
+ * follow `data-form-type`, with per-manager attributes for the rest.
+ */
+export function textInput(options: {
+  value?: string;
+  placeholder?: string;
+}): HTMLInputElement {
+  return el("input", {
+    type: "text",
+    value: options.value,
+    placeholder: options.placeholder,
+    attrs: {
+      autocomplete: "off",
+      "data-form-type": "other",
+      "data-lpignore": "true",
+      "data-1p-ignore": "",
+      "data-bwignore": "true",
+    },
+  });
+}

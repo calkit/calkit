@@ -1,4 +1,5 @@
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import type { ProjectPublic, References, ZoteroLibrary } from "../core/types";
 import {
@@ -9,6 +10,7 @@ import {
   mountPanel,
   signInPrompt,
   type Panel,
+  textInput,
 } from "../core/ui";
 
 const PANEL_ID = "calkit-zotero-panel";
@@ -166,10 +168,8 @@ async function renderImport(
     );
   }
   const collectionSelect = el("select");
-  const bibPath = el("input", {
-    type: "text",
+  const bibPath = textInput({
     value: "references.bib",
-    attrs: { autocomplete: "off", "data-lpignore": "true" },
   });
   const message = el("div", { class: "small" });
   const loadCollections = async () => {
@@ -362,6 +362,16 @@ async function openPanel(): Promise<void> {
   }
 }
 
-if (isLibraryPage()) {
-  mountLauncher(() => void openPanel());
-}
+runContentScript({
+  id: "zotero",
+  sync: () => {
+    if (isLibraryPage()) {
+      mountLauncher(() => void openPanel());
+    }
+  },
+  teardown: () => {
+    document.getElementById(LAUNCHER_ID)?.remove();
+    panel?.remove();
+    panel = null;
+  },
+});

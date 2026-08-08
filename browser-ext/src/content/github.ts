@@ -1,5 +1,6 @@
 import { getGithubPath, getGithubRepo } from "../core/detect";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import type { ContentsItemBase, ProjectPublic } from "../core/types";
 import {
@@ -309,13 +310,12 @@ function sync(): void {
   mountLauncher(repo);
 }
 
-// GitHub navigates without full page loads, so watch for the repo changing
-let lastUrl = window.location.href;
-setInterval(() => {
-  if (window.location.href !== lastUrl) {
-    lastUrl = window.location.href;
-    sync();
-  }
-}, 1000);
-
-sync();
+runContentScript({
+  id: "github",
+  sync,
+  teardown: () => {
+    document.getElementById(LAUNCHER_ID)?.remove();
+    panel?.remove();
+    panel = null;
+  },
+});

@@ -4,6 +4,7 @@ import {
   type DetectedReference,
 } from "../core/detect";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
+import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import type { ReferenceNote, ReferenceSearchMatch } from "../core/types";
 import {
@@ -14,6 +15,7 @@ import {
   mountPanel,
   signInPrompt,
   type Panel,
+  textInput,
 } from "../core/ui";
 
 const PANEL_ID = "calkit-reference-panel";
@@ -235,10 +237,8 @@ async function renderAddForm(
     return;
   }
   const collectionSelect = el("select");
-  const keyInput = el("input", {
-    type: "text",
+  const keyInput = textInput({
     value: suggestCitationKey(reference),
-    attrs: { autocomplete: "off", "data-lpignore": "true" },
   });
   const message = el("div", { class: "small" });
   const addButton = el("button", {
@@ -424,4 +424,12 @@ async function start(): Promise<void> {
   }
 }
 
-void start();
+runContentScript({
+  id: "references",
+  sync: () => void start(),
+  teardown: () => {
+    document.getElementById(LAUNCHER_ID)?.remove();
+    panel?.remove();
+    panel = null;
+  },
+});

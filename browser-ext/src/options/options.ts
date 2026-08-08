@@ -1,7 +1,7 @@
 import { apiUrlFromHubUrl, customHubFromUrl } from "../core/hubs";
 import { send } from "../core/messages";
 import type { ProjectPublic } from "../core/types";
-import { clear, el, errorMessage, loading } from "../core/ui";
+import { clear, el, errorMessage, loading, textInput } from "../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
 
@@ -127,11 +127,9 @@ async function renderHubSection(
       );
     }
   });
-  const customUrl = el("input", {
-    type: "text",
+  const customUrl = textInput({
     placeholder: "https://calkit.example.edu",
     value: customHubUrl,
-    attrs: { autocomplete: "off", "data-lpignore": "true" },
   });
   const derived = el("div", { class: "dim small" });
   const showDerived = () => {
@@ -234,14 +232,8 @@ async function renderActiveProjectSection(
   }
   clear(container);
   const message = el("div", { class: "small" });
-  const search = el("input", {
-    type: "text",
+  const search = textInput({
     placeholder: "Search projects",
-    attrs: {
-      autocomplete: "off",
-      "data-form-type": "other",
-      "data-lpignore": "true",
-    },
   });
   const list = el("div");
   const setActive = async (spec: string | null) => {

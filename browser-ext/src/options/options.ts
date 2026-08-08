@@ -98,12 +98,29 @@ async function renderHubSection(
 ): Promise<void> {
   clear(container);
   const hubSelect = el("select");
-  for (const hub of hubs) {
+  // Nearly everyone belongs on calkit.io, so it leads and is named as the
+  // default; the rest are development instances or self-hosting, which is
+  // rare enough that presenting them as equal choices misleads
+  const primary = hubs.find((hub) => hub.name === "production");
+  if (primary) {
     hubSelect.append(
+      el("option", {
+        value: primary.name,
+        text: `${primary.label} (default)`,
+      }),
+    );
+  }
+  const others = el("optgroup", { attrs: { label: "Other instances" } });
+  for (const hub of hubs) {
+    if (hub.name === "production") {
+      continue;
+    }
+    others.append(
       el("option", { value: hub.name, text: `${hub.label} (${hub.apiUrl})` }),
     );
   }
-  hubSelect.append(el("option", { value: "custom", text: "Self-hosted" }));
+  others.append(el("option", { value: "custom", text: "Self-hosted" }));
+  hubSelect.append(others);
   hubSelect.value = hubName;
   const message = el("div", { class: "small" });
   // Selecting a hub applies it straight away. A Save button below a long
@@ -184,9 +201,9 @@ async function renderHubSection(
     el("div", {
       class: "dim small",
       text:
-        "A hub serves its API from the api subdomain of its own host, so " +
-        "its URL is all that's needed. Chrome will ask for access to that " +
-        "host.",
+        "Only needed if you run your own Calkit instance. A hub serves its " +
+        "API from the api subdomain of its own host, so its URL is all " +
+        "that's needed. Chrome will ask for access to that host.",
     }),
     el("div", { class: "actions" }, [useCustom]),
   ]);
@@ -199,7 +216,10 @@ async function renderHubSection(
     el("div", { class: "small", style: { fontWeight: "600" }, text: "Hub" }),
     el("div", {
       class: "dim small",
-      text: "Every surface uses this hub. Changing it takes effect right away.",
+      text:
+        "Every surface uses this hub, and calkit.io is where projects live " +
+        "unless you've been told otherwise. Changing it takes effect right " +
+        "away.",
     }),
     hubSelect,
     customFields,

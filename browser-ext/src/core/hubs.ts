@@ -88,3 +88,22 @@ export function getHub(name: string, custom?: Hub | null): Hub {
   }
   return hub;
 }
+
+/**
+ * Resolve a hub from the web URL a project declares for itself.
+ *
+ * A project names its hub in calkit.yaml, and that is enough to talk to
+ * it: a built-in instance is matched outright, and anything else is
+ * derived from the URL by the `api` subdomain rule. Reaching a hub that
+ * isn't built in still needs Chrome to have granted its host, which only
+ * the options page can ask for.
+ */
+export function resolveHubByWebUrl(webUrl: string): Hub {
+  const normalized = webUrl.trim().replace(/\/+$/, "");
+  for (const hub of Object.values(HUBS)) {
+    if (hub.webUrl.replace(/\/+$/, "") === normalized) {
+      return hub;
+    }
+  }
+  return customHubFromUrl(normalized);
+}

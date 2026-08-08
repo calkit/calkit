@@ -266,32 +266,31 @@ def get_contents_from_repo(
     )
 
 
-def record_overleaf_links(
-    session: Session,
-    project: Project,
-    repo: git.Repo,
-    ck_info: dict | None = None,
-) -> list[OverleafLink]:
-    """Index the project's Overleaf links so an Overleaf project ID can be
-    resolved back to this project.
+def overleaf_links_from_ck_info(ck_info: dict) -> dict[str, str]:
+    """Map synced folder to Overleaf project ID, as calkit.yaml declares it.
 
-    The repo stays the source of truth, so this refreshes the index to match
-    what calkit.yaml declares, dropping links that are no longer there.
+    Only the committed ``overleaf_sync`` block is read, not the private
+    sync state, so this works on a calkit.yaml fetched on its own without
+    the rest of the repo.
     """
     import calkit.overleaf
 
-    try:
-        sync_info = calkit.overleaf.get_sync_info(
-            wdir=repo.working_dir, ck_info=deepcopy(ck_info)
-        )
-    except Exception as e:
-        logger.warning(f"Could not read Overleaf sync info: {e}")
-        return []
-    declared = {}
-    for path, info in sync_info.items():
-        overleaf_project_id = info.get("project_id")
-        if overleaf_project_id:
-            declared[path] = str(overleaf_project_id)
+    declared: dict[str, str] = {}
+    for path, info in (ck_info.get("overleaf_sync") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        project_id = info.get("project_id")
+        if not project_id and info.get("url"):
+            project_id = calkit.overleaf.project_id_from_url(info["url"])
+        if project_id:
+            declared[str(path)] = str(project_id)
+    return declared
+
+
+def store_overleaf_links(
+    session: Session, project: Project, declared: dict[str, str]
+) -> list[OverleafLink]:
+    """Make the index for a project match ``declared`` exactly."""
     existing = {
         link.path: link
         for link in session.exec(
@@ -321,9 +320,91 @@ def record_overleaf_links(
             changed = True
     if changed:
         session.commit()
-    return session.exec(
-        select(OverleafLink).where(OverleafLink.project_id == project.id)
-    ).all()  # type: ignore[return-value]
+    return list(
+        session.exec(
+            select(OverleafLink).where(OverleafLink.project_id == project.id)
+        ).all()
+    )
+
+
+def scan_overleaf_links(
+    session: Session, project: Project, user: User
+) -> list[OverleafLink]:
+    """Read a project's Overleaf links from its calkit.yaml on GitHub.
+
+    Fetching the one file through the GitHub API costs a single request,
+    where cloning the repo to read the same file costs a clone. That is
+    what makes it reasonable to walk a user's projects looking for the one
+    that syncs with a given Overleaf project.
+
+    The scan timestamp is recorded either way, so a project with no links,
+    no calkit.yaml, or no readable repo isn't re-fetched on every lookup.
+    """
+    declared: dict[str, str] = {}
+    if project.github_repo:
+        try:
+            token = app.users.get_github_token(session, user)
+        except HTTPException:
+            token = None
+        if token is not None:
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{project.github_repo}"
+                    "/contents/calkit.yaml",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github.raw+json",
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    declared = overleaf_links_from_ck_info(
+                        _yaml_load(resp.text) or {}
+                    )
+            except Exception as e:
+                logger.info(
+                    f"Could not read calkit.yaml for {project.id}: {e}"
+                )
+    links = store_overleaf_links(session, project, declared)
+    project.overleaf_scanned = utcnow()
+    session.add(project)
+    session.commit()
+    return links
+
+
+def record_overleaf_links(
+    session: Session,
+    project: Project,
+    repo: git.Repo,
+    ck_info: dict | None = None,
+) -> list[OverleafLink]:
+    """Index the project's Overleaf links so an Overleaf project ID can be
+    resolved back to this project.
+
+    The repo stays the source of truth, so this refreshes the index to match
+    what calkit.yaml declares, dropping links that are no longer there.
+    """
+    import calkit.overleaf
+
+    try:
+        sync_info = calkit.overleaf.get_sync_info(
+            wdir=repo.working_dir, ck_info=deepcopy(ck_info)
+        )
+    except Exception as e:
+        logger.warning(f"Could not read Overleaf sync info: {e}")
+        return []
+    declared = {}
+    for path, info in sync_info.items():
+        overleaf_project_id = info.get("project_id")
+        if overleaf_project_id:
+            declared[path] = str(overleaf_project_id)
+    links = store_overleaf_links(session, project, declared)
+    # Reading the repo is the most authoritative look there is, so it also
+    # satisfies the scan the lazy lookup would otherwise do
+    project.overleaf_scanned = utcnow()
+    session.add(project)
+    session.commit()
+    return links
 
 
 def get_ck_info_and_dvc_outs_from_tree(

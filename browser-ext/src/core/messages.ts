@@ -16,6 +16,17 @@ import type {
 } from "./types";
 
 /**
+ * A hub other than the configured one, named by its web URL.
+ *
+ * A project declares the hub it belongs to, so a surface that has read
+ * that declaration can work with the project where it actually lives
+ * without changing which hub the extension uses by default.
+ */
+export interface HubScoped {
+  hubUrl?: string;
+}
+
+/**
  * Every operation a UI surface can ask the service worker to perform.
  *
  * These are named operations rather than a general "call this URL" proxy so a
@@ -23,8 +34,8 @@ import type {
  * stays in the service worker.
  */
 export type Request =
-  | { type: "auth.state" }
-  | { type: "auth.signIn" }
+  | ({ type: "auth.state" } & HubScoped)
+  | ({ type: "auth.signIn" } & HubScoped)
   | { type: "auth.signOut" }
   | { type: "settings.get" }
   | { type: "settings.set"; update: SettingsUpdate }
@@ -41,21 +52,21 @@ export type Request =
        */
       minAccessLevel?: "read" | "write";
     }
-  | { type: "projects.byGithubRepo"; githubRepo: string }
-  | {
+  | ({ type: "projects.byGithubRepo"; githubRepo: string } & HubScoped)
+  | ({
       type: "projects.create";
       name: string;
       title: string;
       gitRepoUrl: string;
       isPublic: boolean;
-    }
+    } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
-  | {
+  | ({
       type: "project.contents";
       owner: string;
       project: string;
       path?: string;
-    }
+    } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "overleaf.links"; overleafProjectId: string }

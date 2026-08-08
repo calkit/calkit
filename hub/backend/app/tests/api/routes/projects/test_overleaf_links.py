@@ -321,3 +321,61 @@ def test_get_user_reference_matches(
     )
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_post_reference_item_creates_missing_collection(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    repo_dir = tmp_path / uuid.uuid4().hex[:8]
+    os.makedirs(repo_dir)
+    repo = git.Repo.init(path=repo_dir)
+    _set_identity(repo)
+    with open(repo_dir / "calkit.yaml", "w") as f:
+        ryaml.dump({}, f)
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Initial commit"])
+    remote_dir = tmp_path / f"{uuid.uuid4().hex[:8]}-remote"
+    git.Repo.init(path=remote_dir, bare=True)
+    repo.git.remote(["add", "origin", str(remote_dir)])
+    repo.git.push(["-u", "origin", repo.active_branch.name])
+    url = (
+        f"{settings.API_V1_STR}/projects/{project.owner_account_name}/"
+        f"{project.name}/references/items"
+    )
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "thomas2026",
+                "type": "article",
+                "fields": {"title": "Reversing biodiversity decline"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    # The first reference in a project creates the collection rather than
+    # failing because the .bib doesn't exist yet
+    bib_path = repo_dir / "references.bib"
+    assert bib_path.is_file()
+    assert "thomas2026" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]
+    # A second reference lands in the collection that now exists, and
+    # doesn't re-declare it
+    with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        resp = client.post(
+            url,
+            json={
+                "path": "references.bib",
+                "key": "smith2025",
+                "type": "article",
+                "fields": {"title": "Another paper"},
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    assert "smith2025" in bib_path.read_text()
+    ck_info = ryaml.load((repo_dir / "calkit.yaml").read_text())
+    assert ck_info["references"] == [{"path": "references.bib"}]

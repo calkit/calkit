@@ -160,5 +160,10 @@ export interface ReferenceNote {
  */
 export interface CalkitYamlInfo {
   present: boolean;
+  /**
+   * Hub the project belongs to, already resolved: a declared hub, or
+   * calkit.io when the file names none. Null only when there's no
+   * calkit.yaml to read, where the repo isn't a Calkit project at all.
+   */
   hubUrl: string | null;
 }

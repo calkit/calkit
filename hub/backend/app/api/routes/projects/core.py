@@ -5857,10 +5857,18 @@ class ReferenceItemPost(BaseModel):
     fields: dict[str, str] = {}
 
 
-def _load_bib_db(repo, path: str):
+def _load_bib_db(repo, path: str, create: bool = False):
+    """Parse a .bib file from the repo.
+
+    With ``create``, a path that doesn't exist yet yields an empty
+    database instead of a 404, so a project's first reference can be added
+    without the user having to create the file first.
+    """
     full_path = os.path.join(repo.working_dir, path)
     if not os.path.isfile(full_path):
-        raise HTTPException(404, "References file not found")
+        if not create:
+            raise HTTPException(404, "References file not found")
+        return bibtexparser.loads(""), full_path
     with open(full_path) as f:
         return bibtexparser.loads(f.read()), full_path
 
@@ -5889,7 +5897,10 @@ def post_project_reference_item(
         min_access_level="write",
     )
     repo = get_repo(project=project, user=current_user, session=session)
-    db, full_path = _load_bib_db(repo, req.path)
+    # Adding the first reference to a project shouldn't require creating
+    # the collection by hand first
+    db, full_path = _load_bib_db(repo, req.path, create=True)
+    created = not os.path.isfile(full_path)
     if any(e.get("ID") == req.key for e in db.entries):
         raise HTTPException(409, f"An entry '{req.key}' already exists")
     entry = {"ENTRYTYPE": req.type, "ID": req.key}
@@ -5906,11 +5917,31 @@ def post_project_reference_item(
             session=session, user=current_user
         )
         _push_added_reference(repo, api_key, link, req.path, req)
+    os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
     with open(full_path, "w") as f:
         f.write(zotero.format_bib(bibtexparser.dumps(db)))
     repo.git.add(req.path)
+    # A brand new collection is declared in calkit.yaml too, so it shows up
+    # as a real collection rather than only being found by the .bib scan
+    if created:
+        ck_info = get_ck_info_from_repo(repo)
+        collections = ck_info.get("references") or []
+        if not any(
+            isinstance(c, dict) and c.get("path") == req.path
+            for c in collections
+        ):
+            collections.append({"path": req.path})
+            ck_info["references"] = collections
+            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+                ryaml.dump(ck_info, f)
+            repo.git.add("calkit.yaml")
     if repo.git.diff("--cached", "--name-only").strip():
-        repo.git.commit(["-m", f"Add reference '{req.key}'"])
+        message = (
+            f"Add reference '{req.key}'"
+            if not created
+            else f"Add reference '{req.key}' in new collection '{req.path}'"
+        )
+        repo.git.commit(["-m", message])
         repo.git.push(["origin", repo.active_branch.name])
     mixpanel.track(
         user=current_user,

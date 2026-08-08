@@ -1,3 +1,4 @@
+import type { Hub } from "./hubs";
 import { getCredentials, getCurrentHub, setCredentials } from "./storage";
 
 export class ApiError extends Error {
@@ -26,6 +27,42 @@ interface TokenResponse {
   access_token: string;
   refresh_token?: string | null;
   expires_in?: number | null;
+}
+
+// The hub answers 403 with these when a token is missing, expired, or
+// revoked. It answers 401 for plenty of things that have nothing to do
+// with the caller's Calkit credentials, the missing Overleaf token being
+// the one users hit most, so the status alone can't decide whether
+// signing in would help. Matching on what the hub actually says keeps a
+// "connect Overleaf" problem from being reported as "sign in".
+const CREDENTIAL_FAILURES = [
+  "could not validate credentials",
+  "invalid token",
+  "token invalid",
+  "token has expired",
+  "token has been deactivated",
+  "invalid token scope",
+  "not authenticated",
+  "invalid refresh token",
+  "refresh token has expired",
+];
+
+function isCredentialFailure(detail: string | null): boolean {
+  if (!detail) {
+    return false;
+  }
+  const lowered = detail.toLowerCase();
+  return CREDENTIAL_FAILURES.some((phrase) => lowered.includes(phrase));
+}
+
+/** Read an error body without consuming it, so the caller can read it too. */
+async function peekDetail(resp: Response): Promise<string | null> {
+  try {
+    const body = await resp.clone().json();
+    return typeof body?.detail === "string" ? body.detail : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readError(resp: Response): Promise<string> {
@@ -96,6 +133,12 @@ export interface RequestOptions {
   form?: Record<string, string | Blob>;
   /** Make the request without credentials, e.g. during sign-in. */
   anonymous?: boolean;
+  /**
+   * Hub to call, when it isn't the configured one. A project declares
+   * the hub it belongs to, so it can be worked with where it lives
+   * rather than making the user switch hubs to reach it.
+   */
+  hub?: Hub;
 }
 
 function buildUrl(
@@ -130,7 +173,7 @@ export async function request<T>(
   path: string,
   options: RequestOptions = {},
 ): Promise<T> {
-  const hub = await getCurrentHub();
+  const hub = options.hub ?? (await getCurrentHub());
   const url = buildUrl(hub.apiUrl, path, options.query);
   const headers: Record<string, string> = {};
   let body: BodyInit | undefined;
@@ -162,13 +205,17 @@ export async function request<T>(
   let resp = await send(token);
   // A token can be rejected even when it looks unexpired, e.g. it was
   // revoked, so retry once with a freshly minted one before giving up.
-  if (resp.status === 401 && !options.anonymous) {
+  if (
+    !options.anonymous &&
+    (resp.status === 401 || resp.status === 403) &&
+    isCredentialFailure(await peekDetail(resp))
+  ) {
     token = await refreshCredentials(hub.apiUrl);
     resp = await send(token);
   }
   if (!resp.ok) {
     const detail = await readError(resp);
-    if (resp.status === 401 || resp.status === 403) {
+    if (isCredentialFailure(detail)) {
       throw new NotSignedInError(detail);
     }
     throw new ApiError(resp.status, detail);

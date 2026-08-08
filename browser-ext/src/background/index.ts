@@ -1,6 +1,7 @@
 import { NotSignedInError, request } from "../core/api";
 import { getAuthState, signIn, signOut } from "../core/auth";
-import { HUBS } from "../core/hubs";
+import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
+import { HUBS, resolveHubByWebUrl, type Hub } from "../core/hubs";
 import type { Envelope, Request } from "../core/messages";
 import { getCurrentHub, getSettingsView, setSettings } from "../core/storage";
 import type {
@@ -78,20 +79,22 @@ async function readCalkitYaml(githubRepo: string): Promise<CalkitYamlInfo> {
   if (!resp.ok) {
     return { present: false, hubUrl: null };
   }
-  const text = await resp.text();
-  // Only one top-level scalar is needed, so this reads that key rather
-  // than pulling in a YAML parser for a file we otherwise ignore. An
-  // absent key means calkit.io, which the caller resolves.
-  const match = text.match(/^hub:[ \t]*["']?([^"'#\n]+?)["']?[ \t]*$/m);
-  return { present: true, hubUrl: match ? match[1].trim() : null };
+  // Resolved here, so the rule that an absent key means calkit.io lives
+  // next to the parsing rather than in each caller
+  return { present: true, hubUrl: hubUrlFromCalkitYaml(await resp.text()) };
+}
+
+/** The hub a message names, or the configured one. */
+function hubFor(message: { hubUrl?: string }): Hub | undefined {
+  return message.hubUrl ? resolveHubByWebUrl(message.hubUrl) : undefined;
 }
 
 async function handle(message: Request): Promise<unknown> {
   switch (message.type) {
     case "auth.state":
-      return getAuthState();
+      return getAuthState(hubFor(message));
     case "auth.signIn":
-      return signIn();
+      return signIn(hubFor(message));
     case "auth.signOut":
       return signOut();
     case "settings.get":
@@ -118,6 +121,7 @@ async function handle(message: Request): Promise<unknown> {
           git_repo_exists: true,
           is_public: message.isPublic,
         },
+        hub: hubFor(message),
       });
     case "github.calkitInfo":
       return readCalkitYaml(message.githubRepo);
@@ -126,11 +130,12 @@ async function handle(message: Request): Promise<unknown> {
       // artifacts behind a public repo you don't own is the point
       return request<ProjectsPublic>("/projects", {
         query: { github_repo: message.githubRepo },
+        hub: hubFor(message),
       });
     case "project.contents":
       return request<ContentsItem>(
         `${projectPath(message.owner, message.project)}/contents`,
-        { query: { path: message.path } },
+        { query: { path: message.path }, hub: hubFor(message) },
       );
     case "project.figures":
       return request<Figure[]>(

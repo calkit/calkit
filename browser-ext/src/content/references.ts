@@ -6,6 +6,11 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
+import {
+  renderFailure,
+  renderHubPicker,
+  renderProjectPicker,
+} from "../core/pickers";
 import type { ReferenceNote, ReferenceSearchMatch } from "../core/types";
 import {
   clear,
@@ -13,13 +18,15 @@ import {
   errorMessage,
   loading,
   mountPanel,
-  signInPrompt,
   type Panel,
   textInput,
 } from "../core/ui";
 
 const PANEL_ID = "calkit-reference-panel";
 const LAUNCHER_ID = "calkit-reference-launcher";
+// Where a project's first references collection goes, and the offer
+// made alongside any it already has. The hub creates it on first add.
+const ROOT_BIB = "references.bib";
 
 let panel: Panel | null = null;
 let hubWebUrl = "https://calkit.io";
@@ -242,8 +249,15 @@ async function renderAddForm(
     text: "Add to collection",
   });
   const [owner, name] = activeProject.split("/");
+  const collectionStatus = el("div", { class: "small" });
   const loadCollections = async () => {
     clear(collectionSelect);
+    // Reading a project's collections means reading its repo, which takes
+    // a moment, so the form says so instead of showing an empty select
+    // next to an Add button that would post nothing
+    collectionSelect.disabled = true;
+    addButton.disabled = true;
+    clear(collectionStatus).append(loading("Loading collections"));
     try {
       const collections = await send({
         type: "references.list",
@@ -252,10 +266,7 @@ async function renderAddForm(
       });
       if (!collections.length) {
         collectionSelect.append(
-          el("option", {
-            value: "references.bib",
-            text: "references.bib (new)",
-          }),
+          el("option", { value: ROOT_BIB, text: `${ROOT_BIB} (new)` }),
         );
         return;
       }
@@ -264,10 +275,24 @@ async function renderAddForm(
           el("option", { value: collection.path, text: collection.path }),
         );
       }
+      // A project with collections can still want a new root-level one
+      if (!collections.some((collection) => collection.path === ROOT_BIB)) {
+        collectionSelect.append(
+          el("option", { value: ROOT_BIB, text: `${ROOT_BIB} (new)` }),
+        );
+      }
     } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
+      // Listing collections is only how the options get filled in. Adding
+      // to a root-level references.bib still works, and creates it, so a
+      // failure here shouldn't leave the form with nothing to submit.
+      collectionSelect.append(
+        el("option", { value: ROOT_BIB, text: `${ROOT_BIB} (new)` }),
       );
+      clear(message).append(renderFailure(e, { onSignedIn: reload }));
+    } finally {
+      clear(collectionStatus);
+      collectionSelect.disabled = false;
+      addButton.disabled = false;
     }
   };
   addButton.addEventListener("click", async () => {
@@ -294,6 +319,7 @@ async function renderAddForm(
   container.append(
     el("label", { text: "Collection" }),
     collectionSelect,
+    collectionStatus,
     el("label", { text: "Citation key" }),
     keyInput,
     el("div", { class: "actions" }, [addButton]),
@@ -321,68 +347,6 @@ async function searchMatches(
   });
 }
 
-/**
- * The project every action in this panel applies to, and a way to change it.
- *
- * Switching here switches the active project outright rather than making a
- * one-off choice, so what the panel checked and what an import lands in
- * can't drift apart, and the next page starts where this one left off.
- */
-async function renderProjectPicker(
-  activeProject: string | null,
-  onChange: () => void,
-): Promise<HTMLElement> {
-  const select = el("select");
-  const message = el("div", { class: "small" });
-  const row = el("div", {}, [
-    el("label", { text: "Active project" }),
-    select,
-    message,
-  ]);
-  let projects;
-  try {
-    projects = (await send({ type: "projects.list", limit: 100 })).data;
-  } catch {
-    // Signing in is what the panel below will prompt for; here it just
-    // means there is nothing to choose between yet
-    return el("div", {}, [
-      el("label", { text: "Active project" }),
-      el("div", { class: "small", text: activeProject ?? "None set" }),
-    ]);
-  }
-  const specs = projects.map(
-    (project) => `${project.owner_account_name}/${project.name}`,
-  );
-  if (activeProject && !specs.includes(activeProject)) {
-    specs.unshift(activeProject);
-  }
-  if (!specs.length) {
-    return el("div", {}, [
-      el("label", { text: "Active project" }),
-      el("div", { class: "dim small", text: "No projects you can write to." }),
-    ]);
-  }
-  for (const spec of specs) {
-    select.append(el("option", { value: spec, text: spec }));
-  }
-  select.value = activeProject ?? specs[0];
-  select.addEventListener("change", async () => {
-    clear(message).append(loading("Switching"));
-    try {
-      await send({
-        type: "settings.set",
-        update: { activeProject: select.value },
-      });
-      onChange();
-    } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-    }
-  });
-  return row;
-}
-
 async function openPanel(reference: DetectedReference): Promise<void> {
   panel = mountPanel({ id: PANEL_ID, title: "Calkit reference" });
   const body = panel.body;
@@ -391,9 +355,35 @@ async function openPanel(reference: DetectedReference): Promise<void> {
   try {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
-    const picker = await renderProjectPicker(settings.activeProject, reload);
-    const matches = await searchMatches(reference, settings.activeProject);
-    clear(body).append(referenceSummary(reference), picker);
+    const [hubPicker, projectPicker] = await Promise.all([
+      renderHubPicker(reload),
+      renderProjectPicker({
+        activeProject: settings.activeProject,
+        onChange: reload,
+      }),
+    ]);
+    clear(body).append(
+      referenceSummary(reference),
+      el("div", { class: "muted-box stack", style: { marginTop: "8px" } }, [
+        hubPicker,
+        projectPicker,
+      ]),
+    );
+    // Whether this reference is already filed is useful to know, but it is
+    // not what the panel is for. A lookup that fails, including against a
+    // hub too old to offer the search, leaves adding and switching
+    // projects working rather than replacing the panel with an error.
+    let matches: ReferenceSearchMatch[] = [];
+    let lookupError: string | null = null;
+    try {
+      matches = await searchMatches(reference, settings.activeProject);
+    } catch (e) {
+      // Signing in is the whole panel's problem, not this one lookup's
+      if (e instanceof RequestFailed && e.notSignedIn) {
+        throw e;
+      }
+      lookupError = e instanceof Error ? e.message : String(e);
+    }
     if (matches.length) {
       body.append(
         el("div", {
@@ -402,6 +392,15 @@ async function openPanel(reference: DetectedReference): Promise<void> {
           text: "Already in your collections",
         }),
         ...matches.map(matchRow),
+      );
+    } else if (lookupError) {
+      body.append(
+        el("div", { class: "dim small", style: { marginTop: "8px" } }, [
+          document.createTextNode(
+            `Couldn't check whether this is already filed (${lookupError}). `,
+          ),
+          document.createTextNode("You can still add it below."),
+        ]),
       );
     } else {
       body.append(
@@ -431,26 +430,10 @@ async function openPanel(reference: DetectedReference): Promise<void> {
     );
   } catch (e) {
     clear(body).append(referenceSummary(reference));
-    if (e instanceof RequestFailed && e.notSignedIn) {
-      body.append(
-        signInPrompt(async () => {
-          try {
-            await send({ type: "auth.signIn" });
-            reload();
-          } catch (signInError) {
-            body.append(
-              errorMessage(
-                signInError instanceof Error
-                  ? signInError.message
-                  : String(signInError),
-              ),
-            );
-          }
-        }),
-      );
-      return;
-    }
-    body.append(errorMessage(e instanceof Error ? e.message : String(e)));
+    body.append(
+      await renderHubPicker(reload),
+      renderFailure(e, { hubUrl: hubWebUrl, onSignedIn: reload }),
+    );
   }
 }
 

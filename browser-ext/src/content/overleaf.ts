@@ -20,6 +20,7 @@ import {
 } from "../core/ui";
 
 const PANEL_ID = "calkit-overleaf-panel";
+const LAUNCHER_ID = "calkit-overleaf-launcher";
 
 let panel: Panel | null = null;
 let currentProjectId: string | null = null;
@@ -429,27 +430,77 @@ async function load(overleafProjectId: string): Promise<void> {
   }
 }
 
-function sync(): void {
-  const overleafProjectId = getOverleafProjectId(window.location.href);
-  if (!overleafProjectId) {
-    panel?.remove();
-    panel = null;
-    currentProjectId = null;
-    return;
-  }
-  if (panel && overleafProjectId === currentProjectId) {
-    return;
-  }
-  currentProjectId = overleafProjectId;
-  panel = mountPanel({ id: PANEL_ID, title: "Calkit" });
+/**
+ * The button the panel collapses to when closed.
+ *
+ * This panel opens by itself, since knowing a figure is stale is the
+ * point of being on an Overleaf page. Closing it therefore has to leave
+ * something behind, or the only way back would be reloading the page.
+ */
+function mountLauncher(onClick: () => void): void {
+  document.getElementById(LAUNCHER_ID)?.remove();
+  const host = el("div", { attrs: { id: LAUNCHER_ID } });
+  Object.assign(host.style, {
+    position: "fixed",
+    right: "16px",
+    bottom: "16px",
+    zIndex: "2147482999",
+  });
+  const root = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = `
+    button {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica,
+        Arial, sans-serif;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      background: #009688;
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    }
+    button:hover { background: #00766c; }
+  `;
+  const button = el("button", { text: "Calkit" });
+  button.addEventListener("click", onClick);
+  root.append(style, button);
+  document.body.append(host);
+}
+
+function openPanel(overleafProjectId: string): void {
+  document.getElementById(LAUNCHER_ID)?.remove();
+  panel = mountPanel({
+    id: PANEL_ID,
+    title: "Calkit",
+    onClose: () => {
+      panel = null;
+      mountLauncher(() => openPanel(overleafProjectId));
+    },
+  });
   void load(overleafProjectId);
 }
 
-runContentScript({
-  id: "overleaf",
-  sync,
-  teardown: () => {
-    panel?.remove();
-    panel = null;
-  },
-});
+function teardown(): void {
+  document.getElementById(LAUNCHER_ID)?.remove();
+  panel?.remove();
+  panel = null;
+  currentProjectId = null;
+}
+
+function sync(): void {
+  const overleafProjectId = getOverleafProjectId(window.location.href);
+  if (!overleafProjectId) {
+    teardown();
+    return;
+  }
+  if (overleafProjectId === currentProjectId) {
+    return;
+  }
+  currentProjectId = overleafProjectId;
+  openPanel(overleafProjectId);
+}
+
+runContentScript({ id: "overleaf", sync, teardown });

@@ -115,6 +115,28 @@ describe("detectReference", () => {
     expect(reference?.journal).toBe("Journal of Things");
   });
 
+  test("doesn't repeat authors listed under two schemes", () => {
+    // Springer and others emit the same people as both citation_author and
+    // dc.creator, which used to yield "Thomas, Chris D. and Thomas, Chris D."
+    addMeta("citation_title", "A Paper");
+    addMeta("citation_author", "Thomas, Chris D.");
+    addMeta("dc.creator", "Thomas, Chris D.");
+    expect(detectReference("https://example.org/paper")?.authors).toBe(
+      "Thomas, Chris D.",
+    );
+  });
+
+  test("keeps every distinct author within one scheme", () => {
+    addMeta("citation_title", "A Paper");
+    addMeta("citation_author", "Smith, Jane");
+    addMeta("citation_author", "Jones, Alex");
+    // Repeated once per affiliation is common and still one author
+    addMeta("citation_author", "Smith, Jane");
+    expect(detectReference("https://example.org/paper")?.authors).toBe(
+      "Smith, Jane and Jones, Alex",
+    );
+  });
+
   test("falls back to Dublin Core tags", () => {
     addMeta("dc.title", "Another Paper");
     addMeta("dc.identifier", "10.5555/xyz");

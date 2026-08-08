@@ -540,6 +540,10 @@ class ProjectBase(SQLModel):
 class Project(ProjectBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     owner_account_id: uuid.UUID = Field(foreign_key="account.id")
+    # When this project's Overleaf links were last read out of its
+    # calkit.yaml. Set even when nothing was found, so a project without
+    # any links isn't re-read on every lookup.
+    overleaf_scanned: datetime | None = Field(default=None)
     parent_project_id: uuid.UUID | None = Field(
         foreign_key="project.id", default=None
     )

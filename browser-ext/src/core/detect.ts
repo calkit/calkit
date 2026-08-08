@@ -82,18 +82,34 @@ function metaContent(names: string[]): string | null {
   return null;
 }
 
+/**
+ * Read a repeated meta tag, taking the first scheme that has any values.
+ *
+ * Publishers commonly emit the same authors under both the Highwire and
+ * Dublin Core names, so reading across schemes and concatenating lists
+ * every author twice. Case is also inconsistent between publishers, hence
+ * matching the tag name case-insensitively rather than listing variants.
+ */
 function metaContents(names: string[]): string[] {
-  const values: string[] = [];
   for (const name of names) {
+    const values: string[] = [];
+    const seen = new Set<string>();
     for (const el of document.querySelectorAll<HTMLMetaElement>(
-      `meta[name="${name}"], meta[property="${name}"]`,
+      `meta[name="${name}" i], meta[property="${name}" i]`,
     )) {
-      if (el.content?.trim()) {
-        values.push(el.content.trim());
+      const value = el.content?.trim();
+      // One scheme can still repeat a value, e.g. a tag emitted once per
+      // affiliation of the same author
+      if (value && !seen.has(value.toLowerCase())) {
+        seen.add(value.toLowerCase());
+        values.push(value);
       }
     }
+    if (values.length) {
+      return values;
+    }
   }
-  return values;
+  return [];
 }
 
 export function normalizeDoi(value: string | null): string | null {
@@ -161,11 +177,7 @@ export function detectReference(
   if (!doi && !arxivId && !title) {
     return null;
   }
-  const authors = metaContents([
-    "citation_author",
-    "dc.creator",
-    "DC.creator",
-  ]).join(" and ");
+  const authors = metaContents(["citation_author", "dc.creator"]).join(" and ");
   const dateString =
     metaContent([
       "citation_publication_date",

@@ -31,13 +31,25 @@ interface RepoState {
   repo: string;
   project: ProjectPublic | null;
   declaresCalkit: boolean;
-  /** Hub the repo declares, when that isn't the one in use. */
-  foreignHubUrl: string | null;
+  /**
+   * Hub this repo is worked with through: the one it declares if it
+   * declares one, otherwise the configured one. Knowing a project's hub
+   * is enough to use it, so a project on another instance doesn't require
+   * changing which hub the extension uses by default.
+   */
+  hubWebUrl: string;
+  /** Whether that hub has credentials stored for it. */
+  signedIn: boolean;
 }
 
 let panel: Panel | null = null;
 let currentRepo: string | null = null;
 let hubWebUrl = "https://calkit.io";
+
+/** Host of a hub URL, for prose that shouldn't carry a scheme. */
+function hubHost(webUrl: string): string {
+  return webUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
 
 function formatSize(size: number | null | undefined): string {
   if (!size && size !== 0) {
@@ -69,27 +81,39 @@ function describe(item: ContentsItemBase): string {
 }
 
 async function resolveRepo(repo: string): Promise<RepoState> {
-  const [info, projects] = await Promise.all([
-    send({ type: "github.calkitInfo", githubRepo: repo }).catch(() => null),
-    send({ type: "projects.byGithubRepo", githubRepo: repo }).catch(() => null),
-  ]);
+  const info = await send({
+    type: "github.calkitInfo",
+    githubRepo: repo,
+  }).catch(() => null);
+  // The repo's own declaration wins, so the project is looked up on the
+  // hub it says it belongs to rather than whichever one is configured
+  const target = info?.hubUrl ? info.hubUrl.replace(/\/+$/, "") : hubWebUrl;
   const state: RepoState = {
     repo,
-    project: projects?.data[0] ?? null,
+    project: null,
     declaresCalkit: Boolean(info?.present),
-    foreignHubUrl: null,
+    hubWebUrl: target,
+    signedIn: false,
   };
-  if (info?.present && info.hubUrl) {
-    const declared = info.hubUrl.replace(/\/+$/, "");
-    if (declared !== hubWebUrl.replace(/\/+$/, "")) {
-      state.foreignHubUrl = declared;
-    }
-  }
+  const auth = await send({ type: "auth.state", hubUrl: target }).catch(
+    () => null,
+  );
+  state.signedIn = Boolean(auth?.signedIn);
+  const projects = await send({
+    type: "projects.byGithubRepo",
+    githubRepo: repo,
+    hubUrl: target,
+  }).catch(() => null);
+  state.project = projects?.data[0] ?? null;
   return state;
 }
 
 /** Show an artifact without leaving the repo page. */
-function openArtifact(project: ProjectPublic, item: ContentsItemBase): void {
+function openArtifact(
+  project: ProjectPublic,
+  item: ContentsItemBase,
+  hubUrl: string,
+): void {
   panel = mountPanel({ id: PANEL_ID, title: item.name });
   const body = panel.body;
   clear(body).append(
@@ -102,7 +126,7 @@ function openArtifact(project: ProjectPublic, item: ContentsItemBase): void {
         class: "small",
         text: "Open in Calkit",
         href:
-          `${projectUrl(hubWebUrl, project.owner_account_name, project.name)}` +
+          `${projectUrl(hubUrl, project.owner_account_name, project.name)}` +
           `/files?path=${encodeURIComponent(item.path)}`,
       }),
     );
@@ -149,6 +173,7 @@ function openArtifact(project: ProjectPublic, item: ContentsItemBase): void {
 function injectArtifactRows(
   project: ProjectPublic,
   items: ContentsItemBase[],
+  hubUrl: string,
 ): number {
   const table =
     document.querySelector('table[aria-labelledby="folders-and-files"]') ??
@@ -196,7 +221,7 @@ function injectArtifactRows(
     nameLink.title = `${item.path} (tracked by DVC)`;
     nameLink.addEventListener("click", (event) => {
       event.preventDefault();
-      openArtifact(project, item);
+      openArtifact(project, item, hubUrl);
     });
     for (const other of links.slice(1)) {
       other.remove();
@@ -228,6 +253,7 @@ function injectArtifactRows(
 function renderConnect(
   body: HTMLElement,
   repo: string,
+  hubUrl: string,
   reload: () => void,
 ): void {
   const [, repoName] = repo.split("/");
@@ -249,6 +275,7 @@ function renderConnect(
         title: title.value.trim() || repoName,
         gitRepoUrl: `https://github.com/${repo}`,
         isPublic: isPublic.checked,
+        hubUrl,
       });
       reload();
     } catch (e) {
@@ -262,8 +289,8 @@ function renderConnect(
     el("div", {
       class: "dim small",
       text:
-        `${repo} isn't a Calkit project on ` +
-        `${hubWebUrl.replace(/^https?:\/\//, "")} yet. Connecting it tracks ` +
+        `${repo} isn't a Calkit project on ${hubHost(hubUrl)} yet. ` +
+        "Connecting it tracks " +
         "the repo as a project, so its pipeline, figures, and DVC artifacts " +
         "show up here and on the hub. You need write access to the repo.",
     }),
@@ -281,13 +308,14 @@ function renderConnect(
 async function renderProject(
   body: HTMLElement,
   project: ProjectPublic,
+  hubUrl: string,
 ): Promise<void> {
   clear(body).append(
     el("div", { class: "row" }, [
       el("div", { class: "grow" }, [
         el("a", {
           text: `${project.owner_account_name}/${project.name}`,
-          href: projectUrl(hubWebUrl, project.owner_account_name, project.name),
+          href: projectUrl(hubUrl, project.owner_account_name, project.name),
         }),
         el("div", { class: "dim small", text: project.title }),
       ]),
@@ -304,6 +332,7 @@ async function renderProject(
       owner: project.owner_account_name,
       project: project.name,
       path,
+      hubUrl,
     });
     const items = (contents.dir_items ?? [contents]).filter(
       (item) => item.storage === "dvc" || item.storage === "dvc-zip",
@@ -318,7 +347,7 @@ async function renderProject(
       );
       return;
     }
-    const added = injectArtifactRows(project, items);
+    const added = injectArtifactRows(project, items, hubUrl);
     list.append(
       el("div", {
         class: "small dim",
@@ -337,7 +366,7 @@ async function renderProject(
           el("button", {
             class: "action secondary",
             text: "View",
-            onClick: () => openArtifact(project, item),
+            onClick: () => openArtifact(project, item, hubUrl),
           }),
         ]),
       ),
@@ -355,31 +384,57 @@ async function openPanel(state: RepoState): Promise<void> {
   const reload = () => void refresh(state.repo);
   clear(body).append(loading());
   try {
-    if (state.foreignHubUrl) {
+    if (!state.signedIn) {
       clear(body).append(
         el("div", { class: "stack" }, [
           el("div", {
             class: "dim small",
             text:
-              `This project belongs to ${state.foreignHubUrl}, not the hub ` +
-              "you're using. Switch hubs in the extension options to work " +
-              "with it here.",
-          }),
-          el("a", {
-            class: "small",
-            text: "Open the project's hub",
-            href: state.foreignHubUrl,
+              `This project belongs to ${hubHost(state.hubWebUrl)}. Sign in ` +
+              "to that hub to work with it here; it stays separate from " +
+              "whichever hub the extension uses by default.",
           }),
         ]),
+      );
+      const message = el("div", { class: "small" });
+      const signIn = el("button", {
+        class: "action",
+        text: `Sign in to ${hubHost(state.hubWebUrl)}`,
+      });
+      signIn.addEventListener("click", async () => {
+        signIn.disabled = true;
+        clear(message).append(
+          loading("Approve the request in the tab that just opened"),
+        );
+        try {
+          await send({ type: "auth.signIn", hubUrl: state.hubWebUrl });
+          reload();
+        } catch (e) {
+          signIn.disabled = false;
+          clear(message).append(
+            errorMessage(e instanceof Error ? e.message : String(e)),
+          );
+        }
+      });
+      body.append(
+        el("div", { class: "actions" }, [
+          signIn,
+          el("a", {
+            class: "small",
+            text: "Open the hub",
+            href: state.hubWebUrl,
+          }),
+        ]),
+        message,
       );
       return;
     }
     if (state.project) {
-      await renderProject(body, state.project);
+      await renderProject(body, state.project, state.hubWebUrl);
       return;
     }
     clear(body);
-    renderConnect(body, state.repo, reload);
+    renderConnect(body, state.repo, state.hubWebUrl, reload);
   } catch (e) {
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
@@ -456,10 +511,14 @@ function mountLauncher(state: RepoState | null, onClick: () => void): void {
   ]);
   if (state?.project) {
     button.className = "connected";
-    button.title = `${state.repo} is a Calkit project on ${hubWebUrl}`;
-  } else if (state?.foreignHubUrl) {
+    button.title = `${state.repo} is a Calkit project on ${hubHost(
+      state.hubWebUrl,
+    )}`;
+  } else if (state?.declaresCalkit) {
     button.className = "elsewhere";
-    button.title = `This project belongs to ${state.foreignHubUrl}`;
+    button.title = state.signedIn
+      ? `${state.repo} declares a Calkit project on ${state.hubWebUrl}`
+      : `Sign in to ${hubHost(state.hubWebUrl)} to work with this project`;
   } else if (state) {
     button.title = `${state.repo} isn't a Calkit project yet`;
   } else {
@@ -481,7 +540,13 @@ async function refresh(repo: string): Promise<void> {
   try {
     state = await resolveRepo(repo);
   } catch {
-    state = { repo, project: null, declaresCalkit: false, foreignHubUrl: null };
+    state = {
+      repo,
+      project: null,
+      declaresCalkit: false,
+      hubWebUrl,
+      signedIn: false,
+    };
   }
   if (currentRepo !== repo) {
     return;
@@ -489,7 +554,7 @@ async function refresh(repo: string): Promise<void> {
   mountLauncher(state, () => void openPanel(state));
   // A connected project puts its artifacts in the file listing without
   // waiting to be asked, which is the point of being on this page
-  if (state.project && !state.foreignHubUrl) {
+  if (state.project) {
     try {
       const path = getGithubPath(window.location.href) ?? undefined;
       const contents = await send({
@@ -497,8 +562,13 @@ async function refresh(repo: string): Promise<void> {
         owner: state.project.owner_account_name,
         project: state.project.name,
         path,
+        hubUrl: state.hubWebUrl,
       });
-      injectArtifactRows(state.project, contents.dir_items ?? [contents]);
+      injectArtifactRows(
+        state.project,
+        contents.dir_items ?? [contents],
+        state.hubWebUrl,
+      );
     } catch {
       // The panel reports why; the listing stays as GitHub had it
     }

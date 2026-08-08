@@ -233,6 +233,12 @@ export function mountPanel(options: {
   id: string;
   title: string;
   position?: "bottom-right" | "top-right";
+  /**
+   * Called when the user closes the panel. A surface that has no other
+   * way back uses this to put its launcher button up, so closing means
+   * "get out of my way", not "never again on this page".
+   */
+  onClose?: () => void;
 }): Panel {
   document.getElementById(options.id)?.remove();
   const host = el("div", { attrs: { id: options.id } });
@@ -261,7 +267,10 @@ export function mountPanel(options: {
     body.style.display = collapsed ? "" : "none";
     collapse.textContent = collapsed ? "−" : "+";
   });
-  close.addEventListener("click", () => host.remove());
+  close.addEventListener("click", () => {
+    host.remove();
+    options.onClose?.();
+  });
   makeDraggable(host, header);
   root.append(style, el("div", { class: "panel" }, [header, body]));
   document.body.append(host);
@@ -307,16 +316,23 @@ function makeDraggable(host: HTMLElement, handle: HTMLElement): void {
 }
 
 /** A "sign in to Calkit" prompt shown when a panel has no session. */
-export function signInPrompt(onSignIn: () => void): HTMLElement {
+export function signInPrompt(
+  onSignIn: () => void,
+  hubLabel?: string,
+): HTMLElement {
+  // Naming the hub matters once more than one is in play: credentials are
+  // per hub, so "sign in" without saying where is ambiguous
   return el("div", { class: "stack" }, [
     el("div", {
       class: "dim small",
-      text: "Sign in to your Calkit account to use this panel.",
+      text: hubLabel
+        ? `Sign in to ${hubLabel} to use this panel.`
+        : "Sign in to your Calkit account to use this panel.",
     }),
     el("div", { class: "actions" }, [
       el("button", {
         class: "action",
-        text: "Sign in",
+        text: hubLabel ? `Sign in to ${hubLabel}` : "Sign in",
         onClick: onSignIn,
       }),
     ]),

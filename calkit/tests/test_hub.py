@@ -46,6 +46,48 @@ def test_hub_urls(monkeypatch):
     assert hub.env_for_hub("https://other-calkit.io") is None
 
 
+def test_api_url_from_hub_url(monkeypatch):
+    # A hub's API lives on the api subdomain of its host, so its URL is all
+    # that's needed to reach it
+    assert (
+        hub.api_url_from_hub_url("https://calkit.example.edu")
+        == "https://api.calkit.example.edu"
+    )
+    # A missing scheme is filled in, https for a real host
+    assert (
+        hub.api_url_from_hub_url("calkit.example.edu")
+        == "https://api.calkit.example.edu"
+    )
+    # A trailing slash and a path don't change the host
+    assert (
+        hub.api_url_from_hub_url("https://calkit.example.edu/")
+        == "https://api.calkit.example.edu"
+    )
+    # A port is carried over, and a local host stays on http
+    assert (
+        hub.api_url_from_hub_url("http://localhost:8000")
+        == "http://api.localhost:8000"
+    )
+    # A URL that already names the API host is left alone rather than
+    # picking up a second prefix
+    assert (
+        hub.api_url_from_hub_url("https://api.calkit.example.edu")
+        == "https://api.calkit.example.edu"
+    )
+    with pytest.raises(ValueError):
+        hub.api_url_from_hub_url("https://")
+    # An arbitrary hub resolves through the rule, while the built-in
+    # environments keep their explicitly declared URLs
+    monkeypatch.delenv("CALKIT_HUB_API_BASE_URL", raising=False)
+    monkeypatch.delenv("CALKIT_CLOUD_BASE_URL", raising=False)
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.example.edu")
+    assert hub.get_base_url() == "https://api.calkit.example.edu"
+    monkeypatch.delenv("CALKIT_HUB")
+    monkeypatch.setenv("CALKIT_ENV", "production")
+    assert hub.get_base_url() == "https://api.calkit.io"
+
+
 def _make_jwt(exp: float) -> str:
     """Build a minimal unsigned JWT with the given ``exp`` claim."""
     header = base64.urlsafe_b64encode(

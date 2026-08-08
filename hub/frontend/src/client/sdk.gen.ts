@@ -2076,6 +2076,7 @@ export class ProjectsService {
       search_for?: string | null
       owner_name?: string | null
       github_repo?: string | null
+      min_access_level?: "read" | "write"
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<GetProjectsResponses, GetProjectsErrors, ThrowOnError> {
@@ -2089,6 +2090,7 @@ export class ProjectsService {
             { in: "query", key: "search_for" },
             { in: "query", key: "owner_name" },
             { in: "query", key: "github_repo" },
+            { in: "query", key: "min_access_level" },
           ],
         },
       ],

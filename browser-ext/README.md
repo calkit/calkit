@@ -41,10 +41,10 @@ one of your projects. From there you can:
 - Read and edit the notes attached to it, which are stored in the BibTeX
   `comment` field and pushed to Zotero for Zotero-linked collections.
 
-Which projects get checked is configured in the extension's options. That list
-is explicit rather than "all your projects" because each project has to be
-read on the server, so an unbounded search would be too slow to run on page
-load.
+The project checked is the **active project** set in the extension's options.
+One project rather than a list is deliberate: it suits a thesis-scale
+monorepo, and it's also what keeps the lookup fast, since each project has to
+be read on the server to search its collections.
 
 The extension's popup does the same detection on any page through `activeTab`,
 so a site that isn't in the content script's list still works, just from the
@@ -88,22 +88,51 @@ Google Cloud Storage and S3, which covers the hosted instances. A hub using
 some other storage, e.g. MinIO, needs its host added; without it the preview
 is dropped and the download link still works.
 
-## Choosing a hub
+## Settings
 
-The options page selects between calkit.io, the staging instance, a local
-development instance, and a self-hosted one. A self-hosted hub needs its API
-host granted to the extension, which Chrome prompts for on first use.
+The options page holds two settings.
+
+**Hub** selects between calkit.io, the staging instance, a local development
+instance, and a self-hosted one. Changing it applies immediately, and the
+page then shows whether you're signed in to the newly selected hub, since
+credentials are stored per hub and switching generally means signing in
+again.
+
+A hub serves its API from the `api` subdomain of the host serving its web
+app, so a self-hosted hub is configured with its URL alone:
+`https://calkit.example.edu` implies `https://api.calkit.example.edu`. Chrome
+prompts for access to that host when the hub is applied. This matches
+`calkit.hub.api_url_from_hub_url` in the Python package; see the
+[self-hosting docs](../docs/hub/self-hosting.md).
+
+**Active project** is the project being worked on, remembered per hub.
+Reference lookups check its collections, and importing a reference or a
+Zotero collection defaults to it. It can also be switched from the popup.
+
+Project pickers list only projects you can **write** to
+(`GET /projects?min_access_level=write`), since every action they offer
+writes. The GitHub panel is the exception: it resolves a repo at read
+access, because browsing the DVC artifacts behind a public project you
+don't own is the point of it.
 
 ## Layout
 
 ```
 public/manifest.json   Extension manifest
+popup.html             Toolbar popup page, built to dist/popup.html
+options.html           Options page, built to dist/options.html
 src/background/        Service worker: auth, API calls, message routing
 src/content/           One content script per site
 src/core/              Hub config, storage, API client, page detection, UI
-src/popup/             Toolbar popup
-src/options/           Options page
+src/popup/             Popup script and shared page styles
+src/options/           Options script
 ```
+
+Both pages are built to the root of `dist` rather than to a path under
+`src/`, so they load from `chrome-extension://<id>/options.html`. Content
+blockers match on request paths and some of their filter lists catch generic
+source-tree paths, which is enough to break an extension page with
+`ERR_BLOCKED_BY_CLIENT`.
 
 ## Development
 

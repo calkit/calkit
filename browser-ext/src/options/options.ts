@@ -1,106 +1,295 @@
+import { apiUrlFromHubUrl, customHubFromUrl } from "../core/hubs";
 import { send } from "../core/messages";
+import type { ProjectPublic } from "../core/types";
 import { clear, el, errorMessage, loading } from "../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
 
-async function render(): Promise<void> {
-  clear(app).append(
-    el("header", {}, [el("span", { text: "Calkit options" })]),
-    el("main", {}, [loading()]),
-  );
-  const settings = await send({ type: "settings.get" });
-  const { hubs, current } = await send({ type: "hubs.get" });
-  clear(app).append(el("header", {}, [el("span", { text: "Calkit options" })]));
-  const main = el("main", { class: "stack" });
-  app.append(main);
+/**
+ * Ask Chrome for access to a self-hosted hub's API host.
+ *
+ * The built-in hubs are in the manifest's host permissions, but a
+ * self-hosted one can't be, so it's requested here. Clicking Use this hub is
+ * the user gesture Chrome requires before it will show the prompt.
+ */
+async function requestApiAccess(apiUrl: string): Promise<boolean> {
+  const origin = `${new URL(apiUrl).origin}/*`;
+  if (await chrome.permissions.contains({ origins: [origin] })) {
+    return true;
+  }
+  return chrome.permissions.request({ origins: [origin] });
+}
+
+/**
+ * The signed-in state of the selected hub, with the action that changes it.
+ *
+ * Credentials are per hub, so switching hubs generally means signing in
+ * again. Showing that here means the switch doesn't silently leave every
+ * surface signed out with no explanation.
+ */
+async function renderAuth(container: HTMLElement): Promise<void> {
+  clear(container).append(loading("Checking sign-in"));
+  let state: Awaited<ReturnType<typeof send<"auth.state">>>;
+  try {
+    state = await send({ type: "auth.state" });
+  } catch (e) {
+    clear(container).append(
+      errorMessage(e instanceof Error ? e.message : String(e)),
+    );
+    return;
+  }
+  clear(container);
+  if (state.signedIn && state.user) {
+    container.append(
+      el("div", { class: "row" }, [
+        el("div", { class: "grow" }, [
+          el("div", { text: `Signed in to ${state.hubLabel}` }),
+          el("div", { class: "dim small", text: state.user.email }),
+        ]),
+        el("button", {
+          class: "action secondary",
+          text: "Sign out",
+          onClick: async () => {
+            await send({ type: "auth.signOut" });
+            void render();
+          },
+        }),
+      ]),
+    );
+    return;
+  }
   const message = el("div", { class: "small" });
-  // Hub selection
+  const signIn = el("button", { class: "action", text: "Sign in" });
+  signIn.addEventListener("click", async () => {
+    signIn.disabled = true;
+    clear(message).append(
+      loading("Approve the request in the tab that just opened"),
+    );
+    try {
+      await send({ type: "auth.signIn" });
+      void render();
+    } catch (e) {
+      signIn.disabled = false;
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  container.append(
+    el("div", { class: "row" }, [
+      el("div", { class: "grow" }, [
+        el("div", { text: `Not signed in to ${state.hubLabel}` }),
+        el("div", {
+          class: "dim small",
+          text: "Each hub has its own credentials.",
+        }),
+      ]),
+      signIn,
+    ]),
+    message,
+  );
+}
+
+async function renderHubSection(
+  container: HTMLElement,
+  hubName: string,
+  customHubUrl: string,
+  hubs: { name: string; label: string; apiUrl: string }[],
+): Promise<void> {
+  clear(container);
   const hubSelect = el("select");
   for (const hub of hubs) {
-    hubSelect.append(el("option", { value: hub.name, text: hub.label }));
+    hubSelect.append(
+      el("option", { value: hub.name, text: `${hub.label} (${hub.apiUrl})` }),
+    );
   }
   hubSelect.append(el("option", { value: "custom", text: "Self-hosted" }));
-  hubSelect.value = settings.hubName;
-  const customWebUrl = el("input", {
+  hubSelect.value = hubName;
+  const message = el("div", { class: "small" });
+  // Selecting a hub applies it straight away. A Save button below a long
+  // project list is easy to miss, and a hub that looks switched but isn't
+  // is worse than no setting at all.
+  hubSelect.addEventListener("change", async () => {
+    if (hubSelect.value === "custom") {
+      syncVisibility();
+      return;
+    }
+    clear(message).append(loading("Switching hub"));
+    try {
+      await send({
+        type: "settings.set",
+        update: { hubName: hubSelect.value },
+      });
+      void render();
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  const customUrl = el("input", {
     type: "text",
-    placeholder: "https://calkit.example.org",
-    value: settings.customHub?.webUrl ?? "",
+    placeholder: "https://calkit.example.edu",
+    value: customHubUrl,
     attrs: { autocomplete: "off", "data-lpignore": "true" },
   });
-  const customApiUrl = el("input", {
-    type: "text",
-    placeholder: "https://api.calkit.example.org",
-    value: settings.customHub?.apiUrl ?? "",
-    attrs: { autocomplete: "off", "data-lpignore": "true" },
+  const derived = el("div", { class: "dim small" });
+  const showDerived = () => {
+    const value = customUrl.value.trim();
+    if (!value) {
+      derived.textContent = "";
+      return;
+    }
+    try {
+      derived.textContent = `API: ${apiUrlFromHubUrl(value)}`;
+      derived.classList.remove("error");
+    } catch {
+      derived.textContent = "That doesn't look like a hub URL.";
+      derived.classList.add("error");
+    }
+  };
+  customUrl.addEventListener("input", showDerived);
+  showDerived();
+  // The custom hub needs an explicit commit, since it also has to ask
+  // Chrome for access to a host the manifest can't know about
+  const useCustom = el("button", { class: "action", text: "Use this hub" });
+  useCustom.addEventListener("click", async () => {
+    useCustom.disabled = true;
+    clear(message).append(loading("Switching hub"));
+    try {
+      const url = customUrl.value.trim();
+      if (!url) {
+        throw new Error("A hub URL is required");
+      }
+      const customHub = customHubFromUrl(url);
+      if (!(await requestApiAccess(customHub.apiUrl))) {
+        throw new Error(
+          `Calkit needs access to ${customHub.apiUrl} to use that hub`,
+        );
+      }
+      await send({
+        type: "settings.set",
+        update: { hubName: "custom", customHub },
+      });
+      void render();
+    } catch (e) {
+      useCustom.disabled = false;
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
   });
   const customFields = el("div", { class: "stack" }, [
-    el("label", { text: "Web app URL" }),
-    customWebUrl,
-    el("label", { text: "API URL" }),
-    customApiUrl,
+    el("label", { text: "Hub URL" }),
+    customUrl,
+    derived,
     el("div", {
       class: "dim small",
       text:
-        "A self-hosted hub also needs its API host added to the extension's " +
-        "site access, which Chrome will prompt for on the first request.",
+        "A hub serves its API from the api subdomain of its own host, so " +
+        "its URL is all that's needed. Chrome will ask for access to that " +
+        "host.",
     }),
+    el("div", { class: "actions" }, [useCustom]),
   ]);
-  const syncCustomVisibility = () => {
+  function syncVisibility() {
     customFields.style.display = hubSelect.value === "custom" ? "" : "none";
-  };
-  hubSelect.addEventListener("change", syncCustomVisibility);
-  syncCustomVisibility();
-  main.append(
+  }
+  syncVisibility();
+  const authContainer = el("div");
+  container.append(
     el("div", { class: "small", style: { fontWeight: "600" }, text: "Hub" }),
     el("div", {
       class: "dim small",
-      text: `Currently signed in against ${current.apiUrl}.`,
+      text: "Every surface uses this hub. Changing it takes effect right away.",
     }),
     hubSelect,
     customFields,
+    message,
+    el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
+      authContainer,
+    ]),
   );
-  // Watched projects
-  const watched = new Set(settings.watchedProjects);
-  const projectList = el("div");
-  main.append(
-    el("div", {
-      class: "small",
-      style: { fontWeight: "600", marginTop: "12px" },
-      text: "Projects to check for references",
-    }),
-    el("div", {
-      class: "dim small",
-      text:
-        "When you open a paper, these projects are checked to see whether " +
-        "it's already in one of their collections. Each one is read on the " +
-        "server, so keep the list to the projects you're actively citing in.",
-    }),
-    projectList,
-  );
-  clear(projectList).append(loading());
+  await renderAuth(authContainer);
+}
+
+async function renderActiveProjectSection(
+  container: HTMLElement,
+  selected: string | null,
+): Promise<void> {
+  clear(container).append(loading("Loading your projects"));
+  let projects: ProjectPublic[];
   try {
-    const projects = await send({ type: "projects.list", limit: 100 });
-    clear(projectList);
-    if (!projects.data.length) {
-      projectList.append(
-        el("div", { class: "dim small", text: "No projects yet." }),
+    projects = (await send({ type: "projects.list", limit: 100 })).data;
+  } catch (e) {
+    clear(container).append(
+      el("div", { class: "dim small" }, [
+        document.createTextNode(
+          "Sign in above to choose a project on this hub. ",
+        ),
+        el("span", { text: e instanceof Error ? e.message : "" }),
+      ]),
+    );
+    return;
+  }
+  clear(container);
+  const message = el("div", { class: "small" });
+  const search = el("input", {
+    type: "text",
+    placeholder: "Search projects",
+    attrs: {
+      autocomplete: "off",
+      "data-form-type": "other",
+      "data-lpignore": "true",
+    },
+  });
+  const list = el("div");
+  const setActive = async (spec: string | null) => {
+    clear(message).append(loading("Saving"));
+    try {
+      const updated = await send({
+        type: "settings.set",
+        update: { activeProject: spec },
+      });
+      selected = updated.activeProject;
+      clear(message).append(
+        el("span", {
+          class: "dim",
+          text: selected ? `Active project: ${selected}` : "No active project",
+        }),
+      );
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
       );
     }
-    for (const project of projects.data) {
+    renderList();
+  };
+  const renderList = () => {
+    const query = search.value.trim().toLowerCase();
+    const matching = projects.filter((project) => {
       const spec = `${project.owner_account_name}/${project.name}`;
-      const checkbox = el("input", { type: "checkbox" });
-      checkbox.checked = watched.has(spec);
-      checkbox.style.width = "auto";
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) {
-          watched.add(spec);
-        } else {
-          watched.delete(spec);
-        }
-      });
-      projectList.append(
+      return (
+        !query ||
+        spec.toLowerCase().includes(query) ||
+        project.title.toLowerCase().includes(query)
+      );
+    });
+    clear(list);
+    if (!matching.length) {
+      list.append(el("div", { class: "dim small", text: "No projects" }));
+      return;
+    }
+    for (const project of matching) {
+      const spec = `${project.owner_account_name}/${project.name}`;
+      const radio = el("input", { type: "radio" });
+      radio.name = "active-project";
+      radio.checked = spec === selected;
+      radio.style.width = "auto";
+      radio.addEventListener("change", () => void setActive(spec));
+      list.append(
         el("label", { class: "row", style: { fontWeight: "400" } }, [
-          checkbox,
+          radio,
           el("div", { class: "grow" }, [
             el("div", { text: spec }),
             el("div", { class: "dim small", text: project.title }),
@@ -108,47 +297,60 @@ async function render(): Promise<void> {
         ]),
       );
     }
-  } catch (e) {
-    clear(projectList).append(
-      el("div", { class: "dim small" }, [
-        document.createTextNode(
-          "Sign in from the extension popup to choose projects. ",
-        ),
-        el("span", { class: "dim", text: e instanceof Error ? e.message : "" }),
-      ]),
-    );
-  }
-  const save = el("button", { class: "action", text: "Save" });
-  save.addEventListener("click", async () => {
-    save.disabled = true;
-    clear(message).append(loading("Saving"));
-    try {
-      await send({
-        type: "settings.set",
-        update: {
-          hubName: hubSelect.value,
-          customHub:
-            hubSelect.value === "custom"
-              ? {
-                  name: "custom",
-                  label: new URL(customWebUrl.value.trim()).host,
-                  webUrl: customWebUrl.value.trim().replace(/\/$/, ""),
-                  apiUrl: customApiUrl.value.trim().replace(/\/$/, ""),
-                }
-              : settings.customHub,
-          watchedProjects: [...watched].sort(),
-        },
-      });
-      clear(message).append(el("span", { class: "dim", text: "Saved." }));
-    } catch (e) {
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-    } finally {
-      save.disabled = false;
-    }
-  });
-  main.append(el("div", { class: "actions" }, [save]), message);
+  };
+  search.addEventListener("input", renderList);
+  container.append(
+    search,
+    list,
+    el("div", { class: "actions" }, [
+      el("button", {
+        class: "action secondary",
+        text: "Clear",
+        onClick: () => void setActive(null),
+      }),
+    ]),
+    message,
+  );
+  renderList();
+}
+
+async function render(): Promise<void> {
+  clear(app).append(
+    el("header", {}, [el("span", { text: "Calkit options" })]),
+    el("main", {}, [loading()]),
+  );
+  const settings = await send({ type: "settings.get" });
+  const { hubs } = await send({ type: "hubs.get" });
+  clear(app).append(el("header", {}, [el("span", { text: "Calkit options" })]));
+  const main = el("main", { class: "stack" });
+  app.append(main);
+  const hubContainer = el("div", { class: "stack" });
+  const projectContainer = el("div");
+  main.append(
+    hubContainer,
+    el("div", {
+      class: "small",
+      style: { fontWeight: "600", marginTop: "12px" },
+      text: "Active project",
+    }),
+    el("div", {
+      class: "dim small",
+      text:
+        "The project you're working on now, remembered per hub. Reference " +
+        "lookups check its collections, and importing a reference or a " +
+        "Zotero collection defaults to it. One at a time on purpose: a " +
+        "thesis-scale project stays easier to keep reproducible when " +
+        "everything lands in the same place.",
+    }),
+    projectContainer,
+  );
+  await renderHubSection(
+    hubContainer,
+    settings.hubName,
+    settings.customHub?.webUrl ?? "",
+    hubs,
+  );
+  await renderActiveProjectSection(projectContainer, settings.activeProject);
 }
 
 void render();

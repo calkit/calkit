@@ -299,19 +299,19 @@ async function openPanel(): Promise<void> {
     const settings = await send({ type: "settings.get" });
     const projects = await send({ type: "projects.list", limit: 100 });
     clear(body);
-    // Watched projects float to the top, since they're the ones the user
-    // works with references in
-    const ordered = [...projects.data].sort((a, b) => {
-      const aWatched = settings.watchedProjects.includes(
-        `${a.owner_account_name}/${a.name}`,
-      );
-      const bWatched = settings.watchedProjects.includes(
-        `${b.owner_account_name}/${b.name}`,
-      );
-      return Number(bWatched) - Number(aWatched);
-    });
-    if (!ordered.length) {
+    if (!projects.data.length) {
       body.append(el("div", { class: "dim small", text: "No projects yet." }));
+      return;
+    }
+    // Go straight into the active project, which is where a collection is
+    // almost always headed; the list is there for the exceptions
+    const active = projects.data.find(
+      (project) =>
+        `${project.owner_account_name}/${project.name}` ===
+        settings.activeProject,
+    );
+    if (active) {
+      await renderProject(body, active, reload);
       return;
     }
     body.append(
@@ -320,7 +320,7 @@ async function openPanel(): Promise<void> {
         text: "Pick the project to import into or sync with.",
       }),
     );
-    for (const project of ordered.slice(0, 25)) {
+    for (const project of projects.data.slice(0, 25)) {
       body.append(
         el("div", { class: "row" }, [
           el("div", { class: "grow" }, [

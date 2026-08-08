@@ -14,6 +14,7 @@ from app import users
 from app.config import settings
 from app.core import ryaml
 from app.models import OverleafLink, Project, UserCreate
+from app.models.core import ROLE_IDS, UserProjectAccess
 from app.tests import authentication_token_from_email
 
 
@@ -136,6 +137,83 @@ def test_record_overleaf_links_and_lookup(
     )
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_get_projects_min_access_level_write(
+    client: TestClient, db: Session
+) -> None:
+    # A project the user owns, plus one owned by somebody else that they can
+    # only read
+    owned, headers = _make_owner_with_project(db, client)
+    others, _ = _make_owner_with_project(db, client)
+    others.is_public = True
+    db.add(others)
+    db.commit()
+    suffix = uuid.uuid4().hex[:8]
+    reader = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"reader-{suffix}@example.com",
+            password="readerpassword123",
+            account_name=f"reader{suffix}",
+            github_username=f"reader{suffix}",
+        ),
+    )
+    reader_headers = authentication_token_from_email(
+        client=client, email=reader.email, db=db
+    )
+
+    def _list(headers: dict[str, str], **params):
+        resp = client.get(
+            f"{settings.API_V1_STR}/projects", params=params, headers=headers
+        )
+        assert resp.status_code == 200
+        return {
+            f"{p['owner_account_name']}/{p['name']}"
+            for p in resp.json()["data"]
+        }
+
+    owned_spec = f"{owned.owner_account_name}/{owned.name}"
+    others_spec = f"{others.owner_account_name}/{others.name}"
+    # Reading lists the public project belonging to someone else; asking for
+    # write access drops it, since a reader can't write to it
+    assert others_spec in _list(reader_headers)
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    # An owner keeps their own project under either level
+    assert owned_spec in _list(headers)
+    assert owned_spec in _list(headers, min_access_level="write")
+    # A read-level grant isn't enough, but a write-level one is
+    db.add(
+        UserProjectAccess(
+            project_id=others.id, user_id=reader.id, role_id=ROLE_IDS["read"]
+        )
+    )
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access = db.exec(
+        select(UserProjectAccess)
+        .where(UserProjectAccess.project_id == others.id)
+        .where(UserProjectAccess.user_id == reader.id)
+    ).one()
+    access.role_id = ROLE_IDS["write"]
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # GitHub-derived access counts too, but only at write or better
+    access.role_id = None
+    access.github_access = "read"
+    db.add(access)
+    db.commit()
+    assert others_spec not in _list(reader_headers, min_access_level="write")
+    access.github_access = "admin"
+    db.add(access)
+    db.commit()
+    assert others_spec in _list(reader_headers, min_access_level="write")
+    # Anonymous callers can't ask for write access at all
+    resp = client.get(
+        f"{settings.API_V1_STR}/projects", params={"min_access_level": "write"}
+    )
+    assert resp.status_code == 403
 
 
 def test_get_projects_filters_by_github_repo(

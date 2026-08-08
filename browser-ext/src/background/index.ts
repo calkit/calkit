@@ -2,7 +2,7 @@ import { NotSignedInError, request } from "../core/api";
 import { getAuthState, signIn, signOut } from "../core/auth";
 import { HUBS } from "../core/hubs";
 import type { Envelope, Request } from "../core/messages";
-import { getCurrentHub, getSettings, setSettings } from "../core/storage";
+import { getCurrentHub, getSettingsView, setSettings } from "../core/storage";
 import type {
   ContentsItem,
   Figure,
@@ -68,7 +68,7 @@ async function handle(message: Request): Promise<unknown> {
     case "auth.signOut":
       return signOut();
     case "settings.get":
-      return getSettings();
+      return getSettingsView();
     case "settings.set":
       return setSettings(message.update);
     case "hubs.get":
@@ -78,9 +78,12 @@ async function handle(message: Request): Promise<unknown> {
         query: {
           search_for: message.searchFor,
           limit: message.limit ?? 100,
+          min_access_level: message.minAccessLevel ?? "write",
         },
       });
     case "projects.byGithubRepo":
+      // Read access on purpose, unlike the picker: browsing the DVC
+      // artifacts behind a public repo you don't own is the point
       return request<ProjectsPublic>("/projects", {
         query: { github_repo: message.githubRepo },
       });

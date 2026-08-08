@@ -40,7 +40,11 @@ export function el<K extends keyof HTMLElementTagNameMap>(
     options.value !== undefined &&
     (node instanceof HTMLInputElement ||
       node instanceof HTMLTextAreaElement ||
-      node instanceof HTMLSelectElement)
+      node instanceof HTMLSelectElement ||
+      // An option left out here silently falls back to its own text as its
+      // value, so a select reports its visible label instead of the value
+      // the caller set
+      node instanceof HTMLOptionElement)
   ) {
     node.value = options.value;
   }

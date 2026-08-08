@@ -32,6 +32,36 @@ never handed to a script running in a web page.
 If you use a staging, local, or self-hosted hub, select it in the extension's
 options page first, since credentials are stored per hub.
 
+## Settings
+
+The options page holds two settings.
+
+**Hub** selects which instance every surface talks to: calkit.io, staging, a
+local development instance, or a self-hosted one.
+Changing it applies immediately, and the page then shows whether you're
+signed in to the newly selected hub, since credentials are stored per hub and
+switching usually means signing in again.
+
+A self-hosted hub is configured with its URL alone, because
+[a hub serves its API from the `api` subdomain](hub/self-hosting.md) of its own
+host.
+Chrome prompts for access to that host when the hub is applied.
+
+**Active project** is the project you're working on, remembered per hub.
+Reference lookups check its collections, and importing a reference or a
+Zotero collection defaults to it.
+It can also be switched from the popup, next to any project in the list.
+
+One project at a time is deliberate.
+A thesis-scale monorepo stays easier to keep reproducible when everything
+lands in the same place, and a single project is also what keeps reference
+lookups fast, since each one has to be read on the server to search it.
+
+Project pickers list only the projects you can write to, since everything
+they offer writes something.
+The GitHub panel is the exception, resolving a repo at read access so you
+can browse the artifacts behind a public project you don't own.
+
 ## Overleaf
 
 <!-- prettier-ignore -->
@@ -65,27 +95,20 @@ Overleaf URL back to your project.
 
 ## GitHub
 
-On a repository page, a "Calkit artifacts" button resolves the repo to a
-Calkit project and lists its DVC-tracked files, with the pipeline stage that
-produced each one, previews for images, and links that download the content
-from the project's DVC storage.
-This is the piece GitHub can't show you on its own, since it only stores the
-`.dvc` pointer files.
+On a repository page, the Calkit button in the lower right indicates if the
+current repo is a Calkit project.
+If it's not, you can turn it into one.
+If it is, Calkit will intersperse your DVC-tracked artifacts
+in the GitHub file view with a badge showing
 
 ## References
 
 On a journal, publisher, or preprint page, the extension reads the page's
 citation metadata and checks whether that reference is already in a collection
-in one of your projects.
+in your current active project.
 From the panel you can import it into any `.bib` collection, and read or edit
 the notes stored on it.
 See [References](references.md) for how collections and notes work.
-
-Which projects are checked is set in the extension's options.
-The list is explicit rather than "everything you can see" because each project
-is read on the server to search it, so checking all of them would be too slow
-to do on every page load.
-Pick the handful you're actively citing in.
 
 ## Zotero
 

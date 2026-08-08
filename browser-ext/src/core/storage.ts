@@ -8,14 +8,35 @@ export interface Credentials {
 }
 
 export interface Settings {
+  /** Hub used by default for every surface, e.g. "production". */
   hubName: string;
   customHub: Hub | null;
   /**
-   * Projects checked when looking a reference up, as ``owner/name``. Kept
-   * explicit because each one has to be read server side, so searching
-   * everything the user can see would be too slow to do on page load.
+   * The project being worked on, as ``owner/name``, per hub API URL.
+   *
+   * One at a time is deliberate: a thesis-scale monorepo is the pattern
+   * this is built around, and a single active project is also what keeps
+   * reference lookups fast, since each project has to be read server side
+   * to search its collections. It's stored per hub because a project only
+   * exists on the hub it lives on, so switching hubs must not carry a
+   * project that isn't there.
    */
-  watchedProjects: string[];
+  activeProjects: Record<string, string>;
+}
+
+/** Settings as a surface sees them, with the current hub resolved. */
+export interface SettingsView {
+  hubName: string;
+  customHub: Hub | null;
+  hub: Hub;
+  activeProject: string | null;
+}
+
+export interface SettingsUpdate {
+  hubName?: string;
+  customHub?: Hub | null;
+  /** Applied to whichever hub is active once the update is done. */
+  activeProject?: string | null;
 }
 
 const SETTINGS_KEY = "settings";
@@ -24,7 +45,7 @@ const CREDENTIALS_KEY = "credentials";
 export const DEFAULT_SETTINGS: Settings = {
   hubName: DEFAULT_HUB_NAME,
   customHub: null,
-  watchedProjects: [],
+  activeProjects: {},
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -32,12 +53,40 @@ export async function getSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...(stored[SETTINGS_KEY] ?? {}) };
 }
 
+export async function getSettingsView(): Promise<SettingsView> {
+  const settings = await getSettings();
+  const hub = getHub(settings.hubName, settings.customHub);
+  return {
+    hubName: settings.hubName,
+    customHub: settings.customHub,
+    hub,
+    activeProject: settings.activeProjects[hub.apiUrl] ?? null,
+  };
+}
+
 export async function setSettings(
-  update: Partial<Settings>,
-): Promise<Settings> {
-  const settings = { ...(await getSettings()), ...update };
+  update: SettingsUpdate,
+): Promise<SettingsView> {
+  const current = await getSettings();
+  const settings: Settings = {
+    ...current,
+    ...(update.hubName === undefined ? {} : { hubName: update.hubName }),
+    ...(update.customHub === undefined ? {} : { customHub: update.customHub }),
+  };
+  if (update.activeProject !== undefined) {
+    // Resolved against the hub this update leaves in place, so setting the
+    // hub and the project together lands the project on the new hub
+    const hub = getHub(settings.hubName, settings.customHub);
+    const activeProjects = { ...settings.activeProjects };
+    if (update.activeProject === null) {
+      delete activeProjects[hub.apiUrl];
+    } else {
+      activeProjects[hub.apiUrl] = update.activeProject;
+    }
+    settings.activeProjects = activeProjects;
+  }
   await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
-  return settings;
+  return getSettingsView();
 }
 
 export async function getCurrentHub(): Promise<Hub> {

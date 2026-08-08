@@ -217,28 +217,22 @@ function bibFields(reference: DetectedReference): Record<string, string> {
 async function renderAddForm(
   container: HTMLElement,
   reference: DetectedReference,
-  watchedProjects: string[],
+  activeProject: string | null,
   reload: () => void,
 ): Promise<void> {
   clear(container);
-  if (!watchedProjects.length) {
+  if (!activeProject) {
     container.append(
       el("div", { class: "dim small" }, [
-        document.createTextNode(
-          "Choose which projects to check for references in the ",
-        ),
+        document.createTextNode("Choose an active project in the "),
         el("a", {
           text: "extension options",
-          href: chrome.runtime.getURL("src/options/index.html"),
+          href: chrome.runtime.getURL("options.html"),
         }),
-        document.createTextNode("."),
+        document.createTextNode(" to add references to it."),
       ]),
     );
     return;
-  }
-  const projectSelect = el("select");
-  for (const spec of watchedProjects) {
-    projectSelect.append(el("option", { value: spec, text: spec }));
   }
   const collectionSelect = el("select");
   const keyInput = el("input", {
@@ -251,9 +245,9 @@ async function renderAddForm(
     class: "action",
     text: "Add to collection",
   });
+  const [owner, name] = activeProject.split("/");
   const loadCollections = async () => {
     clear(collectionSelect);
-    const [owner, name] = projectSelect.value.split("/");
     try {
       const collections = await send({
         type: "references.list",
@@ -280,11 +274,9 @@ async function renderAddForm(
       );
     }
   };
-  projectSelect.addEventListener("change", () => void loadCollections());
   addButton.addEventListener("click", async () => {
     addButton.disabled = true;
     clear(message).append(loading("Adding"));
-    const [owner, name] = projectSelect.value.split("/");
     try {
       await send({
         type: "references.add",
@@ -305,7 +297,7 @@ async function renderAddForm(
   });
   container.append(
     el("label", { text: "Project" }),
-    projectSelect,
+    el("div", { class: "small", text: activeProject }),
     el("label", { text: "Collection" }),
     collectionSelect,
     el("label", { text: "Citation key" }),
@@ -318,9 +310,9 @@ async function renderAddForm(
 
 async function searchMatches(
   reference: DetectedReference,
-  watchedProjects: string[],
+  activeProject: string | null,
 ): Promise<ReferenceSearchMatch[]> {
-  if (!watchedProjects.length) {
+  if (!activeProject) {
     return [];
   }
   if (!reference.doi && !reference.arxivId && !reference.title) {
@@ -328,7 +320,7 @@ async function searchMatches(
   }
   return send({
     type: "references.search",
-    projects: watchedProjects,
+    projects: [activeProject],
     doi: reference.doi ?? undefined,
     arxivId: reference.arxivId ?? undefined,
     title: reference.title ?? undefined,
@@ -343,7 +335,7 @@ async function openPanel(reference: DetectedReference): Promise<void> {
   try {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
-    const matches = await searchMatches(reference, settings.watchedProjects);
+    const matches = await searchMatches(reference, settings.activeProject);
     clear(body).append(referenceSummary(reference));
     if (matches.length) {
       body.append(
@@ -359,9 +351,9 @@ async function openPanel(reference: DetectedReference): Promise<void> {
         el("div", {
           class: "dim small",
           style: { marginTop: "8px" },
-          text: settings.watchedProjects.length
-            ? "Not in any of the projects you're watching."
-            : "No projects are being watched yet.",
+          text: settings.activeProject
+            ? `Not in any collection in ${settings.activeProject}.`
+            : "No active project is set yet.",
         }),
       );
     }
@@ -377,7 +369,7 @@ async function openPanel(reference: DetectedReference): Promise<void> {
     await renderAddForm(
       addContainer,
       reference,
-      settings.watchedProjects,
+      settings.activeProject,
       reload,
     );
   } catch (e) {
@@ -415,10 +407,10 @@ async function start(): Promise<void> {
   // collection without them having to open anything
   try {
     const settings = await send({ type: "settings.get" });
-    if (!settings.watchedProjects.length) {
+    if (!settings.activeProject) {
       return;
     }
-    const matches = await searchMatches(reference, settings.watchedProjects);
+    const matches = await searchMatches(reference, settings.activeProject);
     if (matches.length) {
       launcher.setLabel(
         `In ${matches.length} collection${matches.length === 1 ? "" : "s"}`,

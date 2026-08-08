@@ -203,9 +203,44 @@ def get_projects(
     search_for: str | None = None,
     owner_name: str | None = None,
     github_repo: str | None = None,
+    min_access_level: Literal["read", "write"] = "read",
 ) -> ProjectsPublic:
     if current_user is None:
+        if min_access_level != "read":
+            raise HTTPException(403, "User is not authenticated")
         where_clause = Project.is_public
+    elif min_access_level == "write":
+        # Mirrors the access rules get_project applies per project, so a
+        # project listed here is one the user can actually write to: they
+        # own it, hold a write-or-better grant (native or GitHub-derived),
+        # or administer the owning org. Note that GitHub-derived access is
+        # only present once it has been resolved and cached for this user,
+        # so a GitHub collaborator who has never opened the project won't
+        # appear until they do.
+        where_clause = or_(
+            Project.owner_account_id == current_user.account.id,
+            and_(
+                UserProjectAccess.user_id == current_user.id,
+                or_(
+                    UserProjectAccess.role_id >= ROLE_IDS["write"],  # type: ignore
+                    UserProjectAccess.github_access.in_(["write", "admin"]),  # type: ignore
+                ),
+            ),
+            Project.owner_account.has(  # type: ignore
+                and_(
+                    Account.org_id.is_not(None),  # type: ignore
+                    select(UserOrgMembership)
+                    .where(
+                        UserOrgMembership.user_id == current_user.id,
+                        UserOrgMembership.org_id == Account.org_id,
+                        # A plain org member only gets read on the org's
+                        # projects; admins and owners get full access
+                        UserOrgMembership.role_id >= ROLE_IDS["admin"],
+                    )
+                    .exists(),
+                )
+            ),
+        )
     else:
         where_clause = or_(
             Project.is_public,

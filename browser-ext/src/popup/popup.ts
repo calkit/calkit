@@ -143,6 +143,7 @@ async function renderSignedIn(
     }
     for (const project of projects.data.slice(0, 8)) {
       const spec = `${project.owner_account_name}/${project.name}`;
+      const isActive = spec === settings.activeProject;
       list.append(
         el("div", { class: "row" }, [
           el("div", { class: "grow" }, [
@@ -156,13 +157,24 @@ async function renderSignedIn(
             }),
             el("div", { class: "dim small", text: project.title }),
           ]),
-          settings.watchedProjects.includes(spec)
+          isActive
             ? el("span", {
                 class: "badge info",
-                text: "watched",
-                title: "Checked when looking up a reference",
+                text: "active",
+                title:
+                  "References are looked up and imported into this project",
               })
-            : null,
+            : el("button", {
+                class: "action secondary",
+                text: "Make active",
+                onClick: async () => {
+                  await send({
+                    type: "settings.set",
+                    update: { activeProject: spec },
+                  });
+                  void render();
+                },
+              }),
         ]),
       );
     }

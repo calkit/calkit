@@ -6648,6 +6648,10 @@ export type GetProjectsData = {
      * Github Repo
      */
     github_repo?: string | null
+    /**
+     * Min Access Level
+     */
+    min_access_level?: "read" | "write"
   }
   url: "/projects"
 }

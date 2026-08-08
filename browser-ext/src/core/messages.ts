@@ -1,6 +1,6 @@
 import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
-import type { Settings } from "./storage";
+import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
   ContentsItem,
   Figure,
@@ -28,9 +28,20 @@ export type Request =
   | { type: "auth.signIn" }
   | { type: "auth.signOut" }
   | { type: "settings.get" }
-  | { type: "settings.set"; update: Partial<Settings> }
+  | { type: "settings.set"; update: SettingsUpdate }
   | { type: "hubs.get" }
-  | { type: "projects.list"; searchFor?: string; limit?: number }
+  | {
+      type: "projects.list";
+      searchFor?: string;
+      limit?: number;
+      /**
+       * Defaults to write, since every surface here either writes to a
+       * project or offers to. Listing projects the user can only read
+       * would put other people's projects in a picker whose actions
+       * would then fail.
+       */
+      minAccessLevel?: "read" | "write";
+    }
   | { type: "projects.byGithubRepo"; githubRepo: string }
   | {
       type: "project.contents";
@@ -113,8 +124,8 @@ export interface ResponseMap {
   "auth.state": AuthState;
   "auth.signIn": AuthState;
   "auth.signOut": AuthState;
-  "settings.get": Settings;
-  "settings.set": Settings;
+  "settings.get": SettingsView;
+  "settings.set": SettingsView;
   "hubs.get": { hubs: Hub[]; current: Hub };
   "projects.list": ProjectsPublic;
   "projects.byGithubRepo": ProjectsPublic;

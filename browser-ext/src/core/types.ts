@@ -174,3 +174,11 @@ export interface CalkitYamlInfo {
    */
   hubUrl: string | null;
 }
+
+/** The fields of a GitHub repo the extension uses, from GET /user/github/repos. */
+export interface GithubRepo {
+  full_name: string;
+  name: string;
+  description?: string | null;
+  private: boolean;
+}

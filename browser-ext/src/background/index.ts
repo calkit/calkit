@@ -13,6 +13,7 @@ import type {
   CalkitYamlInfo,
   ContentsItem,
   Figure,
+  GithubRepo,
   OverleafLinkPublic,
   OverleafLookup,
   OverleafSyncResponse,
@@ -132,11 +133,19 @@ async function handle(message: Request): Promise<unknown> {
         body: {
           name: message.name,
           title: message.title,
-          git_repo_url: message.gitRepoUrl,
-          git_repo_exists: true,
+          // Null rather than empty: the hub reads null as "make me one"
+          // and validates anything else as a github.com URL
+          git_repo_url: message.gitRepoUrl || null,
+          git_repo_exists: Boolean(message.gitRepoUrl),
           is_public: message.isPublic,
         },
         hub: hubFor(message),
+      });
+    case "github.repos":
+      // The hub proxies this with the user's GitHub token, so the repos
+      // offered are the ones they can actually attach a project to
+      return request<GithubRepo[]>("/user/github/repos", {
+        query: { per_page: message.perPage ?? 100 },
       });
     case "github.calkitInfo":
       return readCalkitYaml(message.githubRepo);

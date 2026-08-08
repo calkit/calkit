@@ -5,6 +5,7 @@ import type {
   CalkitYamlInfo,
   ContentsItem,
   Figure,
+  GithubRepo,
   OverleafLinkPublic,
   OverleafLookup,
   OverleafSyncResponse,
@@ -58,10 +59,15 @@ export type Request =
       type: "projects.create";
       name: string;
       title: string;
-      gitRepoUrl: string;
+      /**
+       * Omitted when the repo doesn't exist yet, which is the hub's cue
+       * to create one under the user's account.
+       */
+      gitRepoUrl?: string;
       isPublic: boolean;
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
+  | { type: "github.repos"; perPage?: number }
   | ({
       type: "project.contents";
       owner: string;
@@ -139,6 +145,7 @@ export interface ResponseMap {
   "projects.byGithubRepo": ProjectsPublic;
   "projects.create": ProjectPublic;
   "github.calkitInfo": CalkitYamlInfo;
+  "github.repos": GithubRepo[];
   "project.contents": ContentsItem;
   "project.figures": Figure[];
   "content.imageDataUrl": string;

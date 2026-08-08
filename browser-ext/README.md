@@ -20,8 +20,20 @@ it and, most importantly, **which figures are out of date on Overleaf**:
 - **Sync now** runs the same bidirectional sync as `calkit overleaf sync`.
 
 If the Overleaf project isn't linked yet, the panel can search your projects
-and either check an existing link or import the Overleaf project into a
-project as a new publication.
+and either check an existing link or import the Overleaf project into one as a
+new publication.
+
+**Attach to new project** covers the case where the code, data, and figures
+already live in a GitHub repo. Turn on "Exists on GitHub", type the repo name,
+and pick the folder the document should occupy inside the project. That
+creates the Calkit project around the existing repo and imports the Overleaf
+document into it in one go, after which the document is a pipeline stage whose
+figures can be checked for staleness and synced. The Calkit GitHub app has to
+be installed for the repo.
+
+Finding the linked project doesn't require having synced before: the hub reads
+each project's `calkit.yaml` through the GitHub API, active project first,
+indexing what it finds so later lookups are a single query.
 
 ### GitHub
 

@@ -1,9 +1,14 @@
 import { getOverleafProjectId } from "../core/detect";
-import { renderHubPicker, renderProjectPicker } from "../core/pickers";
+import {
+  renderFailure,
+  renderHubPicker,
+  renderProjectPicker,
+} from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
 import type {
+  GithubRepo,
   OverleafLinkPublic,
   OverleafSyncStatus,
   OverleafSyncStatusFile,
@@ -285,8 +290,204 @@ async function renderPicker(
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => void runSearch(), 300);
   });
-  body.append(search, results, message);
+  const attachContainer = el("div");
+  const attachToggle = el("button", {
+    class: "action secondary",
+    text: "Attach to new project",
+  });
+  let attachOpen = false;
+  attachToggle.addEventListener("click", () => {
+    attachOpen = !attachOpen;
+    attachToggle.textContent = attachOpen
+      ? "Pick an existing project instead"
+      : "Attach to new project";
+    if (attachOpen) {
+      void renderAttachForm(attachContainer, overleafProjectId, reload);
+    } else {
+      clear(attachContainer);
+    }
+  });
+  body.append(
+    search,
+    results,
+    message,
+    el("div", { class: "actions" }, [attachToggle]),
+    attachContainer,
+  );
   await runSearch();
+}
+
+/**
+ * Attach this Overleaf project to a Calkit project that doesn't exist yet.
+ *
+ * The common case is someone who already has a repo of code, data, and
+ * figures and an Overleaf document written against it. Creating the
+ * project around the existing repo and importing the document into a
+ * folder inside it is what puts the two under one roof, after which the
+ * document is a pipeline stage whose figures can be checked for
+ * staleness and synced.
+ */
+async function renderAttachForm(
+  container: HTMLElement,
+  overleafProjectId: string,
+  reload: () => void,
+): Promise<void> {
+  clear(container);
+  const existsOnGithub = el("input", { type: "checkbox" });
+  existsOnGithub.style.width = "auto";
+  const repoInput = textInput({
+    placeholder: "Start typing your GitHub repo name",
+  });
+  const repoResults = el("div", { class: "stack" });
+  const repoFields = el("div", { class: "stack" }, [
+    el("label", { text: "GitHub repo" }),
+    repoInput,
+    repoResults,
+    el("div", {
+      class: "dim small",
+      text:
+        "The Calkit GitHub app has to be installed for the repo you pick. " +
+        "If it isn't, install it and try again.",
+    }),
+  ]);
+  const nameInput = textInput({ placeholder: "my-project" });
+  const titleInput = textInput({ placeholder: "My project" });
+  const pathInput = textInput({ value: "paper" });
+  const kind = el("select");
+  for (const [value, label] of [
+    ["journal-article", "Journal article"],
+    ["conference-paper", "Conference paper"],
+    ["report", "Report"],
+    ["book", "Book"],
+    ["masters-thesis", "Master's thesis"],
+    ["phd-thesis", "PhD thesis"],
+    ["other", "Other"],
+  ]) {
+    kind.append(el("option", { value, text: label }));
+  }
+  const message = el("div", { class: "small" });
+  let repos: GithubRepo[] | null = null;
+  let chosenRepo: GithubRepo | null = null;
+  const renderRepoResults = () => {
+    const query = repoInput.value.trim().toLowerCase();
+    clear(repoResults);
+    if (!repos) {
+      return;
+    }
+    const matching = repos
+      .filter((repo) => repo.full_name.toLowerCase().includes(query))
+      .slice(0, 8);
+    for (const repo of matching) {
+      repoResults.append(
+        el("div", { class: "row" }, [
+          el("div", { class: "grow" }, [
+            el("div", { class: "small", text: repo.full_name }),
+            repo.description
+              ? el("div", { class: "dim small", text: repo.description })
+              : null,
+          ]),
+          el("button", {
+            class: "action secondary",
+            text: chosenRepo?.full_name === repo.full_name ? "Chosen" : "Use",
+            disabled: chosenRepo?.full_name === repo.full_name,
+            onClick: () => {
+              chosenRepo = repo;
+              repoInput.value = repo.full_name;
+              // The project takes the repo's name unless renamed, since
+              // that's the pairing everything else assumes
+              if (!nameInput.value.trim()) {
+                nameInput.value = repo.name;
+              }
+              if (!titleInput.value.trim()) {
+                titleInput.value = repo.name;
+              }
+              renderRepoResults();
+            },
+          }),
+        ]),
+      );
+    }
+    if (!matching.length) {
+      repoResults.append(
+        el("div", { class: "dim small", text: "No matching repos" }),
+      );
+    }
+  };
+  const loadRepos = async () => {
+    clear(repoResults).append(loading("Reading your GitHub repos"));
+    try {
+      repos = await send({ type: "github.repos" });
+      renderRepoResults();
+    } catch (e) {
+      clear(repoResults).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  };
+  repoInput.addEventListener("input", renderRepoResults);
+  const syncGithubFields = () => {
+    repoFields.style.display = existsOnGithub.checked ? "" : "none";
+    if (existsOnGithub.checked && repos === null) {
+      void loadRepos();
+    }
+  };
+  existsOnGithub.addEventListener("change", syncGithubFields);
+  syncGithubFields();
+  const attach = el("button", { class: "action", text: "Attach" });
+  attach.addEventListener("click", async () => {
+    attach.disabled = true;
+    clear(message).append(loading("Creating the project"));
+    try {
+      const name = nameInput.value.trim();
+      if (!name) {
+        throw new Error("A project name is required");
+      }
+      if (existsOnGithub.checked && !chosenRepo) {
+        throw new Error("Pick the GitHub repo to attach to");
+      }
+      const project = await send({
+        type: "projects.create",
+        name,
+        title: titleInput.value.trim() || name,
+        gitRepoUrl: chosenRepo
+          ? `https://github.com/${chosenRepo.full_name}`
+          : undefined,
+        isPublic: false,
+      });
+      clear(message).append(loading("Importing the Overleaf project"));
+      await send({
+        type: "overleaf.import",
+        owner: project.owner_account_name,
+        project: project.name,
+        overleafProjectUrl: `https://www.overleaf.com/project/${overleafProjectId}`,
+        path: pathInput.value.trim() || "paper",
+        kind: kind.value,
+      });
+      reload();
+    } catch (e) {
+      attach.disabled = false;
+      clear(message).append(renderFailure(e, { onSignedIn: reload }));
+    }
+  });
+  container.append(
+    el("label", { class: "row", style: { fontWeight: "400" } }, [
+      existsOnGithub,
+      el("div", { class: "grow small", text: "Exists on GitHub" }),
+    ]),
+    repoFields,
+    el("label", { text: "Project name" }),
+    nameInput,
+    el("label", { text: "Title" }),
+    titleInput,
+    el("label", { text: "Folder for the Overleaf project" }),
+    pathInput,
+    el("div", {
+      class: "dim small",
+      text: "Where the document lives inside the larger project.",
+    }),
+    el("label", { text: "Type" }),
+    kind,
+    el("div", { class: "actions" }, [attach]),
+    message,
+  );
 }
 
 function renderImportForm(

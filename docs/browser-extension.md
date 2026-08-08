@@ -128,6 +128,10 @@ panel points you at the hub it actually lives on.
 A private repo won't serve its `calkit.yaml` anonymously, so those fall back to
 asking your hub whether it knows the repo.
 
+When viewing a pull request, if new outputs tracked with DVC have been
+created and pushed, you can view them, optionally viewing the version
+present on the base branch to compare side-by-side.
+
 ## Reference management
 
 On a journal, publisher, or preprint page, the extension reads the page's
@@ -147,3 +151,13 @@ the same way.
 If it's not present you can add it, then view/edit noted on the item.
 If you'd like to add it to a different project, you can select a different
 active project from the dropdown and add it there.
+
+## TODO
+
+Delete this list before merging!
+
+- [ ] When hovering over a DVC tracked file on GitHub, I see my profile
+      popup. This should link us to the all files page on Calkit.
+      The extension panel also has no way to go "back" from viewing the
+      file in the panel.
+- [ ] GitHub PR workflow.

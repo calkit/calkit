@@ -1,0 +1,171 @@
+// Subsets of the hub's API schema, covering only the fields this extension
+// reads. The hub's OpenAPI client is the full definition; duplicating a
+// little here keeps the extension free of a build-time dependency on it.
+
+export interface UserPublic {
+  id: string;
+  email: string;
+  full_name?: string | null;
+  account_name?: string | null;
+  github_username?: string | null;
+}
+
+export interface ProjectPublic {
+  id: string;
+  name: string;
+  title: string;
+  description?: string | null;
+  git_repo_url: string;
+  is_public: boolean;
+  owner_account_name: string;
+  current_user_access?: "read" | "write" | "admin" | "owner" | null;
+}
+
+export interface ProjectsPublic {
+  data: ProjectPublic[];
+  count: number;
+}
+
+export interface StageStatus {
+  status:
+    | "up-to-date"
+    | "stale"
+    | "not-run"
+    | "unknown"
+    | "always-run"
+    | "frozen";
+  modified_command: boolean;
+  modified_inputs: string[];
+  modified_outputs: string[];
+  missing_outputs: string[];
+}
+
+export interface OverleafSyncStatusFile {
+  path: string;
+  project_path: string;
+  state: "new" | "modified" | "deleted";
+  figure: boolean;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+}
+
+export interface OverleafSyncStatus {
+  path: string;
+  overleaf_project_id?: string | null;
+  overleaf_url?: string | null;
+  last_sync_commit?: string | null;
+  project_commit: string;
+  overleaf_commit: string;
+  commits_from_overleaf: number;
+  files_to_push: OverleafSyncStatusFile[];
+  files_to_delete: OverleafSyncStatusFile[];
+  in_sync: boolean;
+}
+
+export interface OverleafLinkPublic {
+  overleaf_project_id: string;
+  path: string;
+  project_owner_name: string;
+  project_name: string;
+  project_title: string;
+  current_user_access?: "read" | "write" | "admin" | "owner" | null;
+}
+
+export interface OverleafSyncResponse {
+  commits_from_overleaf: number;
+  overleaf_commit: string;
+  project_commit: string;
+  committed_overleaf: boolean;
+  committed_project: boolean;
+}
+
+export interface ContentsItemBase {
+  name: string;
+  path: string;
+  type?: string | null;
+  size?: number | null;
+  in_repo: boolean;
+  content?: string | null;
+  url?: string | null;
+  calkit_object?: Record<string, unknown> | null;
+  storage?: "git" | "dvc" | "dvc-zip" | null;
+  stage?: string | null;
+}
+
+export interface ContentsItem extends ContentsItemBase {
+  dir_items?: ContentsItemBase[] | null;
+}
+
+export interface Figure {
+  path: string;
+  title: string;
+  description?: string | null;
+  stage?: string | null;
+  stage_status?: StageStatus | null;
+  url?: string | null;
+  content?: string | null;
+  storage?: "git" | "dvc" | "dvc-zip" | null;
+}
+
+export interface ReferenceEntry {
+  type: string;
+  key: string;
+  file_path?: string | null;
+  url?: string | null;
+  attrs: Record<string, string>;
+  zotero_item_key?: string | null;
+  has_pdf: boolean;
+  note_count: number;
+}
+
+export interface ReferenceZoteroLink {
+  library_type: "user" | "group";
+  library_id: string;
+  collection_key: string;
+  collection_name?: string | null;
+  last_synced?: string | null;
+}
+
+export interface References {
+  path: string;
+  entries?: ReferenceEntry[] | null;
+  zotero?: ReferenceZoteroLink | null;
+  stages?: string[] | null;
+}
+
+export interface ReferenceSearchMatch {
+  project_owner_name: string;
+  project_name: string;
+  project_title: string;
+  path: string;
+  key: string;
+  type: string;
+  title?: string | null;
+  doi?: string | null;
+  note_count: number;
+  matched_on: "doi" | "arxiv_id" | "title";
+}
+
+export interface ReferenceNote {
+  text: string;
+  highlight?: { position: Record<string, unknown>; quote: string } | null;
+}
+
+export interface ZoteroLibrary {
+  library_type: "user" | "group";
+  library_id: string;
+  name: string;
+}
+
+export interface ZoteroCollection {
+  collection_key: string;
+  collection_name?: string | null;
+  parent_collection?: string | null;
+}
+
+export interface ZoteroSyncResponse {
+  path: string;
+  last_sync_version: number;
+  last_synced: string;
+  committed: boolean;
+}

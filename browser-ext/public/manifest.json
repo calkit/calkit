@@ -1,0 +1,81 @@
+{
+  "manifest_version": 3,
+  "name": "Calkit",
+  "description": "Work with your Calkit projects from GitHub, Overleaf, and Zotero.",
+  "version": "0.1.0",
+  "minimum_chrome_version": "114",
+  "icons": {
+    "16": "icons/calkit-16.png",
+    "32": "icons/calkit-32.png",
+    "48": "icons/calkit-48.png",
+    "128": "icons/calkit-128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Calkit",
+    "default_icon": {
+      "16": "icons/calkit-16.png",
+      "32": "icons/calkit-32.png",
+      "48": "icons/calkit-48.png",
+      "128": "icons/calkit-128.png"
+    }
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["storage", "tabs", "scripting", "activeTab"],
+  "host_permissions": [
+    "https://api.calkit.io/*",
+    "https://api.staging.calkit.io/*",
+    "http://api.localhost/*",
+    "https://storage.googleapis.com/*",
+    "https://s3.amazonaws.com/*",
+    "https://*.s3.amazonaws.com/*"
+  ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["content/github.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.overleaf.com/project/*",
+        "https://overleaf.com/project/*"
+      ],
+      "js": ["content/overleaf.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://arxiv.org/*",
+        "https://www.biorxiv.org/*",
+        "https://www.medrxiv.org/*",
+        "https://doi.org/*",
+        "https://dl.acm.org/*",
+        "https://ieeexplore.ieee.org/*",
+        "https://journals.aps.org/*",
+        "https://journals.plos.org/*",
+        "https://link.springer.com/*",
+        "https://onlinelibrary.wiley.com/*",
+        "https://pubmed.ncbi.nlm.nih.gov/*",
+        "https://scholar.google.com/*",
+        "https://www.mdpi.com/*",
+        "https://www.nature.com/*",
+        "https://www.science.org/*",
+        "https://www.sciencedirect.com/*",
+        "https://www.tandfonline.com/*"
+      ],
+      "js": ["content/references.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.zotero.org/*"],
+      "js": ["content/zotero.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

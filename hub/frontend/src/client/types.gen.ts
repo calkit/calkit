@@ -1907,6 +1907,36 @@ export type OrgsResponse = {
 }
 
 /**
+ * OverleafLinkPublic
+ */
+export type OverleafLinkPublic = {
+  /**
+   * Overleaf Project Id
+   */
+  overleaf_project_id: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Project Owner Name
+   */
+  project_owner_name: string
+  /**
+   * Project Name
+   */
+  project_name: string
+  /**
+   * Project Title
+   */
+  project_title: string
+  /**
+   * Current User Access
+   */
+  current_user_access: "read" | "write" | "admin" | "owner" | null
+}
+
+/**
  * OverleafSyncPost
  */
 export type OverleafSyncPost = {
@@ -1940,6 +1970,79 @@ export type OverleafSyncResponse = {
    * Committed Project
    */
   committed_project: boolean
+}
+
+/**
+ * OverleafSyncStatus
+ */
+export type OverleafSyncStatus = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Overleaf Project Id
+   */
+  overleaf_project_id?: string | null
+  /**
+   * Overleaf Url
+   */
+  overleaf_url?: string | null
+  /**
+   * Last Sync Commit
+   */
+  last_sync_commit?: string | null
+  /**
+   * Project Commit
+   */
+  project_commit: string
+  /**
+   * Overleaf Commit
+   */
+  overleaf_commit: string
+  /**
+   * Commits From Overleaf
+   */
+  commits_from_overleaf: number
+  /**
+   * Files To Push
+   */
+  files_to_push: Array<OverleafSyncStatusFile>
+  /**
+   * Files To Delete
+   */
+  files_to_delete: Array<OverleafSyncStatusFile>
+  /**
+   * In Sync
+   */
+  in_sync: boolean
+}
+
+/**
+ * OverleafSyncStatusFile
+ */
+export type OverleafSyncStatusFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Project Path
+   */
+  project_path: string
+  /**
+   * State
+   */
+  state: "new" | "modified" | "deleted"
+  /**
+   * Figure
+   */
+  figure: boolean
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
 }
 
 /**
@@ -3094,6 +3197,52 @@ export type ReferenceNotesResponse = {
    * Notes
    */
   notes: Array<ReferenceNote>
+}
+
+/**
+ * ReferenceSearchMatch
+ */
+export type ReferenceSearchMatch = {
+  /**
+   * Project Owner Name
+   */
+  project_owner_name: string
+  /**
+   * Project Name
+   */
+  project_name: string
+  /**
+   * Project Title
+   */
+  project_title: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Type
+   */
+  type: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Doi
+   */
+  doi?: string | null
+  /**
+   * Note Count
+   */
+  note_count?: number
+  /**
+   * Matched On
+   */
+  matched_on: "doi" | "arxiv_id" | "title"
 }
 
 /**
@@ -6495,6 +6644,10 @@ export type GetProjectsData = {
      * Owner Name
      */
     owner_name?: string | null
+    /**
+     * Github Repo
+     */
+    github_repo?: string | null
   }
   url: "/projects"
 }
@@ -8206,6 +8359,87 @@ export type PostProjectOverleafSyncResponses = {
 export type PostProjectOverleafSyncResponse =
   PostProjectOverleafSyncResponses[keyof PostProjectOverleafSyncResponses]
 
+export type GetProjectOverleafSyncStatusData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Path
+     */
+    path?: string | null
+    /**
+     * Overleaf Project Id
+     */
+    overleaf_project_id?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/overleaf-syncs/status"
+}
+
+export type GetProjectOverleafSyncStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectOverleafSyncStatusError =
+  GetProjectOverleafSyncStatusErrors[keyof GetProjectOverleafSyncStatusErrors]
+
+export type GetProjectOverleafSyncStatusResponses = {
+  /**
+   * Response Projects-Get Project Overleaf Sync Status
+   *
+   * Successful Response
+   */
+  200: Array<OverleafSyncStatus>
+}
+
+export type GetProjectOverleafSyncStatusResponse =
+  GetProjectOverleafSyncStatusResponses[keyof GetProjectOverleafSyncStatusResponses]
+
+export type GetOverleafLinksData = {
+  body?: never
+  path?: never
+  query: {
+    /**
+     * Overleaf Project Id
+     */
+    overleaf_project_id: string
+  }
+  url: "/overleaf-links"
+}
+
+export type GetOverleafLinksErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetOverleafLinksError =
+  GetOverleafLinksErrors[keyof GetOverleafLinksErrors]
+
+export type GetOverleafLinksResponses = {
+  /**
+   * Response Projects-Get Overleaf Links
+   *
+   * Successful Response
+   */
+  200: Array<OverleafLinkPublic>
+}
+
+export type GetOverleafLinksResponse =
+  GetOverleafLinksResponses[keyof GetOverleafLinksResponses]
+
 export type PostProjectSyncData = {
   body?: never
   path: {
@@ -8871,6 +9105,52 @@ export type PostProjectReferencesResponses = {
 
 export type PostProjectReferencesResponse =
   PostProjectReferencesResponses[keyof PostProjectReferencesResponses]
+
+export type GetUserReferenceMatchesData = {
+  body?: never
+  path?: never
+  query: {
+    /**
+     * Projects
+     */
+    projects: Array<string>
+    /**
+     * Doi
+     */
+    doi?: string | null
+    /**
+     * Arxiv Id
+     */
+    arxiv_id?: string | null
+    /**
+     * Title
+     */
+    title?: string | null
+  }
+  url: "/user/references/search"
+}
+
+export type GetUserReferenceMatchesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserReferenceMatchesError =
+  GetUserReferenceMatchesErrors[keyof GetUserReferenceMatchesErrors]
+
+export type GetUserReferenceMatchesResponses = {
+  /**
+   * Response Projects-Get User Reference Matches
+   *
+   * Successful Response
+   */
+  200: Array<ReferenceSearchMatch>
+}
+
+export type GetUserReferenceMatchesResponse =
+  GetUserReferenceMatchesResponses[keyof GetUserReferenceMatchesResponses]
 
 export type PostProjectReferenceItemData = {
   body: ReferenceItemPost

@@ -540,6 +540,125 @@ def get_commits_since_last_sync(
         return []
 
 
+FIGURE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".pdf",
+    ".eps",
+    ".ps",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+
+
+def get_sync_status(
+    main_repo: git.Repo,
+    overleaf_repo: git.Repo,
+    path_in_project: str,
+    sync_info_for_path: dict | None = None,
+    last_sync_commit: str | None = None,
+    ck_info: dict | None = None,
+) -> dict:
+    """Compute the sync status between a project and an Overleaf project.
+
+    This is the read-only counterpart to ``sync``: it reports what a sync
+    would do without touching either repo. Both repos should already be
+    up-to-date (pulled), same as for ``sync``.
+
+    The returned dictionary reports how many commits are waiting on
+    Overleaf, which stored files differ from their Overleaf counterparts
+    (and would therefore be pushed), and which previously-synced files
+    would be deleted from Overleaf. Each file is flagged as a figure or
+    not, so callers can surface out-of-date figures specifically.
+    """
+    path_in_project = Path(path_in_project).as_posix()
+    if sync_info_for_path is None:
+        sync_info_for_path = get_sync_info(wdir=main_repo.working_dir).get(
+            path_in_project, {}
+        )
+    if last_sync_commit is None:
+        last_sync_commit = sync_info_for_path.get("last_sync_commit")
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=main_repo.working_dir)
+    # Declared figures are stored relative to the repo root, but sync works
+    # relative to the synced folder, so translate them once up front
+    prefix = path_in_project.rstrip("/")
+    prefix_slash = (prefix + "/") if prefix else ""
+    declared_figures = set()
+    for fig in ck_info.get("figures") or []:
+        fig_path = fig.get("path") if isinstance(fig, dict) else fig
+        if not isinstance(fig_path, str):
+            continue
+        fig_posix = Path(fig_path).as_posix()
+        if prefix_slash and not fig_posix.startswith(prefix_slash):
+            continue
+        declared_figures.add(fig_posix[len(prefix_slash) :])
+    paths = OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=overleaf_repo,
+        path_in_project=path_in_project,
+        sync_info_for_path=sync_info_for_path,
+        last_sync_commit=last_sync_commit,
+    )
+    main_dir = os.path.join(str(main_repo.working_dir), path_in_project)
+    overleaf_dir = str(overleaf_repo.working_dir)
+
+    def _is_figure(rel_posix: str) -> bool:
+        if rel_posix in declared_figures:
+            return True
+        return Path(rel_posix).suffix.lower() in FIGURE_EXTENSIONS
+
+    def _describe(rel_posix: str, state: str) -> dict:
+        return dict(
+            path=rel_posix,
+            project_path=prefix_slash + rel_posix,
+            state=state,
+            figure=_is_figure(rel_posix),
+        )
+
+    files_to_push = []
+    for rel_posix in paths.files_to_copy_to_overleaf:
+        main_fpath = os.path.join(main_dir, rel_posix)
+        overleaf_fpath = os.path.join(overleaf_dir, rel_posix)
+        if not os.path.isfile(overleaf_fpath):
+            files_to_push.append(_describe(rel_posix, "new"))
+            continue
+        # Compare sizes before contents so unchanged large figures, which
+        # are the common case, don't get read on every status check
+        if os.path.getsize(main_fpath) != os.path.getsize(overleaf_fpath):
+            files_to_push.append(_describe(rel_posix, "modified"))
+            continue
+        with open(main_fpath, "rb") as f1, open(overleaf_fpath, "rb") as f2:
+            if f1.read() != f2.read():
+                files_to_push.append(_describe(rel_posix, "modified"))
+    files_to_delete = [
+        _describe(rel_posix, "deleted")
+        for rel_posix in paths.stale_files_in_overleaf
+    ]
+    commits_from_overleaf = get_commits_since_last_sync(
+        overleaf_repo=overleaf_repo, last_sync_commit=last_sync_commit
+    )
+    return dict(
+        path_in_project=path_in_project,
+        overleaf_project_id=sync_info_for_path.get("project_id"),
+        last_sync_commit=last_sync_commit,
+        project_commit=main_repo.head.commit.hexsha,
+        overleaf_commit=overleaf_repo.head.commit.hexsha,
+        commits_from_overleaf=len(commits_from_overleaf),
+        files_to_push=files_to_push,
+        files_to_delete=files_to_delete,
+        in_sync=(
+            not files_to_push
+            and not files_to_delete
+            and not commits_from_overleaf
+        ),
+    )
+
+
 def sync(
     main_repo: git.Repo,
     overleaf_repo: git.Repo,

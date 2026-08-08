@@ -79,3 +79,8 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm install
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright install
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list
+
+.PHONY: browser-ext
+browser-ext: ## Build the browser extension.
+	@echo "🚀 Building the browser extension"
+	@cd browser-ext && npm install && npm run build

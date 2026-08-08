@@ -3220,6 +3220,53 @@ export const OrgsResponseSchema = {
   title: "OrgsResponse",
 } as const
 
+export const OverleafLinkPublicSchema = {
+  properties: {
+    overleaf_project_id: {
+      type: "string",
+      title: "Overleaf Project Id",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    project_owner_name: {
+      type: "string",
+      title: "Project Owner Name",
+    },
+    project_name: {
+      type: "string",
+      title: "Project Name",
+    },
+    project_title: {
+      type: "string",
+      title: "Project Title",
+    },
+    current_user_access: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["read", "write", "admin", "owner"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Current User Access",
+    },
+  },
+  type: "object",
+  required: [
+    "overleaf_project_id",
+    "path",
+    "project_owner_name",
+    "project_name",
+    "project_title",
+    "current_user_access",
+  ],
+  title: "OverleafLinkPublic",
+} as const
+
 export const OverleafSyncPostSchema = {
   properties: {
     path: {
@@ -3264,6 +3311,135 @@ export const OverleafSyncResponseSchema = {
     "committed_project",
   ],
   title: "OverleafSyncResponse",
+} as const
+
+export const OverleafSyncStatusSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    overleaf_project_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Project Id",
+    },
+    overleaf_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Url",
+    },
+    last_sync_commit: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Sync Commit",
+    },
+    project_commit: {
+      type: "string",
+      title: "Project Commit",
+    },
+    overleaf_commit: {
+      type: "string",
+      title: "Overleaf Commit",
+    },
+    commits_from_overleaf: {
+      type: "integer",
+      title: "Commits From Overleaf",
+    },
+    files_to_push: {
+      items: {
+        $ref: "#/components/schemas/OverleafSyncStatusFile",
+      },
+      type: "array",
+      title: "Files To Push",
+    },
+    files_to_delete: {
+      items: {
+        $ref: "#/components/schemas/OverleafSyncStatusFile",
+      },
+      type: "array",
+      title: "Files To Delete",
+    },
+    in_sync: {
+      type: "boolean",
+      title: "In Sync",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "project_commit",
+    "overleaf_commit",
+    "commits_from_overleaf",
+    "files_to_push",
+    "files_to_delete",
+    "in_sync",
+  ],
+  title: "OverleafSyncStatus",
+} as const
+
+export const OverleafSyncStatusFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    project_path: {
+      type: "string",
+      title: "Project Path",
+    },
+    state: {
+      type: "string",
+      enum: ["new", "modified", "deleted"],
+      title: "State",
+    },
+    figure: {
+      type: "boolean",
+      title: "Figure",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["path", "project_path", "state", "figure"],
+  title: "OverleafSyncStatusFile",
 } as const
 
 export const PipelineSchema = {
@@ -5468,6 +5644,78 @@ export const ReferenceNotesResponseSchema = {
   type: "object",
   required: ["notes"],
   title: "ReferenceNotesResponse",
+} as const
+
+export const ReferenceSearchMatchSchema = {
+  properties: {
+    project_owner_name: {
+      type: "string",
+      title: "Project Owner Name",
+    },
+    project_name: {
+      type: "string",
+      title: "Project Name",
+    },
+    project_title: {
+      type: "string",
+      title: "Project Title",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    type: {
+      type: "string",
+      title: "Type",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    doi: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Doi",
+    },
+    note_count: {
+      type: "integer",
+      title: "Note Count",
+      default: 0,
+    },
+    matched_on: {
+      type: "string",
+      enum: ["doi", "arxiv_id", "title"],
+      title: "Matched On",
+    },
+  },
+  type: "object",
+  required: [
+    "project_owner_name",
+    "project_name",
+    "project_title",
+    "path",
+    "key",
+    "type",
+    "matched_on",
+  ],
+  title: "ReferenceSearchMatch",
 } as const
 
 export const ReferenceZoteroLinkSchema = {

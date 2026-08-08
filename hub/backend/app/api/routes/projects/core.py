@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -86,6 +87,7 @@ from app.models import (
     Notification,
     Org,
     OrgSubscription,
+    OverleafLink,
     Pipeline,
     Presentation,
     Project,
@@ -106,6 +108,7 @@ from app.models import (
     QuestionPublic,
     QuestionPut,
     Result,
+    StageStatus,
     User,
     UserOrgMembership,
     UserProjectAccess,
@@ -199,6 +202,7 @@ def get_projects(
     offset: int = 0,
     search_for: str | None = None,
     owner_name: str | None = None,
+    github_repo: str | None = None,
 ) -> ProjectsPublic:
     if current_user is None:
         where_clause = Project.is_public
@@ -232,6 +236,18 @@ def get_projects(
         where_clause = and_(
             where_clause,
             Project.owner_account.has(Account.name == owner_name.lower()),  # type: ignore
+        )
+    if github_repo is not None:
+        # An exact repo lookup, e.g. for resolving the project behind a
+        # GitHub page. The repo URL is stored with or without the .git
+        # suffix depending on how the project was created.
+        repo_url = f"https://github.com/{github_repo.strip('/')}"
+        where_clause = and_(
+            where_clause,
+            or_(
+                func.lower(Project.git_repo_url) == repo_url.lower(),
+                func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
+            ),
         )
     if search_for is not None:
         search_for = f"%{search_for}%"
@@ -4149,6 +4165,10 @@ async def post_project_overleaf_publication(
     )
     repo.git.commit(["-m", commit_msg])
     repo.git.push(["origin", repo.active_branch.name])
+    if not import_zip_mode:
+        app.projects.record_overleaf_links(
+            session=session, project=project, repo=repo
+        )
     return Publication.model_validate(publication)
 
 
@@ -4187,6 +4207,9 @@ def post_project_overleaf_sync(
     ck_info = get_ck_info_from_repo(repo)
     overleaf_sync_info = calkit.overleaf.get_sync_info(
         wdir=repo.working_dir, ck_info=ck_info, fix_legacy=True
+    )
+    app.projects.record_overleaf_links(
+        session=session, project=project, repo=repo
     )
     if Path(req.path).as_posix() in overleaf_sync_info:
         path_in_project = Path(req.path).as_posix()
@@ -4247,6 +4270,213 @@ def post_project_overleaf_sync(
         committed_overleaf=committed_overleaf,
         committed_project=committed_project,
     )
+
+
+class OverleafSyncStatusFile(BaseModel):
+    path: str
+    project_path: str
+    state: Literal["new", "modified", "deleted"]
+    figure: bool
+    # Pipeline status of the stage that produces this path, if it has one,
+    # so a figure that is stale in the project can be told apart from one
+    # that is merely not yet pushed to Overleaf
+    stage: str | None = None
+    stage_status: StageStatus | None = None
+
+
+class OverleafSyncStatus(BaseModel):
+    path: str
+    overleaf_project_id: str | None = None
+    overleaf_url: str | None = None
+    last_sync_commit: str | None = None
+    project_commit: str
+    overleaf_commit: str
+    commits_from_overleaf: int
+    files_to_push: list[OverleafSyncStatusFile]
+    files_to_delete: list[OverleafSyncStatusFile]
+    in_sync: bool
+
+
+@router.get("/projects/{owner_name}/{project_name}/overleaf-syncs/status")
+def get_project_overleaf_sync_status(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    path: str | None = None,
+    overleaf_project_id: str | None = None,
+) -> list[OverleafSyncStatus]:
+    """Report what an Overleaf sync would do, without doing it.
+
+    Returns one status per synced folder, optionally narrowed to a single
+    folder with ``path`` or to the folders synced with a single Overleaf
+    project with ``overleaf_project_id``.
+    """
+    try:
+        users.get_overleaf_token(session=session, user=current_user)
+    except HTTPException:
+        raise HTTPException(401, "Overleaf token not found")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    ck_info = get_ck_info_from_repo(repo)
+    sync_info = calkit.overleaf.get_sync_info(
+        wdir=repo.working_dir, ck_info=deepcopy(ck_info)
+    )
+    # Reading the repo is the expensive part, so keep the link index fresh
+    # while we have it, which is what makes the reverse lookup work
+    app.projects.record_overleaf_links(
+        session=session, project=project, repo=repo, ck_info=ck_info
+    )
+    if path is not None:
+        path = Path(path).as_posix().rstrip("/")
+        if path not in sync_info:
+            raise HTTPException(404, "Overleaf sync info not found for path")
+    # Stage statuses let us say whether a figure is stale in the project
+    # itself, not just out of date on Overleaf. Best-effort: never fail the
+    # status check over it.
+    stage_statuses: dict = {}
+    dvc_lock: dict = {}
+    try:
+        tree = app.projects.get_repo_tree_for_ref(repo, None)
+        if tree.is_file("dvc.lock"):
+            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+        dvc_yaml: dict = {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+        stage_statuses = compute_stage_statuses(
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            tree=tree,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            fs=get_object_fs(),
+            cache_token=resolve_commit_sha(repo, None),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to compute pipeline status for sync: {e}")
+
+    def _to_status_file(file_info: dict) -> OverleafSyncStatusFile:
+        stage = find_stage_for_path(file_info["project_path"], dvc_lock)
+        stage_status = stage_statuses.get(stage) if stage else None
+        return OverleafSyncStatusFile(
+            path=file_info["path"],
+            project_path=file_info["project_path"],
+            state=file_info["state"],
+            figure=file_info["figure"],
+            stage=stage,
+            stage_status=(
+                StageStatus.model_validate(stage_status.model_dump())
+                if stage_status is not None
+                else None
+            ),
+        )
+
+    resp = []
+    for path_in_project, sync_info_for_path in sync_info.items():
+        if path is not None and path_in_project != path:
+            continue
+        this_overleaf_project_id = sync_info_for_path.get("project_id")
+        if (
+            overleaf_project_id is not None
+            and this_overleaf_project_id != overleaf_project_id
+        ):
+            continue
+        if not this_overleaf_project_id:
+            logger.info(f"No Overleaf project ID for '{path_in_project}'")
+            continue
+        overleaf_repo = get_overleaf_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            overleaf_project_id=this_overleaf_project_id,
+        )
+        status = calkit.overleaf.get_sync_status(
+            main_repo=repo,
+            overleaf_repo=overleaf_repo,
+            path_in_project=path_in_project,
+            sync_info_for_path=sync_info_for_path,
+            ck_info=ck_info,
+        )
+        resp.append(
+            OverleafSyncStatus(
+                path=status["path_in_project"],
+                overleaf_project_id=status["overleaf_project_id"],
+                overleaf_url=calkit.overleaf.project_id_to_url(
+                    this_overleaf_project_id
+                ),
+                last_sync_commit=status["last_sync_commit"],
+                project_commit=status["project_commit"],
+                overleaf_commit=status["overleaf_commit"],
+                commits_from_overleaf=status["commits_from_overleaf"],
+                files_to_push=[
+                    _to_status_file(f) for f in status["files_to_push"]
+                ],
+                files_to_delete=[
+                    _to_status_file(f) for f in status["files_to_delete"]
+                ],
+                in_sync=status["in_sync"],
+            )
+        )
+    return resp
+
+
+class OverleafLinkPublic(BaseModel):
+    overleaf_project_id: str
+    path: str
+    project_owner_name: str
+    project_name: str
+    project_title: str
+    current_user_access: Literal["read", "write", "admin", "owner"] | None
+
+
+@router.get("/overleaf-links")
+def get_overleaf_links(
+    current_user: CurrentUser,
+    session: SessionDep,
+    overleaf_project_id: str,
+) -> list[OverleafLinkPublic]:
+    """Find the projects that sync a folder with an Overleaf project.
+
+    Only projects the user can read are returned. The index this reads is
+    refreshed whenever a project's Overleaf sync status is checked or a sync
+    runs, so a project linked outside the hub appears here once either has
+    happened for it.
+    """
+    links = session.exec(
+        select(OverleafLink).where(
+            OverleafLink.overleaf_project_id == overleaf_project_id
+        )
+    ).all()
+    resp = []
+    for link in links:
+        project = link.project
+        try:
+            project = app.projects.get_project(
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                session=session,
+                current_user=current_user,
+                min_access_level="read",
+            )
+        except HTTPException:
+            continue
+        resp.append(
+            OverleafLinkPublic(
+                overleaf_project_id=link.overleaf_project_id,
+                path=link.path,
+                project_owner_name=project.owner_account_name,
+                project_name=project.name,
+                project_title=project.title,
+                current_user_access=project.current_user_access,
+            )
+        )
+    return resp
 
 
 @router.post("/projects/{owner_name}/{project_name}/syncs")
@@ -5422,6 +5652,167 @@ def delete_project_references(
         add_event_info={"path": path},
     )
     return Message(message="References collection deleted")
+
+
+def _normalize_doi(value: str | None) -> str | None:
+    """Reduce a DOI to a bare, comparable form, e.g. ``10.1234/abcd``."""
+    if not value:
+        return None
+    doi = value.strip().lower()
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:"):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix) :]
+    return doi.strip("/ ") or None
+
+
+def _normalize_arxiv_id(value: str | None) -> str | None:
+    """Reduce an arXiv ID to a bare, version-less form, e.g. ``2301.01234``."""
+    if not value:
+        return None
+    arxiv_id = value.strip().lower()
+    for prefix in (
+        "https://arxiv.org/abs/",
+        "http://arxiv.org/abs/",
+        "arxiv:",
+    ):
+        if arxiv_id.startswith(prefix):
+            arxiv_id = arxiv_id[len(prefix) :]
+    arxiv_id = re.sub(r"v\d+$", "", arxiv_id.strip("/ "))
+    return arxiv_id or None
+
+
+def _normalize_title(value: str | None) -> str | None:
+    """Reduce a title to letters and digits so punctuation, case, and LaTeX
+    braces don't defeat a comparison.
+    """
+    if not value:
+        return None
+    return re.sub(r"[^a-z0-9]+", "", value.lower()) or None
+
+
+class ReferenceSearchMatch(BaseModel):
+    project_owner_name: str
+    project_name: str
+    project_title: str
+    path: str
+    key: str
+    type: str
+    title: str | None = None
+    doi: str | None = None
+    note_count: int = 0
+    matched_on: Literal["doi", "arxiv_id", "title"]
+
+
+@router.get("/user/references/search")
+def get_user_reference_matches(
+    current_user: CurrentUser,
+    session: SessionDep,
+    projects: Annotated[list[str], Query()],
+    doi: str | None = None,
+    arxiv_id: str | None = None,
+    title: str | None = None,
+) -> list[ReferenceSearchMatch]:
+    """Find a reference in the collections of the given projects.
+
+    Each entry in ``projects`` is an ``owner/name`` pair. The projects are
+    named explicitly rather than searched across everything the user can
+    read, since each one has to be cloned and read, which would make an
+    unbounded search unusably slow.
+    """
+    target_doi = _normalize_doi(doi)
+    target_arxiv_id = _normalize_arxiv_id(arxiv_id)
+    target_title = _normalize_title(title)
+    if not any([target_doi, target_arxiv_id, target_title]):
+        raise HTTPException(422, "A DOI, arXiv ID, or title is required")
+    if not projects:
+        raise HTTPException(422, "At least one project is required")
+    if len(projects) > 10:
+        raise HTTPException(422, "At most 10 projects can be searched")
+    resp = []
+    for project_spec in projects:
+        if project_spec.count("/") != 1:
+            raise HTTPException(
+                422, f"Invalid project '{project_spec}'; expected owner/name"
+            )
+        spec_owner_name, spec_project_name = project_spec.split("/")
+        try:
+            project = app.projects.get_project(
+                owner_name=spec_owner_name,
+                project_name=spec_project_name,
+                session=session,
+                current_user=current_user,
+                min_access_level="read",
+            )
+            repo = get_repo(
+                project=project,
+                user=current_user,
+                session=session,
+                ttl=DEFAULT_REPO_TTL,
+            )
+        except HTTPException as e:
+            # One inaccessible project shouldn't sink the whole lookup
+            logger.info(f"Skipping project '{project_spec}': {e.detail}")
+            continue
+        ck_info = get_ck_info_from_repo(repo)
+        bib_paths = {
+            rc["path"]
+            for rc in (ck_info.get("references") or [])
+            if isinstance(rc, dict) and "path" in rc
+        }
+        try:
+            for blob in repo.head.commit.tree.traverse():
+                if blob.type != "blob":  # type: ignore[union-attr]
+                    continue
+                blob_path = str(blob.path)  # type: ignore[union-attr]
+                if not blob_path.lower().endswith(".bib"):
+                    continue
+                if any(p.startswith(".") for p in blob_path.split("/")):
+                    continue
+                bib_paths.add(blob_path)
+        except Exception as e:
+            logger.warning(f"Failed to scan for .bib files: {e}")
+        for bib_path in sorted(bib_paths):
+            full_path = os.path.join(repo.working_dir, bib_path)
+            if not os.path.isfile(full_path):
+                continue
+            try:
+                with open(full_path) as f:
+                    bib_db = bibtexparser.loads(f.read())
+            except Exception as e:
+                logger.warning(f"Failed to parse BibTeX file {bib_path}: {e}")
+                continue
+            for entry in bib_db.entries:
+                entry_doi = _normalize_doi(entry.get("doi"))
+                entry_arxiv_id = _normalize_arxiv_id(
+                    entry.get("eprint") or entry.get("archiveprefix")
+                )
+                entry_title = _normalize_title(entry.get("title"))
+                if target_doi and entry_doi == target_doi:
+                    matched_on = "doi"
+                elif target_arxiv_id and entry_arxiv_id == target_arxiv_id:
+                    matched_on = "arxiv_id"
+                elif target_title and entry_title == target_title:
+                    matched_on = "title"
+                else:
+                    continue
+                comment = entry.get(BIB_NOTE_FIELD)
+                resp.append(
+                    ReferenceSearchMatch(
+                        project_owner_name=project.owner_account_name,
+                        project_name=project.name,
+                        project_title=project.title,
+                        path=bib_path,
+                        key=entry.get("ID", ""),
+                        type=entry.get("ENTRYTYPE", "misc"),
+                        title=entry.get("title"),
+                        doi=entry.get("doi"),
+                        note_count=len(
+                            zotero.parse_notes_markdown(comment or "")
+                        ),
+                        matched_on=matched_on,  # type: ignore[arg-type]
+                    )
+                )
+    return resp
 
 
 class ReferenceItemPost(BaseModel):

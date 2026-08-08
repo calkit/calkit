@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Literal, NamedTuple
 
 import git
@@ -30,7 +31,12 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
-from app.core import CATEGORIES_PLURAL_TO_SINGULAR, params_from_url, ryaml
+from app.core import (
+    CATEGORIES_PLURAL_TO_SINGULAR,
+    params_from_url,
+    ryaml,
+    utcnow,
+)
 from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
 from app.git import (
     RepoTree,
@@ -44,6 +50,7 @@ from app.models import (
     ItemLock,
     Notebook,
     Org,
+    OverleafLink,
     Project,
     Publication,
     User,
@@ -257,6 +264,66 @@ def get_contents_from_repo(
         tree=get_repo_tree_for_ref(repo, ref),
         path=path,
     )
+
+
+def record_overleaf_links(
+    session: Session,
+    project: Project,
+    repo: git.Repo,
+    ck_info: dict | None = None,
+) -> list[OverleafLink]:
+    """Index the project's Overleaf links so an Overleaf project ID can be
+    resolved back to this project.
+
+    The repo stays the source of truth, so this refreshes the index to match
+    what calkit.yaml declares, dropping links that are no longer there.
+    """
+    import calkit.overleaf
+
+    try:
+        sync_info = calkit.overleaf.get_sync_info(
+            wdir=repo.working_dir, ck_info=deepcopy(ck_info)
+        )
+    except Exception as e:
+        logger.warning(f"Could not read Overleaf sync info: {e}")
+        return []
+    declared = {}
+    for path, info in sync_info.items():
+        overleaf_project_id = info.get("project_id")
+        if overleaf_project_id:
+            declared[path] = str(overleaf_project_id)
+    existing = {
+        link.path: link
+        for link in session.exec(
+            select(OverleafLink).where(OverleafLink.project_id == project.id)
+        ).all()
+    }
+    changed = False
+    for path, overleaf_project_id in declared.items():
+        link = existing.get(path)
+        if link is None:
+            session.add(
+                OverleafLink(
+                    project_id=project.id,
+                    path=path,
+                    overleaf_project_id=overleaf_project_id,
+                )
+            )
+            changed = True
+        elif link.overleaf_project_id != overleaf_project_id:
+            link.overleaf_project_id = overleaf_project_id
+            link.updated = utcnow()
+            session.add(link)
+            changed = True
+    for path, link in existing.items():
+        if path not in declared:
+            session.delete(link)
+            changed = True
+    if changed:
+        session.commit()
+    return session.exec(
+        select(OverleafLink).where(OverleafLink.project_id == project.id)
+    ).all()  # type: ignore[return-value]
 
 
 def get_ck_info_and_dvc_outs_from_tree(

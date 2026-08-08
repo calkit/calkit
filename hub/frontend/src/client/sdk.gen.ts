@@ -85,6 +85,8 @@ import type {
   GetOrgStorageResponses,
   GetOrgUsersErrors,
   GetOrgUsersResponses,
+  GetOverleafLinksErrors,
+  GetOverleafLinksResponses,
   GetOwnedProjectsErrors,
   GetOwnedProjectsResponses,
   GetProjectAppErrors,
@@ -136,6 +138,8 @@ import type {
   GetProjectIssuesResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
+  GetProjectOverleafSyncStatusErrors,
+  GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
   GetProjectPresentationsErrors,
@@ -187,6 +191,8 @@ import type {
   GetUserGithubTokenResponses,
   GetUserOrgsResponses,
   GetUserOverleafTokenResponses,
+  GetUserReferenceMatchesErrors,
+  GetUserReferenceMatchesResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
@@ -2069,6 +2075,7 @@ export class ProjectsService {
       offset?: number
       search_for?: string | null
       owner_name?: string | null
+      github_repo?: string | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<GetProjectsResponses, GetProjectsErrors, ThrowOnError> {
@@ -2081,6 +2088,7 @@ export class ProjectsService {
             { in: "query", key: "offset" },
             { in: "query", key: "search_for" },
             { in: "query", key: "owner_name" },
+            { in: "query", key: "github_repo" },
           ],
         },
       ],
@@ -3861,6 +3869,93 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Overleaf Sync Status
+   *
+   * Report what an Overleaf sync would do, without doing it.
+   *
+   * Returns one status per synced folder, optionally narrowed to a single
+   * folder with ``path`` or to the folders synced with a single Overleaf
+   * project with ``overleaf_project_id``.
+   */
+  public static getProjectOverleafSyncStatus<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path?: string | null
+      overleaf_project_id?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectOverleafSyncStatusResponses,
+    GetProjectOverleafSyncStatusErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "overleaf_project_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectOverleafSyncStatusResponses,
+      GetProjectOverleafSyncStatusErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/overleaf-syncs/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Overleaf Links
+   *
+   * Find the projects that sync a folder with an Overleaf project.
+   *
+   * Only projects the user can read are returned. The index this reads is
+   * refreshed whenever a project's Overleaf sync status is checked or a sync
+   * runs, so a project linked outside the hub appears here once either has
+   * happened for it.
+   */
+  public static getOverleafLinks<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleaf_project_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetOverleafLinksResponses,
+    GetOverleafLinksErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "query", key: "overleaf_project_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetOverleafLinksResponses,
+      GetOverleafLinksErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/overleaf-links",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Post Project Sync
    *
    * Synchronize a project with its Git repo.
@@ -4594,6 +4689,55 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get User Reference Matches
+   *
+   * Find a reference in the collections of the given projects.
+   *
+   * Each entry in ``projects`` is an ``owner/name`` pair. The projects are
+   * named explicitly rather than searched across everything the user can
+   * read, since each one has to be cloned and read, which would make an
+   * unbounded search unusably slow.
+   */
+  public static getUserReferenceMatches<ThrowOnError extends boolean = true>(
+    parameters: {
+      projects: Array<string>
+      doi?: string | null
+      arxiv_id?: string | null
+      title?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserReferenceMatchesResponses,
+    GetUserReferenceMatchesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "projects" },
+            { in: "query", key: "doi" },
+            { in: "query", key: "arxiv_id" },
+            { in: "query", key: "title" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetUserReferenceMatchesResponses,
+      GetUserReferenceMatchesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/references/search",
+      ...options,
+      ...params,
     })
   }
 

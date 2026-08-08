@@ -1,0 +1,30 @@
+{
+  "name": "calkit-browser-ext",
+  "displayName": "Calkit",
+  "description": "Work with your Calkit projects from GitHub, Overleaf, and Zotero.",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/calkit/calkit.git"
+  },
+  "homepage": "https://github.com/calkit/calkit/tree/main/browser-ext",
+  "scripts": {
+    "build": "npm run clean && tsc --noEmit && vite build && node scripts/build-content.mjs",
+    "clean": "rm -rf dist",
+    "check": "tsc --noEmit",
+    "format": "prettier --write src public README.md",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.9.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}

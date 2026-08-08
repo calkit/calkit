@@ -563,6 +563,9 @@ class Project(ProjectBase, table=True):
     file_locks: list["FileLock"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    overleaf_links: list["OverleafLink"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
     project_comments: list["ProjectComment"] = Relationship(
         back_populates="project", cascade_delete=True
     )
@@ -1032,6 +1035,23 @@ class ImportedDataset(SQLModel):
 
     project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
     dataset_id: uuid.UUID = Field(foreign_key="dataset.id", primary_key=True)
+
+
+class OverleafLink(SQLModel, table=True):
+    """An index of a folder in a project synced with an Overleaf project.
+
+    The link itself lives in the project's Git repo, under ``overleaf_sync``
+    in calkit.yaml, which stays the source of truth. This table only indexes
+    it, so an Overleaf project ID can be resolved back to the Calkit
+    projects that sync with it without reading every repo.
+    """
+
+    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    path: str = Field(primary_key=True)
+    overleaf_project_id: str = Field(index=True, max_length=255)
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: Project = Relationship(back_populates="overleaf_links")
 
 
 class FileLock(SQLModel, table=True):

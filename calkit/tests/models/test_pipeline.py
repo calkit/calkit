@@ -512,3 +512,37 @@ def test_jsontolatexstage():
     assert {
         "paper/results.tex": {"cache": False, "persist": False}
     } in dvc_outs
+
+
+def test_to_ck_dict() -> None:
+    # Fields left at their defaults should not be serialized, so calkit.yaml
+    # stays free of null and empty entries
+    s = LatexStage(
+        kind="latex",
+        environment="tex",
+        target_path="paper/paper.tex",
+        outputs=["paper/paper.pdf"],
+    )
+    d = s.to_ck_dict()
+    assert d == dict(
+        kind="latex",
+        environment="tex",
+        target_path="paper/paper.tex",
+        outputs=["paper/paper.pdf"],
+    )
+    # The kind discriminator is kept even though it has a default
+    assert list(d)[0] == "kind"
+    # Round-trip produces an equivalent stage
+    assert LatexStage.model_validate(d) == s
+    # Non-default values are kept, including in nested models
+    s2 = PythonScriptStage(
+        kind="python-script",
+        environment="py",
+        script_path="scripts/run.py",
+        outputs=[PathOutput(path="out.csv", storage="git")],
+        always_run=True,
+    )
+    d2 = s2.to_ck_dict()
+    assert d2["always_run"] is True
+    assert d2["outputs"] == [dict(path="out.csv", storage="git")]
+    assert PythonScriptStage.model_validate(d2) == s2

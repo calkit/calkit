@@ -1316,7 +1316,7 @@ def new_publication(
             environment=env_name,
             target_path=pathlib.Path(path, template_obj.target).as_posix(),  # type: ignore
             outputs=[pub_fpath],
-        ).model_dump()
+        ).to_ck_dict()
         if "pipeline" not in ck_info:
             ck_info["pipeline"] = {}
         if "stages" not in ck_info["pipeline"]:
@@ -2642,7 +2642,7 @@ def _save_stage(
         env_names = ck_info.get("environments", {})
         if stage.environment not in env_names:
             raise_error(f"Environment {stage.environment} does not exist")
-    stages[name] = stage.model_dump()
+    stages[name] = stage.to_ck_dict()
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:

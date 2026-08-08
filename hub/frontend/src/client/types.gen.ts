@@ -2758,6 +2758,12 @@ export type Publication = {
   content?: string | null
   stage_info?: DvcPipelineStage | null
   /**
+   * Calkit Stage
+   */
+  calkit_stage?: {
+    [key: string]: unknown
+  } | null
+  /**
    * Url
    */
   url?: string | null

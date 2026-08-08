@@ -1113,6 +1113,10 @@ class Publication(BaseModel):
     stage_status: "StageStatus | None" = None
     content: str | None = None
     stage_info: DvcPipelineStage | None = None
+    # The full Calkit pipeline stage definition from calkit.yaml, unlike
+    # stage_info, which is the compiled DVC stage. A latex stage's target_path
+    # identifies the source file to edit.
+    calkit_stage: dict[str, Any] | None = None
     url: str | None = None
     overleaf: PublicationOverleaf | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None

@@ -4886,6 +4886,18 @@ export const PublicationSchema = {
         },
       ],
     },
+    calkit_stage: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Calkit Stage",
+    },
     url: {
       anyOf: [
         {

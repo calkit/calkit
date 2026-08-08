@@ -1,4 +1,4 @@
-import { Alert, AlertIcon, Image } from "@chakra-ui/react"
+import { Alert, AlertIcon, Box, Code, Image } from "@chakra-ui/react"
 import type { ReactNode } from "react"
 
 import type { Publication } from "../../client"
@@ -7,7 +7,8 @@ import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 interface PubViewProps {
   publication: Publication
   // Optional element rendered in the PDF viewer toolbar, e.g. an "Edit LaTeX"
-  // button. Only shown for PDF publications (the only type with a toolbar).
+  // button. Shown for PDF publications (the only type with a toolbar) and in
+  // the no-content fallback, so an unbuilt publication can still be edited.
   toolbarAction?: ReactNode
 }
 
@@ -64,11 +65,20 @@ function PublicationView({ publication, toolbarAction }: PubViewProps) {
       />
     )
   } else {
+    // Target the publication's stage when we know it so only that part of
+    // the pipeline runs, with a commit message naming the output.
+    const runCmd = publication.stage
+      ? `calkit run ${publication.stage} -m "Compile ${publication.path}"`
+      : 'calkit run -m "Run pipeline"'
     contentView = (
       <Alert mt={2} status="warning" borderRadius="xl">
         <AlertIcon />
-        No content found. Perhaps the publication hasn't been built and pushed
-        yet?
+        <Box flex={1}>
+          No content found. Perhaps the publication hasn't been built and pushed
+          yet? To build, commit, and push it, execute <Code>{runCmd}</Code> in
+          the project folder.
+        </Box>
+        {toolbarAction}
       </Alert>
     )
   }

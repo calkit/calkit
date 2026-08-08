@@ -3,8 +3,35 @@
 // including figures outside the .tex's own directory and DVC-tracked outputs),
 // falling back to scanning the .tex's directory. Files are seeded at their full
 // repo paths so relative refs like \includegraphics{../figures/x.png} resolve.
-import { type GetProjectContentsResponse, ProjectsService } from "../client"
+import {
+  type GetProjectContentsResponse,
+  ProjectsService,
+  type Publication,
+} from "../client"
 import { decodeBase64Utf8 } from "./strings"
+
+// Resolve the LaTeX source path for a publication. Prefer the Calkit pipeline
+// stage definition: a latex stage's target_path is the file to edit, relative
+// to the stage's wdir (which defaults to the project root). A publication
+// built by a non-latex stage has no LaTeX source to edit. Publications
+// without a stage definition fall back to the output-path heuristic,
+// e.g., paper.pdf -> paper.tex.
+export function getLatexSourcePath(publication: Publication): string | null {
+  const stage = publication.calkit_stage as
+    | { kind?: string; target_path?: string; wdir?: string }
+    | null
+    | undefined
+  if (stage) {
+    if (stage.kind !== "latex" || !stage.target_path) {
+      return null
+    }
+    const wdir = stage.wdir?.replace(/\/+$/, "")
+    return wdir && wdir !== "."
+      ? `${wdir}/${stage.target_path}`
+      : stage.target_path
+  }
+  return publication.path ? publication.path.replace(/\.[^/.]+$/, ".tex") : null
+}
 
 const TEXT_EXT = new Set([
   "tex",

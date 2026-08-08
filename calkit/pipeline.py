@@ -3,6 +3,7 @@
 import itertools
 import os
 import re
+import subprocess
 import warnings
 from collections.abc import Callable
 from pathlib import Path
@@ -66,6 +67,13 @@ class PipelineStatus(BaseModel):
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    # Stray git-ignored files in directory deps that are NOT currently the
+    # cause of staleness: {stage_name: {dep_path: [ignored_file, ...]}}. Not
+    # captured in Git, so a fresh checkout / CI can hash the dir differently
+    # and go stale later.
+    ignored_dep_hazards: dict[str, dict[str, list[str]]] = Field(
+        default_factory=dict
+    )
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -153,6 +161,11 @@ class StaleStage(BaseModel):
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
     always_run: bool = False
+    # Directory deps whose staleness is attributable (by elimination, per
+    # calkit#1041) to stray git-ignored files inside them:
+    # {dep_path: [ignored_file, ...]}. DVC hashes a directory as one md5, so
+    # this is a folder-level verdict — we can't say which file changed.
+    ignored_modified_inputs: dict[str, list[str]] = Field(default_factory=dict)
     # True for stages that originate from a subproject (either an individual
     # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
     # wrapper stages are marked always-changed purely as a delegation
@@ -962,13 +975,121 @@ def get_status(
                     for target in targets
                 )
             }
+        # Detect git-ignored files inside directory dependencies that can
+        # silently change a stage's DVC directory hash. DVC records one md5 per
+        # directory (not per file), so an ignored file can make a folder stale
+        # without appearing in `git status` or the DVC file list. We attribute
+        # by elimination (calkit#1041): the dir dep is stale, it holds stray
+        # ignored files, and nothing else git-visible in the folder changed.
+        # This is deliberately folder-level; the ignored files have no per-file
+        # DVC record to diff against.
+        #
+        # Collect DVC-tracked paths first so we don't flag files DVC already
+        # accounts for (DVC git-ignores its own tracked outputs).
+        dvc_tracked_paths: set[str] = set()
+        try:
+            _dvc_repo = calkit.dvc.get_dvc_repo()
+            for out in _dvc_repo.index.outs:
+                try:
+                    dvc_tracked_paths.add(
+                        Path(out.fs_path)
+                        .relative_to(_dvc_repo.root_dir)
+                        .as_posix()
+                    )
+                except (ValueError, AttributeError):
+                    pass
+        except Exception:
+            pass
+
+        def _stray_ignored_in(dir_path: str) -> list[str]:
+            """Git-ignored files in a dir that DVC isn't already tracking."""
+            try:
+                res = subprocess.run(
+                    [
+                        "git",
+                        "ls-files",
+                        "--ignored",
+                        "--exclude-standard",
+                        "--others",
+                        dir_path,
+                    ],
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception:
+                return []
+            return [
+                f
+                for f in res.stdout.strip().splitlines()
+                if Path(f).as_posix() not in dvc_tracked_paths
+            ]
+
+        def _folder_has_other_changes(dir_path: str) -> bool:
+            """True if something other than ignored files could explain the
+            folder's changed hash. `git status --porcelain` (no --ignored)
+            reports tracked modifications and untracked-but-not-ignored files
+            and omits ignored files, so any output means another file moved and
+            we can't pin staleness on the ignored files alone. On error, assume
+            another cause is possible rather than emit a wrong attribution.
+            """
+            try:
+                res = subprocess.run(
+                    ["git", "status", "--porcelain", "--", dir_path],
+                    capture_output=True,
+                    text=True,
+                )
+            except Exception:
+                return True
+            return bool(res.stdout.strip())
+
+        # Map each root stage name to its stale stage(s). Root stale keys equal
+        # the stage name, except iterated stages use "name@param", so match on
+        # the base name. Subproject stages aren't inspected here (we only
+        # iterate root pipeline stages below).
+        stale_by_base: dict[str, list[StaleStage]] = {}
+        for display_name, stale_stage in ordered_stale_stages.items():
+            bare_name, subproject, _ = raw_stale_stages[display_name]
+            if subproject is not None:
+                continue
+            stale_by_base.setdefault(bare_name.split("@")[0], []).append(
+                stale_stage
+            )
+
+        ignored_dep_hazards: dict[str, dict[str, list[str]]] = {}
+        pipeline_stages = ck_info.get("pipeline", {}).get("stages", {})
+        for name, stage_cfg in pipeline_stages.items():
+            for dep in stage_cfg.get("inputs", []):
+                dep_path = (
+                    dep.get("path", dep) if isinstance(dep, dict) else str(dep)
+                )
+                if not os.path.isdir(dep_path):
+                    continue
+                stray = _stray_ignored_in(dep_path)
+                if not stray:
+                    continue
+                dep_posix = Path(dep_path).as_posix().rstrip("/")
+                stale_for_dep = [
+                    s
+                    for s in stale_by_base.get(name, [])
+                    if any(
+                        _paths_overlap(dep_posix, mi)
+                        for mi in s.modified_inputs
+                    )
+                ]
+                if stale_for_dep and not _folder_has_other_changes(dep_path):
+                    for s in stale_for_dep:
+                        s.ignored_modified_inputs[dep_posix] = stray
+                else:
+                    ignored_dep_hazards.setdefault(name, {})[dep_posix] = stray
         result["stale_stages"] = ordered_stale_stages
+        result["ignored_dep_hazards"] = ignored_dep_hazards
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
             environment_checks=result["environment_checks"],
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],
+            ignored_dep_hazards=result["ignored_dep_hazards"],
         )
     finally:
         if wdir is not None:

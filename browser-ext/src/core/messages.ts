@@ -11,6 +11,7 @@ import type {
   OverleafSyncResponse,
   OverleafSyncStatus,
   ProjectPublic,
+  PullRequestRefs,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
@@ -68,11 +69,14 @@ export type Request =
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
   | { type: "github.repos"; perPage?: number }
+  | { type: "github.pullRequest"; githubRepo: string; number: number }
   | ({
       type: "project.contents";
       owner: string;
       project: string;
       path?: string;
+      /** Git ref to read at, for comparing a branch against its base. */
+      ref?: string;
     } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
@@ -146,6 +150,7 @@ export interface ResponseMap {
   "projects.create": ProjectPublic;
   "github.calkitInfo": CalkitYamlInfo;
   "github.repos": GithubRepo[];
+  "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
   "project.figures": Figure[];
   "content.imageDataUrl": string;

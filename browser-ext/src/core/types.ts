@@ -182,3 +182,9 @@ export interface GithubRepo {
   description?: string | null;
   private: boolean;
 }
+
+/** The refs a pull request compares, from the GitHub API. */
+export interface PullRequestRefs {
+  headRef: string;
+  baseRef: string;
+}

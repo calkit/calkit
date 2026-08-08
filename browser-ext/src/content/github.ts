@@ -1,7 +1,12 @@
-import { getGithubPath, getGithubRepo } from "../core/detect";
+import {
+  getGithubPath,
+  getGithubPullNumber,
+  getGithubRepo,
+} from "../core/detect";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { RequestFailed, send } from "../core/messages";
+import { renderFailure } from "../core/pickers";
 import type { ContentsItemBase, ProjectPublic } from "../core/types";
 import {
   clear,
@@ -112,15 +117,42 @@ async function resolveRepo(repo: string): Promise<RepoState> {
   return state;
 }
 
+/** Where a path lives on the hub, for links out of the page. */
+function filesUrl(
+  project: ProjectPublic,
+  path: string,
+  hubUrl: string,
+): string {
+  return (
+    `${projectUrl(hubUrl, project.owner_account_name, project.name)}` +
+    `/files?path=${encodeURIComponent(path)}`
+  );
+}
+
 /** Show an artifact without leaving the repo page. */
 function openArtifact(
   project: ProjectPublic,
   item: ContentsItemBase,
   hubUrl: string,
+  onBack?: () => void,
 ): void {
   panel = mountPanel({ id: PANEL_ID, title: item.name });
   const body = panel.body;
-  clear(body).append(
+  clear(body);
+  if (onBack) {
+    // Opening a file replaces the panel, so without this the only way
+    // back to the artifact list is closing and reopening the panel
+    body.append(
+      el("div", { class: "actions", style: { marginTop: "0" } }, [
+        el("button", {
+          class: "action secondary",
+          text: "\u2190 Back",
+          onClick: onBack,
+        }),
+      ]),
+    );
+  }
+  body.append(
     el("div", { class: "name", text: item.path }),
     el("div", { class: "dim small", text: describe(item) }),
   );
@@ -129,9 +161,7 @@ function openArtifact(
       el("a", {
         class: "small",
         text: "Open in Calkit",
-        href:
-          `${projectUrl(hubUrl, project.owner_account_name, project.name)}` +
-          `/files?path=${encodeURIComponent(item.path)}`,
+        href: filesUrl(project, item.path, hubUrl),
       }),
     );
     return;
@@ -212,6 +242,21 @@ function injectArtifactRows(
     const row = template.cloneNode(true) as HTMLElement;
     row.setAttribute(ARTIFACT_ROW_ATTR, item.path);
     row.removeAttribute("id");
+    // Cloning a row brings GitHub's own behaviour with it. Their hovercard
+    // attributes are the visible one: left in place they pop up the
+    // profile card of whoever last touched the row this was copied from.
+    for (const node of [row, ...Array.from(row.querySelectorAll("*"))]) {
+      for (const name of node.getAttributeNames()) {
+        if (
+          name.startsWith("data-hovercard") ||
+          name.startsWith("data-turbo") ||
+          name === "data-testid" ||
+          name === "aria-describedby"
+        ) {
+          node.removeAttribute(name);
+        }
+      }
+    }
     const links = Array.from(row.querySelectorAll("a"));
     if (!links.length) {
       continue;
@@ -220,10 +265,15 @@ function injectArtifactRows(
     // other chrome that means nothing for a file Git never saw
     const nameLink = links[0];
     nameLink.textContent = item.name;
-    nameLink.removeAttribute("href");
-    nameLink.style.cursor = "pointer";
+    // A real href means middle-click and copy-link do something sensible,
+    // and it goes where the file actually lives
+    nameLink.href = filesUrl(project, item.path, hubUrl);
     nameLink.title = `${item.path} (tracked by DVC)`;
     nameLink.addEventListener("click", (event) => {
+      // Let a modified click through, so opening in a new tab still works
+      if (event.metaKey || event.ctrlKey || event.shiftKey) {
+        return;
+      }
       event.preventDefault();
       openArtifact(project, item, hubUrl);
     });
@@ -370,7 +420,14 @@ async function renderProject(
           el("button", {
             class: "action secondary",
             text: "View",
-            onClick: () => openArtifact(project, item, hubUrl),
+            onClick: () =>
+              openArtifact(project, item, hubUrl, () => {
+                panel = mountPanel({
+                  id: PANEL_ID,
+                  title: `Calkit \u00b7 ${project.owner_account_name}/${project.name}`,
+                });
+                void renderProject(panel.body, project, hubUrl);
+              }),
           }),
         ]),
       ),
@@ -379,6 +436,179 @@ async function renderProject(
     clear(list).append(
       errorMessage(e instanceof Error ? e.message : String(e)),
     );
+  }
+}
+
+/**
+ * What a pull request does to the project's DVC-tracked outputs.
+ *
+ * A diff on GitHub shows the `.dvc` pointer changing, which says an
+ * output changed but nothing about how. Reading the project at both refs
+ * gives the actual files, so a new or regenerated figure can be looked at
+ * next to the one it replaces.
+ */
+async function renderPullRequest(
+  body: HTMLElement,
+  project: ProjectPublic,
+  hubUrl: string,
+  repo: string,
+  number: number,
+): Promise<void> {
+  clear(body).append(loading("Reading the pull request"));
+  let refs;
+  try {
+    refs = await send({
+      type: "github.pullRequest",
+      githubRepo: repo,
+      number,
+    });
+  } catch (e) {
+    clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
+    return;
+  }
+  clear(body).append(loading("Comparing DVC outputs"));
+  const read = async (ref: string) => {
+    const contents = await send({
+      type: "project.contents",
+      owner: project.owner_account_name,
+      project: project.name,
+      ref,
+      hubUrl,
+    });
+    const items = (contents.dir_items ?? [contents]).filter(
+      (item) => item.storage === "dvc" || item.storage === "dvc-zip",
+    );
+    return new Map(items.map((item) => [item.path, item]));
+  };
+  let head: Map<string, ContentsItemBase>;
+  let base: Map<string, ContentsItemBase>;
+  try {
+    [head, base] = await Promise.all([read(refs.headRef), read(refs.baseRef)]);
+  } catch (e) {
+    clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
+    return;
+  }
+  clear(body).append(
+    el("div", { class: "dim small" }, [
+      document.createTextNode(`Comparing DVC outputs in #${number}.`),
+    ]),
+  );
+  const changed = [...head.values()].filter((item) => {
+    const before = base.get(item.path);
+    // A pointer whose content hash is unchanged is the same file; size is
+    // the only comparable the listing carries
+    return !before || before.size !== item.size;
+  });
+  if (!changed.length) {
+    body.append(
+      el("div", {
+        class: "dim small",
+        style: { marginTop: "8px" },
+        text: "No DVC-tracked outputs changed on this branch.",
+      }),
+    );
+    return;
+  }
+  for (const item of changed) {
+    const before = base.get(item.path);
+    body.append(
+      el("div", { class: "row" }, [
+        el("div", { class: "grow" }, [
+          el("div", { class: "name", text: item.path }),
+          el("div", {
+            class: "dim small",
+            text: before
+              ? `changed \u00b7 ${describe(item)}`
+              : `new \u00b7 ${describe(item)}`,
+          }),
+        ]),
+        el("button", {
+          class: "action secondary",
+          text: before ? "Compare" : "View",
+          onClick: () => {
+            if (before) {
+              openComparison(item, before, () => {
+                panel = mountPanel({
+                  id: PANEL_ID,
+                  title: `Calkit \u00b7 #${number}`,
+                });
+                void renderPullRequest(
+                  panel.body,
+                  project,
+                  hubUrl,
+                  repo,
+                  number,
+                );
+              });
+            } else {
+              openArtifact(project, item, hubUrl, () => {
+                panel = mountPanel({
+                  id: PANEL_ID,
+                  title: `Calkit \u00b7 #${number}`,
+                });
+                void renderPullRequest(
+                  panel.body,
+                  project,
+                  hubUrl,
+                  repo,
+                  number,
+                );
+              });
+            }
+          },
+        }),
+      ]),
+    );
+  }
+}
+
+/** Show this branch's version of an output beside the base branch's. */
+function openComparison(
+  head: ContentsItemBase,
+  base: ContentsItemBase,
+  onBack: () => void,
+): void {
+  panel = mountPanel({ id: PANEL_ID, title: head.name });
+  const body = panel.body;
+  clear(body).append(
+    el("div", { class: "actions", style: { marginTop: "0" } }, [
+      el("button", {
+        class: "action secondary",
+        text: "\u2190 Back",
+        onClick: onBack,
+      }),
+    ]),
+    el("div", { class: "name", text: head.path }),
+  );
+  for (const [label, item] of [
+    ["This branch", head],
+    ["Base branch", base],
+  ] as const) {
+    body.append(
+      el("div", { style: { marginTop: "8px" } }, [
+        el("div", {
+          class: "small",
+          style: { fontWeight: "600" },
+          text: label,
+        }),
+        el("div", { class: "dim small", text: describe(item) }),
+      ]),
+    );
+    if (item.url && isPreviewable(item.path)) {
+      const preview = el("img", {
+        style: { display: "block", maxWidth: "100%", marginTop: "4px" },
+      });
+      body.append(preview);
+      void send({ type: "content.imageDataUrl", url: item.url })
+        .then((dataUrl) => {
+          preview.src = dataUrl;
+        })
+        .catch(() => preview.remove());
+    } else if (item.url) {
+      body.append(
+        el("a", { class: "small", text: "Download", href: item.url }),
+      );
+    }
   }
 }
 
@@ -434,6 +664,17 @@ async function openPanel(state: RepoState): Promise<void> {
       return;
     }
     if (state.project) {
+      const pullNumber = getGithubPullNumber(window.location.href);
+      if (pullNumber !== null) {
+        await renderPullRequest(
+          body,
+          state.project,
+          state.hubWebUrl,
+          state.repo,
+          pullNumber,
+        );
+        return;
+      }
       await renderProject(body, state.project, state.hubWebUrl);
       return;
     }

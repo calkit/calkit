@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import {
   detectReference,
   getGithubPath,
+  getGithubPullNumber,
   getGithubRepo,
   getOverleafProjectId,
   normalizeArxivId,
@@ -189,5 +190,24 @@ describe("suggestCitationKey", () => {
     ).toBe("smith2024origin");
     // Nothing usable still yields a key the user can edit
     expect(suggestCitationKey(base)).toBe("reference");
+  });
+});
+
+describe("getGithubPullNumber", () => {
+  test("reads the number from pull request URLs only", () => {
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pull/1087"),
+    ).toBe(1087);
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pull/1087/files"),
+    ).toBe(1087);
+    expect(getGithubPullNumber("https://github.com/calkit/calkit")).toBeNull();
+    // The pulls list isn't a pull request, and neither is an issue
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/pulls"),
+    ).toBeNull();
+    expect(
+      getGithubPullNumber("https://github.com/calkit/calkit/issues/12"),
+    ).toBeNull();
   });
 });

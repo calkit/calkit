@@ -226,3 +226,13 @@ export function suggestCitationKey(reference: DetectedReference): string {
     .join("");
   return key || "reference";
 }
+
+/** The pull request number a GitHub URL names, if it names one. */
+export function getGithubPullNumber(url: string): number | null {
+  const parts = new URL(url).pathname.split("/").filter(Boolean);
+  if (parts.length < 4 || parts[2] !== "pull") {
+    return null;
+  }
+  const number = Number(parts[3]);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}

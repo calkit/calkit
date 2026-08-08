@@ -43,6 +43,11 @@ since that file names the hub the project belongs to, so a project on another
 instance is recognised rather than looking like it isn't one; a private repo,
 which won't serve that file anonymously, falls back to asking your hub.
 
+On a **pull request**, the panel compares DVC-tracked outputs between the
+branch and its base, so a regenerated figure can be looked at next to the one
+it replaces. GitHub's own diff can only show the `.dvc` pointer changing,
+which says an output changed but nothing about how.
+
 From there you can open the project on its hub, or connect a repo that isn't a
 project yet. For a connected project the extension **adds its DVC-tracked
 files to GitHub's own file listing**, badged as DVC, since GitHub can only show

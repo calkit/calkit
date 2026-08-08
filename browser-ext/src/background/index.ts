@@ -20,6 +20,7 @@ import type {
   OverleafSyncStatus,
   ProjectPublic,
   ProjectsPublic,
+  PullRequestRefs,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
@@ -96,6 +97,28 @@ function hubFor(message: { hubUrl?: string }): Hub | undefined {
   return message.hubUrl ? resolveHubByWebUrl(message.hubUrl) : undefined;
 }
 
+/**
+ * The branches a pull request compares.
+ *
+ * Read from GitHub rather than scraped off the page, since the refs are
+ * what the hub needs to read the project at each side, and the page's
+ * markup for them is not something to depend on.
+ */
+async function readPullRequestRefs(
+  githubRepo: string,
+  number: number,
+): Promise<PullRequestRefs> {
+  const resp = await fetch(
+    `https://api.github.com/repos/${githubRepo}/pulls/${number}`,
+    { headers: { Accept: "application/vnd.github+json" } },
+  );
+  if (!resp.ok) {
+    throw new Error(`Could not read pull request #${number} (${resp.status})`);
+  }
+  const body = await resp.json();
+  return { headRef: body?.head?.sha, baseRef: body?.base?.sha };
+}
+
 async function handle(message: Request): Promise<unknown> {
   switch (message.type) {
     case "auth.state":
@@ -147,6 +170,8 @@ async function handle(message: Request): Promise<unknown> {
       return request<GithubRepo[]>("/user/github/repos", {
         query: { per_page: message.perPage ?? 100 },
       });
+    case "github.pullRequest":
+      return readPullRequestRefs(message.githubRepo, message.number);
     case "github.calkitInfo":
       return readCalkitYaml(message.githubRepo);
     case "projects.byGithubRepo":
@@ -159,7 +184,10 @@ async function handle(message: Request): Promise<unknown> {
     case "project.contents":
       return request<ContentsItem>(
         `${projectPath(message.owner, message.project)}/contents`,
-        { query: { path: message.path }, hub: hubFor(message) },
+        {
+          query: { path: message.path, ref: message.ref },
+          hub: hubFor(message),
+        },
       );
     case "project.figures":
       return request<Figure[]>(

@@ -161,3 +161,9 @@ Delete this list before merging!
       The extension panel also has no way to go "back" from viewing the
       file in the panel.
 - [ ] GitHub PR workflow.
+- [ ] Images, PDFs, and Plotly figures should be able to be viewed as modals
+      on GitHub when they are DVC tracked. Maybe even notebook HTML.
+- [ ] When an item is in a Zotero collection, disable the add to collection
+      button unless the user changes to a hub, project, collection where it
+      doesn't exist. That is, don't allow duplicates.
+- [ ] Should work on arvix html pages like https://arxiv.org/html/2608.06314v1.

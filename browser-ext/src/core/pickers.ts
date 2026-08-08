@@ -216,5 +216,11 @@ export function renderFailure(
     }
   });
   container.append(el("div", { class: "actions" }, [button]), message);
+  // Signing in is per hub, so a signed-out panel is also a panel with no
+  // way back: picking the wrong hub used to mean opening the options
+  // page to get out of it. Appended once it loads, so nothing waits.
+  void renderHubPicker(options.onSignedIn).then((picker) =>
+    container.append(picker),
+  );
   return container;
 }

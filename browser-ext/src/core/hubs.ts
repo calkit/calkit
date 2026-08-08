@@ -76,6 +76,24 @@ export function visibleHubs(
  * predates the rule and doesn't follow it.
  */
 /**
+ * Whether a host is this machine, and so exempt from the https rule.
+ *
+ * A local development stack has no certificates, and its object storage
+ * answers on its own subdomain (objects.localhost), so matching the
+ * literal names isn't enough. This is the same set browsers treat as a
+ * secure context over plain http.
+ */
+export function isLoopbackHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    host === "::1" ||
+    /^127(\.\d{1,3}){3}$/.test(host)
+  );
+}
+
+/**
  * Put a hub URL in the one form everything else compares against.
  *
  * calkit.yaml may carry a hub with no scheme, or with a trailing slash,

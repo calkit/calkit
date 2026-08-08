@@ -128,9 +128,13 @@ panel points you at the hub it actually lives on.
 A private repo won't serve its `calkit.yaml` anonymously, so those fall back to
 asking your hub whether it knows the repo.
 
-When viewing a pull request, if new outputs tracked with DVC have been
-created and pushed, you can view them, optionally viewing the version
-present on the base branch to compare side-by-side.
+When viewing a pull request, the outputs it changes appear as a card at the
+bottom of the conversation, where the diff can't show them: GitHub only has
+the `.dvc` pointer file, which says an output changed but nothing about how.
+Each one can be viewed on top of the pull request, or compared side by side
+with the version on the base branch.
+The same list is in the panel, in case GitHub's markup moves out from under
+the card.
 
 ## Reference management
 
@@ -151,6 +155,23 @@ the same way.
 If it's not present you can add it, then view/edit noted on the item.
 If you'd like to add it to a different project, you can select a different
 active project from the dropdown and add it there.
+
+## Releasing
+
+Publishing a release tagged `browser-ext/vX.Y.Z` builds and tests the
+extension, stamps that version into `manifest.json` and `package.json`,
+strips source maps, and attaches a store-ready zip to the release.
+The version comes from the tag because the Chrome Web Store rejects an
+upload whose manifest version isn't higher than the last one, and a version
+kept in sync by hand eventually isn't.
+
+The same workflow uploads to the Chrome Web Store when the
+`CHROME_EXTENSION_ID` repository variable is set, using the
+`CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, and `CHROME_REFRESH_TOKEN`
+secrets (an OAuth client for the Web Store API, authorized for the
+publishing account).
+Until that variable exists the upload step is skipped and the release's zip
+is uploaded by hand, so the workflow is useful before the listing is.
 
 ## TODO
 
@@ -205,11 +226,20 @@ Delete this list before merging!
       lookup only recognized an arXiv entry by its `eprint` field, so an
       entry written with just an arxiv.org URL or an arXiv DOI never
       matched.)
-- [ ] Publish to CWS, perhaps with https://github.com/marketplace/actions/publish-chrome-extension-to-chrome-web-store.
-- [ ] Only https artifact URLs can be viewed -- what about an exception for localhost ones?
-- [ ] GitHub PR view should be more integrated, not just in the bottom right.
+- [x] Publish to CWS, perhaps with https://github.com/marketplace/actions/publish-chrome-extension-to-chrome-web-store.
+      (Added to the release workflow, switched on by setting the
+      `CHROME_EXTENSION_ID` repository variable; see Releasing below.)
+- [x] Only https artifact URLs can be viewed -- what about an exception for localhost ones?
+      (Plain http is allowed for loopback hosts, which includes the
+      `objects.localhost` subdomain the local stack serves artifacts from.)
+- [x] GitHub PR view should be more integrated, not just in the bottom right.
       We can actually put content into the main body, e.g., a little button
       at the bottom allowing us to view the artifact, optionally
       side-by-side with base branch.
-- [ ] When switching hubs, if not logged in, we can't go back and switch to
+      (A card at the end of the conversation, without waiting for the panel
+      to be opened, with View and Compare per changed output. Compare opens
+      both versions in one overlay.)
+- [x] When switching hubs, if not logged in, we can't go back and switch to
       a different hub.
+      (The signed-out state now carries a hub picker along with the sign-in
+      button, everywhere it's shown.)

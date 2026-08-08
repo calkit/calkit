@@ -248,6 +248,30 @@ label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
   flex-wrap: wrap;
 }
 .overlay .toolbar .spacer { flex: 1; }
+.overlay .viewport {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 1px;
+  background: var(--ck-border);
+}
+.overlay .pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--ck-bg);
+}
+.overlay .pane-label {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ck-dim);
+  border-bottom: 1px solid var(--ck-border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .overlay .frame {
   flex: 1;
   min-height: 0;
@@ -341,9 +365,10 @@ export function mountPanel(options: {
 
 export interface Overlay {
   host: HTMLElement;
-  /** A row above the frame, for the caller's own controls. */
+  /** A row above the content, for the caller's own controls. */
   toolbar: HTMLElement;
-  frame: HTMLIFrameElement;
+  /** Fills the rest of the card; the caller puts its frames here. */
+  viewport: HTMLElement;
   remove: () => void;
 }
 
@@ -374,7 +399,7 @@ export function mountOverlay(options: {
   style.textContent = STYLES;
   const close = el("button", { text: "×", title: "Close" });
   const toolbar = el("div", { class: "toolbar" });
-  const frame = el("iframe", { class: "frame" });
+  const viewport = el("div", { class: "viewport" });
   const card = el("div", { class: "overlay" }, [
     el("div", { class: "header" }, [
       el("span", { text: options.title }),
@@ -382,7 +407,7 @@ export function mountOverlay(options: {
       close,
     ]),
     toolbar,
-    frame,
+    viewport,
   ]);
   const backdrop = el("div", { class: "backdrop" }, [card]);
   const remove = () => {
@@ -411,7 +436,7 @@ export function mountOverlay(options: {
   document.addEventListener("keydown", onKeyDown, true);
   root.append(style, backdrop);
   document.body.append(host);
-  return { host, toolbar, frame, remove };
+  return { host, toolbar, viewport, remove };
 }
 
 function makeDraggable(host: HTMLElement, handle: HTMLElement): void {
@@ -443,30 +468,6 @@ function makeDraggable(host: HTMLElement, handle: HTMLElement): void {
     document.addEventListener("mouseup", onUp);
     event.preventDefault();
   });
-}
-
-/** A "sign in to Calkit" prompt shown when a panel has no session. */
-export function signInPrompt(
-  onSignIn: () => void,
-  hubLabel?: string,
-): HTMLElement {
-  // Naming the hub matters once more than one is in play: credentials are
-  // per hub, so "sign in" without saying where is ambiguous
-  return el("div", { class: "stack" }, [
-    el("div", {
-      class: "dim small",
-      text: hubLabel
-        ? `Sign in to ${hubLabel} to use this panel.`
-        : "Sign in to your Calkit account to use this panel.",
-    }),
-    el("div", { class: "actions" }, [
-      el("button", {
-        class: "action",
-        text: hubLabel ? `Sign in to ${hubLabel}` : "Sign in",
-        onClick: onSignIn,
-      }),
-    ]),
-  ]);
 }
 
 export function loading(text = "Loading"): HTMLElement {

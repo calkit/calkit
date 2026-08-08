@@ -73,3 +73,19 @@ jobs:
         run: |
           gh release upload "$TAG_NAME" \
             "calkit-browser-ext-${VERSION}.zip" --clobber
+      # Setting CHROME_EXTENSION_ID (a repository variable, not a secret,
+      # since a store listing's ID is public) is what turns publishing on.
+      # Until then a release still carries a store-ready zip to upload by
+      # hand, so this workflow is useful before the listing exists.
+      - name: Publish to the Chrome Web Store
+        if: vars.CHROME_EXTENSION_ID != ''
+        uses: mnao305/chrome-extension-upload@v5
+        with:
+          file-path: browser-ext/calkit-browser-ext-${{ steps.version.outputs.version }}.zip
+          extension-id: ${{ vars.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          # Submitted for review rather than left as a draft: a release
+          # tag is already the deliberate act
+          publish: true

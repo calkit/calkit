@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  isLoopbackHost,
   apiUrlFromHubUrl,
   customHubFromUrl,
   getHub,
@@ -123,5 +124,26 @@ describe("visibleHubs", () => {
   test("leaves the other hubs alone", () => {
     expect(names(null)).toContain("production");
     expect(names(null)).toContain("local");
+  });
+});
+
+describe("isLoopbackHost", () => {
+  test("covers the names a local development stack answers on", () => {
+    expect(isLoopbackHost("localhost")).toBe(true);
+    // Object storage answers on its own subdomain, so the artifact URL
+    // isn't the hub's host
+    expect(isLoopbackHost("objects.localhost")).toBe(true);
+    expect(isLoopbackHost("api.localhost")).toBe(true);
+    expect(isLoopbackHost("127.0.0.1")).toBe(true);
+    expect(isLoopbackHost("127.1.2.3")).toBe(true);
+    expect(isLoopbackHost("[::1]")).toBe(true);
+    expect(isLoopbackHost("LOCALHOST")).toBe(true);
+  });
+
+  test("doesn't mistake a lookalike for this machine", () => {
+    expect(isLoopbackHost("localhost.example.com")).toBe(false);
+    expect(isLoopbackHost("notlocalhost")).toBe(false);
+    expect(isLoopbackHost("calkit.io")).toBe(false);
+    expect(isLoopbackHost("127.0.0.1.example.com")).toBe(false);
   });
 });

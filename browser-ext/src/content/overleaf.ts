@@ -21,7 +21,6 @@ import {
   errorMessage,
   loading,
   mountPanel,
-  signInPrompt,
   type Panel,
   textInput,
 } from "../core/ui";
@@ -642,23 +641,9 @@ async function load(overleafProjectId: string): Promise<void> {
   } catch (e) {
     clear(body);
     if (e instanceof RequestFailed && e.notSignedIn) {
-      body.append(
-        signInPrompt(async () => {
-          clear(body).append(loading("Waiting for authorization"));
-          try {
-            await send({ type: "auth.signIn" });
-            reload();
-          } catch (signInError) {
-            clear(body).append(
-              errorMessage(
-                signInError instanceof Error
-                  ? signInError.message
-                  : String(signInError),
-              ),
-            );
-          }
-        }),
-      );
+      // With a hub picker alongside, since credentials are per hub and a
+      // signed-out panel otherwise has no way back to the right one
+      body.append(renderFailure(e, { onSignedIn: reload }));
       return;
     }
     const message = e instanceof Error ? e.message : String(e);

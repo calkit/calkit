@@ -1,7 +1,12 @@
 import { NotSignedInError, request } from "../core/api";
 import { getAuthState, signIn, signOut } from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
-import { resolveHubByWebUrl, visibleHubs, type Hub } from "../core/hubs";
+import {
+  isLoopbackHost,
+  resolveHubByWebUrl,
+  visibleHubs,
+  type Hub,
+} from "../core/hubs";
 import type { Envelope, Request } from "../core/messages";
 import {
   getCurrentHub,
@@ -50,7 +55,13 @@ async function fetchDataUrl(
   options: { imageOnly?: boolean; maxBytes?: number } = {},
 ): Promise<string> {
   const parsed = new URL(url);
-  if (parsed.protocol !== "https:") {
+  // Plain http only for this machine, where a development stack has no
+  // certificates -- and where object storage answers on its own
+  // subdomain, so the artifact URL isn't the hub's host
+  if (
+    parsed.protocol !== "https:" &&
+    !(parsed.protocol === "http:" && isLoopbackHost(parsed.hostname))
+  ) {
     throw new Error("Only https artifact URLs can be viewed");
   }
   const resp = await fetch(url);

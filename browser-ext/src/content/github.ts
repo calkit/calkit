@@ -5,18 +5,23 @@ import {
 } from "../core/detect";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
-import { RequestFailed, send } from "../core/messages";
+import { send } from "../core/messages";
 import { renderFailure } from "../core/pickers";
-import type { ContentsItemBase, DvcOutput, ProjectPublic } from "../core/types";
+import type {
+  ContentsItemBase,
+  DvcOutput,
+  ProjectPublic,
+  PullRequestRefs,
+} from "../core/types";
 import {
   clear,
   el,
+  STYLES,
   launcherPosition,
   errorMessage,
   loading,
   mountOverlay,
   mountPanel,
-  signInPrompt,
   textInput,
   type Panel,
 } from "../core/ui";
@@ -32,6 +37,8 @@ interface Viewable {
 
 const PANEL_ID = "calkit-github-panel";
 const OVERLAY_ID = "calkit-github-overlay";
+const SIDE_BY_SIDE = "Side by side";
+const PR_CARD_ID = "calkit-pr-card";
 const LAUNCHER_ID = "calkit-github-launcher";
 const ARTIFACT_ROW_ATTR = "data-calkit-artifact";
 
@@ -487,27 +494,40 @@ async function renderProject(
  * gives the actual files, so a new or regenerated figure can be looked at
  * next to the one it replaces.
  */
-async function renderPullRequest(
-  body: HTMLElement,
+interface PullRequestChanges {
+  refs: PullRequestRefs;
+  changed: { item: DvcOutput; before: DvcOutput | undefined }[];
+}
+
+// The last pull request read, so opening the panel shows what the card in
+// the conversation already fetched instead of asking again
+let pullChanges: { key: string; promise: Promise<PullRequestChanges> } | null =
+  null;
+
+function readPullRequest(
   project: ProjectPublic,
   hubUrl: string,
   number: number,
-): Promise<void> {
-  clear(body).append(loading("Reading the pull request"));
-  let refs;
-  try {
-    refs = await send({
-      type: "github.pullRequest",
-      owner: project.owner_account_name,
-      project: project.name,
-      number,
-      hubUrl,
-    });
-  } catch (e) {
-    clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
-    return;
+): Promise<PullRequestChanges> {
+  const key = `${project.owner_account_name}/${project.name}#${number}`;
+  if (pullChanges?.key !== key) {
+    pullChanges = { key, promise: fetchPullRequest(project, hubUrl, number) };
   }
-  clear(body).append(loading("Comparing DVC outputs"));
+  return pullChanges.promise;
+}
+
+async function fetchPullRequest(
+  project: ProjectPublic,
+  hubUrl: string,
+  number: number,
+): Promise<PullRequestChanges> {
+  const refs = await send({
+    type: "github.pullRequest",
+    owner: project.owner_account_name,
+    project: project.name,
+    number,
+    hubUrl,
+  });
   // Every output at a ref in one call, each carrying that version's own
   // presigned URL. Listing the tree a directory at a time would miss
   // anything nested, which is where outputs usually live, and would have
@@ -522,13 +542,46 @@ async function renderPullRequest(
     });
     return new Map(outputs.map((item) => [item.path, item]));
   };
-  let head: Map<string, DvcOutput>;
-  let base: Map<string, DvcOutput>;
+  const [head, base] = await Promise.all([
+    read(refs.head_sha),
+    read(refs.base_sha),
+  ]);
+  const changed = [...head.values()]
+    .filter((item) => {
+      const before = base.get(item.path);
+      if (!before) {
+        return true;
+      }
+      // Equal content hashes mean the same file, whatever the pointer
+      // commit says. Size only stands in where a hash is missing, and it
+      // can't tell a same-size edit from no edit at all.
+      return before.md5 && item.md5
+        ? before.md5 !== item.md5
+        : before.size !== item.size;
+    })
+    .map((item) => ({ item, before: base.get(item.path) }));
+  return { refs, changed };
+}
+
+/**
+ * What a pull request does to the project's DVC-tracked outputs.
+ *
+ * A diff on GitHub shows the `.dvc` pointer changing, which says an
+ * output changed but nothing about how. Reading the project at both refs
+ * gives the actual files, so a new or regenerated figure can be looked at
+ * next to the one it replaces.
+ */
+async function renderPullRequest(
+  body: HTMLElement,
+  project: ProjectPublic,
+  hubUrl: string,
+  number: number,
+): Promise<void> {
+  clear(body).append(loading("Comparing DVC outputs"));
+  let refs: PullRequestRefs;
+  let changed: PullRequestChanges["changed"];
   try {
-    [head, base] = await Promise.all([
-      read(refs.head_sha),
-      read(refs.base_sha),
-    ]);
+    ({ refs, changed } = await readPullRequest(project, hubUrl, number));
   } catch (e) {
     clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
     return;
@@ -541,18 +594,6 @@ async function renderPullRequest(
       ),
     ]),
   );
-  const changed = [...head.values()].filter((item) => {
-    const before = base.get(item.path);
-    if (!before) {
-      return true;
-    }
-    // Equal content hashes mean the same file, whatever the pointer
-    // commit says. Size only stands in where a hash is missing, and it
-    // can't tell a same-size edit from no edit at all.
-    return before.md5 && item.md5
-      ? before.md5 !== item.md5
-      : before.size !== item.size;
-  });
   if (!changed.length) {
     body.append(
       el("div", {
@@ -563,8 +604,19 @@ async function renderPullRequest(
     );
     return;
   }
-  for (const item of changed) {
-    const before = base.get(item.path);
+  // The card in the conversation is where these belong; the panel keeps
+  // the same list so there's still a way in when GitHub's markup defeats
+  // us
+  if (document.getElementById(PR_CARD_ID)) {
+    body.append(
+      el("div", {
+        class: "dim small",
+        style: { marginTop: "4px" },
+        text: "Also shown at the bottom of the conversation.",
+      }),
+    );
+  }
+  for (const { item, before } of changed) {
     const versions = [
       { label: refs.head_ref, item },
       ...(before ? [{ label: refs.base_ref, item: before }] : []),
@@ -601,34 +653,161 @@ async function renderPullRequest(
  * worth seeing without leaving it. The versions are the same artifact at
  * each ref, so switching between them is switching branches.
  */
+/**
+ * Put the changed outputs into the pull request itself.
+ *
+ * A pull request is read in the middle of the page, so a panel in the
+ * corner is the wrong place for the one thing reviewers can't see from
+ * the diff: the figures and papers a `.dvc` pointer stands in for. This
+ * card goes at the end of the conversation, where the diff would have
+ * shown them.
+ */
+function injectPullRequestCard(
+  project: ProjectPublic,
+  hubUrl: string,
+  refs: PullRequestRefs,
+  changed: { item: DvcOutput; before: DvcOutput | undefined }[],
+): boolean {
+  document.getElementById(PR_CARD_ID)?.remove();
+  if (!changed.length) {
+    return false;
+  }
+  // GitHub rewrites this page's markup often, so this tries the hooks that
+  // have lasted longest and gives up rather than guessing. Losing the card
+  // is no worse than not having one -- the panel still lists everything.
+  const comments = document.querySelectorAll<HTMLElement>(
+    '[id^="issuecomment-"]',
+  );
+  const anchor =
+    document.querySelector<HTMLElement>(".js-discussion") ??
+    document.querySelector<HTMLElement>("#discussion_bucket") ??
+    comments[comments.length - 1]?.parentElement ??
+    null;
+  if (!anchor) {
+    return false;
+  }
+  const host = el("div", { attrs: { id: PR_CARD_ID } });
+  host.style.margin = "16px 0";
+  const root = host.attachShadow({ mode: "open" });
+  const style = document.createElement("style");
+  style.textContent = STYLES;
+  const body = el("div", { class: "body" });
+  for (const { item, before } of changed) {
+    const versions = [
+      { label: refs.head_ref, item },
+      ...(before ? [{ label: refs.base_ref, item: before }] : []),
+    ];
+    body.append(
+      el("div", { class: "row" }, [
+        el("div", { class: "grow" }, [
+          el("div", { class: "name", text: item.path }),
+          el("div", {
+            class: "dim small",
+            text: `${before ? "changed" : "new"} \u00b7 ${describeOutput(
+              item,
+            )}`,
+          }),
+        ]),
+        el("button", {
+          class: "action secondary",
+          text: "View",
+          disabled: !item.url,
+          title: item.url
+            ? undefined
+            : "This version hasn't been pushed to storage yet",
+          onClick: () => openOverlay(project, hubUrl, versions),
+        }),
+        before
+          ? el("button", {
+              class: "action secondary",
+              text: "Compare",
+              disabled: !item.url || !before.url,
+              onClick: () =>
+                openOverlay(project, hubUrl, versions, { sideBySide: true }),
+            })
+          : null,
+      ]),
+    );
+  }
+  root.append(
+    style,
+    el("div", { class: "panel" }, [
+      el("div", { class: "header" }, [
+        el("span", {
+          text: `Calkit \u00b7 ${changed.length} DVC-tracked output${
+            changed.length === 1 ? "" : "s"
+          } changed`,
+        }),
+      ]),
+      body,
+    ]),
+  );
+  anchor.append(host);
+  return true;
+}
+
 function openOverlay(
   project: ProjectPublic,
   hubUrl: string,
   versions: { label: string; item: Viewable }[],
+  options: { sideBySide?: boolean } = {},
 ): void {
   const first = versions[0];
   const overlay = mountOverlay({ id: OVERLAY_ID, title: first.item.name });
-  const show = (version: { label: string; item: Viewable }) => {
+  const pane = (
+    version: { label: string; item: Viewable },
+    labelled: boolean,
+  ) =>
+    el("div", { class: "pane" }, [
+      labelled ? el("div", { class: "pane-label", text: version.label }) : null,
+      (() => {
+        const frame = el("iframe", { class: "frame" });
+        frame.src = `${overlayViewerUrl(
+          project,
+          version.item,
+          hubUrl,
+        )}&embedded=1`;
+        return frame;
+      })(),
+    ]);
+  const show = (label: string) => {
     for (const button of buttons) {
       button.setAttribute(
         "aria-pressed",
-        String(button.dataset.label === version.label),
+        String(button.dataset.mode === label),
       );
     }
-    clear(details).append(
-      document.createTextNode(describeOutput(version.item)),
+    // Side by side is how you see what actually changed; one at a time is
+    // how you read it, since half a page of PDF is no use
+    const showing =
+      label === SIDE_BY_SIDE
+        ? versions
+        : versions.filter((version) => version.label === label);
+    clear(overlay.viewport).append(
+      ...showing.map((version) => pane(version, showing.length > 1)),
     );
-    download.href = version.item.url ?? "";
-    tab.href = overlayViewerUrl(project, version.item, hubUrl);
-    overlay.frame.src = `${tab.href}&embedded=1`;
+    const current = showing[0];
+    clear(details).append(
+      document.createTextNode(
+        showing.length > 1
+          ? versions.map((v) => describeOutput(v.item)).join("  vs  ")
+          : describeOutput(current.item),
+      ),
+    );
+    download.href = current.item.url ?? "";
+    tab.href = overlayViewerUrl(project, current.item, hubUrl);
   };
-  const buttons = versions.map((version) => {
+  const modes = [
+    ...versions.map((version) => version.label),
+    ...(versions.length > 1 ? [SIDE_BY_SIDE] : []),
+  ];
+  const buttons = modes.map((mode) => {
     const button = el("button", {
       class: "chip",
-      text: version.label,
-      onClick: () => show(version),
+      text: mode,
+      onClick: () => show(mode),
     });
-    button.dataset.label = version.label;
+    button.dataset.mode = mode;
     return button;
   });
   const details = el("span", { class: "dim small" });
@@ -643,7 +822,7 @@ function openOverlay(
     tab,
     download,
   );
-  show(first);
+  show(options.sideBySide && versions.length > 1 ? SIDE_BY_SIDE : first.label);
 }
 
 function overlayViewerUrl(
@@ -736,28 +915,10 @@ async function openPanel(state: RepoState): Promise<void> {
     clear(body);
     renderConnect(body, state.repo, state.hubWebUrl, reload);
   } catch (e) {
-    clear(body);
-    if (e instanceof RequestFailed && e.notSignedIn) {
-      body.append(
-        signInPrompt(async () => {
-          clear(body).append(loading("Waiting for authorization"));
-          try {
-            await send({ type: "auth.signIn" });
-            reload();
-          } catch (signInError) {
-            clear(body).append(
-              errorMessage(
-                signInError instanceof Error
-                  ? signInError.message
-                  : String(signInError),
-              ),
-            );
-          }
-        }),
-      );
-      return;
-    }
-    body.append(errorMessage(e instanceof Error ? e.message : String(e)));
+    // renderFailure offers a way to sign in, and a hub picker with it:
+    // credentials are per hub, so a signed-out panel needs a way back to
+    // whichever hub the user meant
+    clear(body).append(renderFailure(e, { onSignedIn: reload }));
   }
 }
 
@@ -852,31 +1013,50 @@ async function refresh(repo: string): Promise<void> {
     return;
   }
   mountLauncher(state, () => void openPanel(state));
-  // A connected project puts its artifacts in the file listing without
-  // waiting to be asked, which is the point of being on this page
-  if (state.project) {
+  if (!state.project) {
+    return;
+  }
+  // A connected project puts its artifacts on the page without waiting to
+  // be asked, which is the point of being here: in the file listing, or
+  // in the conversation on a pull request
+  const pullNumber = getGithubPullNumber(window.location.href);
+  if (pullNumber !== null) {
     try {
-      const path = getGithubPath(window.location.href) ?? undefined;
-      const contents = await send({
-        type: "project.contents",
-        owner: state.project.owner_account_name,
-        project: state.project.name,
-        path,
-        hubUrl: state.hubWebUrl,
-      });
-      injectArtifactRows(
+      const { refs, changed } = await readPullRequest(
         state.project,
-        contents.dir_items ?? [contents],
         state.hubWebUrl,
+        pullNumber,
       );
+      injectPullRequestCard(state.project, state.hubWebUrl, refs, changed);
     } catch {
-      // The panel reports why; the listing stays as GitHub had it
+      // The panel reports why; the conversation stays as GitHub had it
     }
+    return;
+  }
+  try {
+    const path = getGithubPath(window.location.href) ?? undefined;
+    const contents = await send({
+      type: "project.contents",
+      owner: state.project.owner_account_name,
+      project: state.project.name,
+      path,
+      hubUrl: state.hubWebUrl,
+    });
+    injectArtifactRows(
+      state.project,
+      contents.dir_items ?? [contents],
+      state.hubWebUrl,
+    );
+  } catch {
+    // The panel reports why; the listing stays as GitHub had it
   }
 }
 
 function teardown(): void {
   document.getElementById(LAUNCHER_ID)?.remove();
+  document.getElementById(PR_CARD_ID)?.remove();
+  document.getElementById(OVERLAY_ID)?.remove();
+  pullChanges = null;
   for (const row of document.querySelectorAll(`[${ARTIFACT_ROW_ATTR}]`)) {
     row.remove();
   }
@@ -896,6 +1076,10 @@ function sync(): void {
   currentRepo = repo;
   panel?.remove();
   panel = null;
+  // Anything read for the last page is stale now, including a pull
+  // request whose branch may have been pushed to since
+  pullChanges = null;
+  document.getElementById(PR_CARD_ID)?.remove();
   void refresh(repo);
 }
 

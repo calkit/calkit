@@ -782,7 +782,9 @@ def get_ck_info_for_ref(
     if ck_item.content is None:
         return {}
     ck_info = yaml.safe_load(base64.b64decode(ck_item.content))
-    if ck_info is None:
+    # calkit.yaml can hold any YAML value (empty, a list, a string); only a
+    # mapping is usable project metadata
+    if not isinstance(ck_info, dict):
         return {}
     return ck_info
 

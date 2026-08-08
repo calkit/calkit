@@ -452,7 +452,9 @@ def get_ck_info_from_repo(repo: git.Repo, process_includes=False) -> dict:
             f"{type(e).__name__}: {e}"
         )
         return {}
-    if ck_info is None:
+    if not isinstance(ck_info, dict):
+        # calkit.yaml can hold any YAML value (empty, a list, a string);
+        # only a mapping is usable project metadata
         ck_info = {}
     return ck_info
 

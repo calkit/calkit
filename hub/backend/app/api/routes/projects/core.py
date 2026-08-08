@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Annotated, Literal, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -4310,13 +4310,13 @@ def get_project_pipeline(
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     # See if we can read a Calkit pipeline
     calkit_content = None
-    ck_info: dict[str, Any] = {}
-    if tree.is_file("calkit.yaml"):
-        ck_info = ryaml.load(tree.read_text("calkit.yaml")) or {}
-        if "pipeline" in ck_info:
-            stream = io.StringIO()
-            ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
-            calkit_content = stream.getvalue()
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref
+    )
+    if "pipeline" in ck_info:
+        stream = io.StringIO()
+        ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
+        calkit_content = stream.getvalue()
     if tree.is_file("dvc.yaml"):
         dvc_content = tree.read_text("dvc.yaml")
         dvc_pipeline = ryaml.load(dvc_content)

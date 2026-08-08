@@ -64,7 +64,7 @@ jobs:
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@ec16ad5cb2e4afb0ca4ea6895e35867a269769a7 # v2
+        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       - name: Setup Node.js

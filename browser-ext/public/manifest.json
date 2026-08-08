@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Calkit",
-  "description": "Work with your Calkit projects from GitHub, Overleaf, and Zotero.",
+  "description": "Work with your Calkit projects from GitHub and Overleaf.",
   "version": "0.1.0",
   "minimum_chrome_version": "114",
   "icons": {
@@ -32,7 +32,8 @@
     "http://api.localhost/*",
     "https://storage.googleapis.com/*",
     "https://s3.amazonaws.com/*",
-    "https://*.s3.amazonaws.com/*"
+    "https://*.s3.amazonaws.com/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "content_scripts": [
@@ -52,29 +53,38 @@
     {
       "matches": [
         "https://arxiv.org/*",
-        "https://www.biorxiv.org/*",
-        "https://www.medrxiv.org/*",
+        "https://*.biorxiv.org/*",
+        "https://*.medrxiv.org/*",
+        "https://www.preprints.org/*",
         "https://doi.org/*",
-        "https://dl.acm.org/*",
-        "https://ieeexplore.ieee.org/*",
-        "https://journals.aps.org/*",
-        "https://journals.plos.org/*",
-        "https://link.springer.com/*",
-        "https://onlinelibrary.wiley.com/*",
         "https://pubmed.ncbi.nlm.nih.gov/*",
         "https://scholar.google.com/*",
-        "https://www.mdpi.com/*",
+        "https://academic.oup.com/*",
+        "https://arc.aiaa.org/*",
+        "https://asmedigitalcollection.asme.org/*",
+        "https://dl.acm.org/*",
+        "https://elifesciences.org/*",
+        "https://ieeexplore.ieee.org/*",
+        "https://iopscience.iop.org/*",
+        "https://journals.aps.org/*",
+        "https://link.springer.com/*",
+        "https://pubs.acs.org/*",
+        "https://pubs.aip.org/*",
+        "https://pubs.rsc.org/*",
+        "https://royalsocietypublishing.org/*",
+        "https://www.cell.com/*",
+        "https://www.frontiersin.org/*",
         "https://www.nature.com/*",
+        "https://www.pnas.org/*",
         "https://www.science.org/*",
         "https://www.sciencedirect.com/*",
-        "https://www.tandfonline.com/*"
+        "https://www.tandfonline.com/*",
+        "https://*.cambridge.org/*",
+        "https://*.mdpi.com/*",
+        "https://*.onlinelibrary.wiley.com/*",
+        "https://*.plos.org/*"
       ],
       "js": ["content/references.js"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["https://www.zotero.org/*"],
-      "js": ["content/zotero.js"],
       "run_at": "document_idle"
     }
   ]

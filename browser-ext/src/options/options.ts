@@ -329,10 +329,10 @@ async function render(): Promise<void> {
       class: "dim small",
       text:
         "The project you're working on now, remembered per hub. Reference " +
-        "lookups check its collections, and importing a reference or a " +
-        "Zotero collection defaults to it. One at a time on purpose: a " +
-        "thesis-scale project stays easier to keep reproducible when " +
-        "everything lands in the same place.",
+        "lookups check its collections, and importing a reference defaults " +
+        "to it. One at a time on purpose: a thesis-scale project stays " +
+        "easier to keep reproducible when everything lands in the same " +
+        "place.",
     }),
     projectContainer,
   );

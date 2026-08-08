@@ -151,21 +151,14 @@ export interface ReferenceNote {
   highlight?: { position: Record<string, unknown>; quote: string } | null;
 }
 
-export interface ZoteroLibrary {
-  library_type: "user" | "group";
-  library_id: string;
-  name: string;
-}
-
-export interface ZoteroCollection {
-  collection_key: string;
-  collection_name?: string | null;
-  parent_collection?: string | null;
-}
-
-export interface ZoteroSyncResponse {
-  path: string;
-  last_sync_version: number;
-  last_synced: string;
-  committed: boolean;
+/**
+ * What a repo's calkit.yaml says about itself, read straight from GitHub.
+ *
+ * A project declares the hub it belongs to, so the file is a more direct
+ * answer than asking one hub whether it knows the repo. An absent `hub`
+ * key means calkit.io, matching the Python package.
+ */
+export interface CalkitYamlInfo {
+  present: boolean;
+  hubUrl: string | null;
 }

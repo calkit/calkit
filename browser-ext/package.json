@@ -1,7 +1,7 @@
 {
   "name": "calkit-browser-ext",
   "displayName": "Calkit",
-  "description": "Work with your Calkit projects from GitHub, Overleaf, and Zotero.",
+  "description": "Work with your Calkit projects from GitHub and Overleaf.",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

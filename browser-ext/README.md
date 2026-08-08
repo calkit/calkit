@@ -1,8 +1,8 @@
 # Calkit browser extension
 
 A Chrome extension (Manifest V3) for working with Calkit projects from the
-sites where the work actually happens: GitHub, Overleaf, journal and preprint
-pages, and Zotero.
+sites where the work actually happens: GitHub, Overleaf, and journal and
+preprint pages.
 
 ## What it does
 
@@ -25,10 +25,17 @@ project as a new publication.
 
 ### GitHub
 
-On a repository page, the **Calkit artifacts** button resolves the repo to a
-Calkit project and lists the DVC-tracked files near the top of the tree, with
-sizes, the pipeline stage that produced each one, image previews, and download
-links that point at the project's DVC storage.
+A **Calkit** button in the corner of a repository page says whether the repo is
+a Calkit project before you click it. It reads the repo's `calkit.yaml` first,
+since that file names the hub the project belongs to, so a project on another
+instance is recognised rather than looking like it isn't one; a private repo,
+which won't serve that file anonymously, falls back to asking your hub.
+
+From there you can open the project on its hub, or connect a repo that isn't a
+project yet. For a connected project the extension **adds its DVC-tracked
+files to GitHub's own file listing**, badged as DVC, since GitHub can only show
+the `.dvc` pointer files. Clicking one opens it: image preview or download,
+straight from the project's DVC storage.
 
 ### References
 
@@ -39,21 +46,28 @@ one of your projects. From there you can:
 
 - Import it into any `.bib` collection in a project.
 - Read and edit the notes attached to it, which are stored in the BibTeX
-  `comment` field and pushed to Zotero for Zotero-linked collections.
+  `comment` field, and pushed to Zotero for collections linked to it.
 
-The project checked is the **active project** set in the extension's options.
+The project checked is the **active project**, which the panel names in a
+dropdown at the top: changing it there switches the active project outright,
+so what was checked and what an import lands in can't drift apart, and the
+next paper starts where this one left off.
+
 One project rather than a list is deliberate: it suits a thesis-scale
 monorepo, and it's also what keeps the lookup fast, since each project has to
 be read on the server to search its collections.
 
-The extension's popup does the same detection on any page through `activeTab`,
-so a site that isn't in the content script's list still works, just from the
-popup rather than in the page.
+The content script runs on the major preprint servers and publishers (arXiv,
+bioRxiv, PLOS, Springer, Wiley, Elsevier, Nature, Science, MDPI, Cambridge
+Core, AIP, ACS, RSC, IOP, ASME, AIAA, Oxford, and others). Publishers that
+spread journals across subdomains are matched with a wildcard host, so
+`agupubs.onlinelibrary.wiley.com` and `collections.plos.org` are covered by
+the same entry as their parents.
 
-### Zotero
-
-On zotero.org, the panel imports a Zotero collection into a project as a
-`.bib` collection, and syncs collections that are already linked.
+That list can't ever be complete, and every host on it is a permission the
+user has to grant, so it stays limited to sites worth injecting into. The
+popup does the same detection on **any** page through `activeTab`, which is
+the general answer for everything else.
 
 ## Installing during development
 
@@ -106,8 +120,8 @@ prompts for access to that host when the hub is applied. This matches
 [self-hosting docs](../docs/hub/self-hosting.md).
 
 **Active project** is the project being worked on, remembered per hub.
-Reference lookups check its collections, and importing a reference or a
-Zotero collection defaults to it. It can also be switched from the popup.
+Reference lookups check its collections, and importing a reference defaults to
+it. It can also be switched from the popup.
 
 Project pickers list only projects you can **write** to
 (`GET /projects?min_access_level=write`), since every action they offer
@@ -122,7 +136,8 @@ public/manifest.json   Extension manifest
 popup.html             Toolbar popup page, built to dist/popup.html
 options.html           Options page, built to dist/options.html
 src/background/        Service worker: auth, API calls, message routing
-src/content/           One content script per site
+src/content/           One content script per site (github, overleaf,
+                       references)
 src/core/              Hub config, storage, API client, page detection, UI
 src/popup/             Popup script and shared page styles
 src/options/           Options script

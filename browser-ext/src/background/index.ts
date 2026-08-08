@@ -4,18 +4,17 @@ import { HUBS } from "../core/hubs";
 import type { Envelope, Request } from "../core/messages";
 import { getCurrentHub, getSettingsView, setSettings } from "../core/storage";
 import type {
+  CalkitYamlInfo,
   ContentsItem,
   Figure,
   OverleafLinkPublic,
   OverleafSyncResponse,
   OverleafSyncStatus,
+  ProjectPublic,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
-  ZoteroCollection,
-  ZoteroLibrary,
-  ZoteroSyncResponse,
 } from "../core/types";
 
 function projectPath(owner: string, project: string): string {
@@ -59,6 +58,34 @@ async function fetchImageDataUrl(url: string): Promise<string> {
   return `data:${blob.type};base64,${btoa(binary)}`;
 }
 
+/**
+ * Read a repo's calkit.yaml straight from GitHub to learn which hub it
+ * belongs to.
+ *
+ * This asks the project itself rather than asking a hub whether it has
+ * heard of the repo, so a project on some other instance is recognised
+ * instead of looking like it isn't a Calkit project at all. Only public
+ * repos answer; a private one 404s here and the hub lookup covers it.
+ */
+async function readCalkitYaml(githubRepo: string): Promise<CalkitYamlInfo> {
+  const url = `https://raw.githubusercontent.com/${githubRepo}/HEAD/calkit.yaml`;
+  let resp: Response;
+  try {
+    resp = await fetch(url);
+  } catch {
+    return { present: false, hubUrl: null };
+  }
+  if (!resp.ok) {
+    return { present: false, hubUrl: null };
+  }
+  const text = await resp.text();
+  // Only one top-level scalar is needed, so this reads that key rather
+  // than pulling in a YAML parser for a file we otherwise ignore. An
+  // absent key means calkit.io, which the caller resolves.
+  const match = text.match(/^hub:[ \t]*["']?([^"'#\n]+?)["']?[ \t]*$/m);
+  return { present: true, hubUrl: match ? match[1].trim() : null };
+}
+
 async function handle(message: Request): Promise<unknown> {
   switch (message.type) {
     case "auth.state":
@@ -81,6 +108,19 @@ async function handle(message: Request): Promise<unknown> {
           min_access_level: message.minAccessLevel ?? "write",
         },
       });
+    case "projects.create":
+      return request<ProjectPublic>("/projects", {
+        method: "POST",
+        body: {
+          name: message.name,
+          title: message.title,
+          git_repo_url: message.gitRepoUrl,
+          git_repo_exists: true,
+          is_public: message.isPublic,
+        },
+      });
+    case "github.calkitInfo":
+      return readCalkitYaml(message.githubRepo);
     case "projects.byGithubRepo":
       // Read access on purpose, unlike the picker: browsing the DVC
       // artifacts behind a public repo you don't own is the point
@@ -170,38 +210,6 @@ async function handle(message: Request): Promise<unknown> {
           method: "PUT",
           body: { path: message.path, notes: message.notes },
         },
-      );
-    case "zotero.libraries":
-      return request<ZoteroLibrary[]>(
-        `${projectPath(message.owner, message.project)}/zotero/libraries`,
-      );
-    case "zotero.collections":
-      return request<ZoteroCollection[]>(
-        `${projectPath(message.owner, message.project)}/zotero/collections`,
-        {
-          query: {
-            library_type: message.libraryType,
-            library_id: message.libraryId,
-          },
-        },
-      );
-    case "zotero.import":
-      return request<{ path: string }>(
-        `${projectPath(message.owner, message.project)}/zotero/imports`,
-        {
-          method: "POST",
-          body: {
-            library_type: message.libraryType,
-            library_id: message.libraryId,
-            collection_key: message.collectionKey,
-            bib_path: message.bibPath,
-          },
-        },
-      );
-    case "zotero.sync":
-      return request<ZoteroSyncResponse>(
-        `${projectPath(message.owner, message.project)}/zotero/syncs`,
-        { method: "POST", body: { path: message.path } },
       );
   }
 }

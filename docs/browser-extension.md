@@ -1,8 +1,8 @@
 # Browser extension
 
 The Calkit browser extension brings your projects into the sites where a lot
-of research work actually happens: GitHub, Overleaf, journal and preprint
-pages, and Zotero.
+of research work actually happens: GitHub, Overleaf, and journal and
+preprint pages.
 It's a Chrome extension (Manifest V3), and its source lives in the
 [`browser-ext`](https://github.com/calkit/calkit/tree/main/browser-ext)
 directory of the Calkit repo.
@@ -48,8 +48,8 @@ host.
 Chrome prompts for access to that host when the hub is applied.
 
 **Active project** is the project you're working on, remembered per hub.
-Reference lookups check its collections, and importing a reference or a
-Zotero collection defaults to it.
+Reference lookups check its collections, and importing a reference defaults
+to it.
 It can also be switched from the popup, next to any project in the list.
 
 One project at a time is deliberate.
@@ -99,9 +99,19 @@ On a repository page, the Calkit button in the lower right indicates if the
 current repo is a Calkit project.
 If it's not, you can turn it into one.
 If it is, Calkit will intersperse your DVC-tracked artifacts
-in the GitHub file view with a badge showing
+in the GitHub file view with a badge showing that's how it's stored.
+From the Calkit extension you can also visit the project on its Calkit hub.
 
-## References
+The button knows which state it's in before you click it.
+It first reads the repo's `calkit.yaml`, if GitHub is serving one, since that
+file names the hub the project belongs to.
+That way a project on a hub other than the one you're signed in to is
+recognised as a Calkit project rather than looking like it isn't one, and the
+panel points you at the hub it actually lives on.
+A private repo won't serve its `calkit.yaml` anonymously, so those fall back to
+asking your hub whether it knows the repo.
+
+## Reference management
 
 On a journal, publisher, or preprint page, the extension reads the page's
 citation metadata and checks whether that reference is already in a collection
@@ -110,9 +120,13 @@ From the panel you can import it into any `.bib` collection, and read or edit
 the notes stored on it.
 See [References](references.md) for how collections and notes work.
 
-## Zotero
+The extension watches the major preprint servers and publishers, including
+arXiv, bioRxiv, PLOS, Springer, Wiley, Elsevier, Nature, Science, MDPI,
+Cambridge Core, AIP, ACS, RSC, IOP, ASME, AIAA, and Oxford.
+That list will never be complete, so for anything not on it, open the Calkit
+toolbar popup: it reads the page you're on directly and detects the reference
+the same way.
 
-On zotero.org, the panel imports a Zotero collection into a project as a
-`.bib` collection, and syncs collections that are already linked.
-This is the same import and sync the hub offers, reachable from the library
-you're looking at.
+If it's not present you can add it, then view/edit noted on the item.
+If you'd like to add it to a different project, you can select a different
+active project from the dropdown and add it there.

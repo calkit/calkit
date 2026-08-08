@@ -2,18 +2,17 @@ import type { AuthState } from "./auth";
 import type { Hub } from "./hubs";
 import type { SettingsUpdate, SettingsView } from "./storage";
 import type {
+  CalkitYamlInfo,
   ContentsItem,
   Figure,
   OverleafLinkPublic,
   OverleafSyncResponse,
   OverleafSyncStatus,
+  ProjectPublic,
   ProjectsPublic,
   ReferenceNote,
   ReferenceSearchMatch,
   References,
-  ZoteroCollection,
-  ZoteroLibrary,
-  ZoteroSyncResponse,
 } from "./types";
 
 /**
@@ -43,6 +42,14 @@ export type Request =
       minAccessLevel?: "read" | "write";
     }
   | { type: "projects.byGithubRepo"; githubRepo: string }
+  | {
+      type: "projects.create";
+      name: string;
+      title: string;
+      gitRepoUrl: string;
+      isPublic: boolean;
+    }
+  | { type: "github.calkitInfo"; githubRepo: string }
   | {
       type: "project.contents";
       owner: string;
@@ -100,25 +107,7 @@ export type Request =
       path: string;
       bibKey: string;
       notes: ReferenceNote[];
-    }
-  | { type: "zotero.libraries"; owner: string; project: string }
-  | {
-      type: "zotero.collections";
-      owner: string;
-      project: string;
-      libraryType: "user" | "group";
-      libraryId: string;
-    }
-  | {
-      type: "zotero.import";
-      owner: string;
-      project: string;
-      libraryType: "user" | "group";
-      libraryId: string;
-      collectionKey: string;
-      bibPath: string;
-    }
-  | { type: "zotero.sync"; owner: string; project: string; path: string };
+    };
 
 export interface ResponseMap {
   "auth.state": AuthState;
@@ -129,6 +118,8 @@ export interface ResponseMap {
   "hubs.get": { hubs: Hub[]; current: Hub };
   "projects.list": ProjectsPublic;
   "projects.byGithubRepo": ProjectsPublic;
+  "projects.create": ProjectPublic;
+  "github.calkitInfo": CalkitYamlInfo;
   "project.contents": ContentsItem;
   "project.figures": Figure[];
   "content.imageDataUrl": string;
@@ -141,10 +132,6 @@ export interface ResponseMap {
   "references.add": { message: string };
   "references.notes.get": { notes: ReferenceNote[] };
   "references.notes.put": { notes: ReferenceNote[] };
-  "zotero.libraries": ZoteroLibrary[];
-  "zotero.collections": ZoteroCollection[];
-  "zotero.import": { path: string };
-  "zotero.sync": ZoteroSyncResponse;
 }
 
 /**

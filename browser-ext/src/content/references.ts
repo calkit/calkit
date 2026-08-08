@@ -225,14 +225,10 @@ async function renderAddForm(
   clear(container);
   if (!activeProject) {
     container.append(
-      el("div", { class: "dim small" }, [
-        document.createTextNode("Choose an active project in the "),
-        el("a", {
-          text: "extension options",
-          href: chrome.runtime.getURL("options.html"),
-        }),
-        document.createTextNode(" to add references to it."),
-      ]),
+      el("div", {
+        class: "dim small",
+        text: "Pick an active project above to add this reference to it.",
+      }),
     );
     return;
   }
@@ -296,8 +292,6 @@ async function renderAddForm(
     }
   });
   container.append(
-    el("label", { text: "Project" }),
-    el("div", { class: "small", text: activeProject }),
     el("label", { text: "Collection" }),
     collectionSelect,
     el("label", { text: "Citation key" }),
@@ -327,6 +321,68 @@ async function searchMatches(
   });
 }
 
+/**
+ * The project every action in this panel applies to, and a way to change it.
+ *
+ * Switching here switches the active project outright rather than making a
+ * one-off choice, so what the panel checked and what an import lands in
+ * can't drift apart, and the next page starts where this one left off.
+ */
+async function renderProjectPicker(
+  activeProject: string | null,
+  onChange: () => void,
+): Promise<HTMLElement> {
+  const select = el("select");
+  const message = el("div", { class: "small" });
+  const row = el("div", {}, [
+    el("label", { text: "Active project" }),
+    select,
+    message,
+  ]);
+  let projects;
+  try {
+    projects = (await send({ type: "projects.list", limit: 100 })).data;
+  } catch {
+    // Signing in is what the panel below will prompt for; here it just
+    // means there is nothing to choose between yet
+    return el("div", {}, [
+      el("label", { text: "Active project" }),
+      el("div", { class: "small", text: activeProject ?? "None set" }),
+    ]);
+  }
+  const specs = projects.map(
+    (project) => `${project.owner_account_name}/${project.name}`,
+  );
+  if (activeProject && !specs.includes(activeProject)) {
+    specs.unshift(activeProject);
+  }
+  if (!specs.length) {
+    return el("div", {}, [
+      el("label", { text: "Active project" }),
+      el("div", { class: "dim small", text: "No projects you can write to." }),
+    ]);
+  }
+  for (const spec of specs) {
+    select.append(el("option", { value: spec, text: spec }));
+  }
+  select.value = activeProject ?? specs[0];
+  select.addEventListener("change", async () => {
+    clear(message).append(loading("Switching"));
+    try {
+      await send({
+        type: "settings.set",
+        update: { activeProject: select.value },
+      });
+      onChange();
+    } catch (e) {
+      clear(message).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+    }
+  });
+  return row;
+}
+
 async function openPanel(reference: DetectedReference): Promise<void> {
   panel = mountPanel({ id: PANEL_ID, title: "Calkit reference" });
   const body = panel.body;
@@ -335,8 +391,9 @@ async function openPanel(reference: DetectedReference): Promise<void> {
   try {
     hubWebUrl = await getHubWebUrl();
     const settings = await send({ type: "settings.get" });
+    const picker = await renderProjectPicker(settings.activeProject, reload);
     const matches = await searchMatches(reference, settings.activeProject);
-    clear(body).append(referenceSummary(reference));
+    clear(body).append(referenceSummary(reference), picker);
     if (matches.length) {
       body.append(
         el("div", {
@@ -353,7 +410,7 @@ async function openPanel(reference: DetectedReference): Promise<void> {
           style: { marginTop: "8px" },
           text: settings.activeProject
             ? `Not in any collection in ${settings.activeProject}.`
-            : "No active project is set yet.",
+            : "Pick a project above to check it.",
         }),
       );
     }

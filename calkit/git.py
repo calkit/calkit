@@ -339,20 +339,46 @@ def ensure_path_is_not_ignored(
     return True
 
 
-def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
+def ensure_dvc_pointer_is_not_ignored(repo: git.Repo, path: str) -> None:
     """Ensure the .dvc pointer for ``path`` will not be Git-ignored.
 
     A broad pattern in a ``.gitignore`` (e.g. ``*.pdf*``) can also match the
     ``<path>.dvc`` pointer DVC commits to Git, causing ``dvc add`` to fail with
-    "bad DVC file name ... is git-ignored". This appends a ``!*.dvc`` negation
-    to the ``.gitignore`` in the pointer's own directory (which wins under Git
-    precedence) so pointers stay tracked. Idempotent.
+    "bad DVC file name ... is git-ignored". Unignore the pointer and any
+    excluded ancestor directories before adding a local ``!*.dvc`` fallback.
+    Idempotent.
     """
+    repo, path = _resolve_repo_and_ignore_path(repo, path)
     path = path.replace("\\", "/").rstrip("/")
     pointer = path + ".dvc"
     if pointer not in repo.ignored(pointer):
         return
+    matching_gitignore_path, matched_pattern = _get_matching_gitignore_details(
+        repo, pointer
+    )
+    if (
+        matching_gitignore_path is not None
+        and matched_pattern is not None
+        and not matched_pattern.startswith("!")
+        and matched_pattern.endswith("/")
+    ):
+        with open(matching_gitignore_path, encoding="utf-8") as f:
+            gitignore_txt = f.read()
+        lines = gitignore_txt.splitlines()
+        directory_pattern = matched_pattern.rstrip("/")
+        if "/" not in directory_pattern:
+            replacement = f"**/{directory_pattern}/*"
+        else:
+            replacement = directory_pattern + "/*"
+        matched_index = len(lines) - 1 - lines[::-1].index(matched_pattern)
+        lines[matched_index] = replacement
+        with open(matching_gitignore_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+            if gitignore_txt.endswith("\n"):
+                f.write("\n")
     pointer_dir = os.path.dirname(pointer)
+    ensure_path_is_not_ignored(repo, pointer_dir)
+    ensure_path_is_not_ignored(repo, pointer)
     gitignore_path = os.path.join(repo.working_dir, pointer_dir, ".gitignore")
     exception = "!*.dvc"
     existing_lines = []

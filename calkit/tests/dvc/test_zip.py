@@ -3,6 +3,8 @@
 import os
 import shutil
 
+import dvc.repo
+import git
 import pytest
 from sqlitedict import SqliteDict
 
@@ -328,3 +330,26 @@ def test_sync_one(tmp_dir, monkeypatch):
     assert not os.path.exists(zip_out9)
     assert get_sync_record(str(src9.as_posix())) is None
     assert (src9 / "a.txt").read_text() == "hello"
+
+
+def test_sync_one_unignores_dvc_pointer(tmp_dir):
+    repo = git.Repo.init()
+    dvc.repo.Repo.init()
+    workspace_path = "test-results/aor"
+    os.makedirs(workspace_path)
+    with open(f"{workspace_path}/result.txt", "w") as f:
+        f.write("result")
+    unrelated_path = "other/test-results/private.txt"
+    os.makedirs(os.path.dirname(unrelated_path))
+    with open(unrelated_path, "w") as f:
+        f.write("private")
+    with open(".gitignore", "w") as f:
+        f.write("test-results/\n")
+    zip_path = make_zip_path(workspace_path)
+    pointer_path = zip_path + ".dvc"
+    assert pointer_path in repo.ignored(pointer_path)
+    assert unrelated_path in repo.ignored(unrelated_path)
+    sync_one(workspace_path, zip_path, direction="to-zip")
+    assert os.path.isfile(pointer_path)
+    assert pointer_path not in repo.ignored(pointer_path)
+    assert unrelated_path in repo.ignored(unrelated_path)

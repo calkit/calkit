@@ -131,14 +131,16 @@ export function normalizeArxivId(value: string | null): string | null {
     return null;
   }
   let id = value.trim().toLowerCase();
-  for (const prefix of [
-    "https://arxiv.org/abs/",
-    "http://arxiv.org/abs/",
-    "arxiv:",
-  ]) {
-    if (id.startsWith(prefix)) {
-      id = id.slice(prefix.length);
-    }
+  // arXiv serves the same paper under /abs/, /html/, and /pdf/, and the
+  // rendered HTML version is increasingly what people land on
+  const fromUrl = id.match(
+    /^https?:\/\/arxiv\.org\/(?:abs|html|pdf)\/(.+?)(?:\.pdf)?$/,
+  );
+  if (fromUrl) {
+    id = fromUrl[1];
+  }
+  if (id.startsWith("arxiv:")) {
+    id = id.slice("arxiv:".length);
   }
   id = id.replace(/^\/+|\/+$/g, "").replace(/v\d+$/, "");
   return /^\d{4}\.\d{4,5}$/.test(id) || /^[a-z-]+(\.[a-z]{2})?\/\d{7}$/.test(id)

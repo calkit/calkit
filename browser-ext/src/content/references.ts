@@ -228,6 +228,8 @@ async function renderAddForm(
   reference: DetectedReference,
   activeProject: string | null,
   reload: () => void,
+  /** Where this reference already is, so it isn't filed twice. */
+  matches: ReferenceSearchMatch[] = [],
 ): Promise<void> {
   clear(container);
   if (!activeProject) {
@@ -250,6 +252,33 @@ async function renderAddForm(
   });
   const [owner, name] = activeProject.split("/");
   const collectionStatus = el("div", { class: "small" });
+  // Collections in this project that already hold this reference. Adding
+  // it again would either 409 or quietly duplicate the entry, so the
+  // option is disabled rather than offered and then refused.
+  const alreadyIn = new Set(
+    matches
+      .filter(
+        (match) =>
+          `${match.project_owner_name}/${match.project_name}` === activeProject,
+      )
+      .map((match) => match.path),
+  );
+  const syncAddState = () => {
+    const taken = alreadyIn.has(collectionSelect.value);
+    addButton.disabled = taken;
+    addButton.title = taken
+      ? "This reference is already in that collection"
+      : "";
+    if (taken) {
+      clear(message).append(
+        el("span", {
+          class: "dim",
+          text: "Already in this collection. Pick another, or a different project.",
+        }),
+      );
+    }
+  };
+  collectionSelect.addEventListener("change", syncAddState);
   const loadCollections = async () => {
     clear(collectionSelect);
     // Reading a project's collections means reading its repo, which takes
@@ -293,6 +322,7 @@ async function renderAddForm(
       clear(collectionStatus);
       collectionSelect.disabled = false;
       addButton.disabled = false;
+      syncAddState();
     }
   };
   addButton.addEventListener("click", async () => {
@@ -427,6 +457,7 @@ async function openPanel(reference: DetectedReference): Promise<void> {
       reference,
       settings.activeProject,
       reload,
+      matches,
     );
   } catch (e) {
     clear(body).append(referenceSummary(reference));

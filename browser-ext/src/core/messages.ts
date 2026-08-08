@@ -80,6 +80,7 @@ export type Request =
     } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
+  | { type: "content.dataUrl"; url: string }
   | { type: "overleaf.links"; overleafProjectId: string }
   | {
       type: "overleaf.lookup";
@@ -154,6 +155,7 @@ export interface ResponseMap {
   "project.contents": ContentsItem;
   "project.figures": Figure[];
   "content.imageDataUrl": string;
+  "content.dataUrl": string;
   "overleaf.links": OverleafLinkPublic[];
   "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];

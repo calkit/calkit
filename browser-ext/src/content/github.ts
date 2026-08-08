@@ -129,6 +129,20 @@ function filesUrl(
   );
 }
 
+/** The extension's own page for looking at an artifact. */
+function viewerUrl(
+  project: ProjectPublic,
+  item: ContentsItemBase,
+  hubUrl: string,
+): string {
+  const params = new URLSearchParams({
+    url: item.url ?? "",
+    path: item.path,
+    hubUrl: filesUrl(project, item.path, hubUrl),
+  });
+  return `${chrome.runtime.getURL("viewer.html")}?${params.toString()}`;
+}
+
 /** Show an artifact without leaving the repo page. */
 function openArtifact(
   project: ProjectPublic,
@@ -168,6 +182,14 @@ function openArtifact(
   }
   body.append(
     el("div", { class: "actions" }, [
+      // Anything that isn't a plain image needs frames or objects that
+      // GitHub's content security policy forbids in this panel, so it
+      // opens in a page of ours where it can simply be rendered
+      el("a", {
+        class: "small",
+        text: "Open viewer",
+        href: viewerUrl(project, item, hubUrl),
+      }),
       el("a", { class: "small", text: "Download", href: item.url }),
     ]),
   );

@@ -51,6 +51,13 @@ body.options {
   padding-bottom: 32px;
 }
 
+body.viewer {
+  width: auto;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
 header {
   display: flex;
   align-items: center;

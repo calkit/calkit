@@ -83,6 +83,17 @@ describe("normalizeArxivId", () => {
       "2301.01234",
     );
     expect(normalizeArxivId("math.GT/0309136")).toBe("math.gt/0309136");
+    // arXiv serves the same paper three ways, and the rendered HTML page
+    // is increasingly where people read it
+    expect(normalizeArxivId("https://arxiv.org/html/2608.06314v1")).toBe(
+      "2608.06314",
+    );
+    expect(normalizeArxivId("https://arxiv.org/pdf/2608.06314v1.pdf")).toBe(
+      "2608.06314",
+    );
+    expect(normalizeArxivId("https://arxiv.org/pdf/2608.06314")).toBe(
+      "2608.06314",
+    );
     expect(normalizeArxivId("10.1234/abcd")).toBeNull();
     expect(normalizeArxivId(null)).toBeNull();
   });

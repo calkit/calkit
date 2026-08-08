@@ -606,6 +606,9 @@ async function load(overleafProjectId: string): Promise<void> {
     // A folder in more than one project is rare, so the first link is the
     // one shown, with the rest offered as alternatives underneath
     const link = links[0];
+    clear(content).append(
+      loading(`Checking ${link.project_owner_name}/${link.project_name}`),
+    );
     const statuses = await send({
       type: "overleaf.status",
       owner: link.project_owner_name,
@@ -624,6 +627,7 @@ async function load(overleafProjectId: string): Promise<void> {
       );
       return;
     }
+    lastSyncNeeded = !statuses[0].in_sync;
     renderStatus(content, link, statuses[0], reload);
     if (links.length > 1) {
       content.append(
@@ -680,7 +684,9 @@ async function load(overleafProjectId: string): Promise<void> {
  * point of being on an Overleaf page. Closing it therefore has to leave
  * something behind, or the only way back would be reloading the page.
  */
-function mountLauncher(onClick: () => void): void {
+type LauncherTone = "idle" | "attention";
+
+function mountLauncher(onClick: () => void, tone: LauncherTone = "idle"): void {
   document.getElementById(LAUNCHER_ID)?.remove();
   const host = el("div", { attrs: { id: LAUNCHER_ID } });
   Object.assign(host.style, {
@@ -705,13 +711,20 @@ function mountLauncher(onClick: () => void): void {
       cursor: pointer;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
     }
-    button:hover { background: #00766c; }
+    button:hover { filter: brightness(1.1); }
+    button.attention { background: #d69e2e; }
   `;
-  const button = el("button", { text: "Calkit" });
+  const button = el("button", {
+    text: tone === "attention" ? "Calkit: sync needed" : "Calkit",
+    class: tone === "attention" ? "attention" : "",
+  });
   button.addEventListener("click", onClick);
   root.append(style, button);
   document.body.append(host);
 }
+
+// Remembered so a closed panel can still show that something is waiting
+let lastSyncNeeded = false;
 
 function openPanel(overleafProjectId: string): void {
   document.getElementById(LAUNCHER_ID)?.remove();
@@ -720,7 +733,10 @@ function openPanel(overleafProjectId: string): void {
     title: "Calkit",
     onClose: () => {
       panel = null;
-      mountLauncher(() => openPanel(overleafProjectId));
+      mountLauncher(
+        () => openPanel(overleafProjectId),
+        lastSyncNeeded ? "attention" : "idle",
+      );
     },
   });
   void load(overleafProjectId);
@@ -746,4 +762,33 @@ function sync(): void {
   openPanel(overleafProjectId);
 }
 
+/**
+ * Re-check after a save, since that is exactly when the answer changes.
+ *
+ * Overleaf saves continuously, so this listens for the explicit save
+ * people still press rather than trying to observe every keystroke, and
+ * waits a moment for Overleaf to have written it before asking.
+ */
+function watchForSaves(): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  document.addEventListener(
+    "keydown",
+    (event) => {
+      const isSave =
+        (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s";
+      if (!isSave || !currentProjectId) {
+        return;
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (panel && currentProjectId) {
+          void load(currentProjectId);
+        }
+      }, 2000);
+    },
+    true,
+  );
+}
+
+watchForSaves();
 runContentScript({ id: "overleaf", sync, teardown });

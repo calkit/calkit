@@ -33,6 +33,7 @@ function projectPath(owner: string, project: string): string {
 }
 
 const MAX_PREVIEW_BYTES = 2_000_000;
+const MAX_VIEWER_BYTES = 25_000_000;
 
 /**
  * Read an artifact into a data URL so a panel can preview it.
@@ -43,21 +44,24 @@ const MAX_PREVIEW_BYTES = 2_000_000;
  * host permissions aren't subject to the page's policy, and the data URL that
  * comes back is something the page's policy does allow.
  */
-async function fetchImageDataUrl(url: string): Promise<string> {
+async function fetchDataUrl(
+  url: string,
+  options: { imageOnly?: boolean; maxBytes?: number } = {},
+): Promise<string> {
   const parsed = new URL(url);
   if (parsed.protocol !== "https:") {
-    throw new Error("Only https artifact URLs can be previewed");
+    throw new Error("Only https artifact URLs can be viewed");
   }
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Could not fetch artifact (${resp.status})`);
   }
   const blob = await resp.blob();
-  if (!blob.type.startsWith("image/")) {
+  if (options.imageOnly && !blob.type.startsWith("image/")) {
     throw new Error("Artifact is not an image");
   }
-  if (blob.size > MAX_PREVIEW_BYTES) {
-    throw new Error("Artifact is too large to preview");
+  if (blob.size > (options.maxBytes ?? MAX_PREVIEW_BYTES)) {
+    throw new Error("Artifact is too large to view here; download it instead");
   }
   const buffer = new Uint8Array(await blob.arrayBuffer());
   let binary = "";
@@ -194,7 +198,11 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/figures`,
       );
     case "content.imageDataUrl":
-      return fetchImageDataUrl(message.url);
+      return fetchDataUrl(message.url, { imageOnly: true });
+    case "content.dataUrl":
+      // The viewer page shows PDFs and notebooks too, which run
+      // larger than an inline preview ever would
+      return fetchDataUrl(message.url, { maxBytes: MAX_VIEWER_BYTES });
     case "overleaf.lookup":
       return request<OverleafLookup>(
         `/user/overleaf-syncs/${encodeURIComponent(message.overleafProjectId)}`,

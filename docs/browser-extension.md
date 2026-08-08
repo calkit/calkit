@@ -156,14 +156,36 @@ active project from the dropdown and add it there.
 
 Delete this list before merging!
 
-- [ ] When hovering over a DVC tracked file on GitHub, I see my profile
+- [x] When hovering over a DVC tracked file on GitHub, I see my profile
       popup. This should link us to the all files page on Calkit.
       The extension panel also has no way to go "back" from viewing the
       file in the panel.
-- [ ] GitHub PR workflow.
-- [ ] Images, PDFs, and Plotly figures should be able to be viewed as modals
+- [x] GitHub PR workflow.
+- [x] Images, PDFs, and Plotly figures should be able to be viewed as modals
       on GitHub when they are DVC tracked. Maybe even notebook HTML.
-- [ ] When an item is in a Zotero collection, disable the add to collection
+      (Images render in the panel; everything else opens in the extension's
+      own viewer page, since GitHub's content security policy forbids the
+      frames and objects a PDF or notebook needs. Plotly links to the hub
+      rather than shipping the library.)
+- [ ] Private repos: the PR view reads its refs from the GitHub API
+      unauthenticated, so it can't see them. Route through the hub, which
+      holds a token.
+- [ ] "Changed" in the PR view compares file size, the only comparable the
+      contents listing carries. Exposing the DVC md5 would make it exact.
+- [x] When an item is in a Zotero collection, disable the add to collection
       button unless the user changes to a hub, project, collection where it
       doesn't exist. That is, don't allow duplicates.
-- [ ] Should work on arvix html pages like https://arxiv.org/html/2608.06314v1.
+- [x] Should work on arvix html pages like https://arxiv.org/html/2608.06314v1.
+      (Also /pdf/ URLs, which resolve to the same paper.)
+- [x] Show spinner while overleaf sync status is being fetched.
+- [x] Saving on overleaf should trigger a sync status refresh.
+      (Listens for an explicit save, then re-checks once Overleaf has had a
+      moment to write it.)
+- [x] Overleaf project that needs syncing should show as yellow on calkit
+      extension button to draw attention.
+- [x] Add some sort of build/deploy pipeline for the browser extension.
+      (`browser-ext/vX.Y.Z` tags build, test, stamp the version into the
+      manifest, and attach a store-ready zip to the release. Uploading to
+      the Chrome Web Store is still manual, pending store credentials.)
+- [ ] On cambridge.org/core papers, their feedback thing is on top of the
+      calkit extension button.

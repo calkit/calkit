@@ -88,5 +88,11 @@
       "js": ["content/references.js"],
       "run_at": "document_idle"
     }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["viewer.html"],
+      "matches": ["https://github.com/*"]
+    }
   ]
 }

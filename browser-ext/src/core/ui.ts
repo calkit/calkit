@@ -79,7 +79,15 @@ export function clear(node: HTMLElement): HTMLElement {
 /** Colors and spacing shared by the panels, matching the Calkit web app. */
 export const STYLES = `
 :host {
+  /* Isolates from the host page, and takes the page's typography with it:
+     what's left is the initial font, which is a serif. Everything in this
+     shadow root inherits from here, so it's set once rather than on the
+     one container that happened to need it. */
   all: initial;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
   --ck-main: #009688;
   --ck-main-hover: #00766c;
   --ck-danger: #e53e3e;
@@ -101,11 +109,10 @@ export const STYLES = `
   }
 }
 * { box-sizing: border-box; }
+/* A button doesn't inherit type by default; without this they'd each fall
+   back to the browser's own form font */
+button { font-family: inherit; font-size: inherit; }
 .panel {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial,
-    sans-serif;
-  font-size: 13px;
-  line-height: 1.45;
   color: var(--ck-fg);
   background: var(--ck-bg);
   border: 1px solid var(--ck-border);
@@ -286,7 +293,6 @@ button.chip {
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 12px;
-  font-family: inherit;
   cursor: pointer;
 }
 button.chip[aria-pressed="true"] {

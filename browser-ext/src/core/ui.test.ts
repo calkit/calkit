@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { el, launcherPosition } from "./ui";
+import { el, launcherPosition, STYLES } from "./ui";
 
 describe("el", () => {
   test("sets value on every element that carries one", () => {
@@ -91,5 +91,20 @@ describe("launcherPosition", () => {
       value: { ...window.location, hostname: original },
       writable: true,
     });
+  });
+});
+
+describe("STYLES", () => {
+  test("sets the typography where everything inherits it", () => {
+    // ':host { all: initial }' isolates from the host page and drops its
+    // typography too, leaving the initial font -- a serif. The overlay
+    // showed up in Times because the font stack sat on .panel, which the
+    // overlay card isn't.
+    const host = STYLES.slice(STYLES.indexOf(":host {"));
+    const block = host.slice(0, host.indexOf("}"));
+    expect(block).toContain("all: initial");
+    expect(block).toContain("font-family:");
+    // A button doesn't inherit type on its own
+    expect(STYLES).toContain("button { font-family: inherit");
   });
 });

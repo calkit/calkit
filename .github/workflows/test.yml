@@ -18,6 +18,8 @@ jobs:
       pull-requests: read
     outputs:
       cli: ${{ steps.filter.outputs.cli }}
+      jlab: ${{ steps.filter.outputs.jlab }}
+      vscode: ${{ steps.filter.outputs.vscode }}
     steps:
       - uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
         id: filter
@@ -29,6 +31,15 @@ jobs:
             cli:
               - "**"
               - "!hub/**"
+              - "!vscode-ext/**"
+            # The JupyterLab extension depends on the core Python package,
+            # so run its tests for any change outside the other subprojects
+            jlab:
+              - "**"
+              - "!hub/**"
+              - "!vscode-ext/**"
+            vscode:
+              - "vscode-ext/**"
 
   main:
     needs: changes
@@ -85,6 +96,8 @@ jobs:
           uv --version
           uv run pytest -n 4 --durations=10
   jupyterlab-ext:
+    needs: changes
+    if: needs.changes.outputs.jlab == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -124,6 +137,8 @@ jobs:
           path: jupyterlab-ext/ui-tests/test-results/
           retention-days: 7
   vscode-ext:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:

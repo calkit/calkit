@@ -679,6 +679,9 @@ def get_contents_from_tree(
             # fallthrough `else` case where the path has no metadata source.
             size: int | None = None
             obj_type: str = "file"
+            # Only DVC-tracked paths have one, and it must not carry over
+            # from the previous path in the loop
+            md5: str | None = None
             if in_repo:
                 size = tree.size(p)
                 obj_type = "file" if tree.is_file(p) else "dir"
@@ -686,6 +689,7 @@ def get_contents_from_tree(
             elif p in dvc_lock_outs:
                 size = dvc_lock_outs[p].get("size")
                 obj_type = dvc_lock_outs[p]["type"]
+                md5 = dvc_lock_outs[p].get("md5")
                 storage = "dvc"
             elif p in dvc_pointer_outs:
                 dvc_out = dvc_pointer_outs[p]
@@ -704,6 +708,7 @@ def get_contents_from_tree(
                 type=obj_type,
                 calkit_object=ck_objects.get(p),
                 storage=storage,
+                md5=md5,
             )
             contents.append(ContentsItem.model_validate(obj))
         for ck_path, ck_obj in ck_objects.items():

@@ -374,3 +374,26 @@ export function textInput(options: {
     },
   });
 }
+
+/**
+ * Where a floating launcher sits, kept clear of what the site already
+ * puts in that corner.
+ *
+ * The bottom right is prime real estate for feedback widgets and chat
+ * bubbles, and landing on top of one hides both. There's no reliable way
+ * to detect that, so the sites known to collide are listed instead, which
+ * is easy to extend the next time one turns up.
+ */
+const CORNER_OFFSETS: Record<string, { right: string; bottom: string }> = {
+  // Cambridge Core's feedback tab occupies the corner
+  "www.cambridge.org": { right: "16px", bottom: "96px" },
+};
+
+export function launcherPosition(): { right: string; bottom: string } {
+  return (
+    CORNER_OFFSETS[window.location.hostname] ?? {
+      right: "16px",
+      bottom: "16px",
+    }
+  );
+}

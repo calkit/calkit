@@ -102,6 +102,7 @@ describe("normalizeArxivId", () => {
 describe("detectReference", () => {
   beforeEach(() => {
     document.head.replaceChildren();
+    document.body.replaceChildren();
   });
 
   const addMeta = (name: string, content: string) => {
@@ -163,6 +164,49 @@ describe("detectReference", () => {
     const reference = detectReference("https://arxiv.org/abs/2301.01234v2");
     expect(reference?.arxivId).toBe("2301.01234");
     expect(reference?.doi).toBeNull();
+  });
+
+  test("reads arXiv's rendered HTML, which has no citation tags", () => {
+    // The /html/ version of a paper is LaTeXML output: the title block in
+    // the document is the only place its metadata appears
+    document.body.innerHTML = `
+      <div id="watermark-tr">arXiv:2608.06314v1 [physics.flu-dyn] 06 Aug 2026</div>
+      <article class="ltx_document">
+        <h1 class="ltx_title ltx_title_document">Three-layer water flows</h1>
+        <div class="ltx_authors">
+          <span class="ltx_creator ltx_role_author">
+            <span class="ltx_personname">Rossen Ivanov\n</span>
+            <span class="ltx_author_notes">
+              <span class="ltx_contact ltx_role_email">rossen@example.ie</span>
+            </span>
+          </span>
+          <span class="ltx_creator ltx_role_author">
+            <span class="ltx_personname">Calin-Iulian Martin</span>
+          </span>
+        </div>
+      </article>`;
+    const reference = detectReference("https://arxiv.org/html/2608.06314v1");
+    expect(reference?.title).toBe("Three-layer water flows");
+    // Contact details sit next to the name, so only the name is taken
+    expect(reference?.authors).toBe("Rossen Ivanov and Calin-Iulian Martin");
+    expect(reference?.year).toBe("2026");
+    expect(reference?.arxivId).toBe("2608.06314");
+  });
+
+  test("prefers citation tags over the document on an arXiv abs page", () => {
+    addMeta("citation_title", "The Published Title");
+    addMeta("citation_author", "Smith, Jane");
+    document.body.innerHTML =
+      '<h1 class="ltx_title ltx_title_document">A Draft Title</h1>';
+    const reference = detectReference("https://arxiv.org/abs/2608.06314");
+    expect(reference?.title).toBe("The Published Title");
+    expect(reference?.authors).toBe("Smith, Jane");
+  });
+
+  test("doesn't read the document on a page that isn't arXiv's", () => {
+    document.body.innerHTML =
+      '<h1 class="ltx_title ltx_title_document">Someone Else\'s Heading</h1>';
+    expect(detectReference("https://example.org/paper")).toBeNull();
   });
 
   test("returns nothing on a page that describes no reference", () => {

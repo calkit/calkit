@@ -96,6 +96,8 @@ export interface ContentsItemBase {
   url?: string | null;
   calkit_object?: Record<string, unknown> | null;
   storage?: "git" | "dvc" | "dvc-zip" | null;
+  /** Content hash of a DVC output; equal hashes mean the same file. */
+  md5?: string | null;
   stage?: string | null;
 }
 
@@ -185,6 +187,10 @@ export interface GithubRepo {
 
 /** The refs a pull request compares, from the GitHub API. */
 export interface PullRequestRefs {
-  headRef: string;
-  baseRef: string;
+  number: number;
+  title: string;
+  head_ref: string;
+  base_ref: string;
+  head_sha: string;
+  base_sha: string;
 }

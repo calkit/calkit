@@ -1101,6 +1101,10 @@ class _ContentsItemBase(BaseModel):
     calkit_object: dict | None = None
     lock: ItemLock | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Content hash of a DVC-tracked output. Two listings of the same path
+    # at different refs are the same file exactly when this matches, which
+    # size alone can't tell you.
+    md5: str | None = None
     # Pipeline stage that produces this path, if any (from dvc.lock)
     stage: str | None = None
 

@@ -380,6 +380,10 @@ export type ContentsItem = {
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
   /**
+   * Md5
+   */
+  md5?: string | null
+  /**
    * Stage
    */
   stage?: string | null
@@ -1373,6 +1377,36 @@ export type GitRemoteHead = {
    * Sha
    */
   sha: string | null
+}
+
+/**
+ * GithubPullRequest
+ */
+export type GithubPullRequest = {
+  /**
+   * Number
+   */
+  number: number
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Head Ref
+   */
+  head_ref: string
+  /**
+   * Base Ref
+   */
+  base_ref: string
+  /**
+   * Head Sha
+   */
+  head_sha: string
+  /**
+   * Base Sha
+   */
+  base_sha: string
 }
 
 /**
@@ -3090,6 +3124,10 @@ export type ReferenceEntry = {
   attrs: {
     [key: string]: unknown
   }
+  /**
+   * Arxiv Id
+   */
+  arxiv_id?: string | null
   /**
    * Zotero Item Key
    */
@@ -4899,6 +4937,10 @@ export type ContentsItemBase = {
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
   /**
+   * Md5
+   */
+  md5?: string | null
+  /**
    * Stage
    */
   stage?: string | null
@@ -6641,6 +6683,34 @@ export type MarkAllNotificationsReadResponses = {
 
 export type MarkAllNotificationsReadResponse =
   MarkAllNotificationsReadResponses[keyof MarkAllNotificationsReadResponses]
+
+export type GetArxivPdfData = {
+  body?: never
+  path: {
+    /**
+     * Arxiv Id
+     */
+    arxiv_id: string
+  }
+  query?: never
+  url: "/arxiv/{arxiv_id}/pdf"
+}
+
+export type GetArxivPdfErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetArxivPdfError = GetArxivPdfErrors[keyof GetArxivPdfErrors]
+
+export type GetArxivPdfResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
 
 export type GetProjectsData = {
   body?: never
@@ -10122,6 +10192,46 @@ export type GetProjectShowcaseResponses = {
 
 export type GetProjectShowcaseResponse =
   GetProjectShowcaseResponses[keyof GetProjectShowcaseResponses]
+
+export type GetProjectGithubPullData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Pull Number
+     */
+    pull_number: number
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/github-pulls/{pull_number}"
+}
+
+export type GetProjectGithubPullErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectGithubPullError =
+  GetProjectGithubPullErrors[keyof GetProjectGithubPullErrors]
+
+export type GetProjectGithubPullResponses = {
+  /**
+   * Successful Response
+   */
+  200: GithubPullRequest
+}
+
+export type GetProjectGithubPullResponse =
+  GetProjectGithubPullResponses[keyof GetProjectGithubPullResponses]
 
 export type GetProjectGithubReleasesData = {
   body?: never

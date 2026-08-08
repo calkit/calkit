@@ -42,7 +42,7 @@ from TexSoup import TexSoup
 
 import app.projects
 import calkit
-from app import github, messaging, mixpanel, orgs, users, zotero
+from app import arxiv, github, messaging, mixpanel, orgs, users, zotero
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -5383,6 +5383,9 @@ class ReferenceEntry(BaseModel):
     file_path: str | None = None
     url: str | None = None
     attrs: dict
+    # Set when the entry is an arXiv paper, so the PDF can be fetched even
+    # though nothing is stored in the repo.
+    arxiv_id: str | None = None
     # Zotero linkage (populated for Zotero-linked collections).
     zotero_item_key: str | None = None
     has_pdf: bool = False
@@ -5602,6 +5605,7 @@ def get_project_references(
                             attrs=entry,
                             file_path=file_path,
                             url=url,
+                            arxiv_id=arxiv.id_from_bib_attrs(entry),
                             zotero_item_key=item.get("item_key"),
                             has_pdf=bool(item.get("pdf_attachment_keys")),
                             note_count=note_count,
@@ -5889,7 +5893,7 @@ def get_user_reference_matches(
             for entry in bib_db.entries:
                 entry_doi = _normalize_doi(entry.get("doi"))
                 entry_arxiv_id = _normalize_arxiv_id(
-                    entry.get("eprint") or entry.get("archiveprefix")
+                    arxiv.id_from_bib_attrs(entry)
                 )
                 entry_title = _normalize_title(entry.get("title"))
                 if target_doi and entry_doi == target_doi:
@@ -7698,6 +7702,64 @@ class GitHubRelease(BaseModel):
     body: str
     created: datetime
     published: datetime
+
+
+class GithubPullRequest(BaseModel):
+    number: int
+    title: str
+    head_ref: str
+    base_ref: str
+    head_sha: str
+    base_sha: str
+
+
+@router.get("/projects/{owner_name}/{project_name}/github-pulls/{pull_number}")
+def get_project_github_pull(
+    owner_name: str,
+    project_name: str,
+    pull_number: int,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> GithubPullRequest:
+    """Read a pull request's refs from GitHub.
+
+    Proxied rather than read from the browser so a private repo works:
+    the caller has read access to the project here, and the hub holds a
+    GitHub token, where an unauthenticated request would only ever see
+    public repos.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    if not project.github_repo:
+        raise HTTPException(400, "Project is not backed by a GitHub repo")
+    token = users.get_github_token(session=session, user=current_user)
+    resp = requests.get(
+        f"https://api.github.com/repos/{project.github_repo}"
+        f"/pulls/{pull_number}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(
+            resp.status_code, f"Could not read pull request #{pull_number}"
+        )
+    body = resp.json()
+    return GithubPullRequest(
+        number=body["number"],
+        title=body.get("title") or "",
+        head_ref=body["head"]["ref"],
+        base_ref=body["base"]["ref"],
+        head_sha=body["head"]["sha"],
+        base_sha=body["base"]["sha"],
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/github-releases")

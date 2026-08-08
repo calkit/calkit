@@ -477,12 +477,17 @@ const CollectionEntries = memo(function CollectionEntries({
                 ""
               )}
             </Text>
-            {entry.has_pdf || entry.url ? (
+            {entry.has_pdf || entry.url || entry.arxiv_id ? (
               <Icon
                 as={BsFilePdf}
                 ml={1}
                 color="red.500"
                 cursor="pointer"
+                title={
+                  entry.has_pdf || entry.url
+                    ? "View PDF"
+                    : "View PDF from arXiv"
+                }
                 onClick={() => onOpenItem(entry.key)}
               />
             ) : null}

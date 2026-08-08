@@ -148,6 +148,47 @@ export function normalizeArxivId(value: string | null): string | null {
     : null;
 }
 
+function cleanText(node: Element | null): string | null {
+  const text = node?.textContent?.replace(/\s+/g, " ").trim();
+  return text || null;
+}
+
+/**
+ * Read what arXiv's rendered HTML carries in its own DOM.
+ *
+ * The /abs/ page publishes citation meta tags, but the LaTeXML-rendered
+ * full text at /html/ publishes none, so the paper's title block is the
+ * only place its metadata appears. Without this, landing on the HTML
+ * version of a paper reads as an untitled reference with nothing but an ID.
+ */
+function arxivHtmlMetadata(): {
+  title: string | null;
+  authors: string | null;
+  year: string | null;
+} {
+  const authors = [...document.querySelectorAll(".ltx_creator .ltx_personname")]
+    .map((node) => cleanText(node))
+    .filter((name): name is string => Boolean(name));
+  // The submission line, e.g.
+  // "arXiv:2608.06314v1 [physics.flu-dyn] 06 Aug 2026"
+  const watermark = cleanText(document.querySelector("#watermark-tr")) ?? "";
+  return {
+    title:
+      cleanText(document.querySelector("h1.ltx_title_document")) ??
+      cleanText(document.querySelector("title")),
+    authors: authors.join(" and ") || null,
+    year: watermark.match(/\b(?:19|20)\d{2}\b/)?.[0] ?? null,
+  };
+}
+
+function isArxiv(url: string): boolean {
+  try {
+    return /(^|\.)arxiv\.org$/.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Read the reference described by the current page.
  *
@@ -170,16 +211,20 @@ export function detectReference(
   const arxivId =
     normalizeArxivId(metaContent(["citation_arxiv_id"])) ??
     normalizeArxivId(url);
-  const title = metaContent([
-    "citation_title",
-    "dc.title",
-    "DC.title",
-    "og:title",
-  ]);
+  // Only arXiv's own pages get read out of the DOM, and only where the
+  // citation tags a publisher would have emitted are missing
+  const fromDom = isArxiv(url)
+    ? arxivHtmlMetadata()
+    : { title: null, authors: null, year: null };
+  const title =
+    metaContent(["citation_title", "dc.title", "DC.title", "og:title"]) ??
+    fromDom.title;
   if (!doi && !arxivId && !title) {
     return null;
   }
-  const authors = metaContents(["citation_author", "dc.creator"]).join(" and ");
+  const authors =
+    metaContents(["citation_author", "dc.creator"]).join(" and ") ||
+    (fromDom.authors ?? "");
   const dateString =
     metaContent([
       "citation_publication_date",
@@ -194,7 +239,7 @@ export function detectReference(
     arxivId,
     title,
     authors: authors || null,
-    year: yearMatch ? yearMatch[0] : null,
+    year: yearMatch ? yearMatch[0] : fromDom.year,
     journal: metaContent([
       "citation_journal_title",
       "citation_conference_title",

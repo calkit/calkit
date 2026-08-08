@@ -11,6 +11,7 @@ import type { ContentsItemBase, ProjectPublic } from "../core/types";
 import {
   clear,
   el,
+  launcherPosition,
   errorMessage,
   loading,
   mountPanel,
@@ -481,8 +482,10 @@ async function renderPullRequest(
   try {
     refs = await send({
       type: "github.pullRequest",
-      githubRepo: repo,
+      owner: project.owner_account_name,
+      project: project.name,
       number,
+      hubUrl,
     });
   } catch (e) {
     clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
@@ -505,21 +508,33 @@ async function renderPullRequest(
   let head: Map<string, ContentsItemBase>;
   let base: Map<string, ContentsItemBase>;
   try {
-    [head, base] = await Promise.all([read(refs.headRef), read(refs.baseRef)]);
+    [head, base] = await Promise.all([
+      read(refs.head_sha),
+      read(refs.base_sha),
+    ]);
   } catch (e) {
     clear(body).append(renderFailure(e, { onSignedIn: () => undefined }));
     return;
   }
   clear(body).append(
     el("div", { class: "dim small" }, [
-      document.createTextNode(`Comparing DVC outputs in #${number}.`),
+      document.createTextNode(
+        `Comparing DVC outputs in #${number}: ` +
+          `${refs.head_ref} against ${refs.base_ref}.`,
+      ),
     ]),
   );
   const changed = [...head.values()].filter((item) => {
     const before = base.get(item.path);
-    // A pointer whose content hash is unchanged is the same file; size is
-    // the only comparable the listing carries
-    return !before || before.size !== item.size;
+    if (!before) {
+      return true;
+    }
+    // Equal content hashes mean the same file, whatever the pointer
+    // commit says. Size only stands in where a hash is missing, and it
+    // can't tell a same-size edit from no edit at all.
+    return before.md5 && item.md5
+      ? before.md5 !== item.md5
+      : before.size !== item.size;
   });
   if (!changed.length) {
     body.append(
@@ -737,8 +752,7 @@ function mountLauncher(state: RepoState | null, onClick: () => void): void {
   const host = el("div", { attrs: { id: LAUNCHER_ID } });
   Object.assign(host.style, {
     position: "fixed",
-    right: "16px",
-    bottom: "16px",
+    ...launcherPosition(),
     zIndex: "2147482999",
   });
   const root = host.attachShadow({ mode: "open" });

@@ -1,16 +1,20 @@
 """Miscellaneous routes."""
 
+import logging
 import os
 import uuid
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+import requests
+from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic.networks import EmailStr
 from sqlalchemy.exc import DataError
 from sqlmodel import and_, or_, select
 from starlette.requests import Request
 
+from app import arxiv
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -36,6 +40,7 @@ from app.models import (
 from app.stripe import stripe
 from app.subscriptions import SubscriptionPlan, get_plans
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -418,3 +423,53 @@ def mark_all_notifications_read(
         n.read = now
         session.add(n)
     session.commit()
+
+
+ARXIV_PDF_TIMEOUT = 30
+# arXiv asks that automated readers identify themselves
+ARXIV_USER_AGENT = "Calkit/1.0 (+https://calkit.io; support@calkit.io)"
+
+
+@router.get("/arxiv/{arxiv_id:path}/pdf")
+def get_arxiv_pdf(arxiv_id: str, current_user: CurrentUser) -> Response:
+    """Stream a paper's PDF from arXiv.
+
+    Proxied rather than pointed at directly because arXiv sends no CORS
+    headers, so the PDF viewer can't fetch it from the browser. The ID is
+    matched against arXiv's own format, which is what keeps this from
+    being a proxy for arbitrary URLs.
+
+    Old-style IDs contain a slash, hence the path converter.
+    """
+    if not arxiv.is_id(arxiv_id):
+        raise HTTPException(422, "Invalid arXiv ID")
+    url = arxiv.pdf_url(arxiv_id)
+    try:
+        resp = requests.get(
+            url,
+            timeout=ARXIV_PDF_TIMEOUT,
+            stream=True,
+            headers={"User-Agent": ARXIV_USER_AGENT},
+        )
+    except requests.RequestException as e:
+        logger.warning(f"Failed to fetch arXiv PDF {arxiv_id}: {e}")
+        raise HTTPException(502, "Could not reach arXiv")
+    if resp.status_code == 404:
+        raise HTTPException(404, "No PDF for this arXiv ID")
+    if not resp.ok:
+        logger.warning(f"arXiv returned {resp.status_code} for PDF {arxiv_id}")
+        raise HTTPException(502, "arXiv could not provide this PDF")
+    if "pdf" not in resp.headers.get("Content-Type", ""):
+        # A withdrawn or unreleased paper answers with an HTML notice
+        raise HTTPException(404, "No PDF for this arXiv ID")
+    headers = {
+        # A paper at a given version never changes, so let the browser keep it
+        "Cache-Control": "private, max-age=86400",
+    }
+    if length := resp.headers.get("Content-Length"):
+        headers["Content-Length"] = length
+    return StreamingResponse(
+        resp.iter_content(chunk_size=64 * 1024),
+        media_type="application/pdf",
+        headers=headers,
+    )

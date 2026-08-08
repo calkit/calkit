@@ -70,6 +70,8 @@ import type {
   FsOpRequest,
   GetAccountErrors,
   GetAccountResponses,
+  GetArxivPdfErrors,
+  GetArxivPdfResponses,
   GetCurrentUserResponses,
   GetDatasetsErrors,
   GetDatasetsResponses,
@@ -124,6 +126,8 @@ import type {
   GetProjectGitContents2Responses,
   GetProjectGitContentsErrors,
   GetProjectGitContentsResponses,
+  GetProjectGithubPullErrors,
+  GetProjectGithubPullResponses,
   GetProjectGithubReleasesErrors,
   GetProjectGithubReleasesResponses,
   GetProjectGitRemoteHeadErrors,
@@ -2063,6 +2067,41 @@ export class MiscService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/notifications/read-all",
       ...options,
+    })
+  }
+
+  /**
+   * Get Arxiv Pdf
+   *
+   * Stream a paper's PDF from arXiv.
+   *
+   * Proxied rather than pointed at directly because arXiv sends no CORS
+   * headers, so the PDF viewer can't fetch it from the browser. The ID is
+   * matched against arXiv's own format, which is what keeps this from
+   * being a proxy for arbitrary URLs.
+   *
+   * Old-style IDs contain a slash, hence the path converter.
+   */
+  public static getArxivPdf<ThrowOnError extends boolean = true>(
+    parameters: {
+      arxiv_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetArxivPdfResponses, GetArxivPdfErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "arxiv_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetArxivPdfResponses,
+      GetArxivPdfErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/arxiv/{arxiv_id}/pdf",
+      ...options,
+      ...params,
     })
   }
 }
@@ -5777,6 +5816,53 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/showcase",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Github Pull
+   *
+   * Read a pull request's refs from GitHub.
+   *
+   * Proxied rather than read from the browser so a private repo works:
+   * the caller has read access to the project here, and the hub holds a
+   * GitHub token, where an unauthenticated request would only ever see
+   * public repos.
+   */
+  public static getProjectGithubPull<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pull_number: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectGithubPullResponses,
+    GetProjectGithubPullErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "pull_number" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectGithubPullResponses,
+      GetProjectGithubPullErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/github-pulls/{pull_number}",
       ...options,
       ...params,
     })

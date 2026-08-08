@@ -33,8 +33,7 @@
     "https://storage.googleapis.com/*",
     "https://s3.amazonaws.com/*",
     "https://*.s3.amazonaws.com/*",
-    "https://raw.githubusercontent.com/*",
-    "https://api.github.com/*"
+    "https://raw.githubusercontent.com/*"
   ],
   "optional_host_permissions": ["https://*/*", "http://*/*"],
   "content_scripts": [

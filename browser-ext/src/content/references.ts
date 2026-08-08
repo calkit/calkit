@@ -15,6 +15,7 @@ import type { ReferenceNote, ReferenceSearchMatch } from "../core/types";
 import {
   clear,
   el,
+  launcherPosition,
   errorMessage,
   loading,
   mountPanel,
@@ -40,8 +41,7 @@ function mountLauncher(onClick: () => void): LauncherHandle {
   const host = el("div", { attrs: { id: LAUNCHER_ID } });
   Object.assign(host.style, {
     position: "fixed",
-    right: "16px",
-    bottom: "16px",
+    ...launcherPosition(),
     zIndex: "2147482999",
   });
   const root = host.attachShadow({ mode: "open" });

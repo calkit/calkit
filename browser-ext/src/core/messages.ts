@@ -69,7 +69,12 @@ export type Request =
     } & HubScoped)
   | { type: "github.calkitInfo"; githubRepo: string }
   | { type: "github.repos"; perPage?: number }
-  | { type: "github.pullRequest"; githubRepo: string; number: number }
+  | ({
+      type: "github.pullRequest";
+      owner: string;
+      project: string;
+      number: number;
+    } & HubScoped)
   | ({
       type: "project.contents";
       owner: string;

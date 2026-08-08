@@ -655,6 +655,17 @@ export const ContentsItemSchema = {
       ],
       title: "Storage",
     },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
+    },
     stage: {
       anyOf: [
         {
@@ -2369,6 +2380,38 @@ export const GitRemoteHeadSchema = {
   type: "object",
   required: ["branch", "sha"],
   title: "GitRemoteHead",
+} as const
+
+export const GithubPullRequestSchema = {
+  properties: {
+    number: {
+      type: "integer",
+      title: "Number",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    head_ref: {
+      type: "string",
+      title: "Head Ref",
+    },
+    base_ref: {
+      type: "string",
+      title: "Base Ref",
+    },
+    head_sha: {
+      type: "string",
+      title: "Head Sha",
+    },
+    base_sha: {
+      type: "string",
+      title: "Base Sha",
+    },
+  },
+  type: "object",
+  required: ["number", "title", "head_ref", "base_ref", "head_sha", "base_sha"],
+  title: "GithubPullRequest",
 } as const
 
 export const HTTPValidationErrorSchema = {
@@ -5494,6 +5537,17 @@ export const ReferenceEntrySchema = {
       additionalProperties: true,
       type: "object",
       title: "Attrs",
+    },
+    arxiv_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Arxiv Id",
     },
     zotero_item_key: {
       anyOf: [
@@ -8633,6 +8687,17 @@ export const _ContentsItemBaseSchema = {
         },
       ],
       title: "Storage",
+    },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
     },
     stage: {
       anyOf: [

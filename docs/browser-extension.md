@@ -167,11 +167,16 @@ Delete this list before merging!
       own viewer page, since GitHub's content security policy forbids the
       frames and objects a PDF or notebook needs. Plotly links to the hub
       rather than shipping the library.)
-- [ ] Private repos: the PR view reads its refs from the GitHub API
+- [x] Private repos: the PR view reads its refs from the GitHub API
       unauthenticated, so it can't see them. Route through the hub, which
       holds a token.
-- [ ] "Changed" in the PR view compares file size, the only comparable the
+      (`GET /projects/{owner}/{project}/github-pulls/{number}` returns the
+      head and base refs. The extension no longer asks GitHub for anything
+      directly, so its GitHub host permission is gone.)
+- [x] "Changed" in the PR view compares file size, the only comparable the
       contents listing carries. Exposing the DVC md5 would make it exact.
+      (The contents listing now carries the DVC md5, and the comparison
+      uses it, falling back to size only where a hash is missing.)
 - [x] When an item is in a Zotero collection, disable the add to collection
       button unless the user changes to a hub, project, collection where it
       doesn't exist. That is, don't allow duplicates.
@@ -187,5 +192,16 @@ Delete this list before merging!
       (`browser-ext/vX.Y.Z` tags build, test, stamp the version into the
       manifest, and attach a store-ready zip to the release. Uploading to
       the Chrome Web Store is still manual, pending store credentials.)
-- [ ] On cambridge.org/core papers, their feedback thing is on top of the
+- [x] On cambridge.org/core papers, their feedback thing is on top of the
       calkit extension button.
+      (The launcher lifts above it. There's no way to detect another site's
+      floating widget, so the hosts known to collide are listed in
+      `launcherPosition`, which is easy to extend.)
+- [x] Arxiv html page doesn't pick up metadata even though it's in a ref
+      collection on Calkit. Just shows Untitled and the arxiv number.
+      (Two causes. The rendered HTML at `/html/` publishes no citation meta
+      tags at all, unlike the `/abs/` page, so the title, authors, and year
+      are now read from the paper's own title block. And the collection
+      lookup only recognized an arXiv entry by its `eprint` field, so an
+      entry written with just an arxiv.org URL or an arXiv DOI never
+      matched.)

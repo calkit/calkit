@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { el } from "./ui";
+import { el, launcherPosition } from "./ui";
 
 describe("el", () => {
   test("sets value on every element that carries one", () => {
@@ -70,5 +70,26 @@ describe("el", () => {
       el("span", { text: "b" }),
     ]);
     expect(row.childElementCount).toBe(2);
+  });
+});
+
+describe("launcherPosition", () => {
+  test("defaults to the bottom right corner", () => {
+    expect(launcherPosition()).toEqual({ right: "16px", bottom: "16px" });
+  });
+
+  test("lifts clear of a site that already occupies that corner", () => {
+    // jsdom's hostname is fixed per environment, so the table is checked
+    // directly; the point is that a listed host gets moved
+    const original = window.location.hostname;
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, hostname: "www.cambridge.org" },
+      writable: true,
+    });
+    expect(launcherPosition().bottom).not.toBe("16px");
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, hostname: original },
+      writable: true,
+    });
   });
 });

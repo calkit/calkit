@@ -1,5 +1,6 @@
 """Pipeline-related functionality."""
 
+import functools
 import itertools
 import os
 import re
@@ -1213,6 +1214,31 @@ def _write_managed_gitignore_block(
     return True
 
 
+@functools.cache
+def _ref_resolver(wdir: str | None) -> Callable[[str], str] | None:
+    """Return something that turns a Git revision into its commit hash.
+
+    Stages whose inputs are revisions rather than files put the resolved
+    hash in their command, so DVC can see when a branch has moved. None
+    when there's no repo to ask, in which case those stages fall back to
+    running every time.
+    """
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return None
+
+    def resolve(ref: str) -> str:
+        try:
+            return str(repo.git.rev_parse(ref)).strip()
+        except Exception:
+            # A revision that isn't there yet compiles as written; the
+            # command reports it properly when the stage runs
+            return ref
+
+    return resolve
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1492,6 +1518,24 @@ def to_dvc(
         )
         dvc_stage["desc"] = desc
         dvc_stages[stage_name] = dvc_stage
+        # A Calkit stage can compile into more than one DVC stage when the
+        # work has genuinely different inputs
+        for extra_name, extra_stage in stage.extra_dvc_stages(
+            resolve_ref=_ref_resolver(wdir)
+        ).items():
+            # Raised rather than worked around with a suffix: a generated
+            # name is addressable (calkit run <name>) and is the stage's
+            # identity in dvc.lock, so a name that shifted when the
+            # pipeline changed would cause spurious re-runs and orphaned
+            # lock entries. Renaming the conflicting stage is a one-word
+            # fix; an unpredictable name isn't.
+            if extra_name in pipeline.stages or extra_name in dvc_stages:
+                raise ValueError(
+                    f"Stage '{stage_name}' generates a stage named "
+                    f"'{extra_name}', which already exists; rename the "
+                    "conflicting stage"
+                )
+            dvc_stages[extra_name] = extra_stage
         # Check for any outputs that should be ignored/unignored.
         # Skipped when manage_gitignore=False (e.g., status checks) to avoid
         # spawning a git subprocess per output (~100 ms each).

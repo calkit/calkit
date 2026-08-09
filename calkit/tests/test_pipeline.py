@@ -2394,3 +2394,41 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert not os.path.exists(os.path.join("doc", ".gitignore"))
     with open(os.path.join("sub", "doc", ".gitignore")) as f:
         assert "*.aux" in f.read()
+
+
+def test_to_dvc_latex_diff_stages():
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "pubs/paper-1/main.tex",
+                    "diffs": [["v1", "v2"], "main"],
+                }
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    # Building the document and comparing revisions of it are separate
+    # stages, so adding a comparison doesn't rebuild the paper
+    assert set(stages) == {
+        "paper",
+        "paper-diff-v1-v2",
+        "paper-diff-main",
+    }
+    assert stages["paper"]["outs"] == ["pubs/paper-1/main.pdf"]
+    assert stages["paper-diff-v1-v2"]["outs"] == [
+        ".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf"
+    ]
+    # A generated name that collides with one the user wrote is an error,
+    # not something to work around: the name is addressable and is the
+    # stage's identity in dvc.lock, so it can't be allowed to shift
+    ck_info["pipeline"]["stages"]["paper-diff-v1-v2"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "echo hi",
+    }
+    with pytest.raises(ValueError, match="already exists"):
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)

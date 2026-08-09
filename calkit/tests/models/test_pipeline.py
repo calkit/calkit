@@ -546,3 +546,74 @@ def test_to_ck_dict() -> None:
     assert d2["always_run"] is True
     assert d2["outputs"] == [dict(path="out.csv", storage="git")]
     assert PythonScriptStage.model_validate(d2) == s2
+
+
+def test_latex_stage_diffs():
+    stage = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        inputs=["figures/fig1.png"],
+        diffs=[["v1", "v2"], "main"],
+    )
+    # A bare revision compares it against HEAD. Every comparison in a
+    # pipeline is between two commits; one against the working tree can't
+    # be reproduced, so it isn't the project's to keep.
+    assert stage.diff_pairs == [("v1", "v2"), ("main", "HEAD")]
+    # Building the document and comparing revisions of it have different
+    # inputs, so they are separate DVC stages: adding a comparison
+    # shouldn't rebuild the paper, and chaining them with && assumes a
+    # shell not everyone has
+    assert stage.dvc_cmd == (
+        "calkit latex build -e tex --no-check pubs/paper-1/main.tex"
+    )
+    assert stage.dvc_outs == ["pubs/paper-1/main.pdf"]
+    fake = {
+        "v1": "aaa1111",
+        "v2": "bbb2222",
+        "main": "ccc3333",
+        "HEAD": "ddd4",
+    }
+    extra = stage.extra_dvc_stages(resolve_ref=fake.get)
+    assert list(extra) == ["paper-1-diff-v1-v2", "paper-1-diff-main"]
+    # Revisions are resolved into the command, so DVC sees a moving end
+    # move, while the output location keeps the pair as written
+    assert extra["paper-1-diff-v1-v2"]["cmd"] == (
+        "calkit latex diff -e tex --no-check --from aaa1111 --to bbb2222 "
+        "--output-dir .calkit/latex-diffs/v1..v2 pubs/paper-1/main.tex"
+    )
+    # HEAD is what a comparison runs up to unless it says otherwise, so
+    # naming it would only add noise
+    assert extra["paper-1-diff-main"]["outs"] == [
+        ".calkit/latex-diffs/main/pubs/paper-1/main.pdf"
+    ]
+    # Both sides come out of Git, so nothing in the working tree is an
+    # input, and nothing has to run unconditionally
+    assert all(st["deps"] == [] for st in extra.values())
+    assert not any("always_changed" in st for st in extra.values())
+    # Without a resolver there's nothing for DVC to hash, and no way to
+    # tell a tag from a branch, so every comparison has to run each time
+    unresolved = stage.extra_dvc_stages()
+    assert all(st["always_changed"] is True for st in unresolved.values())
+    # Storage is chosen for diffs the same way it is for the document
+    git_stored = LatexStage(
+        name="paper-1",
+        kind="latex",
+        environment="tex",
+        target_path="pubs/paper-1/main.tex",
+        diffs=[["v1", "v2"]],
+        diff_pdf_storage="git",
+    )
+    assert git_stored.extra_dvc_stages()["paper-1-diff-v1-v2"]["outs"] == [
+        {".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf": {"cache": False}}
+    ]
+    for bad in [[["v1"]], [["v1", "v2", "v3"]], [["v1", ""]], [["v1", "v1"]]]:
+        with pytest.raises(ValidationError):
+            LatexStage(
+                name="paper-1",
+                kind="latex",
+                environment="tex",
+                target_path="pubs/paper-1/main.tex",
+                diffs=bad,
+            )

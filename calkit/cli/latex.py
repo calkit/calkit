@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import re
 import shutil
 import string
 import subprocess
 from copy import deepcopy
 from pathlib import Path
 
-import git
 import typer
 from typing_extensions import Annotated
 
 import calkit
+import calkit.latex
 from calkit.cli import raise_error
 
 latex_app = typer.Typer(no_args_is_help=True)
@@ -274,72 +274,11 @@ def build(
         raise_error("latexmk failed")
 
 
-# Where the base revision is checked out and the marked-up document is
-# built. Inside the project so a containerized TeX environment, which only
-# sees the working directory, can read it; under .calkit/tmp so it's
-# ignored rather than tracked alongside the diffs themselves.
-DIFF_WORKTREE_DIR = os.path.join(".calkit", "tmp", "latex-diff", "base")
-DIFF_AUX_DIR = os.path.join(".calkit", "tmp", "latex-diff", "aux")
-
-
-# What a diff with no named base is called. Its base moves, so unlike a
-# diff against a tag there's nothing stable to name it after.
-MERGE_BASE_DIFF_NAME = "merge-base"
-
-
-def get_diff_path(
-    tex_file: str, base_ref: str | None = None, as_posix: bool = True
-) -> str:
-    """Return where a document's diff against ``base_ref`` is kept.
-
-    Beside the other things Calkit derives from a project's files rather
-    than next to the document, following executed notebooks: it's an
-    output, and a PDF, so saving the project tracks it with DVC and its
-    history comes along with the project's.
-
-    Named after what it's a diff against, so a document can keep several
-    -- the round it was first submitted in, the first revision, and so on
-    -- and each says what it means.
-    """
-    name = MERGE_BASE_DIFF_NAME if base_ref is None else base_ref
-    # Ref names can carry slashes (release/1, origin/main) and a name is
-    # one path component here
-    name = re.sub(r"[^A-Za-z0-9._-]+", "-", name.replace("/", "-")).strip("-")
-    p = os.path.join(
-        ".calkit",
-        "latex-diff",
-        os.path.dirname(tex_file),
-        Path(tex_file).stem,
-        f"{name or MERGE_BASE_DIFF_NAME}.pdf",
-    )
-    return Path(p).as_posix() if as_posix else p
-
-
-def _default_base_ref(repo: git.Repo) -> str:
-    """The ref a change is naturally read against: the merge base with the
-    default branch.
-
-    Not the default branch itself, since work that landed there after this
-    branch started isn't part of this change and would otherwise show up
-    as deletions.
-    """
-    from calkit.cli import warn
-
-    candidates = []
-    try:
-        candidates.append(repo.remotes.origin.refs.HEAD.reference.name)
-    except Exception:
-        pass
-    candidates += ["origin/main", "origin/master", "main", "master"]
-    for candidate in candidates:
-        try:
-            base = str(repo.git.merge_base("HEAD", candidate)).strip()
-        except Exception:
-            continue
-        if base:
-            return base
-    warn("Could not find a default branch; comparing against HEAD~1")
-    return "HEAD~1"
+DIFF_TMP_DIR = calkit.latex.DIFF_TMP_DIR
+DIFF_AUX_DIR = calkit.latex.DIFF_AUX_DIR
+get_diff_path = calkit.latex.get_diff_path
+_is_immutable_ref = calkit.latex._is_immutable_ref
+_default_base_ref = calkit.latex.default_base_ref
 
 
 @latex_app.command(name="diff")
@@ -350,8 +289,18 @@ def diff(
         typer.Option(
             "--from",
             help=(
-                "Git ref to compare against. Defaults to the merge base "
-                "with the default branch."
+                "Older revision, whose removed text is struck through. "
+                "Defaults to the merge base with the default branch."
+            ),
+        ),
+    ] = None,
+    to_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--to",
+            help=(
+                "Newer revision, whose additions are marked. Defaults to "
+                "the working tree."
             ),
         ),
     ] = None,
@@ -370,11 +319,34 @@ def diff(
             "-o",
             help=(
                 "Where to write the diff PDF. Defaults to a path under "
-                ".calkit/latex-diff, keeping it with the project's other "
+                ".calkit/latex-diffs, keeping it with the project's other "
                 "derived files."
             ),
         ),
     ] = None,
+    output_dir: Annotated[
+        str | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Directory to write the diff into, keeping the document's "
+                "own path inside it. Lets a pipeline name the location "
+                "after the revisions as written while passing resolved "
+                "commits to --from and --to."
+            ),
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Rebuild even if this comparison can't have changed and "
+                "has already been built."
+            ),
+        ),
+    ] = False,
     keep_tex: Annotated[
         bool,
         typer.Option(
@@ -393,62 +365,155 @@ def diff(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ) -> None:
-    """Build a PDF showing what a change did to a LaTeX document.
+    """Build a PDF showing what changed in a LaTeX document.
 
-    Marks up the current document against an earlier revision with
-    latexdiff, so additions and deletions are visible where they happen
-    rather than as a list of files that changed. A `.dvc` pointer in a
-    pull request says a paper was rebuilt; this says what it now reads.
+    Two revisions that turn out to be the same is a result rather than an
+    error: the marked-up document comes out unmarked, which is what "this
+    branch hasn't changed the paper" looks like. A pipeline shouldn't fail
+    depending on which branch it runs from.
 
-    The diff is built in the working tree, so it uses the current figures
-    and bibliography -- what changed in the text is what's marked.
+    Marks up one revision of a document against another with latexdiff, so
+    additions and deletions are visible where they happen rather than as a
+    list of files that changed. A `.dvc` pointer in a pull request says a
+    paper was rebuilt; this says what it now reads.
+
+    With the default `--to`, the newer side is the working tree, so the
+    marked-up document is built with the current figures and bibliography
+    and what's marked is what changed in the text.
     """
     repo = calkit.git.get_repo()
     if repo.bare:
         raise_error("This is not a working Git repo")
-    if not os.path.isfile(tex_file):
+    # Named for what was asked for, not what it resolved to: a merge base
+    # is a different commit on every branch, and a directory per commit
+    # would pile up for something nobody keeps
+    from_label = from_ref if from_ref is not None else "default-branch"
+    if from_ref is None:
+        from_ref = _default_base_ref(repo)
+    if to_ref is None and not os.path.isfile(tex_file):
         raise_error(f"{tex_file} does not exist")
-    base_ref = from_ref or _default_base_ref(repo)
-    try:
-        base_sha = repo.git.rev_parse(base_ref).strip()
-    except Exception:
-        raise_error(f"Git ref '{base_ref}' was not found")
-    tex_dir = os.path.dirname(tex_file) or "."
-    stem = Path(tex_file).stem
     if output is None:
-        output = get_diff_path(tex_file, base_ref=from_ref)
-    # A worktree, not a temp directory: a document is rarely one file, and
-    # \input needs the rest of them as they were at that revision
-    worktree = DIFF_WORKTREE_DIR
-    if os.path.exists(worktree):
+        output = get_diff_path(
+            tex_file,
+            from_ref=from_label,
+            to_ref=to_ref,
+            output_dir=output_dir,
+        )
+    # A comparison between two revisions that can't move is the same
+    # comparison forever, and LaTeX writes a timestamp into every PDF, so
+    # rebuilding one would change the file without changing what it says
+    fixed = _is_immutable_ref(repo, from_ref) and _is_immutable_ref(
+        repo, to_ref
+    )
+    if fixed and os.path.isfile(output) and not force:
+        typer.echo(f"{output} is already built; use --force to rebuild it")
+        return
+    checkouts: dict[str, str] = {}
+    try:
+        for name, ref in [("base", from_ref), ("head", to_ref)]:
+            if ref is None:
+                continue
+            try:
+                sha = repo.git.rev_parse(ref).strip()
+            except Exception:
+                raise_error(f"Git ref '{ref}' was not found")
+            # A worktree, not a temp directory: a document is rarely one
+            # file, and \input needs the rest of them as they were then
+            path = os.path.join(DIFF_TMP_DIR, name)
+            _remove_worktree(path)
+            # Writes the .gitignore that keeps everything below it out of
+            # version control
+            calkit.ensure_local_dir()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            typer.echo(f"Checking out {ref} to compare")
+            try:
+                repo.git.worktree("add", "--detach", path, sha)
+            except Exception as e:
+                raise_error(f"Failed to check out {ref}: {e}")
+            checkouts[name] = path
+        sides = {}
+        for name, ref in [("base", from_ref), ("head", to_ref)]:
+            side = (
+                tex_file
+                if ref is None
+                else os.path.join(checkouts[name], tex_file)
+            )
+            if not os.path.isfile(side):
+                raise_error(f"{tex_file} does not exist at {ref}")
+            sides[name] = side
+        _build_diff(
+            base_tex=sides["base"],
+            head_tex=sides["head"],
+            tex_file=tex_file,
+            output=output,
+            environment=environment,
+            no_check=no_check,
+            keep_tex=keep_tex,
+            force=force,
+            verbose=verbose,
+        )
+    finally:
+        for path in checkouts.values():
+            _remove_worktree(path)
+
+
+def _marked_up_digest(marked_up: bytes) -> str:
+    """Hash a marked-up document by what actually determines the PDF.
+
+    latexdiff writes the two inputs' paths and modification times into a
+    header comment, and the older side is a fresh checkout every time, so
+    hashing the file as-is would say "changed" on every run when nothing
+    had. Those lines are comments; the PDF doesn't depend on them.
+    """
+    kept = [
+        line
+        for line in marked_up.splitlines(keepends=True)
+        if not line.startswith((b"%DIF DEL ", b"%DIF ADD "))
+    ]
+    return hashlib.sha256(b"".join(kept)).hexdigest()
+
+
+def _read(path: str) -> str | None:
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def _remove_worktree(path: str) -> None:
+    if os.path.exists(path):
         subprocess.call(
-            ["git", "worktree", "remove", "--force", worktree],
+            ["git", "worktree", "remove", "--force", path],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        shutil.rmtree(worktree, ignore_errors=True)
-    os.makedirs(os.path.dirname(worktree), exist_ok=True)
-    typer.echo(f"Checking out {base_ref} to compare against")
-    try:
-        repo.git.worktree("add", "--detach", worktree, base_sha)
-    except Exception as e:
-        raise_error(f"Failed to check out {base_ref}: {e}")
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _build_diff(
+    base_tex: str,
+    head_tex: str,
+    tex_file: str,
+    output: str,
+    environment: str | None,
+    no_check: bool,
+    keep_tex: bool,
+    force: bool,
+    verbose: bool,
+) -> None:
+    """Mark up one document against another and build the result."""
+    # Built beside the newer document so \graphicspath, \bibliography,
+    # and relative \includegraphics resolve the way they do for the real
+    # thing
+    tex_dir = os.path.dirname(head_tex) or "."
+    stem = Path(tex_file).stem
     diff_tex = os.path.join(tex_dir, f"{stem}-diff.tex")
     try:
-        base_tex = os.path.join(worktree, tex_file)
-        if not os.path.isfile(base_tex):
-            raise_error(f"{tex_file} does not exist at {base_ref}")
         # --flatten pulls \input and \include files into one document on
         # each side, so a multi-file paper compares as a whole
-        latexdiff_cmd = [
-            "latexdiff",
-            "--flatten",
-            "--encoding=utf8",
-            base_tex,
-            tex_file,
-        ]
         cmd = _tex_cmd(
-            latexdiff_cmd,
+            ["latexdiff", "--flatten", "--encoding=utf8", base_tex, head_tex],
             environment=environment,
             no_check=no_check,
             verbose=verbose,
@@ -464,11 +529,22 @@ def diff(
             )
         except subprocess.CalledProcessError:
             raise_error("latexdiff failed")
+        # The PDF is a function of this marked-up source, so if it hasn't
+        # changed there's nothing to build. Worth checking because the
+        # common case produces nothing at all: on the default branch the
+        # merge base is usually HEAD, so the comparison is empty, and
+        # latexmk is the expensive half of this.
+        digest = _marked_up_digest(marked_up)
+        state_path = calkit.latex.diff_state_path(output)
+        if (
+            not force
+            and os.path.isfile(output)
+            and _read(state_path) == digest
+        ):
+            typer.echo(f"{output} is up to date")
+            return
         with open(diff_tex, "wb") as f:
             f.write(marked_up)
-        # Built beside the original so \graphicspath, \bibliography, and
-        # relative \includegraphics resolve the same way they do for the
-        # real document
         aux_dir = DIFF_AUX_DIR
         os.makedirs(aux_dir, exist_ok=True)
         rel_aux = Path(os.path.relpath(aux_dir, tex_dir)).as_posix()
@@ -503,13 +579,10 @@ def diff(
             raise_error("latexmk did not produce a PDF")
         os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
         shutil.move(built, output)
+        os.makedirs(os.path.dirname(state_path), exist_ok=True)
+        with open(state_path, "w") as f:
+            f.write(digest)
         typer.echo(f"Wrote {output}")
     finally:
         if not keep_tex and os.path.isfile(diff_tex):
             os.remove(diff_tex)
-        subprocess.call(
-            ["git", "worktree", "remove", "--force", worktree],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        shutil.rmtree(worktree, ignore_errors=True)

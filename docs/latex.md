@@ -10,68 +10,14 @@ calkit latex build paper/main.tex --env tex
 Without `--env`, `latexmk` runs directly if it's installed, and in a TeX Live
 container if it isn't.
 
-## Seeing what a change did
+## Comparing revisions
 
 A rebuilt PDF is a DVC-tracked artifact, so a pull request shows its pointer
 file changing and nothing about the document itself.
-`calkit latex diff` marks up the current document against an earlier revision
-with `latexdiff`, so additions and deletions appear where they happen:
+Calkit can mark up one revision of a document against another with
+`latexdiff`, so additions and deletions appear where they happen.
 
-```sh
-calkit latex diff paper/main.tex --env tex
-```
-
-By default this compares against the merge base with the default branch,
-which is what a reviewer of the branch would see.
-Work that landed on the default branch after the branch started isn't part
-of the change, so comparing against the branch tip instead would show it as
-deletions.
-Pass `--from` to compare against any other ref.
-
-The marked-up document is built in the working tree, so it uses the current
-figures and bibliography: what's marked is what changed in the text.
-Multi-file documents are handled, since `latexdiff` inlines `\input` and
-`\include` on both sides before comparing.
-The result is written to `.calkit/latex-diff/<document>/<ref>.pdf`, beside
-the project's other derived files rather than next to the document,
-following the same convention as executed notebooks.
-It's named after what it's a diff against, so a document can keep several of
-them:
-
-```sh
-calkit latex diff paper/main.tex --from submitted-v1
-# .calkit/latex-diff/paper/main/submitted-v1.pdf
-```
-
-Retaining the diff for each round of journal revisions is the case this is
-meant for.
-A PDF is tracked with DVC when the project is saved, so these are versioned
-and pushed with everything else rather than living somewhere with no tie
-back to the project.
-Pass `--output` to put one somewhere else.
-
-`latexdiff` ships with TeX Live, so an environment that can build the
-document can usually diff it too.
-
-<!-- prettier-ignore -->
-!!! note
-
-    Nothing produces these automatically.
-    A diff against a *moving* ref, like the default branch, doesn't belong in
-    the pipeline: its result changes whenever that branch moves, and since DVC
-    hashes files rather than Git history, `calkit run` has no way to know it
-    went stale.
-    A diff against a tag is a different matter -- its base can't move, so it
-    is a function of the files -- which is what makes retained revision-round
-    diffs worth keeping.
-
-Once saved and pushed, the diff is an artifact like any other, so the
-[browser extension](browser-extension.md) can show it alongside the
-document it describes.
-
-## Creating diffs in the pipeline
-
-In a `latex` stage, you can list off the diffs you'd like generated like:
+List the comparisons a document should keep in its `latex` stage:
 
 ```yaml
 pipeline:
@@ -81,7 +27,77 @@ pipeline:
       environment: tex
       target_path: pubs/paper-1/main.tex
       diffs:
-        - [v1, v2] # Ensure a frozen diff of v1 vs v2 is cached in the project
-        - [main, _merge_branch]
-      diff_pdf_storage: dvc # Default is DVC
+        - main # what this branch changes, for reviewers of the PR
+        - [submitted-v1, revision-1] # what the referees were sent
 ```
+
+`calkit run` builds each one alongside the document.
+They're stage outputs, so they're tracked, pushed, and pulled with the rest
+of the project, and the
+[browser extension](browser-extension.md) can show them on the pull request
+they belong to.
+
+`latexdiff` ships with TeX Live, so an environment that can build the
+document can usually diff it too.
+
+### For pull request reviewers
+
+A bare revision compares it against `HEAD`, so `- main` means "what this
+branch has committed, against the branch it will merge into".
+That's the diff a PR reviewer wants, and it's rebuilt whenever either end
+moves.
+
+On the default branch, `main` and `HEAD` are the same commit, so the
+comparison comes out empty and the marked-up document is simply the
+document.
+That's a result rather than an error: a stage shouldn't fail depending on
+which branch it runs from.
+
+### For journal referees
+
+A revision round is a comparison between two tags, so name both:
+
+```yaml
+diffs:
+  - [submitted-v1, revision-1]
+```
+
+Neither end can move, so it's built once and then left alone.
+That matters for a file you've already sent someone: LaTeX writes a
+timestamp into every PDF, so rebuilding from identical sources would produce
+a different file.
+
+Before sending back for the next round of reviews,
+create a [release](releases.md) for the document with a name like `v2`,
+with its diff as part of the release.
+A release stores a frozen copy named `{project}-{document}-{release}.pdf`,
+which is what you want on a file about to be emailed to an editor.
+For a DVC-tracked file that copy is a pointer to content already stored, so
+keeping it costs nothing.
+
+### Where they go
+
+Each comparison gets a directory named after what it compares, with the
+document's own path inside it:
+
+| Diff                 | File                                                         |
+| -------------------- | ------------------------------------------------------------ |
+| `main`               | `.calkit/latex-diffs/main/pubs/paper-1/main.pdf`             |
+| `[submitted-v1, v2]` | `.calkit/latex-diffs/submitted-v1..v2/pubs/paper-1/main.pdf` |
+
+`diff_pdf_storage` on the stage chooses between DVC and Git for them, like
+`pdf_storage` does for the document itself.
+
+### Comparing against uncommitted work
+
+`calkit latex diff` runs a comparison on demand, and with no `--to` the
+newer side is the working tree:
+
+```sh
+calkit latex diff pubs/paper-1/main.tex --from main --env tex
+# .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
+```
+
+That one can't be reproduced from two revisions, so it isn't tracked: it
+goes under `.calkit/local`, which is private to the machine.
+With no `--from` it compares against the merge base with the default branch.

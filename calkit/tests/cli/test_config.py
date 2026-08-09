@@ -43,11 +43,19 @@ def test_get_set():
         .strip()
     )
     assert not out
-    # Check with secrets
-    subprocess.check_call(["calkit", "config", "unset", "token"])
+    # Hub credentials are not accessible through the shared-key commands
+    result = subprocess.run(
+        ["calkit", "config", "get", "token"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "calkit hub config" in result.stderr
+    # Check with secrets, which live under the hub subcommand
+    subprocess.check_call(["calkit", "hub", "config", "unset", "token"])
     out = (
         subprocess.check_output(
-            ["calkit", "config", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
@@ -55,22 +63,22 @@ def test_get_set():
     assert not out
     test_token = str(uuid.uuid4())
     subprocess.check_call(
-        ["calkit", "config", "set", "token", test_token],
+        ["calkit", "hub", "config", "set", "token", test_token],
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
     )
     assert out == test_token
     subprocess.check_call(
-        ["calkit", "config", "unset", "token"],
+        ["calkit", "hub", "config", "unset", "token"],
     )
     out = (
         subprocess.check_output(
-            ["calkit", "config", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
@@ -82,14 +90,14 @@ def test_get_set():
         calkit.ryaml.dump({"token": "this-was-in-the-config-file"}, f)
     out = (
         subprocess.check_output(
-            ["calkit", "config", "get", "token"],
+            ["calkit", "hub", "config", "get", "token"],
         )
         .decode()
         .strip()
     )
     assert out == "this-was-in-the-config-file"
     subprocess.check_call(
-        ["calkit", "config", "set", "token", "this-is-a-new-token"],
+        ["calkit", "hub", "config", "set", "token", "this-is-a-new-token"],
     )
     with open(fpath, "r") as f:
         cfg = calkit.ryaml.load(f)
@@ -97,3 +105,64 @@ def test_get_set():
         assert "token" not in cfg
     else:
         assert cfg["token"] == "this-is-a-new-token"
+    # Hub scoping shares the same config file, so check it here rather
+    # than in a separate test that could run in a parallel worker
+    _check_hub_scoping()
+
+
+def _check_hub_scoping():
+    hub = "https://hub.example.edu"
+    # A credential set for one hub is invisible to others; all hubs share
+    # one config file
+    hub_token = f"hub-scoped-{uuid.uuid4()}"
+    subprocess.check_call(
+        ["calkit", "hub", "config", "set", "token", hub_token, "--hub", hub]
+    )
+    out = (
+        subprocess.check_output(
+            ["calkit", "hub", "config", "get", "token", "--hub", hub]
+        )
+        .decode()
+        .strip()
+    )
+    assert out == hub_token
+    out = (
+        subprocess.check_output(["calkit", "hub", "config", "get", "token"])
+        .decode()
+        .strip()
+    )
+    assert out != hub_token
+    # Shared settings are visible regardless of hub
+    email = f"{uuid.uuid4()}@example.com"
+    subprocess.check_call(["calkit", "config", "set", "email", email])
+    out = (
+        subprocess.check_output(
+            ["calkit", "config", "get", "email"],
+            env=os.environ | {"CALKIT_HUB": hub},
+        )
+        .decode()
+        .strip()
+    )
+    assert out == email
+    subprocess.check_call(
+        ["calkit", "hub", "config", "unset", "token", "--hub", hub]
+    )
+    out = (
+        subprocess.check_output(
+            ["calkit", "hub", "config", "get", "token", "--hub", hub]
+        )
+        .decode()
+        .strip()
+    )
+    assert not out
+    # Both spellings reach the same commands
+    out = subprocess.check_output(["calkit", "config", "hub", "list"]).decode()
+    assert "token" in out
+    # Environment names are rejected as hub values
+    result = subprocess.run(
+        ["calkit", "hub", "config", "get", "token", "--hub", "staging"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "hub URL" in result.stderr

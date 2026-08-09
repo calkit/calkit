@@ -217,6 +217,15 @@ class Stage(BaseModel):
         data["scheduler"] = data.pop("slurm")
         return data
 
+    def to_ck_dict(self) -> dict:
+        """Dump the stage for calkit.yaml, omitting fields left at their
+        defaults so we don't write a bunch of nulls and empty lists.
+
+        ``kind`` is kept even though subclasses define it with a default,
+        since it's the discriminator needed to load the stage back.
+        """
+        return {"kind": self.kind} | self.model_dump(exclude_defaults=True)
+
     @property
     def outer_environment(self) -> str:
         """The outer environment of the stage, in case it is nested."""

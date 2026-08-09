@@ -8,6 +8,14 @@ install: ## Create the project's virtual environment.
 	@echo "🚀 Creating virtual environment"
 	@uv sync
 
+.PHONY: dev
+dev: ## Start up the hub containers for development.
+	@$(MAKE) -C hub dev
+
+.PHONY: frontend-client
+frontend-client: ## Regenerate the hub frontend's API client.
+	@$(MAKE) -C hub/frontend client
+
 .PHONY: format
 format: sync-docs ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"
@@ -18,7 +26,7 @@ check: format ## Run code quality tools.
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
 	@uv lock --locked
 	@echo "🚀 Static type checking with mypy"
-	@uv run mypy .
+	@uv run --all-packages mypy
 	@echo "🚀 Checking for obsolete dependencies with deptry"
 	@uv run deptry .
 

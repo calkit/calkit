@@ -47,11 +47,11 @@ from calkit.cli.check import (
     check_matlab_env,
     check_venv,
 )
-from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
@@ -84,7 +84,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
-app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
+app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
     scheduler_app,
     name="scheduler|sch",
@@ -269,11 +269,9 @@ def clone(
                 "{owner_name}/{project_name}"
             )
         owner_name, project_name = url_split
-        typer.echo("Fetching Git repo URL from the Calkit Cloud")
+        typer.echo("Fetching Git repo URL from the hub")
         try:
-            project = calkit.cloud.get(
-                f"/projects/{owner_name}/{project_name}"
-            )
+            project = calkit.hub.get(f"/projects/{owner_name}/{project_name}")
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
@@ -1157,6 +1155,31 @@ def save(
         overleaf_sync(verbose=verbose, no_push=no_push)
 
 
+def _warn_on_hub_mismatch() -> None:
+    """Warn if the project declares a hub other than the one commands are
+    currently targeting.
+
+    The declared hub is respected by default, so this only fires when an
+    explicit override (``CALKIT_HUB``, ``CALKIT_ENV``, or ``--hub``)
+    points somewhere else, e.g., when pushing a copy of a project to
+    staging during development.
+    """
+    from calkit import config
+
+    try:
+        declared = calkit.load_calkit_info().get("hub")
+    except Exception:
+        return
+    if not declared or not isinstance(declared, str):
+        return
+    active = calkit.hub.get_hub_url()
+    if config.normalize_hub_url(declared) != active.rstrip("/"):
+        warn(
+            f"This project declares hub {declared}, but commands are "
+            f"currently targeting {active}"
+        )
+
+
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
@@ -1190,6 +1213,7 @@ def pull(
     ] = False,
 ):
     """Pull with both Git and DVC."""
+    _warn_on_hub_mismatch()
     if force:
         if "-f" not in git_args and "--force" not in git_args:
             git_args.append("-f")
@@ -1266,6 +1290,7 @@ def push(
     ] = False,
 ):
     """Push with both Git and DVC."""
+    _warn_on_hub_mismatch()
     if not no_dvc:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:

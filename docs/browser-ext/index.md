@@ -70,14 +70,8 @@ If it is, Calkit will intersperse your DVC-tracked artifacts
 in the GitHub file view with a badge showing that's how it's stored.
 From the Calkit extension you can also visit the project on its Calkit hub.
 
-The button knows which state it's in before you click it.
-It first reads the repo's `calkit.yaml`, if GitHub is serving one, since that
-file names the hub the project belongs to.
-That way a project on a hub other than the one you're signed in to is
-recognized as a Calkit project rather than looking like it isn't one, and the
-panel points you at the hub it actually lives on.
-A private repo won't serve its `calkit.yaml` anonymously, so those fall back to
-asking your hub whether it knows the repo.
+A project that lives on a different hub from the one you're signed in to is
+still recognized, and the panel points you at the hub it belongs to.
 
 When viewing a pull request, the outputs it changes appear as a card at the
 bottom of the conversation, where the diff can't show them: GitHub only has
@@ -85,26 +79,18 @@ the `.dvc` pointer file, which says an output changed but nothing about how.
 Each one opens on top of the pull request, showing whatever is most useful:
 the project's LaTeX diff if it built one, otherwise both versions side by
 side.
-The overlay's other views are one click away.
-The same list is in the panel, in case GitHub's markup moves out from under
-the card.
+The overlay's other views are one click away, and the same list is in the
+extension's panel.
 
-When the project builds a **LaTeX diff** of a document against the base
-branch (see [LaTeX documents](../latex.md)), that's what the panel opens: the
-typeset paper with insertions and deletions shown where they happen.
-Nothing extra is fetched, since it's an output of the pull request's own
-pipeline run.
+If the project builds a **LaTeX diff** of the document against the base
+branch (see [LaTeX documents](../latex.md)), that's what opens: the typeset
+paper with insertions and deletions marked where they happen.
 
-A PDF with no LaTeX diff falls back to a **text diff**, which reads the
-words out of both versions on the hub and compares them.
-Side by side answers "did the figures move"; the text diff answers "did the
-wording change", which is otherwise invisible when the source isn't in the
-repo or the numbers come from data.
-Extraction is lossy by nature -- a PDF stores glyphs at positions, not
-sentences -- so ligatures, hyphenation, and layout spacing are normalized
-away first, and text that reflowed around a real edit can still show up as
-changed.
-A scanned PDF has no text to read, and figures aren't compared this way.
+A PDF without one falls back to a **text diff**, which compares the words in
+the two versions. Side by side answers "did the figures move"; the text diff
+answers "did the wording change". It reads text out of the PDFs themselves,
+so text that reflowed around an edit can show up as changed, and a scanned
+PDF has nothing to read.
 
 ## Reference management
 
@@ -125,23 +111,6 @@ the same way.
 If it isn't there you can add it, then read and edit the notes on it.
 To save it under a different project, select that project from the dropdown
 and add it there.
-
-## Releasing
-
-Publishing a release tagged `browser-ext/vX.Y.Z` builds and tests the
-extension, stamps that version into `manifest.json` and `package.json`,
-strips source maps, and attaches a store-ready zip to the release.
-The version comes from the tag because the Chrome Web Store rejects an
-upload whose manifest version isn't higher than the last one, and a version
-kept in sync by hand eventually isn't.
-
-The same workflow uploads to the Chrome Web Store when the
-`CHROME_EXTENSION_ID` repository variable is set, using the
-`CHROME_CLIENT_ID`, `CHROME_CLIENT_SECRET`, and `CHROME_REFRESH_TOKEN`
-secrets (an OAuth client for the Web Store API, authorized for the
-publishing account).
-Until that variable exists the upload step is skipped and the release's zip
-is uploaded by hand, so the workflow is useful before the listing is.
 
 What the extension stores and what it sends, and to whom, is in its
 [privacy policy](privacy.md).

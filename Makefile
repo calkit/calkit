@@ -81,6 +81,21 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list
 
 .PHONY: browser-ext
-browser-ext: ## Build the browser extension.
+browser-ext: ## Build the browser extension and package it as a ZIP.
 	@echo "🚀 Building the browser extension"
 	@cd browser-ext && npm ci && npm run build
+	@echo "📦 Packaging the browser extension ZIP"
+	@mkdir -p browser-ext/zip
+# Source maps are useful loading unpacked, but only bloat a store upload, so
+# they stay in dist and are excluded from the archive.
+# zip adds to an existing archive rather than replacing it, so a rebuild at
+# the same commit would otherwise keep files the build no longer produces.
+# $$ escapes the shell's expansion from Make's own.
+	@rm -f "browser-ext/zip/calkit-browser-ext-$$(git rev-parse --short HEAD).zip"
+	@cd browser-ext/dist && zip -qr \
+		"../zip/calkit-browser-ext-$$(git rev-parse --short HEAD).zip" . \
+		-x '.*' '*/.*' '*.map'
+
+.PHONY: browser-ext-clean-zips
+browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
+	@rm -rf browser-ext/zip

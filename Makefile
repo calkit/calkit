@@ -96,6 +96,14 @@ browser-ext: ## Build the browser extension and package it as a ZIP.
 		"../zip/calkit-browser-ext.zip" . \
 		-x '.*' '*/.*' '*.map'
 
+.PHONY: browser-ext-dev
+browser-ext-dev: ## Rebuild the browser extension on every change.
+	@echo "🚀 Watching the browser extension"
+# Rebuilds on save. Chrome still needs the extension reloaded, since it
+# reads a content script from disk when a page loads. Vite doesn't type
+# check, so run 'cd browser-ext && npm run check' alongside this.
+	@cd browser-ext && npm ci && npm run dev
+
 .PHONY: browser-ext-clean-zips
 browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
 	@rm -rf browser-ext/zip

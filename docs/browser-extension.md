@@ -1,66 +1,17 @@
 # Browser extension
 
-The Calkit browser extension brings your projects into the sites where a lot
-of research work actually happens: GitHub, Overleaf, and journal and
-preprint pages.
-It's a Chrome extension (Manifest V3), and its source lives in the
-[`browser-ext`](https://github.com/calkit/calkit/tree/main/browser-ext)
-directory of the Calkit repo.
-
-## Installing
-
-The extension isn't in the Chrome Web Store yet.
-To run it from source:
-
-```sh
-make browser-ext
-```
-
-Then open `chrome://extensions`, turn on developer mode,
-click "Load unpacked," and select the `browser-ext/dist` directory.
+The Calkit browser extension, compatible with Chrome, Edge, and more,
+allows you to interact with your project from other tools:
+Overleaf for syncing figures, results, and text,
+GitHub for viewing artifacts stored with DVC and viewing LaTeX diffs
+on PRs,
+and journal and preprint webpages for saving reference information directly
+to BibTeX inside your project repo.
 
 ## Signing in
 
-Click the Calkit toolbar icon and select "Sign in."
-This uses the same device authorization flow as `calkit hub login`:
-a tab opens on the hub, you approve the request, and the extension stores a
-short-lived access token and a refresh token.
-
-Every API call happens in the extension's service worker, so the token is
-never handed to a script running in a web page.
-
-If you use a staging, local, or self-hosted hub, select it in the extension's
-options page first, since credentials are stored per hub.
-
-## Settings
-
-The options page holds two settings.
-
-**Hub** selects which instance every surface talks to: calkit.io, staging, a
-local development instance, or a self-hosted one.
-Changing it applies immediately, and the page then shows whether you're
-signed in to the newly selected hub, since credentials are stored per hub and
-switching usually means signing in again.
-
-A self-hosted hub is configured with its URL alone, because
-[a hub serves its API from the `api` subdomain](hub/self-hosting.md) of its own
-host.
-Chrome prompts for access to that host when the hub is applied.
-
-**Active project** is the project you're working on, remembered per hub.
-Reference lookups check its collections, and importing a reference defaults
-to it.
-It can also be switched from the popup, next to any project in the list.
-
-One project at a time is deliberate.
-A thesis-scale monorepo stays easier to keep reproducible when everything
-lands in the same place, and a single project is also what keeps reference
-lookups fast, since each one has to be read on the server to search it.
-
-Project pickers list only the projects you can write to, since everything
-they offer writes something.
-The GitHub panel is the exception, resolving a repo at read access so you
-can browse the artifacts behind a public project you don't own.
+From a connected website,
+click the Calkit toolbar icon in the bottom right and select "Sign in."
 
 ## Overleaf
 
@@ -68,7 +19,7 @@ can browse the artifacts behind a public project you don't own.
 !!! note
 
     Syncing from the extension requires an Overleaf token stored in your
-    Calkit account, the same as syncing from the hub. See
+    Calkit account, the same as syncing from calkit.io. See
     [Overleaf integration](overleaf.md) for how to set that up.
 
 Opening an Overleaf project shows a panel with the Calkit project that syncs
@@ -131,13 +82,21 @@ asking your hub whether it knows the repo.
 When viewing a pull request, the outputs it changes appear as a card at the
 bottom of the conversation, where the diff can't show them: GitHub only has
 the `.dvc` pointer file, which says an output changed but nothing about how.
-Each one can be viewed on top of the pull request, or compared side by side
-with the version on the base branch.
+Each one opens on top of the pull request, showing whatever is most useful:
+the project's LaTeX diff if it built one, otherwise both versions side by
+side.
+The overlay's other views are one click away.
 The same list is in the panel, in case GitHub's markup moves out from under
 the card.
 
-A PDF also offers a **text diff**, which reads the words out of both versions
-on the hub and compares them.
+When the project builds a **LaTeX diff** of a document against the base
+branch (see [LaTeX documents](latex.md)), that's what the panel opens: the
+typeset paper with insertions and deletions shown where they happen.
+Nothing extra is fetched, since it's an output of the pull request's own
+pipeline run.
+
+A PDF with no LaTeX diff falls back to a **text diff**, which reads the
+words out of both versions on the hub and compares them.
 Side by side answers "did the figures move"; the text diff answers "did the
 wording change", which is otherwise invisible when the source isn't in the
 repo or the numbers come from data.

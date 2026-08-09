@@ -53,6 +53,22 @@ document.
 That's a result rather than an error: a stage shouldn't fail depending on
 which branch it runs from.
 
+It does mean the tracked diff keeps showing a merged branch's changes until
+the pipeline runs on the default branch again, which rebuilds it as the
+plain document.
+Running the pipeline in CI on pushes to the default branch keeps it current;
+the [run action](https://github.com/calkit/run-action) does that in its
+example workflow, and saves the result.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Comparing revisions needs those revisions in the clone, and
+    `actions/checkout` fetches a single commit by default, which leaves
+    `calkit run` reporting `Git ref 'main' was not found`.
+    Set `fetch-depth: 0` on the checkout step for a project that builds
+    diffs.
+
 ### For journal referees
 
 A revision round is a comparison between two tags, so name both:

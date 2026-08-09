@@ -413,9 +413,8 @@ def diff(
         for name, ref in [("base", from_ref), ("head", to_ref)]:
             if ref is None:
                 continue
-            try:
-                sha = repo.git.rev_parse(ref).strip()
-            except Exception:
+            sha = calkit.git.resolve_ref(repo, ref)
+            if sha is None:
                 raise_error(f"Git ref '{ref}' was not found")
             # A worktree, not a temp directory: a document is rarely one
             # file, and \input needs the rest of them as they were then

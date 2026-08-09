@@ -6,6 +6,7 @@ import {
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
 import { send } from "../core/messages";
+import { isDiffableDocument, latexDiffPath } from "../core/latex";
 import { renderFailure } from "../core/pickers";
 import type {
   ContentsItemBase,
@@ -39,6 +40,10 @@ const PANEL_ID = "calkit-github-panel";
 const OVERLAY_ID = "calkit-github-overlay";
 const SIDE_BY_SIDE = "Side by side";
 const TEXT_DIFF = "Text diff";
+const LATEX_DIFF = "LaTeX diff";
+// Marked-up documents are outputs too; they belong beside the document
+// they describe rather than in the list of things that changed
+const LATEX_DIFF_DIR = ".calkit/latex-diffs/";
 const PR_CARD_ID = "calkit-pr-card";
 const LAUNCHER_ID = "calkit-github-launcher";
 const ARTIFACT_ROW_ATTR = "data-calkit-artifact";
@@ -497,7 +502,12 @@ async function renderProject(
  */
 interface PullRequestChanges {
   refs: PullRequestRefs;
-  changed: { item: DvcOutput; before: DvcOutput | undefined }[];
+  changed: {
+    item: DvcOutput;
+    before: DvcOutput | undefined;
+    /** What the project's own latexdiff stage built, when it has one. */
+    latexDiff: DvcOutput | undefined;
+  }[];
 }
 
 // The last pull request read, so opening the panel shows what the card in
@@ -547,7 +557,17 @@ async function fetchPullRequest(
     read(refs.head_sha),
     read(refs.base_sha),
   ]);
+  const latexDiffFor = (item: DvcOutput): DvcOutput | undefined => {
+    if (!isDiffableDocument(item.path)) {
+      return undefined;
+    }
+    // A `latex` stage with the base branch in its `diffs` builds this and
+    // pushes it like any other output, so it's already in the list
+    const diff = head.get(latexDiffPath(refs.base_ref, item.path));
+    return diff?.url ? diff : undefined;
+  };
   const changed = [...head.values()]
+    .filter((item) => !item.path.startsWith(LATEX_DIFF_DIR))
     .filter((item) => {
       const before = base.get(item.path);
       if (!before) {
@@ -560,7 +580,11 @@ async function fetchPullRequest(
         ? before.md5 !== item.md5
         : before.size !== item.size;
     })
-    .map((item) => ({ item, before: base.get(item.path) }));
+    .map((item) => ({
+      item,
+      before: base.get(item.path),
+      latexDiff: latexDiffFor(item),
+    }));
   return { refs, changed };
 }
 
@@ -618,7 +642,7 @@ async function renderPullRequest(
     );
   }
   const diffRefs = { base: refs.base_sha, head: refs.head_sha };
-  for (const { item, before } of changed) {
+  for (const { item, before, latexDiff } of changed) {
     const versions = [
       { label: refs.head_ref, item },
       ...(before ? [{ label: refs.base_ref, item: before }] : []),
@@ -629,24 +653,44 @@ async function renderPullRequest(
           el("div", { class: "name", text: item.path }),
           el("div", {
             class: "dim small",
-            text: before
-              ? `changed \u00b7 ${describeOutput(item)}`
-              : `new \u00b7 ${describeOutput(item)}`,
+            text:
+              (before
+                ? `changed \u00b7 ${describeOutput(item)}`
+                : `new \u00b7 ${describeOutput(item)}`) +
+              (latexDiff ? " \u00b7 LaTeX diff" : ""),
           }),
         ]),
         el("button", {
           class: "action secondary",
-          text: "View",
+          text: diffButtonLabel(before, latexDiff),
           disabled: !item.url,
           title: item.url
             ? undefined
             : "This version hasn't been pushed to storage yet",
           onClick: () =>
-            openOverlay(project, hubUrl, versions, { refs: diffRefs }),
+            openOverlay(project, hubUrl, versions, {
+              refs: diffRefs,
+              latexDiff,
+            }),
         }),
       ]),
     );
   }
+}
+
+/**
+ * What the one button on a row says, which is what the overlay will open
+ * on: the project's own LaTeX diff if it built one, the two versions side
+ * by side if there's something to compare against, else just the file.
+ */
+function diffButtonLabel(
+  before: DvcOutput | undefined,
+  latexDiff: DvcOutput | undefined,
+): string {
+  if (latexDiff) {
+    return "View changes";
+  }
+  return before ? "Compare" : "View";
 }
 
 /**
@@ -669,7 +713,7 @@ function injectPullRequestCard(
   project: ProjectPublic,
   hubUrl: string,
   refs: PullRequestRefs,
-  changed: { item: DvcOutput; before: DvcOutput | undefined }[],
+  changed: PullRequestChanges["changed"],
 ): boolean {
   document.getElementById(PR_CARD_ID)?.remove();
   if (!changed.length) {
@@ -696,7 +740,7 @@ function injectPullRequestCard(
   const style = document.createElement("style");
   style.textContent = STYLES;
   const body = el("div", { class: "body" });
-  for (const { item, before } of changed) {
+  for (const { item, before, latexDiff } of changed) {
     const versions = [
       { label: refs.head_ref, item },
       ...(before ? [{ label: refs.base_ref, item: before }] : []),
@@ -707,33 +751,24 @@ function injectPullRequestCard(
           el("div", { class: "name", text: item.path }),
           el("div", {
             class: "dim small",
-            text: `${before ? "changed" : "new"} \u00b7 ${describeOutput(
-              item,
-            )}`,
+            text:
+              `${before ? "changed" : "new"} \u00b7 ${describeOutput(item)}` +
+              (latexDiff ? " \u00b7 LaTeX diff" : ""),
           }),
         ]),
         el("button", {
           class: "action secondary",
-          text: "View",
+          text: diffButtonLabel(before, latexDiff),
           disabled: !item.url,
           title: item.url
             ? undefined
             : "This version hasn't been pushed to storage yet",
           onClick: () =>
-            openOverlay(project, hubUrl, versions, { refs: diffRefs }),
+            openOverlay(project, hubUrl, versions, {
+              refs: diffRefs,
+              latexDiff,
+            }),
         }),
-        before
-          ? el("button", {
-              class: "action secondary",
-              text: "Compare",
-              disabled: !item.url || !before.url,
-              onClick: () =>
-                openOverlay(project, hubUrl, versions, {
-                  sideBySide: true,
-                  refs: diffRefs,
-                }),
-            })
-          : null,
       ]),
     );
   }
@@ -759,12 +794,14 @@ function openOverlay(
   hubUrl: string,
   versions: { label: string; item: Viewable }[],
   options: {
-    sideBySide?: boolean;
     /** The refs being compared, which the text diff is asked for by. */
     refs?: { base: string; head: string };
+    /** The project's own marked-up version, if its pipeline built one. */
+    latexDiff?: Viewable;
   } = {},
 ): void {
   const refs = options.refs ?? null;
+  const latexDiff = options.latexDiff ?? null;
   const first = versions[0];
   const overlay = mountOverlay({ id: OVERLAY_ID, title: first.item.name });
   const pane = (
@@ -794,6 +831,15 @@ function openOverlay(
       showTextDiff();
       return;
     }
+    if (label === LATEX_DIFF && latexDiff) {
+      clear(overlay.viewport).append(
+        pane({ label: LATEX_DIFF, item: latexDiff }, false),
+      );
+      clear(details).append(document.createTextNode(describeOutput(latexDiff)));
+      download.href = latexDiff.url ?? "";
+      tab.href = overlayViewerUrl(project, latexDiff, hubUrl);
+      return;
+    }
     // Side by side is how you see what actually changed; one at a time is
     // how you read it, since half a page of PDF is no use
     const showing =
@@ -814,10 +860,15 @@ function openOverlay(
     download.href = current.item.url ?? "";
     tab.href = overlayViewerUrl(project, current.item, hubUrl);
   };
-  // Side by side shows where things moved; the words are what a reviewer
-  // is usually asking about, and the browser can't read them out of a PDF
+  // A document the project marked up itself is the best answer: latexdiff
+  // shows insertions and deletions in place, in the typeset document.
+  // Reading the words out of both PDFs is the fallback for a project that
+  // hasn't declared the comparison.
   const comparable =
-    versions.length > 1 && /\.pdf$/i.test(first.item.path) && refs !== null;
+    latexDiff === null &&
+    versions.length > 1 &&
+    /\.pdf$/i.test(first.item.path) &&
+    refs !== null;
   const showTextDiff = async () => {
     clear(details);
     download.href = versions[0].item.url ?? "";
@@ -874,6 +925,7 @@ function openOverlay(
   const modes = [
     ...versions.map((version) => version.label),
     ...(versions.length > 1 ? [SIDE_BY_SIDE] : []),
+    ...(latexDiff ? [LATEX_DIFF] : []),
     ...(comparable ? [TEXT_DIFF] : []),
   ];
   const buttons = modes.map((mode) => {
@@ -897,7 +949,12 @@ function openOverlay(
     tab,
     download,
   );
-  show(options.sideBySide && versions.length > 1 ? SIDE_BY_SIDE : first.label);
+  // Open on the most useful thing there is, and leave the rest a chip
+  // away: the project's own LaTeX diff, else both versions side by side,
+  // else just the file
+  show(
+    latexDiff ? LATEX_DIFF : versions.length > 1 ? SIDE_BY_SIDE : first.label,
+  );
 }
 
 function overlayViewerUrl(

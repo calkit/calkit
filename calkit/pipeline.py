@@ -1229,12 +1229,9 @@ def _ref_resolver(wdir: str | None) -> Callable[[str], str] | None:
         return None
 
     def resolve(ref: str) -> str:
-        try:
-            return str(repo.git.rev_parse(ref)).strip()
-        except Exception:
-            # A revision that isn't there yet compiles as written; the
-            # command reports it properly when the stage runs
-            return ref
+        # A revision that isn't there at all compiles as written; the
+        # command reports it properly when the stage runs
+        return calkit.git.resolve_ref(repo, ref) or ref
 
     return resolve
 

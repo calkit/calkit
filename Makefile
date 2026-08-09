@@ -91,9 +91,9 @@ browser-ext: ## Build the browser extension and package it as a ZIP.
 # zip adds to an existing archive rather than replacing it, so a rebuild at
 # the same commit would otherwise keep files the build no longer produces.
 # $$ escapes the shell's expansion from Make's own.
-	@rm -f "browser-ext/zip/calkit-browser-ext-$$(git rev-parse --short HEAD).zip"
+	@rm -f "browser-ext/zip/calkit-browser-ext.zip"
 	@cd browser-ext/dist && zip -qr \
-		"../zip/calkit-browser-ext-$$(git rev-parse --short HEAD).zip" . \
+		"../zip/calkit-browser-ext.zip" . \
 		-x '.*' '*/.*' '*.map'
 
 .PHONY: browser-ext-clean-zips

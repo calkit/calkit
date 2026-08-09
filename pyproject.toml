@@ -87,6 +87,9 @@ dev = [
   "pytest-env>=1.1.5",
   "pytest-httpserver>=1.0.0",
   "pytest-xdist>=3.8.0",
+  # For the hub backend format hook, which runs ruff via uv from the
+  # default workspace environment
+  "ruff",
   "mkdocs-glightbox>=0.5.2",
   "scipy>=1.15.3",
 ]
@@ -163,7 +166,8 @@ git_describe_command = [
 ]
 
 [tool.mypy]
-files = ["calkit"]
+files = ["calkit", "hub/backend/app"]
+exclude = ["^hub/backend/app/alembic/"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -177,14 +181,49 @@ show_error_codes = true
 module = ["sqlitedict", "networkx"]
 ignore_missing_imports = true
 
+# The hub backend is checked strict; mypy can't set ``strict`` per-module,
+# so the remainder of its flag bundle is enumerated here (the rest are
+# already enabled globally above)
+[[tool.mypy.overrides]]
+module = ["app", "app.*"]
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true
+# The backend's previous config didn't enable this
+disallow_any_unimported = false
+
 [tool.ruff]
 target-version = "py310"
 line-length = 79
 fix = true
+extend-exclude = ["hub/backend/app/alembic"]
+
+[tool.ruff.per-file-target-version]
+"hub/backend/**" = "py312"
 
 [tool.ruff.lint]
-extend-select = ["I"]  # Import sorting (isort compatibility)
+# Pin the rule set explicitly (the pre-0.9 defaults plus import sorting)
+# so it doesn't drift with ruff's own defaults across versions
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Defines a yaml-loader helper amid its imports
+"hub/backend/app/projects.py" = ["E402"]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve runtime typing for pydantic models even if UP rules are enabled
+keep-runtime-typing = true
+
+[tool.uv.workspace]
+members = ["hub/backend"]
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
-addopts = "-n auto -p pytest_jupyter.jupyter_server"
+# The hub backend's tests need the compose stack and its own environment;
+# they run via test-hub.yml, not from the workspace root
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"

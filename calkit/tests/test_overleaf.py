@@ -1,5 +1,6 @@
 """Tests for the ``overleaf`` module."""
 
+import json
 import os
 import subprocess
 
@@ -132,3 +133,20 @@ def test_get_sync_status(tmp_dir):
     deletes = [f["path"] for f in status["files_to_delete"]]
     assert deletes == ["figures/fig.png"]
     assert status["files_to_delete"][0]["figure"]
+
+
+def test_write_sync_info_without_calkit_dir(tmp_dir):
+    """A repo that has never used Calkit locally has no ``.calkit`` dir.
+
+    That is the hub's normal case: it clones a project and imports an
+    Overleaf document into it, so nothing has created the directory yet.
+    """
+    fpath = calkit.overleaf.write_sync_info(
+        synced_path="paper",
+        info={"project_id": "abc123"},
+        wdir=os.getcwd(),
+    )
+    assert os.path.isfile(fpath)
+    with open(fpath) as f:
+        written = json.load(f)
+    assert written["paper"]["project_id"] == "abc123"

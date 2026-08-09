@@ -256,16 +256,42 @@ export function onUrlChange(callback: (url: string) => void): () => void {
 
 export type Envelope<T> =
   | { ok: true; data: T }
-  | { ok: false; error: string; notSignedIn?: boolean };
+  | {
+      ok: false;
+      error: string;
+      notSignedIn?: boolean;
+      /** HTTP status, when the failure came from a hub request. */
+      status?: number;
+    };
 
 export class RequestFailed extends Error {
   readonly notSignedIn: boolean;
+  /** Null when the request never reached a hub. */
+  readonly status: number | null;
 
-  constructor(message: string, notSignedIn: boolean) {
+  constructor(
+    message: string,
+    notSignedIn: boolean,
+    status: number | null = null,
+  ) {
     super(message);
     this.name = "RequestFailed";
     this.notSignedIn = notSignedIn;
+    this.status = status;
   }
+}
+
+/**
+ * Whether a failure means this hub is older than this extension.
+ *
+ * Hubs are deployed separately from the extension, and self-hosted ones
+ * more separately still, so an endpoint a feature needs may simply not
+ * exist yet. That arrives as a 404 from a route that was never registered,
+ * whose message is "Not Found" — indistinguishable, to the reader, from a
+ * project or document that doesn't exist.
+ */
+export function isUnsupportedByHub(e: unknown): boolean {
+  return e instanceof RequestFailed && e.status === 404;
 }
 
 /** Ask the service worker to run an operation, from any UI surface. */
@@ -298,7 +324,11 @@ export async function send<K extends Request["type"]>(
     throw new RequestFailed("No response from the Calkit extension", false);
   }
   if (!envelope.ok) {
-    throw new RequestFailed(envelope.error, Boolean(envelope.notSignedIn));
+    throw new RequestFailed(
+      envelope.error,
+      Boolean(envelope.notSignedIn),
+      envelope.status ?? null,
+    );
   }
   return envelope.data;
 }

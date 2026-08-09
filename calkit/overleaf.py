@@ -191,6 +191,10 @@ def write_sync_info(
         existing = {}
     synced_path = Path(synced_path).as_posix()
     existing[synced_path] = {k: info.get(k) for k in PRIVATE_KEYS}
+    # A project that has never used Calkit locally has no .calkit directory,
+    # which is the normal case on the hub: it writes this into a fresh clone
+    # while importing an Overleaf document as a publication
+    os.makedirs(os.path.dirname(fpath) or ".", exist_ok=True)
     with open(fpath, "w") as f:
         json.dump(existing, f, indent=2)
     return fpath
@@ -780,6 +784,7 @@ def sync(
                         msg += line + "\n"
                 # Save a file to track this merge conflict
                 c = overleaf_repo.head.commit.hexsha
+                os.makedirs(os.path.dirname(conflict_fpath), exist_ok=True)
                 with open(conflict_fpath, "w") as f:
                     json.dump(
                         {

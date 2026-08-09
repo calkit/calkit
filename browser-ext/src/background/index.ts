@@ -1,4 +1,4 @@
-import { NotSignedInError, request } from "../core/api";
+import { ApiError, NotSignedInError, request } from "../core/api";
 import { getAuthState, signIn, signOut } from "../core/auth";
 import { hubUrlFromCalkitYaml } from "../core/calkit-yaml";
 import {
@@ -318,6 +318,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         ok: false,
         error,
         notSignedIn: e instanceof NotSignedInError,
+        // Carried across so a surface can tell a hub that lacks an endpoint
+        // from one that answered with a real error
+        status: e instanceof ApiError ? e.status : undefined,
       } as Envelope<unknown>);
     });
   // Keep the message channel open for the async response above

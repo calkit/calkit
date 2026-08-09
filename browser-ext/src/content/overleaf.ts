@@ -6,7 +6,7 @@ import {
 } from "../core/pickers";
 import { getHubWebUrl, projectUrl } from "../core/hub-url";
 import { runContentScript } from "../core/lifecycle";
-import { RequestFailed, send } from "../core/messages";
+import { isUnsupportedByHub, RequestFailed, send } from "../core/messages";
 import type {
   GithubRepo,
   OverleafLinkPublic,
@@ -646,6 +646,27 @@ async function load(overleafProjectId: string): Promise<void> {
       body.append(renderFailure(e, { onSignedIn: reload }));
       return;
     }
+    if (isUnsupportedByHub(e)) {
+      // Hubs deploy separately from the extension, so this is a version
+      // gap rather than anything the user did wrong. Saying "Not Found",
+      // which is all the hub sends back for a route it doesn't have,
+      // would send them looking for a missing project instead
+      body.append(
+        errorMessage(
+          `${hubWebUrl.replace(/^https?:\/\//, "")} doesn't support ` +
+            "Overleaf sync yet.",
+        ),
+        el("div", {
+          class: "dim small",
+          style: { marginTop: "6px" },
+          text: "Switch to a hub running a newer version to sync from here.",
+        }),
+        el("div", { style: { marginTop: "8px" } }, [
+          await renderHubPicker(reload),
+        ]),
+      );
+      return;
+    }
     const message = e instanceof Error ? e.message : String(e);
     body.append(errorMessage(message));
     if (message.includes("Overleaf token")) {
@@ -664,11 +685,11 @@ async function load(overleafProjectId: string): Promise<void> {
 }
 
 /**
- * The button the panel collapses to when closed.
+ * The button that opens the panel, and what it collapses back to.
  *
- * This panel opens by itself, since knowing a figure is stale is the
- * point of being on an Overleaf page. Closing it therefore has to leave
- * something behind, or the only way back would be reloading the page.
+ * Its tone carries the one thing worth interrupting for: amber means a
+ * sync would do something, which is how a stale figure gets noticed
+ * without the panel opening on top of the document uninvited.
  */
 type LauncherTone = "idle" | "attention";
 

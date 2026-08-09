@@ -20,7 +20,7 @@ click the Calkit toolbar icon in the bottom right and select "Sign in."
 
     Syncing from the extension requires an Overleaf token stored in your
     Calkit account, the same as syncing from calkit.io. See
-    [Overleaf integration](overleaf.md) for how to set that up.
+    [Overleaf integration](../overleaf.md) for how to set that up.
 
 Opening an Overleaf project shows a panel with the Calkit project that syncs
 with it and what a sync would do:
@@ -90,7 +90,7 @@ The same list is in the panel, in case GitHub's markup moves out from under
 the card.
 
 When the project builds a **LaTeX diff** of a document against the base
-branch (see [LaTeX documents](latex.md)), that's what the panel opens: the
+branch (see [LaTeX documents](../latex.md)), that's what the panel opens: the
 typeset paper with insertions and deletions shown where they happen.
 Nothing extra is fetched, since it's an output of the pull request's own
 pipeline run.
@@ -113,7 +113,7 @@ citation metadata and checks whether that reference is already in a collection
 in your current active project.
 From the panel you can import it into any `.bib` collection, and read or edit
 the notes stored on it.
-See [References](references.md) for how collections and notes work.
+See [References](../references.md) for how collections and notes work.
 
 The extension watches the major preprint servers and publishers, including
 arXiv, bioRxiv, PLOS, Springer, Wiley, Elsevier, Nature, Science, MDPI,
@@ -142,3 +142,6 @@ secrets (an OAuth client for the Web Store API, authorized for the
 publishing account).
 Until that variable exists the upload step is skipped and the release's zip
 is uploaded by hand, so the workflow is useful before the listing is.
+
+What the extension stores and what it sends, and to whom, is in its
+[privacy policy](privacy.md).

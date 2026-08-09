@@ -61,7 +61,9 @@ nav:
   - Local server (GUI interaction): local-server.md
   - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
-  - Browser extension: browser-extension.md
+  - Browser extension:
+      - browser-ext/index.md
+      - Privacy policy: browser-ext/privacy.md
   - Subprojects: subprojects.md
   - Examples: examples.md
   - Tutorials:

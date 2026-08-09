@@ -34,7 +34,7 @@ pipeline:
 `calkit run` builds each one alongside the document.
 They're stage outputs, so they're tracked, pushed, and pulled with the rest
 of the project, and the
-[browser extension](browser-extension.md) can show them on the pull request
+[browser extension](browser-ext/index.md) can show them on the pull request
 they belong to.
 
 `latexdiff` ships with TeX Live, so an environment that can build the

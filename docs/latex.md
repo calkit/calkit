@@ -28,7 +28,7 @@ pipeline:
       target_path: pubs/paper-1/main.tex
       diffs:
         - main # what this branch changes, for reviewers of the PR
-        - [submitted-v1, revision-1] # what the referees were sent
+        - [paper-1-submitted, paper-1-v2] # what the referees were sent
 ```
 
 `calkit run` builds each one alongside the document.
@@ -59,7 +59,7 @@ A revision round is a comparison between two tags, so name both:
 
 ```yaml
 diffs:
-  - [submitted-v1, revision-1]
+  - [paper-1-submitted, paper-1-v2]
 ```
 
 Neither end can move, so it's built once and then left alone.
@@ -67,23 +67,39 @@ That matters for a file you've already sent someone: LaTeX writes a
 timestamp into every PDF, so rebuilding from identical sources would produce
 a different file.
 
-Before sending back for the next round of reviews,
-create a [release](releases.md) for the document with a name like `v2`,
-with its diff as part of the release.
+Before sending the paper back for the next round of reviews, create a
+[release](releases.md) for the document:
+
+```sh
+calkit new release pubs/paper-1/main.pdf --name paper-1-v2
+```
+
+A release name becomes a Git tag, and tags belong to the whole repo, so name
+them after the document as well as the round.
+A project with two papers in it can't have both call their second round
+`v2`.
+
 A release stores a frozen copy named `{project}-{document}-{release}.pdf`,
 which is what you want on a file about to be emailed to an editor.
 For a DVC-tracked file that copy is a pointer to content already stored, so
 keeping it costs nothing.
+
+A release covers one path, so archiving the diff means a second release
+naming its directory.
+The tag pins both either way, since the diff is tracked with the project
+like any other output.
+Bundling everything a publication needs into a single release is
+[issue #1026](https://github.com/calkit/calkit/issues/1026).
 
 ### Where they go
 
 Each comparison gets a directory named after what it compares, with the
 document's own path inside it:
 
-| Diff                 | File                                                         |
-| -------------------- | ------------------------------------------------------------ |
-| `main`               | `.calkit/latex-diffs/main/pubs/paper-1/main.pdf`             |
-| `[submitted-v1, v2]` | `.calkit/latex-diffs/submitted-v1..v2/pubs/paper-1/main.pdf` |
+| Diff                              | File                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------- |
+| `main`                            | `.calkit/latex-diffs/main/pubs/paper-1/main.pdf`                          |
+| `[paper-1-submitted, paper-1-v2]` | `.calkit/latex-diffs/paper-1-submitted..paper-1-v2/pubs/paper-1/main.pdf` |
 
 `diff_pdf_storage` on the stage chooses between DVC and Git for them, like
 `pdf_storage` does for the document itself.

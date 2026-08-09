@@ -22,8 +22,12 @@ click the Calkit toolbar icon in the bottom right and select "Sign in."
     Calkit account, the same as syncing from calkit.io. See
     [Overleaf integration](../overleaf.md) for how to set that up.
 
-Opening an Overleaf project shows a panel with the Calkit project that syncs
-with it and what a sync would do:
+Opening an Overleaf project shows the Calkit button in the corner, which
+turns amber when a sync would do something, so a figure that was
+regenerated and never made it to Overleaf is visible without going looking
+for it.
+Clicking it shows the Calkit project that syncs with this one and what a
+sync would do:
 
 - **Figures to sync**, meaning figures whose content in the project differs
   from what's currently on Overleaf. This is the case worth catching, since a
@@ -111,6 +115,8 @@ the same way.
 If it isn't there you can add it, then read and edit the notes on it.
 To save it under a different project, select that project from the dropdown
 and add it there.
+
+## Privacy
 
 What the extension stores and what it sends, and to whom, is in its
 [privacy policy](privacy.md).

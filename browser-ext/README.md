@@ -173,7 +173,15 @@ npm run check    # Type-check
 npm test         # Unit tests for URL and citation-metadata parsing
 npm run format   # Prettier
 npm run build    # Type-check, then build into dist/
+npm run dev      # Rebuild into dist/ as sources change
 ```
+
+`dist` is a directory Chrome has loaded, not just build output, so anything
+that empties it is doing so underneath a running extension. The type check
+therefore happens before `dist` is cleared, and `npm run build` shouldn't be
+run while `npm run dev` is watching: both own the same directory, and a
+service worker that goes missing mid-build stays failed until the extension
+is reloaded.
 
 Content scripts are bundled one at a time as IIFEs (see
 `scripts/build-content.mjs`), because Chrome runs them as classic scripts,

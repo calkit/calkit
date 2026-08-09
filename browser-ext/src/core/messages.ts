@@ -277,9 +277,23 @@ export async function send<K extends Request["type"]>(
   if (!isExtensionAlive()) {
     throw new ExtensionReloaded();
   }
-  const envelope = (await chrome.runtime.sendMessage(request)) as Envelope<
-    ResponseMap[K]
-  >;
+  let envelope: Envelope<ResponseMap[K]>;
+  try {
+    envelope = (await chrome.runtime.sendMessage(request)) as Envelope<
+      ResponseMap[K]
+    >;
+  } catch (e) {
+    // The extension is still installed (checked above) but nothing answered,
+    // which means the service worker did not start: a failed registration,
+    // or a build that replaced its file while Chrome had it loaded. Chrome's
+    // own wording for this is "Receiving end does not exist", which reads
+    // like a bug in the page rather than something a reload fixes
+    throw new RequestFailed(
+      "The Calkit extension's background worker isn't running. " +
+        "Reload the extension from chrome://extensions, then reload this page.",
+      false,
+    );
+  }
   if (!envelope) {
     throw new RequestFailed("No response from the Calkit extension", false);
   }

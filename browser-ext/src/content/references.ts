@@ -460,11 +460,20 @@ async function openPanel(reference: DetectedReference): Promise<void> {
       matches,
     );
   } catch (e) {
-    clear(body).append(referenceSummary(reference));
-    body.append(
-      await renderHubPicker(reload),
-      renderFailure(e, { hubUrl: hubWebUrl, onSignedIn: reload }),
-    );
+    const failure = renderFailure(e, {
+      hubUrl: hubWebUrl,
+      onSignedIn: reload,
+    });
+    clear(body).append(referenceSummary(reference), failure);
+    // The picker asks the worker which hubs exist, so it is the one thing
+    // that cannot be relied on here: when the worker is what failed, it
+    // fails too. Saying what went wrong comes first, and the picker goes in
+    // above it only if it can be built
+    try {
+      body.insertBefore(await renderHubPicker(reload), failure);
+    } catch {
+      // Whatever renderFailure already says is the more useful message
+    }
   }
 }
 

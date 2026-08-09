@@ -12,7 +12,7 @@
   },
   "homepage": "https://github.com/calkit/calkit/tree/main/browser-ext",
   "scripts": {
-    "build": "npm run clean && tsc --noEmit && vite build && node scripts/build-content.mjs",
+    "build": "tsc --noEmit && npm run clean && vite build && node scripts/build-content.mjs",
     "dev": "npm run clean && node scripts/watch.mjs",
     "clean": "rm -rf dist",
     "check": "tsc --noEmit",

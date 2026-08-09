@@ -744,7 +744,53 @@ function sync(): void {
     return;
   }
   currentProjectId = overleafProjectId;
-  openPanel(overleafProjectId);
+  // A button, not an open panel: this sits on top of someone's document,
+  // and opening uninvited is the extension deciding it matters more than
+  // what they were doing. The check below is what earns the click.
+  mountLauncher(() => openPanel(overleafProjectId));
+  void checkSyncStatus(overleafProjectId);
+}
+
+/**
+ * Ask whether this Overleaf project has anything waiting, and say so on
+ * the button.
+ *
+ * The whole point of the panel is catching a figure that was regenerated
+ * and never made it to Overleaf, which nobody would think to open a panel
+ * to find out. So the question is asked quietly and only the answer
+ * shows: an amber button when a sync would do something.
+ */
+async function checkSyncStatus(overleafProjectId: string): Promise<void> {
+  try {
+    const settings = await send({ type: "settings.get" });
+    const lookup = await send({
+      type: "overleaf.lookup",
+      overleafProjectId,
+      activeProject: settings.activeProject ?? undefined,
+    });
+    const link = lookup.links[0];
+    if (!link) {
+      return;
+    }
+    const statuses = await send({
+      type: "overleaf.status",
+      owner: link.project_owner_name,
+      project: link.project_name,
+      overleafProjectId,
+      path: link.path,
+    });
+    lastSyncNeeded = Boolean(statuses.length) && !statuses[0].in_sync;
+    // Nothing to say if the panel was opened in the meantime, or if the
+    // page moved on to another project
+    if (panel || currentProjectId !== overleafProjectId) {
+      return;
+    }
+    if (lastSyncNeeded) {
+      mountLauncher(() => openPanel(overleafProjectId), "attention");
+    }
+  } catch {
+    // Whatever went wrong, the panel says so properly when opened
+  }
 }
 
 /**
@@ -766,8 +812,16 @@ function watchForSaves(): void {
       }
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (panel && currentProjectId) {
+        if (!currentProjectId) {
+          return;
+        }
+        // A save is when a figure most often stops matching what's on
+        // Overleaf, so the button has to notice it too, not just an
+        // already-open panel
+        if (panel) {
           void load(currentProjectId);
+        } else {
+          void checkSyncStatus(currentProjectId);
         }
       }, 2000);
     },

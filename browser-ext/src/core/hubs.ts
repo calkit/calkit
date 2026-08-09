@@ -128,15 +128,6 @@ export function apiUrlFromHubUrl(hubUrl: string): string {
 }
 
 /** Build a custom hub entry from just its web URL. */
-export function customHubFromUrl(hubUrl: string): Hub {
-  return {
-    name: "custom",
-    label: new URL(normalizeHubUrl(hubUrl)).host,
-    webUrl: normalizeHubUrl(hubUrl),
-    apiUrl: apiUrlFromHubUrl(hubUrl),
-  };
-}
-
 export function getHub(name: string, custom?: Hub | null): Hub {
   if (name === "custom" && custom) {
     return custom;
@@ -170,5 +161,24 @@ export function resolveHubByWebUrl(webUrl: string): Hub {
       return hub;
     }
   }
-  return customHubFromUrl(normalized);
+  return unknownHub(normalized);
+}
+
+/** A hub that isn't built in: nameable, but not reachable. */
+function unknownHub(webUrl: string): Hub {
+  return {
+    name: "unknown",
+    label: hostOf(webUrl),
+    webUrl,
+    apiUrl: apiUrlFromHubUrl(webUrl),
+  };
+}
+
+function hostOf(webUrl: string): string {
+  return webUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+}
+
+/** Whether a hub is one this build can actually reach. */
+export function isKnownHub(hub: Hub): boolean {
+  return hub.name !== "unknown";
 }

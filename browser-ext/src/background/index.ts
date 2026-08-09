@@ -21,7 +21,6 @@ import type {
   TextDiff,
   Figure,
   GithubRepo,
-  OverleafLinkPublic,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -232,10 +231,6 @@ async function handle(message: Request): Promise<unknown> {
           },
         },
       );
-    case "overleaf.links":
-      return request<OverleafLinkPublic[]>("/overleaf-links", {
-        query: { overleaf_project_id: message.overleafProjectId },
-      });
     case "overleaf.status":
       return request<OverleafSyncStatus[]>(
         `${projectPath(message.owner, message.project)}/overleaf-syncs/status`,

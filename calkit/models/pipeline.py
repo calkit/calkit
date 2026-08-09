@@ -461,8 +461,8 @@ class Stage(BaseModel):
         the work has genuinely different inputs, so that a change to one
         part doesn't force the rest to run again.
 
-        ``resolve_ref`` turns a Git revision into the commit it points at,
-        for stages whose inputs are revisions rather than files.
+        ``resolve_ref`` turns a Git revision into a commit, for stages
+        whose inputs are revisions rather than files.
         """
         return {}
 
@@ -636,6 +636,11 @@ class LatexStage(Stage):
             out: str | dict = path
             if self.diff_pdf_storage != "dvc":
                 out = {path: {"cache": False}}
+            # Revisions are resolved to the commit that last changed this
+            # document, not to the tip. The two describe the same document
+            # -- nothing since has touched it -- but the tip moves with
+            # every commit to anything, which would rewrite this command
+            # constantly, and saving that rewrite is itself a commit.
             from_arg = resolve_ref(from_ref) if resolve_ref else from_ref
             to_arg = resolve_ref(to_ref) if resolve_ref else to_ref
             cmd = (
@@ -650,11 +655,14 @@ class LatexStage(Stage):
                 f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
             )
             cmd += f" {shlex.quote(self.target_path)}"
-            # Both sides come out of Git, so nothing in the working tree
-            # is an input, whether or not the revisions can move
+            # The command already names the exact commits being compared,
+            # so nothing in the working tree is an input. A DVC-tracked
+            # figure is the exception: its content isn't in Git, so only
+            # the dependency catches a change to it.
+            moving = calkit.latex.MOVING_REFS.intersection({from_ref, to_ref})
             stage: dict = {
                 "cmd": cmd,
-                "deps": [],
+                "deps": self.dvc_deps if moving else [],
                 "outs": [out],
                 "desc": (
                     f"Automatically generated from the '{self.name}' stage "
@@ -663,11 +671,9 @@ class LatexStage(Stage):
             }
             if self.wdir is not None:
                 stage["wdir"] = self.wdir
-            # With the revisions resolved into the command, DVC sees a
-            # moving end move. Without a resolver there's nothing for it
-            # to hash, and no way to tell a tag from a branch, so the
-            # stage has to run every time.
-            if resolve_ref is None:
+            # Without a resolver the command holds a name rather than a
+            # commit, so there's nothing for DVC to notice moving
+            if moving and resolve_ref is None:
                 stage["always_changed"] = True
             stages[name] = stage
         return stages

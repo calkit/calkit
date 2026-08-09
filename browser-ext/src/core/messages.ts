@@ -8,7 +8,6 @@ import type {
   TextDiff,
   Figure,
   GithubRepo,
-  OverleafLinkPublic,
   OverleafLookup,
   OverleafSyncResponse,
   OverleafSyncStatus,
@@ -103,7 +102,6 @@ export type Request =
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
-  | { type: "overleaf.links"; overleafProjectId: string }
   | {
       type: "overleaf.lookup";
       overleafProjectId: string;
@@ -180,7 +178,6 @@ export interface ResponseMap {
   "project.figures": Figure[];
   "content.imageDataUrl": string;
   "content.dataUrl": string;
-  "overleaf.links": OverleafLinkPublic[];
   "overleaf.lookup": OverleafLookup;
   "overleaf.status": OverleafSyncStatus[];
   "overleaf.sync": OverleafSyncResponse;

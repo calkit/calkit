@@ -117,34 +117,25 @@ def test_record_overleaf_links_and_lookup(
         select(OverleafLink).where(OverleafLink.project_id == project.id)
     ).all()
     assert len(stored) == 1
-    # The owner can resolve the Overleaf project back to their project
+    # The owner can resolve the Overleaf project back to their project,
+    # straight from the index
     resp = client.get(
-        f"{settings.API_V1_STR}/overleaf-links",
-        params={"overleaf_project_id": "ol333"},
+        f"{settings.API_V1_STR}/user/overleaf-syncs/ol333",
         headers=headers,
     )
     assert resp.status_code == 200
-    data = resp.json()
+    data = resp.json()["links"]
     assert len(data) == 1
     assert data[0]["project_name"] == project.name
     assert data[0]["path"] == "paper"
     assert data[0]["current_user_access"] == "owner"
     # An unrelated user gets nothing back for the same private project
     resp = client.get(
-        f"{settings.API_V1_STR}/overleaf-links",
-        params={"overleaf_project_id": "ol333"},
+        f"{settings.API_V1_STR}/user/overleaf-syncs/ol333",
         headers=other_headers,
     )
     assert resp.status_code == 200
-    assert resp.json() == []
-    # An Overleaf project nobody has linked resolves to nothing
-    resp = client.get(
-        f"{settings.API_V1_STR}/overleaf-links",
-        params={"overleaf_project_id": "nonexistent"},
-        headers=headers,
-    )
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.json()["links"] == []
 
 
 def test_get_projects_min_access_level_write(

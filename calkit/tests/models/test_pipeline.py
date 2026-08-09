@@ -588,14 +588,21 @@ def test_latex_stage_diffs():
     assert extra["paper-1-diff-main"]["outs"] == [
         ".calkit/latex-diffs/main/pubs/paper-1/main.pdf"
     ]
-    # Both sides come out of Git, so nothing in the working tree is an
-    # input, and nothing has to run unconditionally
-    assert all(st["deps"] == [] for st in extra.values())
+    # The command names the exact commits, so nothing has to run
+    # unconditionally. A comparison up to HEAD still depends on the
+    # document's files, since a DVC-tracked figure's content isn't in Git
+    # and only the dependency catches a change to it.
     assert not any("always_changed" in st for st in extra.values())
-    # Without a resolver there's nothing for DVC to hash, and no way to
-    # tell a tag from a branch, so every comparison has to run each time
+    assert extra["paper-1-diff-v1-v2"]["deps"] == []
+    assert extra["paper-1-diff-main"]["deps"] == [
+        "pubs/paper-1/main.tex",
+        "figures/fig1.png",
+    ]
+    # Without a resolver the command holds a name rather than a commit, so
+    # a moving end has nothing DVC could notice
     unresolved = stage.extra_dvc_stages()
-    assert all(st["always_changed"] is True for st in unresolved.values())
+    assert unresolved["paper-1-diff-main"]["always_changed"] is True
+    assert "always_changed" not in unresolved["paper-1-diff-v1-v2"]
     # Storage is chosen for diffs the same way it is for the document
     git_stored = LatexStage(
         name="paper-1",

@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   isLoopbackHost,
   apiUrlFromHubUrl,
-  customHubFromUrl,
+  isKnownHub,
   getHub,
   HUBS,
   resolveHubByWebUrl,
@@ -74,33 +74,27 @@ describe("resolveHubByWebUrl", () => {
   });
 });
 
-describe("customHubFromUrl", () => {
-  test("builds a hub entry from just the web URL", () => {
-    expect(customHubFromUrl("https://calkit.example.edu/")).toEqual({
-      name: "custom",
-      label: "calkit.example.edu",
-      webUrl: "https://calkit.example.edu",
-      apiUrl: "https://api.calkit.example.edu",
-    });
-    // A bare host gets a scheme on both URLs
-    expect(customHubFromUrl("calkit.example.edu")).toEqual({
-      name: "custom",
-      label: "calkit.example.edu",
-      webUrl: "https://calkit.example.edu",
-      apiUrl: "https://api.calkit.example.edu",
-    });
+describe("getHub", () => {
+  test("resolves built-ins and falls back for anything else", () => {
+    expect(getHub("local").apiUrl).toBe("http://api.localhost");
+    // An instance that isn't built in has no host permission, so falling
+    // back beats leaving the extension with an API URL it can't reach
+    expect(getHub("nonexistent")).toBe(HUBS.production);
   });
 });
 
-describe("getHub", () => {
-  test("resolves built-ins, the custom hub, and unknown names", () => {
-    expect(getHub("local").apiUrl).toBe("http://api.localhost");
-    const custom = customHubFromUrl("calkit.example.edu");
-    expect(getHub("custom", custom)).toBe(custom);
-    // A custom selection with nothing configured falls back rather than
-    // leaving the extension with no API URL at all
-    expect(getHub("custom", null)).toBe(HUBS.production);
-    expect(getHub("nonexistent")).toBe(HUBS.production);
+describe("resolveHubByWebUrl", () => {
+  test("names a hub it doesn't know, and says it doesn't know it", () => {
+    // A project can declare any hub; this build can only reach the ones
+    // it ships a host permission for, which is why joining means adding
+    // an entry to HUBS
+    const known = resolveHubByWebUrl("https://calkit.io");
+    expect(known).toBe(HUBS.production);
+    expect(isKnownHub(known)).toBe(true);
+    const other = resolveHubByWebUrl("calkit.example.edu");
+    expect(other.label).toBe("calkit.example.edu");
+    expect(other.apiUrl).toBe("https://api.calkit.example.edu");
+    expect(isKnownHub(other)).toBe(false);
   });
 });
 

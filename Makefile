@@ -85,6 +85,9 @@ browser-ext: ## Build the browser extension and package it as a ZIP.
 	@echo "🚀 Building the browser extension"
 	@cd browser-ext && npm ci && npm run build
 	@echo "📦 Packaging the browser extension ZIP"
+# The published manifest drops the development-only host permission, which
+# would otherwise be one more thing for a store reviewer to weigh.
+	@cd browser-ext && node scripts/package-manifest.mjs
 	@mkdir -p browser-ext/zip
 # Source maps are useful loading unpacked, but only bloat a store upload, so
 # they stay in dist and are excluded from the archive.

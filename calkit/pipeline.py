@@ -1213,7 +1213,9 @@ def _write_managed_gitignore_block(
     return True
 
 
-def _ref_resolver(wdir: str | None) -> Callable[[str], str] | None:
+def _ref_resolver(
+    wdir: str | None, paths: list[str] | None = None
+) -> Callable[[str], str] | None:
     """Return something that turns a Git revision into its commit hash.
 
     Stages whose inputs are revisions rather than files put the resolved
@@ -1227,11 +1229,25 @@ def _ref_resolver(wdir: str | None) -> Callable[[str], str] | None:
         return None
 
     def resolve(ref: str) -> str:
-        # A revision that isn't there at all compiles as written; the
-        # command reports it properly when the stage runs
-        return calkit.git.resolve_ref(repo, ref) or ref
+        sha = calkit.git.resolve_ref(repo, ref)
+        if sha is None:
+            # A revision that isn't there at all compiles as written; the
+            # command reports it properly when the stage runs
+            return ref
+        # The commit this revision last changed the document in describes
+        # the same document as the tip does, and doesn't move when
+        # something else is committed
+        return calkit.git.last_change(repo, sha, paths or []) or sha
 
     return resolve
+
+
+def _stage_ref_resolver(
+    wdir: str | None, stage
+) -> Callable[[str], str] | None:
+    """A resolver that pins revisions by what this stage reads."""
+    paths = [p for p in stage.dvc_deps if not p.startswith(".calkit/")]
+    return _ref_resolver(wdir, paths)
 
 
 def to_dvc(
@@ -1422,10 +1438,6 @@ def to_dvc(
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
-    # Made once for this compilation rather than per stage, and never
-    # cached across calls: a resolver is bound to one repo, and the same
-    # process can compile pipelines in several
-    ref_resolver = _ref_resolver(wdir)
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
@@ -1519,8 +1531,11 @@ def to_dvc(
         dvc_stages[stage_name] = dvc_stage
         # A Calkit stage can compile into more than one DVC stage when the
         # work has genuinely different inputs
+        # Per stage, since which commits count depends on what the stage
+        # reads. Never cached across calls: a resolver is bound to one
+        # repo, and a process can compile pipelines in several.
         for extra_name, extra_stage in stage.extra_dvc_stages(
-            resolve_ref=ref_resolver
+            resolve_ref=_stage_ref_resolver(wdir, stage)
         ).items():
             # Raised rather than worked around with a suffix: a generated
             # name is addressable (calkit run <name>) and is the stage's

@@ -426,3 +426,24 @@ def resolve_ref(repo: git.Repo, ref: str) -> str | None:
         warnings.warn(f"Failed to fetch history: {e}")
         return None
     return parse()
+
+
+def last_change(repo: git.Repo, ref: str, paths: list[str]) -> str | None:
+    """The last commit at or before ``ref`` that touched any of ``paths``.
+
+    Used to name a revision by its content rather than its position. A
+    comparison against ``HEAD`` means the document as it stands, and the
+    document doesn't change when something else in the project is
+    committed, so resolving to the commit that last changed it keeps the
+    answer stable and keeps a pipeline from invalidating itself.
+
+    Returns None if nothing matches, including when the paths were never
+    tracked.
+    """
+    if not paths:
+        return None
+    try:
+        out = str(repo.git.rev_list("-1", ref, "--", *paths)).strip()
+    except Exception:
+        return None
+    return out or None

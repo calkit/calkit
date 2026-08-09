@@ -10,7 +10,6 @@ export interface Credentials {
 export interface Settings {
   /** Hub used by default for every surface, e.g. "production". */
   hubName: string;
-  customHub: Hub | null;
   /**
    * The project being worked on, as ``owner/name``, per hub API URL.
    *
@@ -27,14 +26,12 @@ export interface Settings {
 /** Settings as a surface sees them, with the current hub resolved. */
 export interface SettingsView {
   hubName: string;
-  customHub: Hub | null;
   hub: Hub;
   activeProject: string | null;
 }
 
 export interface SettingsUpdate {
   hubName?: string;
-  customHub?: Hub | null;
   /** Applied to whichever hub is active once the update is done. */
   activeProject?: string | null;
 }
@@ -45,7 +42,6 @@ const EMAILS_KEY = "knownEmails";
 
 export const DEFAULT_SETTINGS: Settings = {
   hubName: DEFAULT_HUB_NAME,
-  customHub: null,
   activeProjects: {},
 };
 
@@ -56,10 +52,9 @@ export async function getSettings(): Promise<Settings> {
 
 export async function getSettingsView(): Promise<SettingsView> {
   const settings = await getSettings();
-  const hub = getHub(settings.hubName, settings.customHub);
+  const hub = getHub(settings.hubName);
   return {
     hubName: settings.hubName,
-    customHub: settings.customHub,
     hub,
     activeProject: settings.activeProjects[hub.apiUrl] ?? null,
   };
@@ -72,12 +67,11 @@ export async function setSettings(
   const settings: Settings = {
     ...current,
     ...(update.hubName === undefined ? {} : { hubName: update.hubName }),
-    ...(update.customHub === undefined ? {} : { customHub: update.customHub }),
   };
   if (update.activeProject !== undefined) {
     // Resolved against the hub this update leaves in place, so setting the
     // hub and the project together lands the project on the new hub
-    const hub = getHub(settings.hubName, settings.customHub);
+    const hub = getHub(settings.hubName);
     const activeProjects = { ...settings.activeProjects };
     if (update.activeProject === null) {
       delete activeProjects[hub.apiUrl];
@@ -92,7 +86,7 @@ export async function setSettings(
 
 export async function getCurrentHub(): Promise<Hub> {
   const settings = await getSettings();
-  return getHub(settings.hubName, settings.customHub);
+  return getHub(settings.hubName);
 }
 
 // Credentials are stored per hub so switching between, say, production and a

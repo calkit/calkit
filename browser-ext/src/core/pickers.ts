@@ -52,11 +52,6 @@ export async function renderHubPicker(
     }
     others.append(el("option", { value: hub.name, text: hub.label }));
   }
-  if (settings.customHub) {
-    others.append(
-      el("option", { value: "custom", text: settings.customHub.label }),
-    );
-  }
   if (others.childElementCount) {
     select.append(others);
   }

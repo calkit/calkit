@@ -1,24 +1,8 @@
-import { apiUrlFromHubUrl, customHubFromUrl } from "../core/hubs";
 import { send } from "../core/messages";
 import type { ProjectPublic } from "../core/types";
 import { clear, el, errorMessage, loading, textInput } from "../core/ui";
 
 const app = document.getElementById("app") as HTMLElement;
-
-/**
- * Ask Chrome for access to a self-hosted hub's API host.
- *
- * The built-in hubs are in the manifest's host permissions, but a
- * self-hosted one can't be, so it's requested here. Clicking Use this hub is
- * the user gesture Chrome requires before it will show the prompt.
- */
-async function requestApiAccess(apiUrl: string): Promise<boolean> {
-  const origin = `${new URL(apiUrl).origin}/*`;
-  if (await chrome.permissions.contains({ origins: [origin] })) {
-    return true;
-  }
-  return chrome.permissions.request({ origins: [origin] });
-}
 
 /**
  * The signed-in state of the selected hub, with the action that changes it.
@@ -93,7 +77,6 @@ async function renderAuth(container: HTMLElement): Promise<void> {
 async function renderHubSection(
   container: HTMLElement,
   hubName: string,
-  customHubUrl: string,
   hubs: { name: string; label: string; apiUrl: string }[],
 ): Promise<void> {
   clear(container);
@@ -119,7 +102,6 @@ async function renderHubSection(
       el("option", { value: hub.name, text: `${hub.label} (${hub.apiUrl})` }),
     );
   }
-  others.append(el("option", { value: "custom", text: "Self-hosted" }));
   hubSelect.append(others);
   hubSelect.value = hubName;
   const message = el("div", { class: "small" });
@@ -127,10 +109,6 @@ async function renderHubSection(
   // project list is easy to miss, and a hub that looks switched but isn't
   // is worse than no setting at all.
   hubSelect.addEventListener("change", async () => {
-    if (hubSelect.value === "custom") {
-      syncVisibility();
-      return;
-    }
     clear(message).append(loading("Switching hub"));
     try {
       await send({
@@ -144,73 +122,6 @@ async function renderHubSection(
       );
     }
   });
-  const customUrl = textInput({
-    placeholder: "https://calkit.example.edu",
-    value: customHubUrl,
-  });
-  const derived = el("div", { class: "dim small" });
-  const showDerived = () => {
-    const value = customUrl.value.trim();
-    if (!value) {
-      derived.textContent = "";
-      return;
-    }
-    try {
-      derived.textContent = `API: ${apiUrlFromHubUrl(value)}`;
-      derived.classList.remove("error");
-    } catch {
-      derived.textContent = "That doesn't look like a hub URL.";
-      derived.classList.add("error");
-    }
-  };
-  customUrl.addEventListener("input", showDerived);
-  showDerived();
-  // The custom hub needs an explicit commit, since it also has to ask
-  // Chrome for access to a host the manifest can't know about
-  const useCustom = el("button", { class: "action", text: "Use this hub" });
-  useCustom.addEventListener("click", async () => {
-    useCustom.disabled = true;
-    clear(message).append(loading("Switching hub"));
-    try {
-      const url = customUrl.value.trim();
-      if (!url) {
-        throw new Error("A hub URL is required");
-      }
-      const customHub = customHubFromUrl(url);
-      if (!(await requestApiAccess(customHub.apiUrl))) {
-        throw new Error(
-          `Calkit needs access to ${customHub.apiUrl} to use that hub`,
-        );
-      }
-      await send({
-        type: "settings.set",
-        update: { hubName: "custom", customHub },
-      });
-      void render();
-    } catch (e) {
-      useCustom.disabled = false;
-      clear(message).append(
-        errorMessage(e instanceof Error ? e.message : String(e)),
-      );
-    }
-  });
-  const customFields = el("div", { class: "stack" }, [
-    el("label", { text: "Hub URL" }),
-    customUrl,
-    derived,
-    el("div", {
-      class: "dim small",
-      text:
-        "Only needed if you run your own Calkit instance. A hub serves its " +
-        "API from the api subdomain of its own host, so its URL is all " +
-        "that's needed. Chrome will ask for access to that host.",
-    }),
-    el("div", { class: "actions" }, [useCustom]),
-  ]);
-  function syncVisibility() {
-    customFields.style.display = hubSelect.value === "custom" ? "" : "none";
-  }
-  syncVisibility();
   const authContainer = el("div");
   container.append(
     el("div", { class: "small", style: { fontWeight: "600" }, text: "Hub" }),
@@ -219,10 +130,11 @@ async function renderHubSection(
       text:
         "Every surface uses this hub, and calkit.io is where projects live " +
         "unless you've been told otherwise. Changing it takes effect right " +
-        "away.",
+        "away. A self-hosted instance is added to the extension's source " +
+        "rather than configured here, so it ships with permission to reach " +
+        "its host.",
     }),
     hubSelect,
-    customFields,
     message,
     el("div", { class: "muted-box", style: { marginTop: "8px" } }, [
       authContainer,
@@ -356,12 +268,7 @@ async function render(): Promise<void> {
     }),
     projectContainer,
   );
-  await renderHubSection(
-    hubContainer,
-    settings.hubName,
-    settings.customHub?.webUrl ?? "",
-    hubs,
-  );
+  await renderHubSection(hubContainer, settings.hubName, hubs);
   await renderActiveProjectSection(projectContainer, settings.activeProject);
 }
 

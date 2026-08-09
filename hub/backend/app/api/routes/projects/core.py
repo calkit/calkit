@@ -4647,21 +4647,6 @@ def _indexed_overleaf_links(
     return resp
 
 
-@router.get("/overleaf-links")
-def get_overleaf_links(
-    current_user: CurrentUser,
-    session: SessionDep,
-    overleaf_project_id: str,
-) -> list[OverleafLinkPublic]:
-    """Find the projects that sync a folder with an Overleaf project.
-
-    Reads the index only. Prefer
-    ``/user/overleaf-syncs/{overleaf_project_id}``, which falls back to
-    looking through the user's projects when the index has nothing yet.
-    """
-    return _indexed_overleaf_links(session, current_user, overleaf_project_id)
-
-
 class OverleafLookup(BaseModel):
     links: list[OverleafLinkPublic]
     # How much of the search happened, so a caller can tell "no project

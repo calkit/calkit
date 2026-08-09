@@ -502,10 +502,13 @@ def _build_diff(
     verbose: bool,
 ) -> None:
     """Mark up one document against another and build the result."""
-    # Built beside the newer document so \graphicspath, \bibliography,
-    # and relative \includegraphics resolve the way they do for the real
-    # thing
-    tex_dir = os.path.dirname(head_tex) or "."
+    # Built beside the working copy of the document, so \graphicspath,
+    # \bibliography, and relative \includegraphics resolve the way they do
+    # for the real thing. A checked-out revision would be the tidier place
+    # for it, but a DVC-tracked figure isn't in Git: a checkout has the
+    # pointer file and not the image, and the marked-up document would
+    # come out with its figures missing.
+    tex_dir = os.path.dirname(tex_file) or "."
     stem = Path(tex_file).stem
     diff_tex = os.path.join(tex_dir, f"{stem}-diff.tex")
     try:

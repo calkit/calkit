@@ -41,6 +41,9 @@ dependencies = [
   "python-json-logger>=2.0.0",
   # For signing Zotero's OAuth 1.0a requests
   "requests-oauthlib>=2.0.0",
+  # Reading the text out of a PDF to diff two builds of a document; pure
+  # Python, so the image needs no system packages for it
+  "pypdf>=6.1.1",
 ]
 
 [dependency-groups]

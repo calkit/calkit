@@ -59,6 +59,10 @@ AUTO_IGNORE_PREFIXES = [
     "__pycache__",
     ".ipynb_checkpoints",
     ".calkit/overleaf/",
+    # Working files: the revision 'calkit latex diff' checks out to
+    # compare against, and what latexmk leaves behind building the
+    # marked-up document. The diffs themselves are tracked.
+    ".calkit/tmp/",
 ]
 # Constants for version control auto-add to DVC
 DVC_EXTENSIONS = [

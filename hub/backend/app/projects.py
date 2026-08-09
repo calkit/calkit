@@ -256,6 +256,52 @@ def get_project(
     return project
 
 
+def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
+    """Every DVC-tracked output in a tree, keyed by path.
+
+    Two sources: dvc.lock, which covers anything a pipeline stage
+    produces, and the standalone ``.dvc`` pointer files that ``dvc add``
+    leaves next to a tracked file, which the lock knows nothing about.
+    """
+    outs: dict[str, dict] = dict(
+        get_ck_info_and_dvc_outs_from_tree(
+            project=project, tree=tree
+        ).dvc_lock_outs
+    )
+
+    def walk(dirname: str) -> list[str]:
+        found = []
+        for name in tree.listdir(dirname or None):
+            path = os.path.join(dirname, name) if dirname else name
+            if path in [".git", ".dvc"]:
+                continue
+            if tree.is_dir(path):
+                found += walk(path)
+            elif path.endswith(".dvc"):
+                found.append(path)
+        return found
+
+    for pointer_path in walk(""):
+        try:
+            data = yaml.safe_load(tree.read_text(pointer_path))
+            out = (data.get("outs") or [{}])[0]
+        except Exception as e:
+            logger.warning(f"Failed to read DVC pointer {pointer_path}: {e}")
+            continue
+        if not isinstance(out, dict) or not out.get("md5"):
+            continue
+        declared = out.get("path")
+        path = (
+            os.path.normpath(
+                os.path.join(os.path.dirname(pointer_path), declared)
+            )
+            if declared
+            else pointer_path[: -len(".dvc")]
+        )
+        outs.setdefault(path, out)
+    return outs
+
+
 def get_contents_from_repo(
     project: Project,
     repo: git.Repo,

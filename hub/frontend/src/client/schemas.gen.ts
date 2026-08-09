@@ -1083,6 +1083,28 @@ export const DeviceTokenRequestSchema = {
   title: "DeviceTokenRequest",
 } as const
 
+export const DiffSegmentSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["equal", "insert", "delete"],
+      title: "Kind",
+    },
+    text: {
+      type: "string",
+      title: "Text",
+    },
+    elided: {
+      type: "boolean",
+      title: "Elided",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["kind", "text"],
+  title: "DiffSegment",
+} as const
+
 export const DiscountCodeSchema = {
   properties: {
     id: {
@@ -7667,6 +7689,42 @@ export const SubscriptionUpdateSchema = {
   type: "object",
   required: ["plan_name", "period"],
   title: "SubscriptionUpdate",
+} as const
+
+export const TextDiffSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    base_ref: {
+      type: "string",
+      title: "Base Ref",
+    },
+    head_ref: {
+      type: "string",
+      title: "Head Ref",
+    },
+    identical: {
+      type: "boolean",
+      title: "Identical",
+    },
+    segments: {
+      items: {
+        $ref: "#/components/schemas/DiffSegment",
+      },
+      type: "array",
+      title: "Segments",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "base_ref", "head_ref", "identical", "segments"],
+  title: "TextDiff",
 } as const
 
 export const TokenSchema = {

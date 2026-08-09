@@ -38,6 +38,7 @@ interface Viewable {
 const PANEL_ID = "calkit-github-panel";
 const OVERLAY_ID = "calkit-github-overlay";
 const SIDE_BY_SIDE = "Side by side";
+const TEXT_DIFF = "Text diff";
 const PR_CARD_ID = "calkit-pr-card";
 const LAUNCHER_ID = "calkit-github-launcher";
 const ARTIFACT_ROW_ATTR = "data-calkit-artifact";
@@ -616,6 +617,7 @@ async function renderPullRequest(
       }),
     );
   }
+  const diffRefs = { base: refs.base_sha, head: refs.head_sha };
   for (const { item, before } of changed) {
     const versions = [
       { label: refs.head_ref, item },
@@ -639,7 +641,8 @@ async function renderPullRequest(
           title: item.url
             ? undefined
             : "This version hasn't been pushed to storage yet",
-          onClick: () => openOverlay(project, hubUrl, versions),
+          onClick: () =>
+            openOverlay(project, hubUrl, versions, { refs: diffRefs }),
         }),
       ]),
     );
@@ -686,6 +689,7 @@ function injectPullRequestCard(
   if (!anchor) {
     return false;
   }
+  const diffRefs = { base: refs.base_sha, head: refs.head_sha };
   const host = el("div", { attrs: { id: PR_CARD_ID } });
   host.style.margin = "16px 0";
   const root = host.attachShadow({ mode: "open" });
@@ -715,7 +719,8 @@ function injectPullRequestCard(
           title: item.url
             ? undefined
             : "This version hasn't been pushed to storage yet",
-          onClick: () => openOverlay(project, hubUrl, versions),
+          onClick: () =>
+            openOverlay(project, hubUrl, versions, { refs: diffRefs }),
         }),
         before
           ? el("button", {
@@ -723,7 +728,10 @@ function injectPullRequestCard(
               text: "Compare",
               disabled: !item.url || !before.url,
               onClick: () =>
-                openOverlay(project, hubUrl, versions, { sideBySide: true }),
+                openOverlay(project, hubUrl, versions, {
+                  sideBySide: true,
+                  refs: diffRefs,
+                }),
             })
           : null,
       ]),
@@ -750,8 +758,13 @@ function openOverlay(
   project: ProjectPublic,
   hubUrl: string,
   versions: { label: string; item: Viewable }[],
-  options: { sideBySide?: boolean } = {},
+  options: {
+    sideBySide?: boolean;
+    /** The refs being compared, which the text diff is asked for by. */
+    refs?: { base: string; head: string };
+  } = {},
 ): void {
+  const refs = options.refs ?? null;
   const first = versions[0];
   const overlay = mountOverlay({ id: OVERLAY_ID, title: first.item.name });
   const pane = (
@@ -777,6 +790,10 @@ function openOverlay(
         String(button.dataset.mode === label),
       );
     }
+    if (label === TEXT_DIFF) {
+      showTextDiff();
+      return;
+    }
     // Side by side is how you see what actually changed; one at a time is
     // how you read it, since half a page of PDF is no use
     const showing =
@@ -797,9 +814,67 @@ function openOverlay(
     download.href = current.item.url ?? "";
     tab.href = overlayViewerUrl(project, current.item, hubUrl);
   };
+  // Side by side shows where things moved; the words are what a reviewer
+  // is usually asking about, and the browser can't read them out of a PDF
+  const comparable =
+    versions.length > 1 && /\.pdf$/i.test(first.item.path) && refs !== null;
+  const showTextDiff = async () => {
+    clear(details);
+    download.href = versions[0].item.url ?? "";
+    const pane = el("div", { class: "diff" });
+    clear(overlay.viewport).append(pane);
+    pane.append(loading("Reading both documents"));
+    let result;
+    try {
+      result = await send({
+        type: "project.textDiff",
+        owner: project.owner_account_name,
+        project: project.name,
+        path: first.item.path,
+        base: refs!.base,
+        head: refs!.head,
+        hubUrl,
+      });
+    } catch (e) {
+      clear(pane).append(
+        errorMessage(e instanceof Error ? e.message : String(e)),
+      );
+      return;
+    }
+    clear(pane);
+    if (result.identical) {
+      pane.append(
+        el("div", {
+          class: "dim small",
+          text:
+            "The words are the same in both versions. Whatever changed is " +
+            "in the layout, the figures, or the numbers inside them.",
+        }),
+      );
+      return;
+    }
+    if (result.truncated) {
+      pane.append(
+        el("div", {
+          class: "dim small",
+          text: "Long document: only the first pages were compared.",
+        }),
+      );
+    }
+    for (const segment of result.segments) {
+      if (segment.elided) {
+        pane.append(el("span", { class: "elided" }));
+        continue;
+      }
+      pane.append(
+        el("span", { class: segment.kind, text: `${segment.text} ` }),
+      );
+    }
+  };
   const modes = [
     ...versions.map((version) => version.label),
     ...(versions.length > 1 ? [SIDE_BY_SIDE] : []),
+    ...(comparable ? [TEXT_DIFF] : []),
   ];
   const buttons = modes.map((mode) => {
     const button = el("button", {

@@ -18,6 +18,7 @@ import type {
   CalkitYamlInfo,
   ContentsItem,
   DvcOutput,
+  TextDiff,
   Figure,
   GithubRepo,
   OverleafLinkPublic,
@@ -198,6 +199,18 @@ async function handle(message: Request): Promise<unknown> {
       return request<DvcOutput[]>(
         `${projectPath(message.owner, message.project)}/dvc-outputs`,
         { query: { ref: message.ref }, hub: hubFor(message) },
+      );
+    case "project.textDiff":
+      return request<TextDiff>(
+        `${projectPath(message.owner, message.project)}/dvc-outputs/text-diff`,
+        {
+          query: {
+            path: message.path,
+            base: message.base,
+            head: message.head,
+          },
+          hub: hubFor(message),
+        },
       );
     case "project.figures":
       return request<Figure[]>(

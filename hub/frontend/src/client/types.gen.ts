@@ -632,6 +632,24 @@ export type DeviceTokenRequest = {
 }
 
 /**
+ * DiffSegment
+ */
+export type DiffSegment = {
+  /**
+   * Kind
+   */
+  kind: "equal" | "insert" | "delete"
+  /**
+   * Text
+   */
+  text: string
+  /**
+   * Elided
+   */
+  elided?: boolean
+}
+
+/**
  * DiscountCode
  */
 export type DiscountCode = {
@@ -4369,6 +4387,36 @@ export type SubscriptionUpdate = {
 }
 
 /**
+ * TextDiff
+ */
+export type TextDiff = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Base Ref
+   */
+  base_ref: string
+  /**
+   * Head Ref
+   */
+  head_ref: string
+  /**
+   * Identical
+   */
+  identical: boolean
+  /**
+   * Segments
+   */
+  segments: Array<DiffSegment>
+  /**
+   * Truncated
+   */
+  truncated?: boolean
+}
+
+/**
  * Token
  */
 export type Token = {
@@ -7632,6 +7680,59 @@ export type GetProjectDvcOutputsResponses = {
 
 export type GetProjectDvcOutputsResponse =
   GetProjectDvcOutputsResponses[keyof GetProjectDvcOutputsResponses]
+
+export type GetProjectDvcOutputTextDiffData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Base
+     */
+    base: string
+    /**
+     * Head
+     */
+    head: string
+    /**
+     * Ttl
+     */
+    ttl?: number | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dvc-outputs/text-diff"
+}
+
+export type GetProjectDvcOutputTextDiffErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDvcOutputTextDiffError =
+  GetProjectDvcOutputTextDiffErrors[keyof GetProjectDvcOutputTextDiffErrors]
+
+export type GetProjectDvcOutputTextDiffResponses = {
+  /**
+   * Successful Response
+   */
+  200: TextDiff
+}
+
+export type GetProjectDvcOutputTextDiffResponse =
+  GetProjectDvcOutputTextDiffResponses[keyof GetProjectDvcOutputTextDiffResponses]
 
 export type GetProjectContentPathsData = {
   body?: never

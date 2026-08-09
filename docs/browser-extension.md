@@ -136,6 +136,17 @@ with the version on the base branch.
 The same list is in the panel, in case GitHub's markup moves out from under
 the card.
 
+A PDF also offers a **text diff**, which reads the words out of both versions
+on the hub and compares them.
+Side by side answers "did the figures move"; the text diff answers "did the
+wording change", which is otherwise invisible when the source isn't in the
+repo or the numbers come from data.
+Extraction is lossy by nature -- a PDF stores glyphs at positions, not
+sentences -- so ligatures, hyphenation, and layout spacing are normalized
+away first, and text that reflowed around a real edit can still show up as
+changed.
+A scanned PDF has no text to read, and figures aren't compared this way.
+
 ## Reference management
 
 On a journal, publisher, or preprint page, the extension reads the page's

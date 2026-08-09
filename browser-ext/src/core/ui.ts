@@ -286,6 +286,36 @@ label { display: block; font-size: 11px; font-weight: 600; margin: 6px 0 2px; }
   width: 100%;
   background: var(--ck-bg);
 }
+.diff {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--ck-bg);
+  color: var(--ck-fg);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.diff .equal { color: var(--ck-dim); }
+.diff .insert {
+  background: rgba(72, 187, 120, 0.22);
+  color: var(--ck-fg);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.diff .delete {
+  background: rgba(229, 62, 62, 0.2);
+  color: var(--ck-fg);
+  border-radius: 3px;
+  padding: 0 2px;
+  text-decoration: line-through;
+}
+.diff .elided {
+  display: block;
+  margin: 10px 0;
+  border-top: 1px dashed var(--ck-border);
+}
 button.chip {
   background: var(--ck-bg);
   color: var(--ck-fg);

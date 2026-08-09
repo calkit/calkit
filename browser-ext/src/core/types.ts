@@ -101,6 +101,23 @@ export interface ContentsItemBase {
   stage?: string | null;
 }
 
+export interface TextDiffSegment {
+  kind: "equal" | "insert" | "delete";
+  text: string;
+  /** An equal segment standing in for text that was left out. */
+  elided: boolean;
+}
+
+/** A word-level comparison of one PDF's text at two refs. */
+export interface TextDiff {
+  path: string;
+  base_ref: string;
+  head_ref: string;
+  identical: boolean;
+  segments: TextDiffSegment[];
+  truncated: boolean;
+}
+
 /** A DVC-tracked output as it stands at one Git ref. */
 export interface DvcOutput {
   path: string;

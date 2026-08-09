@@ -5,6 +5,7 @@ import type {
   CalkitYamlInfo,
   ContentsItem,
   DvcOutput,
+  TextDiff,
   Figure,
   GithubRepo,
   OverleafLinkPublic,
@@ -91,6 +92,14 @@ export type Request =
       /** Git ref to read at; the artifact URLs are that ref's versions. */
       ref?: string;
     } & HubScoped)
+  | ({
+      type: "project.textDiff";
+      owner: string;
+      project: string;
+      path: string;
+      base: string;
+      head: string;
+    } & HubScoped)
   | { type: "project.figures"; owner: string; project: string }
   | { type: "content.imageDataUrl"; url: string }
   | { type: "content.dataUrl"; url: string }
@@ -167,6 +176,7 @@ export interface ResponseMap {
   "github.pullRequest": PullRequestRefs;
   "project.contents": ContentsItem;
   "project.dvcOutputs": DvcOutput[];
+  "project.textDiff": TextDiff;
   "project.figures": Figure[];
   "content.imageDataUrl": string;
   "content.dataUrl": string;

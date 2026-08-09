@@ -42,7 +42,16 @@ from TexSoup import TexSoup
 
 import app.projects
 import calkit
-from app import arxiv, github, messaging, mixpanel, orgs, users, zotero
+from app import (
+    arxiv,
+    github,
+    messaging,
+    mixpanel,
+    orgs,
+    pdftext,
+    users,
+    zotero,
+)
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -1349,43 +1358,10 @@ def get_project_dvc_outputs(
         ref=ref,
     )
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
-    ck_info_and_outs = app.projects.get_ck_info_and_dvc_outs_from_tree(
+    outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    zip_path_map = app.projects.get_ck_info_and_dvc_outs_from_tree(
         project=project, tree=tree
-    )
-    outs: dict[str, dict] = dict(ck_info_and_outs.dvc_lock_outs)
-
-    # Files tracked with `dvc add` have no dvc.lock entry, only a pointer
-    # file next to them, so the tree is walked for those as well
-    def walk(dirname: str) -> list[str]:
-        found = []
-        for name in tree.listdir(dirname or None):
-            path = os.path.join(dirname, name) if dirname else name
-            if path in [".git", ".dvc"]:
-                continue
-            if tree.is_dir(path):
-                found += walk(path)
-            elif path.endswith(".dvc"):
-                found.append(path)
-        return found
-
-    for pointer_path in walk(""):
-        try:
-            data = yaml.safe_load(tree.read_text(pointer_path))
-            out = (data.get("outs") or [{}])[0]
-        except Exception as e:
-            logger.warning(f"Failed to read DVC pointer {pointer_path}: {e}")
-            continue
-        if not isinstance(out, dict) or not out.get("md5"):
-            continue
-        declared = out.get("path")
-        path = (
-            os.path.normpath(
-                os.path.join(os.path.dirname(pointer_path), declared)
-            )
-            if declared
-            else pointer_path[: -len(".dvc")]
-        )
-        outs.setdefault(path, out)
+    ).zip_path_map
     fs = get_object_fs()
     resp = []
     for path, out in sorted(outs.items()):
@@ -1410,15 +1386,89 @@ def get_project_dvc_outputs(
                 type="dir" if is_dir else "file",
                 size=out.get("size"),
                 md5=md5 or None,
-                storage=(
-                    "dvc-zip"
-                    if path in ck_info_and_outs.zip_path_map
-                    else "dvc"
-                ),
+                storage="dvc-zip" if path in zip_path_map else "dvc",
                 url=url,
             )
         )
     return resp
+
+
+@router.get("/projects/{owner_name}/{project_name}/dvc-outputs/text-diff")
+def get_project_dvc_output_text_diff(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUserOptional,
+    path: str,
+    base: str,
+    head: str,
+    ttl: int | None = DEFAULT_REPO_TTL,
+) -> pdftext.TextDiff:
+    """Compare the words in a PDF output at two refs.
+
+    Looking at two builds of a paper side by side answers "did the
+    figures move" well and "did the wording change" badly. This reads the
+    text out of both and diffs it, which the browser can't do without
+    shipping a PDF parser.
+    """
+    if not path.lower().endswith(".pdf"):
+        raise HTTPException(422, "Only PDFs can be compared as text")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    fs = get_object_fs()
+
+    def read(ref: str) -> tuple[str, bool]:
+        repo = get_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            ttl=ttl,
+            ref=ref,
+        )
+        tree = app.projects.get_repo_tree_for_ref(repo, ref)
+        outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+        out = outs.get(path)
+        if out is None or not out.get("md5"):
+            raise HTTPException(404, f"'{path}' is not DVC-tracked at {ref}")
+        size = out.get("size")
+        if size is not None and size > pdftext.MAX_PDF_BYTES:
+            raise HTTPException(413, f"'{path}' is too large to compare")
+        fpath = get_data_fpath_for_md5(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            md5=out["md5"],
+            fs=fs,
+        )
+        if fpath is None:
+            raise HTTPException(
+                404, f"'{path}' has not been pushed to storage at {ref}"
+            )
+        with fs.open(fpath, "rb") as f:
+            data = f.read(pdftext.MAX_PDF_BYTES + 1)
+        if len(data) > pdftext.MAX_PDF_BYTES:
+            raise HTTPException(413, f"'{path}' is too large to compare")
+        try:
+            return pdftext.extract_text(data)
+        except Exception as e:
+            logger.warning(f"Failed to read text from {path} at {ref}: {e}")
+            raise HTTPException(422, f"Could not read the text of '{path}'")
+
+    base_text, base_truncated = read(base)
+    head_text, head_truncated = read(head)
+    diff = pdftext.diff(
+        base=base_text,
+        head=head_text,
+        path=path,
+        base_ref=base,
+        head_ref=head,
+    )
+    diff.truncated = base_truncated or head_truncated
+    return diff
 
 
 @router.get("/projects/{owner_name}/{project_name}/contents-paths")

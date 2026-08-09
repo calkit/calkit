@@ -113,6 +113,8 @@ import type {
   GetProjectDvcFileResponses,
   GetProjectDvcOutputsErrors,
   GetProjectDvcOutputsResponses,
+  GetProjectDvcOutputTextDiffErrors,
+  GetProjectDvcOutputTextDiffResponses,
   GetProjectEnvironmentsErrors,
   GetProjectEnvironmentsResponses,
   GetProjectErrors,
@@ -2980,6 +2982,61 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/dvc-outputs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Dvc Output Text Diff
+   *
+   * Compare the words in a PDF output at two refs.
+   *
+   * Looking at two builds of a paper side by side answers "did the
+   * figures move" well and "did the wording change" badly. This reads the
+   * text out of both and diffs it, which the browser can't do without
+   * shipping a PDF parser.
+   */
+  public static getProjectDvcOutputTextDiff<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      base: string
+      head: string
+      ttl?: number | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDvcOutputTextDiffResponses,
+    GetProjectDvcOutputTextDiffErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "base" },
+            { in: "query", key: "head" },
+            { in: "query", key: "ttl" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDvcOutputTextDiffResponses,
+      GetProjectDvcOutputTextDiffErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dvc-outputs/text-diff",
       ...options,
       ...params,
     })

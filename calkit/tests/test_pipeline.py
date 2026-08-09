@@ -2432,3 +2432,42 @@ def test_to_dvc_latex_diff_stages():
     }
     with pytest.raises(ValueError, match="already exists"):
         calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+
+
+def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
+    # A resolver is bound to one repo. Caching it on wdir looked harmless
+    # until you notice wdir is usually None, which made every project in a
+    # process share whichever repo was compiled first.
+    import calkit.pipeline
+
+    shas = {}
+    for name in ["one", "two"]:
+        path = os.path.join(tmp_dir, name)
+        os.makedirs(path)
+        subprocess.check_call(["git", "init", "-q", "-b", "main", path])
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(name)
+        subprocess.check_call(["git", "-C", path, "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                path,
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                name,
+            ]
+        )
+        cwd = os.getcwd()
+        os.chdir(path)
+        try:
+            resolve = calkit.pipeline._ref_resolver(None)
+            assert resolve is not None
+            shas[name] = resolve("HEAD")
+        finally:
+            os.chdir(cwd)
+    assert shas["one"] != shas["two"]

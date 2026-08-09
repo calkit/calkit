@@ -1,6 +1,5 @@
 """Pipeline-related functionality."""
 
-import functools
 import itertools
 import os
 import re
@@ -1214,7 +1213,6 @@ def _write_managed_gitignore_block(
     return True
 
 
-@functools.cache
 def _ref_resolver(wdir: str | None) -> Callable[[str], str] | None:
     """Return something that turns a Git revision into its commit hash.
 
@@ -1424,6 +1422,10 @@ def to_dvc(
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
+    # Made once for this compilation rather than per stage, and never
+    # cached across calls: a resolver is bound to one repo, and the same
+    # process can compile pipelines in several
+    ref_resolver = _ref_resolver(wdir)
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
         # parameters if any reference project-level parameters
@@ -1518,7 +1520,7 @@ def to_dvc(
         # A Calkit stage can compile into more than one DVC stage when the
         # work has genuinely different inputs
         for extra_name, extra_stage in stage.extra_dvc_stages(
-            resolve_ref=_ref_resolver(wdir)
+            resolve_ref=ref_resolver
         ).items():
             # Raised rather than worked around with a suffix: a generated
             # name is addressable (calkit run <name>) and is the stage's

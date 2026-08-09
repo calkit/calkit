@@ -17,6 +17,7 @@ import type {
 import {
   clear,
   el,
+  fileIcon,
   STYLES,
   launcherPosition,
   errorMessage,
@@ -318,6 +319,14 @@ function injectArtifactRows(
     // other chrome that means nothing for a file Git never saw
     const nameLink = links[0];
     nameLink.textContent = item.name;
+    // The cloned row's icon belongs to whatever it was cloned from, which
+    // is a directory as often as not. Replacing it keeps this row's text
+    // on the same line as every other row's.
+    const nameCell = nameLink.closest("td") ?? nameLink.parentElement;
+    for (const icon of nameCell?.querySelectorAll("svg") ?? []) {
+      icon.remove();
+    }
+    nameLink.before(fileIcon());
     // A real href means middle-click and copy-link do something sensible,
     // and it goes where the file actually lives
     nameLink.href = filesUrl(project, item.path, hubUrl);

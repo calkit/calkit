@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { el, launcherPosition, STYLES } from "./ui";
+import { el, fileIcon, launcherPosition, STYLES } from "./ui";
 
 describe("el", () => {
   test("sets value on every element that carries one", () => {
@@ -106,5 +106,20 @@ describe("STYLES", () => {
     expect(block).toContain("font-family:");
     // A button doesn't inherit type on its own
     expect(STYLES).toContain("button { font-family: inherit");
+  });
+});
+
+describe("fileIcon", () => {
+  test("is an SVG that can sit beside a filename", () => {
+    const icon = fileIcon();
+    // createElement would make an unknown HTML element that renders as
+    // nothing; an SVG has to be created in its own namespace
+    expect(icon.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(icon.getAttribute("viewBox")).toBe("0 0 16 16");
+    expect(icon.getAttribute("width")).toBe("16");
+    // Decorative: the filename beside it already says what this is
+    expect(icon.getAttribute("aria-hidden")).toBe("true");
+    expect(icon.querySelector("path")).not.toBeNull();
+    expect(icon.style.marginRight).toBe("8px");
   });
 });

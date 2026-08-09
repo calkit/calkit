@@ -158,9 +158,29 @@ function EvidenceItem({
           <Box height="90px" overflow="hidden" pointerEvents="none">
             {thumb}
           </Box>
-          <Text fontSize="xs" noOfLines={1} px={2} py={1}>
-            {fig?.title ?? evidence.path}
-          </Text>
+          {fig?.title ? (
+            <Box
+              fontSize="xs"
+              px={2}
+              py={1}
+              sx={{
+                "& p": {
+                  my: 0,
+                  display: "-webkit-box",
+                  WebkitBoxOrient: "vertical",
+                  WebkitLineClamp: 1,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                },
+              }}
+            >
+              <Markdown>{fig.title}</Markdown>
+            </Box>
+          ) : (
+            <Text fontSize="xs" noOfLines={1} px={2} py={1}>
+              {evidence.path}
+            </Text>
+          )}
         </Box>
       </Link>
     )

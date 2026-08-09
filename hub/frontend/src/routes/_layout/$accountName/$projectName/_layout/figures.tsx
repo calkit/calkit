@@ -26,6 +26,7 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
+import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
@@ -148,9 +149,23 @@ function FigureThumbnail({
       </Box>
       <Box p={3}>
         <Flex align="center" justify="space-between" gap={1}>
-          <Text fontWeight="semibold" fontSize="sm" noOfLines={1} flex={1}>
-            {figure.title}
-          </Text>
+          <Box
+            fontWeight="semibold"
+            fontSize="sm"
+            flex={1}
+            sx={{
+              "& p": {
+                my: 0,
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              },
+            }}
+          >
+            <Markdown>{figure.title}</Markdown>
+          </Box>
           {(figure.comment_count ?? 0) > 0 && (
             <Flex align="center" gap={1} color="gray.500" flexShrink={0}>
               <Icon as={FaComment} fontSize="xs" />

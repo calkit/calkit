@@ -416,6 +416,13 @@ class ProjectInfo(BaseModel):
 
     Attributes
     ----------
+    hub : str
+        The base URL of the hub on which the project is shared, backed up,
+        and collaborated on, e.g., ``https://calkit.io``. A full URL with
+        scheme, since instances can differ in scheme and port. Each project
+        belongs to at most one hub, which makes ``ck://`` paths resolvable
+        against a known instance. Projects with no ``hub`` set are assumed
+        to belong to ``https://calkit.io``.
     parent : str
         The project's parent project, if applicable. This should be set if
         the project was created as a copy of another. This is similar to the
@@ -434,6 +441,7 @@ class ProjectInfo(BaseModel):
     owner: str | None = None
     description: str | None = None
     name: str | None = None
+    hub: str | None = None
     git_repo_url: str | None = None
     derived_from: DerivedFromProject | None = None
     questions: list[str | Question] = []

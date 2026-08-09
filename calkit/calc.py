@@ -230,7 +230,7 @@ class XGBoostModel(Calculation):
         import xgboost
 
         # Convert model path to something that can be loaded if running on the
-        # Calkit Cloud
+        # Calkit hub
         types = {
             "classifier": xgboost.XGBClassifier,
             "regressor": xgboost.XGBRegressor,

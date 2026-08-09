@@ -4,7 +4,7 @@ Calkit projects can help simplify working on high performance computing (HPC)
 clusters and their job schedulers.
 In general, what you'll want to do is clone the project there,
 run your pipeline (perhaps only certain stages), commit the results,
-then push them up to the cloud.
+then push them up to the hub.
 
 This is different from a more ad hoc workflow where you might copy a few
 files to the cluster, run some jobs, then copy the results back manually.
@@ -59,7 +59,7 @@ pipeline:
         - config/simulation.txt
       outputs:
         - path: results/raw
-          storage: null # If the results are too large to push to the cloud
+          storage: null # If the results are too large to push to the hub
 ```
 
 It's also possible to use a nested environment, e.g., if you want to run

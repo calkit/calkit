@@ -276,20 +276,20 @@ def test_execute_operation_retries_transient_5xx():
         assert resp.status_code == 200
 
 
-def _calkit_cloud_available(
+def _calkit_hub_available(
     env: Literal["local", "staging", "production"] = "local",
 ) -> bool:
-    """Check if Calkit Cloud is available."""
+    """Check if the Calkit hub is available."""
     with patch.dict(os.environ, {"CALKIT_ENV": env}):
         try:
-            calkit.cloud.get_current_user()
+            calkit.hub.get_current_user()
             return True
         except Exception:
             return False
 
 
 @pytest.mark.skipif(
-    not _calkit_cloud_available(), reason="Calkit Cloud not available"
+    not _calkit_hub_available(), reason="Calkit hub not available"
 )
 def test_calkitfilesystem():
     """Test basic CalkitFileSystem functionality."""
@@ -310,7 +310,7 @@ def test_calkitfilesystem():
 
 
 @pytest.mark.skipif(
-    not _calkit_cloud_available("staging"), reason="Calkit Cloud not available"
+    not _calkit_hub_available("staging"), reason="Calkit hub not available"
 )
 def test_calkitfilesystem_staging(monkeypatch):
     """Test CalkitFileSystem with staging environment."""
@@ -333,7 +333,7 @@ def test_calkitfilesystem_staging(monkeypatch):
 
 
 @pytest.mark.skipif(
-    not _calkit_cloud_available(), reason="Calkit Cloud not available"
+    not _calkit_hub_available(), reason="Calkit hub not available"
 )
 def test_calkitfilesystem_dvc(tmp_dir):
     """Test CalkitFileSystem as a DVC remote."""
@@ -360,7 +360,7 @@ def test_calkitfilesystem_dvc(tmp_dir):
 
 
 @pytest.mark.skipif(
-    not _calkit_cloud_available("staging"), reason="Calkit Cloud not available"
+    not _calkit_hub_available("staging"), reason="Calkit hub not available"
 )
 def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     """Test CalkitFileSystem as a DVC remote against the staging

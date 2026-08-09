@@ -1,25 +1,52 @@
+# Python linting/formatting runs the uv-managed ruff over the whole repo
+# with the root pyproject config, so the version and rules can't drift
+# between packages. The hub frontend is formatted by its own pinned Biome
+# to match hub/frontend/biome.json exactly.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v4.4.0"
     hooks:
+      - id: check-added-large-files
       - id: check-case-conflict
       - id: check-merge-conflict
         exclude: ^docs/overleaf\.md$
+      - id: check-toml
       - id: end-of-file-fixer
+        exclude: ^hub/frontend/src/client/
       - id: trailing-whitespace
+        exclude: ^hub/frontend/src/client/
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
+        # The hub has JSONC files (tsconfig.json, .vscode/launch.json)
+        exclude: ^hub/
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.6.3"
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--exit-non-zero-on-fix]
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: bash -c 'uv run ruff check --fix --exit-non-zero-on-fix .'
+        pass_filenames: false
+        files: \.pyi?$
       - id: ruff-format
+        name: ruff format
+        language: system
+        entry: bash -c 'uv run ruff format .'
+        pass_filenames: false
+        files: \.pyi?$
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
     hooks:
       - id: prettier
-        exclude: calkit
+        exclude: calkit|^hub/
+
+  - repo: local
+    hooks:
+      - id: biome-format-hub-frontend
+        name: biome format (hub frontend)
+        language: system
+        entry: bash -c 'cd hub/frontend && npx biome format --write ./src'
+        pass_filenames: false
+        files: ^hub/frontend/src/.*\.(jsx?|tsx?|jsonc?|css)$

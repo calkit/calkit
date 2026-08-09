@@ -217,6 +217,52 @@ def test_new_publication(tmp_dir):
     assert stage["environment"] == "my-latex-env"
     assert stage["target_path"] == "my-paper/paper.tex"
     assert stage["outputs"] == ["my-paper/paper.pdf"]
+    # A duplicate path fails cleanly rather than partially applying
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "Again",
+            "--stage",
+            "build-latex-article",
+            "--environment",
+            "my-latex-env",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    # The description is optional and stays out of calkit.yaml when absent
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper-2",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "No description",
+            "--stage",
+            "build-latex-article-2",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pub2 = ck_info["publications"][1]
+    assert pub2["path"] == "my-paper-2/paper.pdf"
+    assert "description" not in pub2
 
 
 def test_new_uv_env(tmp_dir):
@@ -383,11 +429,11 @@ def test_new_project_existing_files(tmp_dir):
 
 def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     # Respond to unexpected requests with a 404 instead of the default 500,
-    # since the cloud client retries 5xx responses with exponential backoff,
+    # since the hub client retries 5xx responses with exponential backoff,
     # which would make a missing expectation take minutes to fail
     httpserver.no_handler_status_code = 404
     monkeypatch.setenv(
-        "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
+        "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
     )
     monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
     project_resp = {
@@ -444,7 +490,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     repo = git.Repo()
     assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
     assert not repo.is_dirty(untracked_files=True)
-    # Test 403: remote owner is an org not in Calkit Cloud; error should
+    # Test 403: remote owner is an org not in Calkit hub; error should
     # surface the detected org name and a helpful hint
     httpserver.expect_ordered_request(
         "/projects", method="POST"
@@ -475,12 +521,12 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     )
     assert result.returncode != 0
     assert "some-org" in result.stderr
-    assert "organization exists in Calkit Cloud" in result.stderr
+    assert "organization exists on the hub" in result.stderr
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"
     ).respond_with_json(project_resp)
-    # Configuring the DVC remote looks up the project in the cloud, since
+    # Configuring the DVC remote looks up the project on the hub, since
     # there's no remote named 'origin' from which to detect the Git repo URL
     httpserver.expect_ordered_request(
         "/projects/test-user/my-project", method="GET"

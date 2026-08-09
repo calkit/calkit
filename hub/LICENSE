@@ -1,0 +1,40 @@
+The MIT License (MIT)
+
+Copyright (c) 2019 Sebastián Ramírez, creator of the Full Stack FastAPI
+template.
+
+Copyright (c) 2024 Peter Bachant and the Calkit development team.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Exception — bundled in-browser LaTeX engine.
+
+The above MIT license covers all of this project EXCEPT the vendored LaTeX
+engine binaries under `frontend/public/tex/` (busytex.{js,wasm} and the
+git-ignored TeX Live `*.data` bundles fetched at build time). Those are governed
+by their own licenses — busytex glue and Calkit's patches are MIT, but the
+compiled engine links pdfTeX/LuaTeX (GPL-2.0-or-later) and kpathsea
+(LGPL-2.1-or-later), so the binary is distributed under the GNU GPL v2 (or
+later). See `frontend/public/tex/LICENSE-busytex` for the full breakdown and
+corresponding-source pointers. The application interacts with this engine only
+across a Web Worker / message-passing boundary (the engine is a runtime-loaded
+static asset, not linked into the app bundle), so it remains a separate work and
+this exception does not affect the MIT licensing of the rest of the project.

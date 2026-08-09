@@ -2,3 +2,5 @@ node_modules/
 dist/
 zip/
 *.zip
+# Generated from docs/img/browser-ext by scripts/store-screenshots.py
+store/screenshots/

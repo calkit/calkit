@@ -12,23 +12,16 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 import { useNavigate } from "@tanstack/react-router"
-import { Suspense, lazy } from "react"
 import { FaCodeBranch } from "react-icons/fa"
 import { SiJupyter } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
-const IpynbRenderer = lazy(() =>
-  import("react-ipynb-renderer").then(async (m) => {
-    await import("react-ipynb-renderer/dist/styles/monokai.css")
-    return { default: m.IpynbRenderer }
-  }),
-)
-
 import { type Notebook, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
+import NotebookView from "../../../../../components/Notebooks/NotebookView"
 
 const notebookSearchSchema = z.object({
   ref: z.string().optional(),
@@ -44,68 +37,6 @@ export const Route = createFileRoute(
   component: Notebooks,
   validateSearch: (search) => notebookSearchSchema.parse(search),
 })
-
-function NotebookView({ notebook }: { notebook: Notebook }) {
-  if (notebook.output_format === "notebook" && notebook.content) {
-    try {
-      const json = JSON.parse(atob(notebook.content))
-      return (
-        <Box
-          overflowY="auto"
-          overflowX="hidden"
-          borderRadius="lg"
-          sx={{
-            ".ipynb-renderer-root": { borderRadius: "var(--chakra-radii-lg)" },
-            ".ipynb-renderer-root #notebook-container": {
-              width: "100%",
-              marginLeft: 0,
-              marginRight: 0,
-            },
-            ".ipynb-renderer-root pre, .ipynb-renderer-root .CodeMirror": {
-              fontSize: "13px !important",
-              lineHeight: "1.5 !important",
-            },
-          }}
-        >
-          <Suspense fallback={<LoadingSpinner />}>
-            <IpynbRenderer ipynb={json} syntaxTheme="atomDark" />
-          </Suspense>
-        </Box>
-      )
-    } catch {
-      // fall through to other renderers
-    }
-  }
-  if (notebook.output_format === "html" && notebook.content) {
-    return (
-      <embed
-        height="100%"
-        width="100%"
-        type="text/html"
-        src={`data:text/html;base64,${notebook.content}`}
-      />
-    )
-  }
-  if (notebook.url) {
-    return (
-      <iframe
-        height="100%"
-        width="100%"
-        title="notebook"
-        src={notebook.url}
-        style={{ border: "none" }}
-      />
-    )
-  }
-  return (
-    <Flex align="center" justify="center" height="300px" color="gray.500">
-      <Text>
-        No rendered output found. Run the notebook and commit the HTML output to
-        view it here.
-      </Text>
-    </Flex>
-  )
-}
 
 function NotebookInfo({
   notebook,

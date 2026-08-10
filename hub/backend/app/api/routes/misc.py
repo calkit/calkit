@@ -14,7 +14,7 @@ from sqlalchemy.exc import DataError
 from sqlmodel import and_, or_, select
 from starlette.requests import Request
 
-from app import arxiv
+from app import arxiv, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -42,6 +42,21 @@ from app.subscriptions import SubscriptionPlan, get_plans
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class HubVersion(BaseModel):
+    version: str
+
+
+@router.get("/version")
+def get_hub_version() -> HubVersion:
+    """Return the version of the hub serving this request.
+
+    Deliberately unauthenticated: the frontend shows it before anyone signs
+    in, and a client deciding whether it's talking to a hub new enough for
+    a given feature shouldn't have to authenticate to find out.
+    """
+    return HubVersion(version=version.get_version())
 
 
 @router.post(

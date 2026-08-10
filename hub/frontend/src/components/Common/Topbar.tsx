@@ -17,6 +17,9 @@ import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { FaGithub, FaPlus } from "react-icons/fa"
 
+import { useQuery } from "@tanstack/react-query"
+
+import { MiscService } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import NewOrg from "../Orgs/NewOrg"
 import NewProject from "../Projects/NewProject"
@@ -29,6 +32,33 @@ interface Props {
 }
 
 const Links = ["Orgs", "Projects", "Datasets", "Learn"]
+
+/**
+ * Which hub this is, next to the repo it's built from.
+ *
+ * Self-hosted instances make "which Calkit is this" a real question, and
+ * the answer belongs where the project it comes from is already named.
+ * Nothing is shown until the hub answers, since a version that renders as
+ * a gap and then appears would shift the toolbar under the cursor.
+ */
+const HubVersion = () => {
+  const { data } = useQuery({
+    queryKey: ["hub-version"],
+    queryFn: () => MiscService.getHubVersion().then((res) => res.data),
+    // It cannot change without a deployment, which serves a new page
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  })
+  const version = data?.version
+  if (!version || version === "unknown") {
+    return null
+  }
+  return (
+    <Text fontSize="xs" color="gray.500" title="Hub version">
+      hub/v{version}
+    </Text>
+  )
+}
 
 const getPath = (link: React.ReactNode) => {
   const linkString = link?.toString()
@@ -158,13 +188,14 @@ export default function Topbar() {
               href="https://github.com/calkit/calkit"
               aria-label="View GitHub repo."
             >
-              <Flex alignItems={"center"} pt={0.5} pb={0.5}>
+              <Flex alignItems={"center"} pt={0.5} pb={0.5} mr={-0.5}>
                 <Icon fontSize="2xl" mr={1}>
                   <FaGithub />
                 </Icon>
                 <Text fontSize="xs">calkit/calkit</Text>
               </Flex>
             </Link>
+            <HubVersion />
             {user && <NotificationBell />}
             {user ? (
               <UserMenu />

@@ -2569,6 +2569,18 @@ export const HttpRequestAccessSchema = {
   title: "HttpRequestAccess",
 } as const
 
+export const HubVersionSchema = {
+  properties: {
+    version: {
+      type: "string",
+      title: "Version",
+    },
+  },
+  type: "object",
+  required: ["version"],
+  title: "HubVersion",
+} as const
+
 export const ImportInfoSchema = {
   properties: {
     project_owner: {

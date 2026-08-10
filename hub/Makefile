@@ -8,6 +8,12 @@ help: ## Show this help.
 # compose file, and keeping it out of .env keeps it out of containers
 DOCKER_COMPOSE_DEV=docker compose --profile objects -f docker-compose.yml -f docker-compose.override.yml
 
+# The backend reports this at /version. The image can't derive it: .git is
+# excluded from its build context, so it's resolved here, where the
+# repository is. Matched on the hub/v prefix because this monorepo also
+# tags the Python package as vX.Y.Z.
+export HUB_VERSION ?= $(shell git describe --tags --match 'hub/v*' --always 2>/dev/null)
+
 .PHONY: tex-engine
 tex-engine: ## Download the TeX Live bundles for the LaTeX editor (idempotent).
 	@bash frontend/scripts/download-tex-engine.sh

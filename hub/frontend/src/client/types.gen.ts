@@ -1508,6 +1508,16 @@ export type HttpRequestAccess = {
 }
 
 /**
+ * HubVersion
+ */
+export type HubVersion = {
+  /**
+   * Version
+   */
+  version: string
+}
+
+/**
  * ImportInfo
  */
 export type ImportInfo = {
@@ -6537,6 +6547,23 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
+export type GetHubVersionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/version"
+}
+
+export type GetHubVersionResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubVersion
+}
+
+export type GetHubVersionResponse =
+  GetHubVersionResponses[keyof GetHubVersionResponses]
+
 export type TestEmailData = {
   body?: never
   path?: never
@@ -8681,40 +8708,6 @@ export type GetProjectOverleafSyncStatusResponses = {
 
 export type GetProjectOverleafSyncStatusResponse =
   GetProjectOverleafSyncStatusResponses[keyof GetProjectOverleafSyncStatusResponses]
-
-export type GetOverleafLinksData = {
-  body?: never
-  path?: never
-  query: {
-    /**
-     * Overleaf Project Id
-     */
-    overleaf_project_id: string
-  }
-  url: "/overleaf-links"
-}
-
-export type GetOverleafLinksErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type GetOverleafLinksError =
-  GetOverleafLinksErrors[keyof GetOverleafLinksErrors]
-
-export type GetOverleafLinksResponses = {
-  /**
-   * Response Projects-Get Overleaf Links
-   *
-   * Successful Response
-   */
-  200: Array<OverleafLinkPublic>
-}
-
-export type GetOverleafLinksResponse =
-  GetOverleafLinksResponses[keyof GetOverleafLinksResponses]
 
 export type GetUserOverleafSyncData = {
   body?: never

@@ -77,3 +77,10 @@ def test_get_arxiv_pdf_when_there_is_no_pdf(
     assert resp.status_code == 404
     # Giving up before streaming has to close it too
     assert fake.closed == [True]
+
+
+def test_get_version_needs_no_auth(client: TestClient) -> None:
+    """Clients check what a hub supports before they have credentials."""
+    resp = client.get(f"{settings.API_V1_STR}/version")
+    assert resp.status_code == 200
+    assert resp.json()["version"]

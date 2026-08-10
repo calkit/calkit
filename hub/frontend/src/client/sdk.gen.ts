@@ -79,6 +79,7 @@ import type {
   GetDiscountCodeResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
+  GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
   GetOrgsErrors,
@@ -87,8 +88,6 @@ import type {
   GetOrgStorageResponses,
   GetOrgUsersErrors,
   GetOrgUsersResponses,
-  GetOverleafLinksErrors,
-  GetOverleafLinksResponses,
   GetOwnedProjectsErrors,
   GetOwnedProjectsResponses,
   GetProjectAppErrors,
@@ -1834,6 +1833,29 @@ export class UsersService {
 }
 
 export class MiscService {
+  /**
+   * Get Hub Version
+   *
+   * Return the version of the hub serving this request.
+   *
+   * Deliberately unauthenticated: the frontend shows it before anyone signs
+   * in, and a client deciding whether it's talking to a hub new enough for
+   * a given feature shouldn't have to authenticate to find out.
+   */
+  public static getHubVersion<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetHubVersionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetHubVersionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/version",
+      ...options,
+    })
+  }
+
   /**
    * Test Email
    *
@@ -4065,42 +4087,6 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/overleaf-syncs/status",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Get Overleaf Links
-   *
-   * Find the projects that sync a folder with an Overleaf project.
-   *
-   * Reads the index only. Prefer
-   * ``/user/overleaf-syncs/{overleaf_project_id}``, which falls back to
-   * looking through the user's projects when the index has nothing yet.
-   */
-  public static getOverleafLinks<ThrowOnError extends boolean = true>(
-    parameters: {
-      overleaf_project_id: string
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    GetOverleafLinksResponses,
-    GetOverleafLinksErrors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [{ args: [{ in: "query", key: "overleaf_project_id" }] }],
-    )
-    return (options?.client ?? client).get<
-      GetOverleafLinksResponses,
-      GetOverleafLinksErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/overleaf-links",
       ...options,
       ...params,
     })

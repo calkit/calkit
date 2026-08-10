@@ -1118,42 +1118,59 @@ def get_notebook_from_repo(
     """
     ck_info = get_ck_info_for_ref(project=project, repo=repo, ref=ref)
     notebooks = ck_info.get("notebooks", [])
-    for notebook in notebooks:
-        if notebook.get("path") == path:
-            item = get_contents_from_repo(
-                project=project,
-                repo=repo,
-                path=path,
-                ref=ref,
-            )
-            try:
-                # If the notebook has HTML output, return that
-                html_path = get_executed_notebook_path(
-                    notebook_path=path, to="html"
-                )
-                html_item = get_contents_from_repo(
-                    project=project,
-                    repo=repo,
-                    path=html_path,
-                    ref=ref,
-                )
-                item = html_item
+    notebook = None
+    for nb in notebooks:
+        if nb.get("path") == path:
+            notebook = nb
+            break
+    # Notebooks don't need to be declared in the ``notebooks`` list, e.g., one
+    # defined as a jupyter-notebook pipeline stage, so fall back to the path
+    # itself and let fetching its contents below decide whether it exists
+    if notebook is None:
+        notebook = {"path": path}
+    # Associate with a jupyter-notebook stage if one runs this notebook
+    if not notebook.get("stage"):
+        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+        for stage_name, stage in stages.items():
+            if (
+                isinstance(stage, dict)
+                and stage.get("kind") == "jupyter-notebook"
+                and stage.get("notebook_path") == path
+            ):
+                notebook["stage"] = stage_name
+                break
+    item = get_contents_from_repo(
+        project=project,
+        repo=repo,
+        path=path,
+        ref=ref,
+    )
+    try:
+        # If the notebook has HTML output, return that
+        html_path = get_executed_notebook_path(notebook_path=path, to="html")
+        html_item = get_contents_from_repo(
+            project=project,
+            repo=repo,
+            path=html_path,
+            ref=ref,
+        )
+        item = html_item
+        notebook["output_format"] = "html"
+    except HTTPException as e:
+        logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+    notebook["url"] = item.url
+    notebook["content"] = item.content
+    notebook["storage"] = item.storage
+    # Figure out the output format from the URL content disposition
+    if item.url is not None:
+        params = params_from_url(item.url)
+        rcd = params.get("response-content-disposition")
+        if rcd is not None:
+            if rcd[0].endswith(".ipynb"):
+                notebook["output_format"] = "notebook"
+            elif rcd[0].endswith(".html"):
                 notebook["output_format"] = "html"
-            except HTTPException as e:
-                logger.info(
-                    f"Notebook HTML does not exist at {html_path}: {e}"
-                )
-            notebook["url"] = item.url
-            notebook["content"] = item.content
-            notebook["storage"] = item.storage
-            # Figure out the output format from the URL content disposition
-            if item.url is not None:
-                params = params_from_url(item.url)
-                rcd = params.get("response-content-disposition")
-                if rcd is not None:
-                    if rcd[0].endswith(".ipynb"):
-                        notebook["output_format"] = "notebook"
-                    elif rcd[0].endswith(".html"):
-                        notebook["output_format"] = "html"
-            return Notebook.model_validate(notebook)
-    raise HTTPException(404, "Notebook not found")
+    # Default to the raw notebook if no HTML version was found
+    if not notebook.get("output_format") and item.content and not item.url:
+        notebook["output_format"] = "notebook"
+    return Notebook.model_validate(notebook)

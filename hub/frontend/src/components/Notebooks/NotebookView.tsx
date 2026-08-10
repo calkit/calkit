@@ -1,37 +1,83 @@
-import { Alert, AlertIcon } from "@chakra-ui/react"
+import { Box, Flex, Text } from "@chakra-ui/react"
+import { Suspense, lazy } from "react"
 
 import { type Notebook } from "../../client"
+import LoadingSpinner from "../Common/LoadingSpinner"
+
+const IpynbRenderer = lazy(() =>
+  import("react-ipynb-renderer").then(async (m) => {
+    await import("react-ipynb-renderer/dist/styles/monokai.css")
+    return { default: m.IpynbRenderer }
+  }),
+)
 
 interface NotebookViewProps {
   notebook: Notebook
 }
 
 function NotebookView({ notebook }: NotebookViewProps) {
-  let contentView = <>Not set</>
-  if (notebook.output_format === "html" && (notebook.content || notebook.url)) {
-    contentView = (
+  if (notebook.output_format === "notebook" && notebook.content) {
+    try {
+      const json = JSON.parse(atob(notebook.content))
+      return (
+        <Box
+          overflowY="auto"
+          overflowX="hidden"
+          borderRadius="lg"
+          height="100%"
+          sx={{
+            ".ipynb-renderer-root": { borderRadius: "var(--chakra-radii-lg)" },
+            ".ipynb-renderer-root #notebook-container": {
+              width: "100%",
+              marginLeft: 0,
+              marginRight: 0,
+            },
+            ".ipynb-renderer-root pre, .ipynb-renderer-root .CodeMirror": {
+              fontSize: "13px !important",
+              lineHeight: "1.5 !important",
+            },
+          }}
+        >
+          <Suspense fallback={<LoadingSpinner />}>
+            <IpynbRenderer ipynb={json} syntaxTheme="atomDark" />
+          </Suspense>
+        </Box>
+      )
+    } catch {
+      // Fall through to the other renderers below
+    }
+  }
+  if (notebook.output_format === "html" && notebook.content) {
+    return (
       <embed
         height="100%"
         width="100%"
         type="text/html"
-        src={
-          notebook.url
-            ? String(notebook.url)
-            : `data:text/html;base64,${notebook.content}`
-        }
+        src={`data:text/html;base64,${notebook.content}`}
         style={{ borderRadius: "0px" }}
       />
     )
-  } else {
-    contentView = (
-      <Alert mt={2} status="warning" borderRadius="xl">
-        <AlertIcon />
-        Cannot render content, either because it is empty or an unrecognized
-        file type.
-      </Alert>
+  }
+  // Content stored outside Git (e.g., in DVC) comes back as a URL
+  if (notebook.url) {
+    return (
+      <iframe
+        height="100%"
+        width="100%"
+        title="notebook"
+        src={String(notebook.url)}
+        style={{ border: "none" }}
+      />
     )
   }
-  return <>{contentView}</>
+  return (
+    <Flex align="center" justify="center" height="300px" color="gray.500">
+      <Text>
+        No rendered output found. Run the notebook and commit the HTML output to
+        view it here.
+      </Text>
+    </Flex>
+  )
 }
 
 export default NotebookView

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal, Optional, cast
+from typing import Annotated, Any, Literal, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -42,6 +42,8 @@ from TexSoup import TexSoup
 
 import app.projects
 import calkit
+import calkit.detect
+import calkit.latex
 from app import (
     arxiv,
     github,
@@ -99,6 +101,10 @@ from app.models import (
     OrgSubscription,
     OverleafLink,
     Pipeline,
+    PipelineStage,
+    PipelineStageEdit,
+    PipelineStageEdited,
+    PipelineStagePut,
     Presentation,
     Project,
     ProjectComment,
@@ -154,6 +160,9 @@ from app.storage import (
 )
 from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
+from calkit.models.pipeline import LatexStage as CkLatexStage
+from calkit.models.pipeline import Pipeline as CkPipeline
+from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
 
 logging.basicConfig(level=logging.INFO)
@@ -4872,6 +4881,227 @@ def get_project_pipeline(
         stage_statuses=stage_statuses,
         status=overall_status,
     )
+
+
+def _load_ck_stage_map(stage_yaml: str) -> Any:
+    """Parse one stage's YAML, keeping key order and comments.
+
+    ``ryaml`` is round-trip, so what comes back is a CommentedMap that
+    dumps in the order it was written. Everything here works on that map
+    rather than on a model dump, which would come back in the model's
+    field order and drop the author's comments.
+    """
+    try:
+        stage_map = ryaml.load(stage_yaml)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid YAML: {e}")
+    if not isinstance(stage_map, dict):
+        raise HTTPException(422, "A stage must be a YAML mapping")
+    return stage_map
+
+
+def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:
+    """Check a stage against the models, returning the parsed stage.
+
+    Validation goes through the same discriminated union the CLI uses, so
+    an unknown kind or a missing required field is a 422 here rather than
+    a broken pipeline later.
+    """
+    try:
+        # Validating as a one-stage pipeline gets the kind-based dispatch
+        # (and the name/key consistency check) for free.
+        stage = CkPipeline(stages={stage_name: dict(stage_map)}).stages[
+            stage_name
+        ]
+    except Exception as e:
+        raise HTTPException(422, f"Invalid stage: {e}")
+    # Pipeline validation fills in name from the key, which is redundant
+    # with the key itself in calkit.yaml.
+    stage.name = None
+    return stage
+
+
+def _dump_ck_stage_map(stage_map: Any) -> str:
+    stream = io.StringIO()
+    ryaml.dump(stage_map, stream)
+    return stream.getvalue()
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+)
+def get_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> PipelineStage:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref
+    )
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if stage_name not in stages:
+        raise HTTPException(404, "Stage not found")
+    # Handed back exactly as written, comments and all. Tidying it up is the
+    # "Remove empty/default keys" action, not something a read does silently.
+    return PipelineStage(
+        name=stage_name, yaml=_dump_ck_stage_map(stages[stage_name])
+    )
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/remove-defaults"
+)
+def remove_project_pipeline_stage_defaults(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStageEdit,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStageEdited:
+    """Drop keys the stage leaves at their default.
+
+    Older versions of Calkit wrote every optional field out, so a stage
+    can carry a dozen nulls that say nothing. Removing them is offered as
+    an action rather than done on save, since it's the user's file and
+    their call. Remaining keys keep the order and comments they had.
+    """
+    app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    stage_map = _load_ck_stage_map(req.yaml)
+    stage = _validate_ck_stage(stage_map, stage_name)
+    # to_ck_dict is exactly the non-default fields, so anything absent from
+    # it is a default worth dropping. Deleting in place leaves every
+    # surviving key where the author put it.
+    keep = stage.to_ck_dict()
+    removed = [key for key in stage_map if key not in keep]
+    for key in removed:
+        del stage_map[key]
+    return PipelineStageEdited(
+        yaml=_dump_ck_stage_map(stage_map), changed=removed
+    )
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/detect-inputs"
+)
+def detect_project_pipeline_stage_inputs(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStageEdit,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStageEdited:
+    """Add the files a LaTeX stage's document reads to its inputs.
+
+    LaTeX resolves its class, style, bibliography, and figure files itself,
+    so they're invisible to the pipeline unless declared -- and undeclared,
+    a change to the class file doesn't rebuild the paper and the in-browser
+    editor can't compile it. Returns the stage with anything found merged
+    in, so the user sees what would be added before saving.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    stage_map = _load_ck_stage_map(req.yaml)
+    stage = _validate_ck_stage(stage_map, stage_name)
+    if not isinstance(stage, CkLatexStage):
+        raise HTTPException(
+            422, "Inputs can only be detected for LaTeX stages"
+        )
+    wdir = os.path.join(str(repo.working_dir), stage.wdir or "")
+    # An input can be a directory, so anything already covered by one is
+    # left off rather than listed again underneath it.
+    added = calkit.detect.filter_covered_inputs(
+        calkit.latex.detect_inputs(stage.target_path, wdir=wdir),
+        [i for i in stage.inputs if isinstance(i, str)],
+    )
+    if added:
+        # Appending to the existing list (rather than replacing the key)
+        # keeps `inputs` where the author put it, with its comments.
+        stage_map.setdefault("inputs", [])
+        for path in added:
+            stage_map["inputs"].append(path)
+    return PipelineStageEdited(
+        yaml=_dump_ck_stage_map(stage_map), changed=added
+    )
+
+
+@router.put(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+)
+def put_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStagePut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStage:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    # Write into the file as it is on disk, not the include-processed view,
+    # so a project that splits its pipeline across files keeps that split.
+    ck_info = get_ck_info_from_repo(repo=repo, process_includes=False)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if stage_name not in stages:
+        raise HTTPException(404, "Stage not found")
+    stage_map = _load_ck_stage_map(req.yaml)
+    # Validated but written as the user wrote it: same key order, same
+    # comments. Tidying is the "remove defaults" action, not a side effect
+    # of saving.
+    _validate_ck_stage(stage_map, stage_name)
+    stages[stage_name] = stage_map
+    ck_info["pipeline"]["stages"] = stages
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    if repo.is_dirty():
+        repo.git.commit(
+            ["-m", req.message or f"Update pipeline stage {stage_name}"]
+        )
+        repo.git.push(["origin", repo.active_branch.name])
+    return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
 
 
 class Collaborator(BaseModel):

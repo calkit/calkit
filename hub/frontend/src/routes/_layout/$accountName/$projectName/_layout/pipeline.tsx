@@ -1,7 +1,26 @@
-import { Alert, AlertIcon, Box, Flex, Heading, Link } from "@chakra-ui/react"
+import {
+  Alert,
+  AlertIcon,
+  Box,
+  Flex,
+  Heading,
+  Link,
+  Text,
+} from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import {
+  Link as RouterLink,
+  createFileRoute,
+  useNavigate,
+} from "@tanstack/react-router"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 import React from "react"
 import { Light as SyntaxHighlighter } from "react-syntax-highlighter"
 import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml"
@@ -11,7 +30,10 @@ import { z } from "zod"
 import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Mermaid from "../../../../../components/Common/Mermaid"
-import { useProjectEnvironments } from "../../../../../hooks/useProject"
+import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
+import useProject, {
+  useProjectEnvironments,
+} from "../../../../../hooks/useProject"
 import { dataOrNull } from "../../../../../lib/api"
 import {
   extractEnvRefs,
@@ -220,6 +242,7 @@ function LinkedYaml({
 const pipelineSearchSchema = z.object({
   ref: z.string().optional(),
   stage: z.string().optional(),
+  stage_editor_open: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -231,7 +254,9 @@ export const Route = createFileRoute(
 
 function ProjectPipeline() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, stage } = Route.useSearch()
+  const { ref, stage, stage_editor_open } = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const { userHasWriteAccess } = useProject(accountName, projectName)
   const pipelineQuery = useQuery({
     queryKey: ["projects", accountName, projectName, "pipeline", ref],
     queryFn: () =>
@@ -255,6 +280,36 @@ function ProjectPipeline() {
   const filesTo = `/${accountName}/${projectName}/files`
   const envTo = `/${accountName}/${projectName}/environments`
 
+  // Which diagram nodes are stages (the rest are files), so only those become
+  // clickable. Names come from the compiled DVC pipeline, and a matrix stage
+  // is drawn per item as `name@item`, so keep the base name.
+  const stageNames = useMemo(
+    () =>
+      new Set(
+        Object.keys(pipelineQuery.data?.dvc_stages ?? {}).map(
+          (n) => n.split("@")[0],
+        ),
+      ),
+    [pipelineQuery.data?.dvc_stages],
+  )
+  // Editing writes to calkit.yaml, so it's only offered for projects that
+  // define their pipeline there, and never while viewing an older revision.
+  const canEditStages =
+    userHasWriteAccess && !ref && Boolean(pipelineQuery.data?.calkit_yaml)
+  const openStageEditor = useCallback(
+    (stageName: string) =>
+      navigate({
+        search: (prev) => ({
+          ...prev,
+          stage: stageName,
+          stage_editor_open: true,
+        }),
+      }),
+    [navigate],
+  )
+  const closeStageEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, stage_editor_open: undefined }) })
+
   return (
     <>
       {pipelineQuery.isPending ? (
@@ -268,9 +323,16 @@ function ProjectPipeline() {
                   isDiagramExpanded={isDiagramExpanded}
                   setIsDiagramExpanded={setIsDiagramExpanded}
                   zoomToStage={stage}
+                  stageNames={canEditStages ? stageNames : undefined}
+                  onStageClick={canEditStages ? openStageEditor : undefined}
                 >
                   {String(pipelineQuery.data.mermaid)}
                 </Mermaid>
+                {canEditStages && (
+                  <Text mt={1} fontSize="xs" color="ui.dim">
+                    Click a stage to edit it.
+                  </Text>
+                )}
               </Box>
               <Box flex={1} minW={0}>
                 {pipelineQuery.data.calkit_yaml ? (
@@ -318,6 +380,15 @@ function ProjectPipeline() {
             </Alert>
           )}
         </Flex>
+      )}
+      {stage_editor_open && stage && canEditStages && (
+        <StageEditorModal
+          isOpen={Boolean(stage_editor_open)}
+          onClose={closeStageEditor}
+          ownerName={accountName}
+          projectName={projectName}
+          stageName={stage}
+        />
       )}
     </>
   )

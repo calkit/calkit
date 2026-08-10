@@ -10,6 +10,65 @@ calkit latex build paper/main.tex --env tex
 Without `--env`, `latexmk` runs directly if it's installed, and in a TeX Live
 container if it isn't.
 
+## Adding a document to the pipeline
+
+A one-off build isn't reproducible on its own.
+Add the document to the [pipeline](pipeline/index.md) as a `latex` stage, and
+`calkit run` rebuilds it whenever the source or any of its inputs change,
+and skips it when nothing has:
+
+```sh
+calkit new latex-stage --name paper --target paper/paper.tex --environment tex
+```
+
+which writes into `calkit.yaml`:
+
+```yaml
+pipeline:
+  stages:
+    paper:
+      kind: latex
+      environment: tex
+      target_path: paper/paper.tex
+```
+
+The compiled PDF is an output of the stage without being declared, so there's
+nothing to add for it.
+Use `--output` only for the extras a build produces, and see the
+[pipeline docs](pipeline/index.md) for the attributes every stage shares.
+
+To start a document from scratch instead, `calkit new publication` writes the
+source files, the environment, and the stage in one go:
+
+```sh
+calkit new publication paper --template latex/jfm --stage paper \
+    --environment tex --kind journal-article --title "A cool paper"
+```
+
+Available templates are `latex/article` and `latex/jfm`.
+
+## Inputs
+
+A document's class, style, bibliography, and figure files are inputs to
+building it, but LaTeX resolves those itself, so the pipeline can't see them
+unless the stage declares them.
+`calkit new latex-stage` and `calkit new publication` read the document and
+add the ones that live in the project, following `\input`, `\include`, and
+any class or style file that loads others.
+Anything that comes from TeX Live is left alone, since it isn't the project's
+to track, and anything an already-declared directory covers is left off
+rather than listed again underneath it.
+Pass `--no-detect-inputs` to turn this off, and `--input` to add more.
+`calkit xr` detects the same inputs when the command it wraps builds a
+document.
+
+In the web app, clicking a stage in the pipeline diagram opens it for
+editing, with a button to re-run this detection against the current source.
+
+Undeclared inputs mean editing the class file doesn't rebuild the paper, and
+the web app's in-browser editor, which loads exactly what the stage declares,
+can't compile the document at all.
+
 ## Comparing revisions
 
 A rebuilt PDF is a DVC-tracked artifact, so a pull request shows its pointer

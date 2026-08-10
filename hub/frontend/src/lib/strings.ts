@@ -73,3 +73,21 @@ export const confirmPasswordRules = (
 
   return rules
 }
+
+/**
+ * Clean up a document the way the project's pre-commit hooks would: no
+ * trailing whitespace on any line, and exactly one newline at the end.
+ *
+ * Doing it in the editor keeps a save from landing a diff that the hooks
+ * immediately rewrite, which would otherwise show up as a spurious change
+ * the next time anyone touches the file.
+ */
+export const trimForSave = (text: string): string => {
+  const trimmed = text
+    .split("\n")
+    .map((line) => line.replace(/[ \t\r]+$/, ""))
+    .join("\n")
+    .replace(/\n+$/, "")
+  // An empty document stays empty rather than becoming a lone newline.
+  return trimmed === "" ? "" : `${trimmed}\n`
+}

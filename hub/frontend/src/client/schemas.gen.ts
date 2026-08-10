@@ -3656,6 +3656,82 @@ export const PipelineSchema = {
   title: "Pipeline",
 } as const
 
+export const PipelineStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["name", "yaml"],
+  title: "PipelineStage",
+  description:
+    "One stage of the Calkit pipeline, as editable YAML.\n\nThe YAML is the stage's body only (no name key), exactly as it sits in\ncalkit.yaml -- same key order, same comments.",
+} as const
+
+export const PipelineStageEditSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineStageEdit",
+  description:
+    "A stage edit to compute, against the editor's unsaved content.\n\nThe YAML is what's in the editor rather than what's committed, so\nre-detecting right after changing ``target_path`` looks at the new\ntarget.",
+} as const
+
+export const PipelineStageEditedSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    changed: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Changed",
+    },
+  },
+  type: "object",
+  required: ["yaml", "changed"],
+  title: "PipelineStageEdited",
+  description:
+    "The stage after an edit, plus what the edit touched.\n\n``changed`` is what the user should see happened: the inputs added, or\nthe default-valued keys removed.",
+} as const
+
+export const PipelineStagePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineStagePut",
+} as const
+
 export const PresentationSchema = {
   properties: {
     path: {

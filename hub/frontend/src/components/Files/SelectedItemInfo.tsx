@@ -1,4 +1,3 @@
-import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Badge,
   Box,
@@ -164,9 +163,11 @@ interface SelectedItemProps {
   userHasWriteAccess: boolean
   onOpenCompare?: () => void
   gitRef?: string
-  // Provided (by the parent) only when this file can be opened in the in-browser
-  // LaTeX editor — e.g. a .tex source or a LaTeX publication.
-  onEditLatex?: () => void
+  // Provided (by the parent) only when this file can be edited in the app.
+  // The parent decides which editor opens: a .tex source (or a LaTeX
+  // publication) gets the LaTeX editor, anything else textual gets the plain
+  // one. Either way it's one button, since it's one thing the user wants.
+  onEditFile?: () => void
 }
 
 function SelectedItemInfo({
@@ -176,7 +177,7 @@ function SelectedItemInfo({
   userHasWriteAccess,
   onOpenCompare,
   gitRef,
-  onEditLatex,
+  onEditFile,
 }: SelectedItemProps) {
   const fileInfoModal = useDisclosure()
   const uploadNewVersionModal = useDisclosure()
@@ -207,10 +208,15 @@ function SelectedItemInfo({
       ) : (
         ""
       )}
-      {onEditLatex ? (
-        <Button size="sm" mt={2} onClick={onEditLatex}>
+      {onEditFile ? (
+        <Button
+          size="sm"
+          mt={2}
+          onClick={onEditFile}
+          isDisabled={Boolean(selectedItem.lock)}
+        >
           <Icon as={MdEdit} mr={1} />
-          Edit LaTeX
+          Edit file
         </Button>
       ) : (
         ""
@@ -252,21 +258,6 @@ function SelectedItemInfo({
           Browse history
         </Button>
       ) : null}
-      {selectedItem.type === "file" &&
-      selectedItem.in_repo &&
-      userHasWriteAccess ? (
-        <Link
-          href={`https://github.dev/${ownerName}/${projectName}/blob/main/${selectedItem.path}`}
-          isExternal
-        >
-          <Button size="sm" mt={2}>
-            <Icon mr={1} as={MdEdit} />
-            Edit on GitHub.dev <Icon ml={1} as={ExternalLinkIcon} />
-          </Button>
-        </Link>
-      ) : (
-        ""
-      )}
       <HStack alignContent={"center"} mt={4} mb={1} gap={1}>
         <Heading size={"sm"}>Artifact info</Heading>
         {userHasWriteAccess ? (

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { FiChevronLeft, FiChevronRight } from "react-icons/fi"
 
 import type { Presentation } from "../../client"
+import NotBuiltAlert from "../Common/NotBuiltAlert"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 
 interface PresentationViewProps {
@@ -177,11 +178,11 @@ function PptxView({ presentation }: PresentationViewProps) {
 
   if (error === "no-content") {
     return (
-      <Alert mt={2} status="warning" borderRadius="xl">
-        <AlertIcon />
-        No content found. Perhaps the presentation hasn't been built and pushed
-        yet?
-      </Alert>
+      <NotBuiltAlert
+        kind="presentation"
+        stage={presentation.stage}
+        path={presentation.path}
+      />
     )
   }
 

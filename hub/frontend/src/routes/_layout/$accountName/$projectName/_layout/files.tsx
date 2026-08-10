@@ -38,6 +38,9 @@ import {
 } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
+import FileEditorModal, {
+  isEditableText,
+} from "../../../../../components/Files/FileEditorModal"
 import SelectedItemInfo, {
   inferKindFromPath,
 } from "../../../../../components/Files/SelectedItemInfo"
@@ -52,6 +55,7 @@ const fileSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   editor_open: z.boolean().optional(),
+  file_editor_open: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -240,8 +244,15 @@ function Item({ item, level, selectedPath, setSelectedPath }: ItemProps) {
 
 function Files() {
   const { accountName, projectName } = Route.useParams()
-  const { path, ref, compare_open, base_ref, compare_ref, editor_open } =
-    Route.useSearch()
+  const {
+    path,
+    ref,
+    compare_open,
+    base_ref,
+    compare_ref,
+    editor_open,
+    file_editor_open,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const {
@@ -360,6 +371,25 @@ function Files() {
     navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
+  // Anything textual and in the repo can be edited in the app. DVC-tracked
+  // files live outside Git, so committing one here wouldn't update the pointer
+  // the project actually reads.
+  const editableFilePath: string | undefined =
+    selectedItem?.type === "file" &&
+    selectedItem.in_repo &&
+    isEditableText(selectedItem.path)
+      ? selectedItem.path
+      : undefined
+  // One "Edit file" button, whichever editor it opens: a .tex source (and a
+  // LaTeX publication, whose source we derive) gets the LaTeX editor with its
+  // preview, everything else textual gets the plain one.
+  const canEdit = Boolean(
+    (latexTexPath || editableFilePath) && userHasWriteAccess && !ref,
+  )
+  const openFileEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, file_editor_open: true }) })
+  const closeFileEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, file_editor_open: undefined }) })
 
   return (
     <>
@@ -449,9 +479,11 @@ function Files() {
                       userHasWriteAccess={userHasWriteAccess}
                       onOpenCompare={openCompare}
                       gitRef={ref}
-                      onEditLatex={
-                        latexTexPath && userHasWriteAccess && !ref
-                          ? openEditor
+                      onEditFile={
+                        canEdit
+                          ? latexTexPath
+                            ? openEditor
+                            : openFileEditor
                           : undefined
                       }
                     />
@@ -484,6 +516,16 @@ function Files() {
               }),
             })
           }
+        />
+      )}
+
+      {file_editor_open && editableFilePath && (
+        <FileEditorModal
+          isOpen={Boolean(file_editor_open)}
+          onClose={closeFileEditor}
+          ownerName={accountName}
+          projectName={projectName}
+          path={editableFilePath}
         />
       )}
 

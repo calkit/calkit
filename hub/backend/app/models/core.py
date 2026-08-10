@@ -815,6 +815,44 @@ class Pipeline(SQLModel):
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
 
 
+class PipelineStage(SQLModel):
+    """One stage of the Calkit pipeline, as editable YAML.
+
+    The YAML is the stage's body only (no name key), exactly as it sits in
+    calkit.yaml -- same key order, same comments.
+    """
+
+    name: str
+    yaml: str
+
+
+class PipelineStagePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
+class PipelineStageEdit(SQLModel):
+    """A stage edit to compute, against the editor's unsaved content.
+
+    The YAML is what's in the editor rather than what's committed, so
+    re-detecting right after changing ``target_path`` looks at the new
+    target.
+    """
+
+    yaml: str
+
+
+class PipelineStageEdited(SQLModel):
+    """The stage after an edit, plus what the edit touched.
+
+    ``changed`` is what the user should see happened: the inputs added, or
+    the default-valued keys removed.
+    """
+
+    yaml: str
+    changed: list[str]
+
+
 class Question(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     project_id: uuid.UUID = Field(foreign_key="project.id")

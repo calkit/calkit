@@ -21,17 +21,16 @@ import {
   VStack,
   useDisclosure,
 } from "@chakra-ui/react"
-import { StreamLanguage } from "@codemirror/language"
-import { stex } from "@codemirror/legacy-modes/mode/stex"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { EditorView, basicSetup } from "codemirror"
+import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
 import { merge as diff3Merge } from "node-diff3"
-import { type MutableRefObject, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import {
   LatexCompiler,
@@ -39,6 +38,8 @@ import {
   findMissingPackages,
 } from "../../lib/latexCompiler"
 import { loadLatexProject } from "../../lib/latexProject"
+import { trimForSave } from "../../lib/strings"
+import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 
 interface LatexEditorProps {
@@ -68,43 +69,6 @@ function relativeTo(fromDir: string, to: string): string {
   return "../".repeat(fromParts.length - i) + toParts.slice(i).join("/")
 }
 
-function EditorPane({
-  initialDoc,
-  viewRef,
-  onChange,
-}: {
-  initialDoc: string
-  viewRef: MutableRefObject<EditorView | null>
-  onChange: (text: string) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!ref.current) {
-      return
-    }
-    const view = new EditorView({
-      doc: initialDoc,
-      extensions: [
-        basicSetup,
-        StreamLanguage.define(stex),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((u) => {
-          if (u.docChanged) {
-            onChange(u.state.doc.toString())
-          }
-        }),
-      ],
-      parent: ref.current,
-    })
-    viewRef.current = view
-    return () => {
-      view.destroy()
-      viewRef.current = null
-    }
-  }, [])
-  return <Box ref={ref} height="100%" overflowY="auto" fontSize="sm" />
-}
-
 const LatexEditor = ({
   isOpen,
   onClose,
@@ -123,6 +87,8 @@ const LatexEditor = ({
   const baseBuffersRef = useRef<Map<string, string>>(new Map())
   const baseShaRef = useRef<string | null>(null)
   const binariesRef = useRef<Map<string, Uint8Array>>(new Map())
+  // Text files the pipeline produces: compiled with, but never edited or saved.
+  const generatedRef = useRef<Set<string>>(new Set())
   const initializedRef = useRef(false)
   const compilingRef = useRef(false)
   const pendingCompileRef = useRef(false)
@@ -174,7 +140,14 @@ const LatexEditor = ({
       if (f.kind === "text") {
         buffersRef.current.set(f.path, f.text ?? "")
         baseBuffersRef.current.set(f.path, f.text ?? "")
-        texts.push(f.path)
+        // A file the pipeline writes (e.g. copied in by a map-paths stage) is
+        // needed to compile but isn't editable: committing to its path would
+        // put content where the next pipeline run overwrites it.
+        if (f.generated) {
+          generatedRef.current.add(f.path)
+        } else {
+          texts.push(f.path)
+        }
       } else if (f.bytes) {
         binariesRef.current.set(f.path, f.bytes)
       }
@@ -324,7 +297,11 @@ const LatexEditor = ({
   const saveMutation = useMutation({
     mutationFn: async (message: string) => {
       for (const repoPath of dirtyRef.current) {
-        const text = buffersRef.current.get(repoPath) ?? ""
+        // Tidied the way the repo's hooks would, so a save doesn't land a
+        // diff that gets rewritten later. The buffer is updated to match, so
+        // what's on screen is what was committed.
+        const text = trimForSave(buffersRef.current.get(repoPath) ?? "")
+        buffersRef.current.set(repoPath, text)
         // Skip files already identical to origin (nothing to commit), so one
         // unchanged file doesn't fail the whole save with a "not different"
         // error from the backend.
@@ -362,14 +339,15 @@ const LatexEditor = ({
       setDirty(new Set())
       setCommitMessage("")
       commitModal.onClose()
+      // Show the trimmed text if trimming changed anything, so the pane
+      // isn't left displaying whitespace that wasn't committed.
+      setMergeNonce((n) => n + 1)
       showToast("Saved", "Your changes were committed.", "success")
       mixpanel.track("Saved LaTeX changes", {
         project: `${ownerName}/${projectName}`,
         file_count: dirtyRef.current.size,
       })
-      queryClient.invalidateQueries({
-        queryKey: ["projects", ownerName, projectName],
-      })
+      refreshProjectContents(ownerName, projectName, queryClient)
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
@@ -445,6 +423,13 @@ const LatexEditor = ({
           continue
         }
         const remote = f.text ?? ""
+        if (f.generated) {
+          // Not editable, so there's nothing to merge — just take the latest.
+          buffersRef.current.set(f.path, remote)
+          baseBuffersRef.current.set(f.path, remote)
+          generatedRef.current.add(f.path)
+          continue
+        }
         const base = baseBuffersRef.current.get(f.path)
         const local = buffersRef.current.get(f.path)
         if (base === undefined || local === undefined) {
@@ -699,24 +684,35 @@ const LatexEditor = ({
                         {displayPath(p)}
                       </Button>
                     ))}
-                    {[...binariesRef.current.keys()].sort().map((p) => (
-                      <Text
-                        key={p}
-                        fontSize="xs"
-                        color="ui.dim"
-                        px={3}
-                        py={1}
-                        isTruncated
-                      >
-                        {displayPath(p)}
-                      </Text>
-                    ))}
+                    {/* Read-only inputs: binaries (figures) and anything the
+                        pipeline generates, which is compiled with but not
+                        editable here. */}
+                    {[...binariesRef.current.keys(), ...generatedRef.current]
+                      .sort()
+                      .map((p) => (
+                        <Text
+                          key={p}
+                          fontSize="xs"
+                          color="ui.dim"
+                          px={3}
+                          py={1}
+                          isTruncated
+                          title={
+                            generatedRef.current.has(p)
+                              ? "Generated by the pipeline — not editable here"
+                              : undefined
+                          }
+                        >
+                          {displayPath(p)}
+                        </Text>
+                      ))}
                   </VStack>
                 </Box>
                 <Box flex="1" borderRightWidth="1px" minW={0}>
-                  <EditorPane
+                  <CodeEditorPane
                     key={`${activePath}:${mergeNonce}`}
                     initialDoc={buffersRef.current.get(activePath) ?? ""}
+                    path={activePath}
                     viewRef={viewRef}
                     onChange={(text) => markDirty(activePath, text)}
                   />
@@ -741,6 +737,27 @@ const LatexEditor = ({
                       <Text>No preview yet.</Text>
                       <Text fontSize="sm">
                         Click "Compile preview" to render the PDF.
+                      </Text>
+                    </Flex>
+                  )}
+                  {/* Overlay rather than replacing the preview, so the last
+                      rendered PDF stays visible (and keeps its scroll
+                      position) while a recompile is in flight. */}
+                  {compiling && (
+                    <Flex
+                      position="absolute"
+                      inset={0}
+                      zIndex={10}
+                      align="center"
+                      justify="center"
+                      direction="column"
+                      gap={3}
+                      bg="blackAlpha.300"
+                      backdropFilter="blur(1px)"
+                    >
+                      <Spinner size="xl" thickness="3px" color="ui.main" />
+                      <Text fontSize="sm" fontWeight="medium">
+                        Compiling…
                       </Text>
                     </Flex>
                   )}

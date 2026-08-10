@@ -135,6 +135,123 @@ def default_base_ref(repo: git.Repo) -> str:
     return "HEAD~1"
 
 
+# Extensions tried, in order, when a reference omits one. LaTeX resolves
+# \includegraphics{fig} against the graphics extension list, and
+# \input{sec}/\bibliography{refs} against .tex/.bib.
+_GRAPHICS_EXTS = [".pdf", ".png", ".jpg", ".jpeg", ".eps", ".ps", ".gif"]
+# Commands that name a local file, mapped to the extensions to try. Each
+# takes a comma-separated list in its final braces group.
+_INPUT_COMMANDS: dict[str, list[str]] = {
+    "documentclass": [".cls"],
+    "usepackage": [".sty"],
+    "RequirePackage": [".sty"],
+    "bibliographystyle": [".bst"],
+    "bibliography": [".bib"],
+    "addbibresource": [".bib"],
+    "input": [".tex"],
+    "include": [".tex"],
+    "subfile": [".tex"],
+    "includegraphics": _GRAPHICS_EXTS,
+    "includesvg": [".svg", ".pdf"],
+    "lstinputlisting": [""],
+    "verbatiminput": [""],
+}
+# Files that are themselves LaTeX source, so their own inputs count too.
+_SOURCE_EXTS = frozenset({".tex", ".cls", ".sty", ".clo", ".def", ".cfg"})
+# One command with optional [...] args, then its {...} argument. TeX
+# comments are stripped first, so a % here is a literal one.
+_INPUT_RE = re.compile(
+    r"\\(" + "|".join(_INPUT_COMMANDS) + r")\s*(?:\[[^\]]*\])*\s*\{([^}]*)\}"
+)
+
+
+def _strip_comments(tex: str) -> str:
+    """Remove TeX comments, keeping escaped percent signs."""
+    out = []
+    for line in tex.splitlines():
+        out.append(re.sub(r"(?<!\\)%.*$", "", line))
+    return "\n".join(out)
+
+
+def _project_has(base: Path, rel: str) -> bool:
+    """Whether the project contains this file.
+
+    A DVC-tracked figure isn't in the working tree until it's pulled, but
+    its ``.dvc`` pointer is always in Git, and it's every bit as much a
+    project file -- and a stage input -- as one stored directly. Without
+    this, detection would depend on whether the caller had pulled, and a
+    server working from a fresh clone would miss every DVC-tracked figure.
+    """
+    return (base / rel).is_file() or (base / f"{rel}.dvc").is_file()
+
+
+def detect_inputs(target_path: str, wdir: str | None = None) -> list[str]:
+    """Find the project files a LaTeX document reads.
+
+    A document's class, style, bibliography, and figure files are inputs
+    to building it, but LaTeX names them without paths or extensions and
+    resolves them itself, so nothing in the pipeline sees them unless
+    they're declared. Undeclared, a change to the class file doesn't
+    rebuild the paper, and the in-browser preview -- which only has the
+    files the stage declares -- can't compile at all.
+
+    Only files that exist in the project are returned; everything else
+    (``graphicx``, ``natbib``, and the rest of TeX Live) comes from the
+    TeX installation and isn't ours to track. Source files found this way
+    are read in turn, so a document split across files contributes its
+    whole tree, and a journal class that loads its own style files (the
+    JFM template's ``jfm.cls`` pulls in ``upmath.sty`` and
+    ``lineno-FLM.sty``) contributes those too.
+
+    Paths are returned relative to ``wdir`` -- the same frame as
+    ``target_path`` and the rest of a stage's paths -- sorted, and with
+    the target itself excluded (it's already a dependency).
+    """
+    base = Path(wdir) if wdir else Path(".")
+    root = Path(target_path)
+    found: set[str] = set()
+    # Source files whose own inputs still need collecting, and everything
+    # already visited, so a pair of files including each other terminates.
+    queue = [root]
+    seen = {root.as_posix()}
+    while queue:
+        current = queue.pop()
+        try:
+            tex = _strip_comments(
+                (base / current).read_text(encoding="utf-8", errors="replace")
+            )
+        except (OSError, UnicodeDecodeError):
+            continue
+        for command, arg in _INPUT_RE.findall(tex):
+            for raw in [n.strip() for n in arg.split(",")]:
+                if not raw or raw.startswith(("http://", "https://")):
+                    continue
+                # TeX resolves a reference against the compile's working
+                # directory, which is the root document's; a nested file
+                # written as if paths were relative to itself is common
+                # enough to try too. Names as written come first, since a
+                # reference can already carry its extension.
+                names = [raw] + [
+                    raw + ext for ext in _INPUT_COMMANDS[command] if ext
+                ]
+                candidates = [
+                    parent / name
+                    for name in names
+                    for parent in dict.fromkeys([root.parent, current.parent])
+                ]
+                for candidate in candidates:
+                    rel = Path(os.path.normpath(candidate)).as_posix()
+                    if rel.startswith("..") or not _project_has(base, rel):
+                        continue
+                    if rel != root.as_posix():
+                        found.add(rel)
+                    if Path(rel).suffix in _SOURCE_EXTS and rel not in seen:
+                        seen.add(rel)
+                        queue.append(Path(rel))
+                    break
+    return sorted(found)
+
+
 def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
     """Whether a ref names something that can't change under us.
 

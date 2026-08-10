@@ -1559,6 +1559,7 @@ Options:
 | `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
 | `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
 | `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
 | `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
 | `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
 | `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |

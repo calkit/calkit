@@ -59,6 +59,8 @@ import type {
   DeleteUserResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
+  DetectProjectPipelineStageInputsErrors,
+  DetectProjectPipelineStageInputsResponses,
   DeviceAuthorizeRequest,
   DeviceAuthRequest,
   DeviceTokenRequest,
@@ -149,6 +151,8 @@ import type {
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineStageErrors,
+  GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
   GetProjectPresentationsResponses,
   GetProjectPublicationsErrors,
@@ -249,6 +253,8 @@ import type {
   PatchProjectResponses,
   PatchUserTokenErrors,
   PatchUserTokenResponses,
+  PipelineStageEdit,
+  PipelineStagePut,
   PostDiscountCodeErrors,
   PostDiscountCodeResponses,
   PostExternalReleaseErrors,
@@ -344,6 +350,8 @@ import type {
   PutProjectContentsResponses,
   PutProjectDevContainerErrors,
   PutProjectDevContainerResponses,
+  PutProjectPipelineStageErrors,
+  PutProjectPipelineStageResponses,
   PutProjectQuestionErrors,
   PutProjectQuestionResponses,
   PutProjectReferenceItemErrors,
@@ -378,6 +386,8 @@ import type {
   ReleasePost,
   ReleaseShareTokenPost,
   ReleaseUrlImport,
+  RemoveProjectPipelineStageDefaultsErrors,
+  RemoveProjectPipelineStageDefaultsResponses,
   ResetPasswordErrors,
   ResetPasswordResponses,
   ResolveReleaseCommentErrors,
@@ -4227,6 +4237,208 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/pipeline",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Project Pipeline Stage
+   */
+  public static getProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineStageResponses,
+    GetProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineStageResponses,
+      GetProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Put Project Pipeline Stage
+   */
+  public static putProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStagePut: PipelineStagePut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutProjectPipelineStageResponses,
+    PutProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStagePut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutProjectPipelineStageResponses,
+      PutProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove Project Pipeline Stage Defaults
+   *
+   * Drop keys the stage leaves at their default.
+   *
+   * Older versions of Calkit wrote every optional field out, so a stage
+   * can carry a dozen nulls that say nothing. Removing them is offered as
+   * an action rather than done on save, since it's the user's file and
+   * their call. Remaining keys keep the order and comments they had.
+   */
+  public static removeProjectPipelineStageDefaults<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStageEdit: PipelineStageEdit
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    RemoveProjectPipelineStageDefaultsResponses,
+    RemoveProjectPipelineStageDefaultsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStageEdit", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      RemoveProjectPipelineStageDefaultsResponses,
+      RemoveProjectPipelineStageDefaultsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/remove-defaults",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Detect Project Pipeline Stage Inputs
+   *
+   * Add the files a LaTeX stage's document reads to its inputs.
+   *
+   * LaTeX resolves its class, style, bibliography, and figure files itself,
+   * so they're invisible to the pipeline unless declared -- and undeclared,
+   * a change to the class file doesn't rebuild the paper and the in-browser
+   * editor can't compile it. Returns the stage with anything found merged
+   * in, so the user sees what would be added before saving.
+   */
+  public static detectProjectPipelineStageInputs<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStageEdit: PipelineStageEdit
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DetectProjectPipelineStageInputsResponses,
+    DetectProjectPipelineStageInputsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStageEdit", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      DetectProjectPipelineStageInputsResponses,
+      DetectProjectPipelineStageInputsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/detect-inputs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

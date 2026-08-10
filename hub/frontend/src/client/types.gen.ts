@@ -2184,6 +2184,10 @@ export type Pipeline = {
    */
   calkit_yaml: string | null
   /**
+   * Ck Stages
+   */
+  ck_stages?: Array<string>
+  /**
    * Stage Statuses
    */
   stage_statuses?: {
@@ -2193,6 +2197,74 @@ export type Pipeline = {
    * Status
    */
   status?: "up-to-date" | "stale" | "unknown"
+}
+
+/**
+ * PipelineStage
+ *
+ * One stage of the Calkit pipeline, as editable YAML.
+ *
+ * The YAML is the stage's body only (no name key), exactly as it sits in
+ * calkit.yaml -- same key order, same comments.
+ */
+export type PipelineStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdit
+ *
+ * A stage edit to compute, against the editor's unsaved content.
+ *
+ * The YAML is what's in the editor rather than what's committed, so
+ * re-detecting right after changing ``target_path`` looks at the new
+ * target.
+ */
+export type PipelineStageEdit = {
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdited
+ *
+ * The stage after an edit, plus what the edit touched.
+ *
+ * ``changed`` is what the user should see happened: the inputs added, or
+ * the default-valued keys removed.
+ */
+export type PipelineStageEdited = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Changed
+   */
+  changed: Array<string>
+}
+
+/**
+ * PipelineStagePut
+ */
+export type PipelineStagePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -8828,6 +8900,171 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type GetProjectPipelineStageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type GetProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineStageError =
+  GetProjectPipelineStageErrors[keyof GetProjectPipelineStageErrors]
+
+export type GetProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type GetProjectPipelineStageResponse =
+  GetProjectPipelineStageResponses[keyof GetProjectPipelineStageResponses]
+
+export type PutProjectPipelineStageData = {
+  body: PipelineStagePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type PutProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineStageError =
+  PutProjectPipelineStageErrors[keyof PutProjectPipelineStageErrors]
+
+export type PutProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PutProjectPipelineStageResponse =
+  PutProjectPipelineStageResponses[keyof PutProjectPipelineStageResponses]
+
+export type RemoveProjectPipelineStageDefaultsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/remove-defaults"
+}
+
+export type RemoveProjectPipelineStageDefaultsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type RemoveProjectPipelineStageDefaultsError =
+  RemoveProjectPipelineStageDefaultsErrors[keyof RemoveProjectPipelineStageDefaultsErrors]
+
+export type RemoveProjectPipelineStageDefaultsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type RemoveProjectPipelineStageDefaultsResponse =
+  RemoveProjectPipelineStageDefaultsResponses[keyof RemoveProjectPipelineStageDefaultsResponses]
+
+export type DetectProjectPipelineStageInputsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/detect-inputs"
+}
+
+export type DetectProjectPipelineStageInputsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DetectProjectPipelineStageInputsError =
+  DetectProjectPipelineStageInputsErrors[keyof DetectProjectPipelineStageInputsErrors]
+
+export type DetectProjectPipelineStageInputsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type DetectProjectPipelineStageInputsResponse =
+  DetectProjectPipelineStageInputsResponses[keyof DetectProjectPipelineStageInputsResponses]
 
 export type GetProjectCollaboratorsData = {
   body?: never

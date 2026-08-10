@@ -2416,3 +2416,225 @@ def test_delete_project_references_collection_missing(
     ):
         r = client.delete(f"{base}/references?path=nope.bib", headers=headers)
     assert r.status_code == 404, r.text
+
+
+def _make_stage_repo(working_dir: str, dirty: bool = True) -> SimpleNamespace:
+    """A repo stand-in for the pipeline stage routes.
+
+    Like _make_fake_repo, but with the is_dirty() the stage PUT checks
+    before committing.
+    """
+    repo = _make_fake_repo(working_dir)
+    repo.is_dirty = lambda *a, **k: dirty
+    return repo
+
+
+def test_project_pipeline_stage_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    stages_url = f"{base}/pipeline/stages"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # A paper whose class file is only discoverable by reading the source,
+    # plus a style file the class itself pulls in and a figure directory
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "figures").mkdir()
+    (tmp_path / "paper" / "figures" / "fig.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "paper" / "paper.tex").write_text(
+        "\\documentclass{jfm}\n"
+        "\\usepackage{graphicx}\n"
+        "% \\usepackage{commented}\n"
+        "\\includegraphics{figures/fig}\n"
+        "\\begin{document}\\end{document}\n"
+    )
+    (tmp_path / "paper" / "jfm.cls").write_text("\\usepackage{upmath}\n")
+    (tmp_path / "paper" / "upmath.sty").write_text("% nothing\n")
+    (tmp_path / "paper" / "commented.sty").write_text("% nothing\n")
+    # As written by an older Calkit: optional fields spelled out as nulls,
+    # and target_path deliberately last so ordering is observable
+    stage_yaml = (
+        "kind: latex\n"
+        "environment: tex\n"
+        "wdir: null\n"
+        "iterate_over: null\n"
+        "always_run: false\n"
+        "outputs:\n"
+        "  - paper/paper.pdf\n"
+        "target_path: paper/paper.tex\n"
+    )
+    ck_info = {"pipeline": {"stages": {"paper": ryaml.load(stage_yaml)}}}
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            side_effect=fake_ck_info,
+        ),
+    ):
+        # Reading a stage hands it back as written: nothing reordered and
+        # nothing removed, since tidying is the user's call
+        r = client.get(f"{stages_url}/paper", headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["name"] == "paper"
+        as_written = r.json()["yaml"]
+        assert list(ryaml.load(as_written)) == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+        ]
+        # A stage that doesn't exist is a 404, not an empty editor
+        r404 = client.get(f"{stages_url}/nope", headers=headers)
+        assert r404.status_code == 404
+        # Detection finds the class file and what the class itself loads,
+        # skipping TeX Live packages and commented-out ones
+        r = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={"yaml": as_written},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == [
+            "paper/figures/fig.pdf",
+            "paper/jfm.cls",
+            "paper/upmath.sty",
+        ]
+        detected_yaml = r.json()["yaml"]
+        # The keys that were there keep their order; inputs is appended
+        assert list(ryaml.load(detected_yaml))[:7] == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+        ]
+        # Detecting again adds nothing
+        r2 = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={"yaml": detected_yaml},
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["changed"] == []
+        # A declared directory covers the figures inside it, so they are
+        # not listed individually
+        r3 = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: latex\nenvironment: tex\n"
+                    "target_path: paper/paper.tex\n"
+                    "inputs:\n  - paper/figures\n"
+                )
+            },
+        )
+        assert r3.status_code == 200, r3.text
+        assert r3.json()["changed"] == ["paper/jfm.cls", "paper/upmath.sty"]
+        # Removing defaults drops exactly the keys left at their default,
+        # leaving the rest where they were
+        r = client.post(
+            f"{stages_url}/paper/remove-defaults",
+            headers=headers,
+            json={"yaml": as_written},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == ["wdir", "iterate_over", "always_run"]
+        assert list(ryaml.load(r.json()["yaml"])) == [
+            "kind",
+            "environment",
+            "outputs",
+            "target_path",
+        ]
+        # Saving writes what the user has, untouched apart from validation
+        r = client.put(
+            f"{stages_url}/paper",
+            headers=headers,
+            json={"yaml": detected_yaml, "message": "Declare the class file"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        saved = written["pipeline"]["stages"]["paper"]
+        assert list(saved) == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+            "inputs",
+        ]
+        assert saved["inputs"] == [
+            "paper/figures/fig.pdf",
+            "paper/jfm.cls",
+            "paper/upmath.sty",
+        ]
+        # Bad YAML, an unknown kind, and a missing required field are all
+        # rejected before anything is written
+        for bad in [
+            "kind: latex\n  bad indent: true\n",
+            "kind: not-a-real-kind\nenvironment: tex\n",
+            "kind: latex\nenvironment: tex\n",  # no target_path
+        ]:
+            r = client.put(
+                f"{stages_url}/paper", headers=headers, json={"yaml": bad}
+            )
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        # Detection is meaningless for a stage that isn't a document
+        r = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: python-script\nenvironment: py\n"
+                    "script_path: scripts/go.py\n"
+                )
+            },
+        )
+        assert r.status_code == 422, r.text
+        # Neither wdir nor target_path may point outside the project, since
+        # both come off the request body and are used to read files
+        for escaping in [
+            "kind: latex\nenvironment: tex\nwdir: ../..\n"
+            "target_path: paper.tex\n",
+            "kind: latex\nenvironment: tex\n"
+            "target_path: ../../../etc/passwd\n",
+        ]:
+            r = client.post(
+                f"{stages_url}/paper/detect-inputs",
+                headers=headers,
+                json={"yaml": escaping},
+            )
+            assert r.status_code == 422, f"{escaping!r} -> {r.status_code}"
+        # A stage still using the legacy `slurm:` spelling keeps it: it is
+        # renamed to `scheduler:` on load, so it isn't a default to drop, and
+        # dropping it would delete the scheduler config outright
+        r = client.post(
+            f"{stages_url}/paper/remove-defaults",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: shell-command\nenvironment: tex\n"
+                    "command: echo hi\nwdir: null\n"
+                    "slurm:\n  account: abc\n  time: '01:00:00'\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == ["wdir"]
+        assert "slurm" in ryaml.load(r.json()["yaml"])

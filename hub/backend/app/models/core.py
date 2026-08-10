@@ -811,8 +811,50 @@ class Pipeline(SQLModel):
     dvc_stages: dict[str, DvcPipelineStage | DvcForeachStage]
     dvc_yaml: str
     calkit_yaml: str | None
+    # Stages declared in calkit.yaml, which is a subset of dvc_stages: the
+    # compiled pipeline also contains stages Calkit generates (LaTeX diffs)
+    # and any hand-written dvc.yaml ones. Only these can be edited.
+    ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
+
+
+class PipelineStage(SQLModel):
+    """One stage of the Calkit pipeline, as editable YAML.
+
+    The YAML is the stage's body only (no name key), exactly as it sits in
+    calkit.yaml -- same key order, same comments.
+    """
+
+    name: str
+    yaml: str
+
+
+class PipelineStagePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
+class PipelineStageEdit(SQLModel):
+    """A stage edit to compute, against the editor's unsaved content.
+
+    The YAML is what's in the editor rather than what's committed, so
+    re-detecting right after changing ``target_path`` looks at the new
+    target.
+    """
+
+    yaml: str
+
+
+class PipelineStageEdited(SQLModel):
+    """The stage after an edit, plus what the edit touched.
+
+    ``changed`` is what the user should see happened: the inputs added, or
+    the default-valued keys removed.
+    """
+
+    yaml: str
+    changed: list[str]
 
 
 class Question(SQLModel, table=True):

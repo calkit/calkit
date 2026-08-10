@@ -1,7 +1,8 @@
-import { Alert, AlertIcon, Box, Code, Image } from "@chakra-ui/react"
+import { Image } from "@chakra-ui/react"
 import type { ReactNode } from "react"
 
 import type { Publication } from "../../client"
+import NotBuiltAlert from "../Common/NotBuiltAlert"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 
 interface PubViewProps {
@@ -65,21 +66,13 @@ function PublicationView({ publication, toolbarAction }: PubViewProps) {
       />
     )
   } else {
-    // Target the publication's stage when we know it so only that part of
-    // the pipeline runs, with a commit message naming the output.
-    const runCmd = publication.stage
-      ? `calkit run ${publication.stage} -m "Compile ${publication.path}"`
-      : 'calkit run -m "Run pipeline"'
     contentView = (
-      <Alert mt={2} status="warning" borderRadius="xl">
-        <AlertIcon />
-        <Box flex={1}>
-          No content found. Perhaps the publication hasn't been built and pushed
-          yet? To build, commit, and push it, execute <Code>{runCmd}</Code> in
-          the project folder.
-        </Box>
-        {toolbarAction}
-      </Alert>
+      <NotBuiltAlert
+        kind="publication"
+        stage={publication.stage}
+        path={publication.path}
+        action={toolbarAction}
+      />
     )
   }
   return <>{contentView}</>

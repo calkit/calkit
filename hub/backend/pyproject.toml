@@ -62,6 +62,15 @@ dev = [
 [tool.uv.sources]
 calkit-python = { workspace = true }
 
+# This package's version is dynamic: hatch-vcs derives it from the Git tags
+# below. uv's build cache keys on the source tree alone, so without this a
+# rebuild at the same sources reuses the wheel it built before the release
+# tag existed, and the image ships the previous version's number. Releases
+# tag a commit that is usually already built (staging deploys every push to
+# main), so `commit` alone would not catch it; `tags` is the one that does.
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+
 [build-system]
 requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"

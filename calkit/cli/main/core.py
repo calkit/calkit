@@ -2440,6 +2440,26 @@ def manual_step(
     typer.echo("Done")
 
 
+def _env_prefix_exists(
+    env: dict, envs: dict, env_name: str, wdir: str | None
+) -> bool:
+    """Check that a venv-like environment's prefix exists on disk.
+
+    The environment check cache only hashes a prefix that's pinned in
+    ``calkit.yaml``, so a virtual environment living at its default location
+    could have been deleted since the last check without invalidating the
+    cache, in which case it still needs to be rebuilt.
+    """
+    if env.get("kind") not in ["uv-venv", "venv"]:
+        return True
+    if env.get("prefix") or "path" not in env:
+        return True
+    prefix = calkit.environments.get_default_venv_prefix(
+        envs, env["path"], env_name
+    )
+    return os.path.isdir(os.path.join(wdir or ".", prefix))
+
+
 @app.command(
     name="xenv|runenv",
     help="Execute a command in an environment.",
@@ -2529,6 +2549,38 @@ def run_in_env(
         docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
+
+    def save_env_check_cache() -> None:
+        """Record a successful check so repeat calls can skip it."""
+        try:
+            calkit.environments.save_cache(
+                env_name=env_name, env=env, wdir=wdir, success=True
+            )
+        except Exception as e:
+            if verbose:
+                typer.echo(f"Failed to save environment check cache: {e}")
+
+    # This command is typically called once per pipeline stage, so checking
+    # the environment every time is wasteful, and on Windows can fail
+    # outright, e.g., if a package installed into the environment provides
+    # the executable that's currently running. Consult the same cache
+    # ``calkit run`` uses and only check if something relevant has changed.
+    if (
+        not no_check
+        and env["kind"] not in calkit.environments.KINDS_NO_CHECK
+        and calkit.environments.check_cache(
+            env_name=env_name, env=env, wdir=wdir
+        )
+        and _env_prefix_exists(
+            env=env, envs=envs, env_name=env_name, wdir=wdir
+        )
+    ):
+        if verbose:
+            typer.echo(
+                f"Skipping check for environment '{env_name}' since it was "
+                "recently checked and nothing has changed"
+            )
+        no_check = True
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
@@ -2555,6 +2607,7 @@ def run_in_env(
                 args=env.get("args", []),
                 quiet=not verbose,
             )
+            save_env_check_cache()
         docker_cmd = [
             "docker",
             "run",
@@ -2630,6 +2683,7 @@ def run_in_env(
                 relaxed=relaxed_check,
                 quiet=not verbose,
             )
+            save_env_check_cache()
         # TODO: Prefix should only be in the env file or calkit.yaml, not both?
         prefix = env.get("prefix")
         # Conda is often not on the PATH (especially on Windows), so search
@@ -2708,6 +2762,7 @@ def run_in_env(
                 quiet=True,
                 verbose=verbose,
             )
+            save_env_check_cache()
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"  # type: ignore
         if verbose:
@@ -2719,6 +2774,7 @@ def run_in_env(
     elif env["kind"] == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
         env_path = env.get("path")
         if env_path is None:
             raise_error(
@@ -2884,6 +2940,7 @@ def run_in_env(
         assert isinstance(env_path, str)
         if not no_check:
             check_renv(env_path=env_path, verbose=verbose)
+            save_env_check_cache()
         # For renv, we need to run from the renv project directory so renv
         # properly initializes the library, but the script needs to run
         # from its original working directory
@@ -2935,6 +2992,7 @@ def run_in_env(
             )
         if not no_check:
             check_nix_env(env=env, verbose=verbose)
+            save_env_check_cache()
         env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
         flake_ref = f"path:{env_dir}"
         shell_name = env.get("shell")
@@ -2966,6 +3024,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),  # type: ignore
             )
+            save_env_check_cache()
         image_name = calkit.matlab.get_docker_image_name(
             ck_info=ck_info,
             env_name=env_name,

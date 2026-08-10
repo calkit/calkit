@@ -1203,10 +1203,13 @@ def check_venv(
                 else os.path.join(wdir or ".", prefix)
             )
             if os.path.isdir(prefix_full_path):
+                # This can fail if the environment is in use, e.g., on
+                # Windows, where files can't be removed while open, in which
+                # case we keep it and fall back to rebuilding from the spec
                 shutil.rmtree(prefix_full_path)
             create_venv()
             pip_install_and_freeze(dep_file_txt)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, OSError):
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"

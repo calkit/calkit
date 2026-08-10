@@ -116,8 +116,13 @@ def get_references(
         raise HTTPException(422, "max_projects must be at least 1")
     project_specs: list[str] = []
     if projects is None:
+        # The join and distinct are load-bearing: the clause references
+        # UserProjectAccess, so without them every project the user owns
+        # comes back once per access row in the whole table
         owned = session.exec(
             select(Project)
+            .distinct()
+            .join(Project.user_access_records, isouter=True)  # type: ignore
             .where(app.projects.writable_project_clause(current_user))
             .order_by(Project.updated.desc())  # type: ignore[union-attr]
             .limit(max_projects)

@@ -31,6 +31,7 @@ const ROOT_BIB = "references.bib";
 
 let panel: Panel | null = null;
 let hubWebUrl = "https://calkit.io";
+let launcher: LauncherHandle | null = null;
 
 interface LauncherHandle {
   setLabel: (label: string, tone: "neutral" | "match" | "none") => void;
@@ -74,6 +75,29 @@ function mountLauncher(onClick: () => void): LauncherHandle {
       button.className = tone === "neutral" ? "" : tone;
     },
   };
+}
+
+/**
+ * Say on the button what the last lookup found.
+ *
+ * Called from the panel as well as on load, because the load-time lookup
+ * can't answer at all when no project is active yet, and picking one in
+ * the panel is exactly when the answer arrives. Reading the module-level
+ * launcher rather than closing over one keeps a stale lookup from writing
+ * to a button that has since been replaced.
+ */
+function showMatchCount(matches: ReferenceSearchMatch[]): void {
+  if (!launcher) {
+    return;
+  }
+  if (matches.length) {
+    launcher.setLabel(
+      `In ${matches.length} collection${matches.length === 1 ? "" : "s"}`,
+      "match",
+    );
+  } else {
+    launcher.setLabel("Add to Calkit", "none");
+  }
 }
 
 function referenceSummary(reference: DetectedReference): HTMLElement {
@@ -407,6 +431,11 @@ async function openPanel(reference: DetectedReference): Promise<void> {
     let lookupError: string | null = null;
     try {
       matches = await searchMatches(reference, settings.activeProject);
+      // The button asked the same question on load, but couldn't answer
+      // without an active project, and this is where one gets picked
+      if (settings.activeProject) {
+        showMatchCount(matches);
+      }
     } catch (e) {
       // Signing in is the whole panel's problem, not this one lookup's
       if (e instanceof RequestFailed && e.notSignedIn) {
@@ -482,23 +511,18 @@ async function start(): Promise<void> {
   if (!reference) {
     return;
   }
-  const launcher = mountLauncher(() => void openPanel(reference));
+  launcher = mountLauncher(() => void openPanel(reference));
   // One lookup on load tells the user whether this paper is already in a
   // collection without them having to open anything
   try {
     const settings = await send({ type: "settings.get" });
     if (!settings.activeProject) {
+      // Nothing to look in yet. The panel updates the button if the user
+      // picks a project there, so this stays neutral rather than claiming
+      // the paper isn't filed anywhere
       return;
     }
-    const matches = await searchMatches(reference, settings.activeProject);
-    if (matches.length) {
-      launcher.setLabel(
-        `In ${matches.length} collection${matches.length === 1 ? "" : "s"}`,
-        "match",
-      );
-    } else {
-      launcher.setLabel("Add to Calkit", "none");
-    }
+    showMatchCount(await searchMatches(reference, settings.activeProject));
   } catch {
     // A failed lookup, e.g. nobody signed in, just leaves the neutral label
   }

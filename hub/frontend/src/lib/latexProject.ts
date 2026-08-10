@@ -305,24 +305,39 @@ export async function loadLatexProject(
   // Repo path -> the path to read its content from; the same except under a
   // map-paths destination.
   const paths = new Map<string, string>([[texPath, texPath]])
+  // Always read the pipeline, even with no deps to expand: a map-paths
+  // destination inside the paper directory (example-basic copies `figures`
+  // to `paper/figures`) is gitignored, so it appears in neither the deps nor
+  // the directory scan, and the sweep below is the only thing that finds it.
   let rules: MapPathsRule[] = []
-  if (deps && deps.length > 0) {
-    try {
-      const pipeline = await ProjectsService.getProjectPipeline({
-        owner_name: ownerName,
-        project_name: projectName,
-      }).then((response) => response.data)
-      if (pipeline?.calkit_yaml) {
-        rules = parseMapPathsRules(pipeline.calkit_yaml)
-      }
-    } catch {
-      // Best effort: without the pipeline, map-paths deps just don't resolve.
+  try {
+    const pipeline = await ProjectsService.getProjectPipeline({
+      owner_name: ownerName,
+      project_name: projectName,
+    }).then((response) => response.data)
+    if (pipeline?.calkit_yaml) {
+      rules = parseMapPathsRules(pipeline.calkit_yaml)
     }
-    // Deps first (authoritative, and they can point outside the paper
-    // directory), so they're never crowded out of the MAX_FILES budget by the
-    // directory scan below.
-    for (const dep of deps) {
-      await expandDep(ownerName, projectName, dep, paths, rules)
+  } catch {
+    // Best effort: without the pipeline, map-paths paths just don't resolve.
+  }
+  // Deps first (authoritative, and they can point outside the paper
+  // directory), so they're never crowded out of the MAX_FILES budget by the
+  // scans below.
+  for (const dep of deps ?? []) {
+    await expandDep(ownerName, projectName, dep, paths, rules)
+  }
+  const dir = texPath.includes("/")
+    ? texPath.slice(0, texPath.lastIndexOf("/"))
+    : ""
+  // Map-paths destinations that land beside the document. The pipeline writes
+  // these, so they're absent from Git and from the listing below, but the
+  // document references them as if they were there.
+  for (const rule of rules) {
+    const underDir =
+      dir === "" || rule.dest === dir || rule.dest.startsWith(`${dir}/`)
+    if (underDir && !paths.has(rule.dest)) {
+      await expandDep(ownerName, projectName, rule.dest, paths, rules)
     }
   }
   // Then always scan the .tex's own directory. A latex stage's deps are usually
@@ -330,9 +345,6 @@ export async function loadLatexProject(
   // style, and bib-style files it needs (e.g. a journal's jfm.cls). Those aren't
   // pipeline deps, and without them the in-browser compile dies with
   // "File `jfm.cls' not found".
-  const dir = texPath.includes("/")
-    ? texPath.slice(0, texPath.lastIndexOf("/"))
-    : ""
   await listDir(ownerName, projectName, dir, 0, paths)
   const files = await Promise.all(
     [...paths].map(([path, readPath]) =>

@@ -296,11 +296,19 @@ const LatexEditor = ({
 
   const saveMutation = useMutation({
     mutationFn: async (message: string) => {
+      // Whether trimming rewrote anything, so the panes are only remounted
+      // (losing the caret and scroll position) when there is actually
+      // something different to show.
+      let trimmed = false
       for (const repoPath of dirtyRef.current) {
         // Tidied the way the repo's hooks would, so a save doesn't land a
         // diff that gets rewritten later. The buffer is updated to match, so
         // what's on screen is what was committed.
-        const text = trimForSave(buffersRef.current.get(repoPath) ?? "")
+        const typed = buffersRef.current.get(repoPath) ?? ""
+        const text = trimForSave(typed, baseBuffersRef.current.get(repoPath))
+        if (text !== typed) {
+          trimmed = true
+        }
         buffersRef.current.set(repoPath, text)
         // Skip files already identical to origin (nothing to commit), so one
         // unchanged file doesn't fail the whole save with a "not different"
@@ -319,8 +327,9 @@ const LatexEditor = ({
           bodyProjectsPutProjectContents: { file, message: message || null },
         }).then((response) => response.data)
       }
+      return trimmed
     },
-    onSuccess: async () => {
+    onSuccess: async (trimmed) => {
       // Our just-saved content is now the committed baseline. Advance the base
       // buffers and the remote-head marker to it so the poll doesn't flag our
       // own push as an update to pull. Do this before clearing dirty so we
@@ -340,8 +349,11 @@ const LatexEditor = ({
       setCommitMessage("")
       commitModal.onClose()
       // Show the trimmed text if trimming changed anything, so the pane
-      // isn't left displaying whitespace that wasn't committed.
-      setMergeNonce((n) => n + 1)
+      // isn't left displaying whitespace that wasn't committed. Remounting
+      // resets the caret and scroll position, so don't do it otherwise.
+      if (trimmed) {
+        setMergeNonce((n) => n + 1)
+      }
       showToast("Saved", "Your changes were committed.", "success")
       mixpanel.track("Saved LaTeX changes", {
         project: `${ownerName}/${projectName}`,
@@ -423,8 +435,12 @@ const LatexEditor = ({
           continue
         }
         const remote = f.text ?? ""
-        if (f.generated) {
+        if (f.generated && !dirtyRef.current.has(f.path)) {
           // Not editable, so there's nothing to merge — just take the latest.
+          // A file that loaded as editable can come back generated (its own
+          // read failed and we fell back to the map-paths source), so one
+          // with unsaved edits goes through the merge below instead of having
+          // them silently replaced.
           buffersRef.current.set(f.path, remote)
           baseBuffersRef.current.set(f.path, remote)
           generatedRef.current.add(f.path)

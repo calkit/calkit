@@ -856,6 +856,12 @@ def sync(
         # Simply copy files to Overleaf
         print_info("Push-only sync; skipping pull from Overleaf")
         res["patch"] = None
+    elif last_sync_commit and not paths_for_overleaf_patch:
+        # Nothing on Overleaf is ours to pull. This needs its own branch
+        # because an empty pathspec after `--` means "everything" to
+        # format-patch, not "nothing", which would pull in exactly the files
+        # we just decided to leave alone.
+        res["patch"] = None
     elif last_sync_commit:
         # Compute a patch in the Overleaf project between HEAD and the last
         # sync

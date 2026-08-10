@@ -19,4 +19,23 @@ describe("trimForSave", () => {
     expect(trimForSave("")).toBe("")
     expect(trimForSave("\n\n")).toBe("")
   })
+
+  it("leaves lines the user didn't touch alone", () => {
+    // A Markdown hard line break survives an edit elsewhere in the file
+    const original = "one  \ntwo  \nthree\n"
+    expect(trimForSave("one  \ntwo  \nedited\n", original)).toBe(
+      "one  \ntwo  \nedited\n",
+    )
+    // ...but a line the user typed still gets trimmed
+    expect(trimForSave("one  \ntwo  \nfour   \n", original)).toBe(
+      "one  \ntwo  \nfour\n",
+    )
+    // A line whose trailing whitespace the user deliberately removed stays
+    // removed rather than being restored
+    expect(trimForSave("one\ntwo  \nthree\n", original)).toBe(
+      "one\ntwo  \nthree\n",
+    )
+    // With no original, everything is trimmed as before
+    expect(trimForSave("one  \ntwo  \n")).toBe("one\ntwo\n")
+  })
 })

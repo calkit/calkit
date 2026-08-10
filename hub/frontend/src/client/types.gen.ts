@@ -2184,6 +2184,10 @@ export type Pipeline = {
    */
   calkit_yaml: string | null
   /**
+   * Ck Stages
+   */
+  ck_stages?: Array<string>
+  /**
    * Stage Statuses
    */
   stage_statuses?: {

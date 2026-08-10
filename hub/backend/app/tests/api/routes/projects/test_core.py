@@ -2607,3 +2607,34 @@ def test_project_pipeline_stage_edit(
             },
         )
         assert r.status_code == 422, r.text
+        # Neither wdir nor target_path may point outside the project, since
+        # both come off the request body and are used to read files
+        for escaping in [
+            "kind: latex\nenvironment: tex\nwdir: ../..\n"
+            "target_path: paper.tex\n",
+            "kind: latex\nenvironment: tex\n"
+            "target_path: ../../../etc/passwd\n",
+        ]:
+            r = client.post(
+                f"{stages_url}/paper/detect-inputs",
+                headers=headers,
+                json={"yaml": escaping},
+            )
+            assert r.status_code == 422, f"{escaping!r} -> {r.status_code}"
+        # A stage still using the legacy `slurm:` spelling keeps it: it is
+        # renamed to `scheduler:` on load, so it isn't a default to drop, and
+        # dropping it would delete the scheduler config outright
+        r = client.post(
+            f"{stages_url}/paper/remove-defaults",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: shell-command\nenvironment: tex\n"
+                    "command: echo hi\nwdir: null\n"
+                    "slurm:\n  account: abc\n  time: '01:00:00'\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == ["wdir"]
+        assert "slurm" in ryaml.load(r.json()["yaml"])

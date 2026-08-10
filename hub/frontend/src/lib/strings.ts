@@ -81,11 +81,22 @@ export const confirmPasswordRules = (
  * Doing it in the editor keeps a save from landing a diff that the hooks
  * immediately rewrite, which would otherwise show up as a spurious change
  * the next time anyone touches the file.
+ *
+ * Pass `original` (the content as loaded) to leave alone any line that was
+ * already there. Trailing whitespace is load-bearing in more formats than it
+ * looks -- a Markdown hard line break, a `verbatim` block, an empty trailing
+ * CSV field -- so a one-word edit shouldn't quietly rewrite the rest of the
+ * file. Omit it to trim everything.
  */
-export const trimForSave = (text: string): string => {
+export const trimForSave = (text: string, original?: string): string => {
+  const keep = new Set(
+    original === undefined
+      ? []
+      : original.split("\n").filter((line) => /[ \t\r]$/.test(line)),
+  )
   const trimmed = text
     .split("\n")
-    .map((line) => line.replace(/[ \t\r]+$/, ""))
+    .map((line) => (keep.has(line) ? line : line.replace(/[ \t\r]+$/, "")))
     .join("\n")
     .replace(/\n+$/, "")
   // An empty document stays empty rather than becoming a lone newline.

@@ -124,6 +124,11 @@ const CodeEditorPane = ({
   onChange,
 }: CodeEditorPaneProps) => {
   const ref = useRef<HTMLDivElement>(null)
+  // The listener below is built once and would otherwise close over the first
+  // render's onChange, so callbacks reading state (e.g. an auto-compile
+  // toggle) would keep seeing that render's values. Go through a ref instead.
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
   // The view owns the document once created, so re-running this would discard
   // the user's edits. Callers remount (via key) to load different content.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only by design
@@ -143,7 +148,7 @@ const CodeEditorPane = ({
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
           if (u.docChanged) {
-            onChange(u.state.doc.toString())
+            onChangeRef.current(u.state.doc.toString())
           }
         }),
       ],

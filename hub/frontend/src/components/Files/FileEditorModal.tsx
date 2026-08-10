@@ -142,7 +142,7 @@ const FileEditorModal = ({
 
   const saveMutation = useMutation({
     mutationFn: async (message: string) => {
-      const text = trimForSave(textRef.current)
+      const text = trimForSave(textRef.current, initialDoc)
       const file = new File([text], path.split("/").pop() || path, {
         type: "text/plain",
       })
@@ -155,7 +155,7 @@ const FileEditorModal = ({
       }).then((response) => response.data)
     },
     onSuccess: () => {
-      baseRef.current = trimForSave(textRef.current)
+      baseRef.current = trimForSave(textRef.current, initialDoc)
       setDirty(false)
       setCommitMessage("")
       commitModal.onClose()

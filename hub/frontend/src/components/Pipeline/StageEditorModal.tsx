@@ -64,7 +64,11 @@ const StageEditorModal = ({
   const showToast = useCustomToast()
   const queryClient = useQueryClient()
 
-  const { data: stage, isPending } = useQuery({
+  const {
+    data: stage,
+    isPending,
+    error: loadError,
+  } = useQuery({
     queryKey: ["projects", ownerName, projectName, "pipeline-stage", stageName],
     queryFn: () =>
       ProjectsService.getProjectPipelineStage({
@@ -100,7 +104,7 @@ const StageEditorModal = ({
         owner_name: ownerName,
         project_name: projectName,
         stage_name: stageName,
-        pipelineStageEdit: { yaml: trimForSave(textRef.current) },
+        pipelineStageEdit: { yaml: trimForSave(textRef.current, stage?.yaml) },
       }).then((response) => response.data),
     onSuccess: (result) => {
       replaceDoc(result.yaml)
@@ -124,7 +128,7 @@ const StageEditorModal = ({
         owner_name: ownerName,
         project_name: projectName,
         stage_name: stageName,
-        pipelineStageEdit: { yaml: trimForSave(textRef.current) },
+        pipelineStageEdit: { yaml: trimForSave(textRef.current, stage?.yaml) },
       }).then((response) => response.data),
     onSuccess: (result) => {
       replaceDoc(result.yaml)
@@ -148,7 +152,7 @@ const StageEditorModal = ({
         project_name: projectName,
         stage_name: stageName,
         pipelineStagePut: {
-          yaml: trimForSave(textRef.current),
+          yaml: trimForSave(textRef.current, stage?.yaml),
           message: message || null,
         },
       }).then((response) => response.data),
@@ -259,7 +263,17 @@ const StageEditorModal = ({
             <ModalCloseButton position="static" />
           </Flex>
           <ModalBody p={0} overflow="hidden">
-            {isPending || doc === null ? (
+            {loadError ? (
+              // Without this the modal sits on a spinner forever, since the
+              // query is no longer pending but never produced a document.
+              <Flex height="60vh" align="center" justify="center" px={6}>
+                <Text color="red.400" textAlign="center">
+                  This stage couldn't be loaded for editing. Stages Calkit
+                  generates, and any written directly in dvc.yaml, aren't in
+                  calkit.yaml and so can't be edited here.
+                </Text>
+              </Flex>
+            ) : isPending || doc === null ? (
               <Flex height="60vh" align="center" justify="center">
                 <Spinner />
               </Flex>

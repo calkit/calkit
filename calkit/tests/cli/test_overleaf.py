@@ -565,3 +565,71 @@ def test_overleaf_sync_paths_stage_outputs(tmp_dir):
     assert set(paths.files_to_copy_from_overleaf) == {"main.tex"}
     # ...and none of it is deleted from Overleaf either
     assert paths.stale_files_in_overleaf == []
+
+
+def test_overleaf_sync_all_overleaf_files_are_pipeline_outputs(tmp_dir):
+    # When every file on Overleaf is a pipeline output there is nothing to
+    # pull, which leaves no paths to pass to git format-patch -- and an empty
+    # pathspec after `--` means *everything* to Git, not nothing. Without a
+    # guard, the sync pulls in exactly the edits it just decided to skip.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    ol_dir = os.path.join(str(tmp_dir), "ol")
+    ol_remote_dir = os.path.join(str(tmp_dir), "ol-remote")
+    os.makedirs(os.path.join(main_dir, "pubs", "mypub1"))
+    os.makedirs(ol_dir)
+    main_repo = git.Repo.init(main_dir)
+    ol_remote = git.Repo.init(path=ol_remote_dir, bare=True)
+    ol_repo = git.Repo.init(ol_dir)
+    generated = "\\newcommand{\\r}{1}"
+    results_fpath = os.path.join(main_dir, "pubs", "mypub1", "results.tex")
+    with open(results_fpath, "w") as f:
+        f.write(generated)
+    ck_info = {"pipeline": {"stages": {}}}
+    with open(os.path.join(main_dir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    dvc_yaml = {
+        "stages": {
+            "results-to-tex": {
+                "cmd": "calkit latex from-json",
+                "outs": [{"pubs/mypub1/results.tex": {"cache": False}}],
+            }
+        }
+    }
+    with open(os.path.join(main_dir, "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    main_repo.git.add("pubs/mypub1/results.tex", "calkit.yaml", "dvc.yaml")
+    main_repo.git.commit(["-m", "Init project"])
+    # Overleaf holds only that generated file, and it was edited there
+    with open(os.path.join(ol_dir, "results.tex"), "w") as f:
+        f.write(generated)
+    ol_repo.git.add(".")
+    ol_repo.git.commit(["-m", "Overleaf state"])
+    last_sync_commit = ol_repo.head.commit.hexsha
+    with open(os.path.join(ol_dir, "results.tex"), "w") as f:
+        f.write("\\newcommand{\\r}{999}")
+    ol_repo.git.commit(["results.tex", "-m", "Update on Overleaf"])
+    ol_repo.git.remote(["add", "origin", ol_remote_dir])
+    ol_repo.git.push(["--set-upstream", "origin", ol_repo.active_branch.name])
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pubs/mypub1",
+        sync_info_for_path={},
+        last_sync_commit=last_sync_commit,
+    )
+    assert paths.paths_to_use_for_git_patch == []
+    res = calkit.overleaf.sync(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pubs/mypub1",
+        sync_info_for_path={},
+        last_sync_commit=last_sync_commit,
+        print_info=lambda *a, **k: None,
+    )
+    assert res["patch"] is None
+    # The Overleaf edit stayed on Overleaf, and our version was pushed back
+    with open(results_fpath) as f:
+        assert f.read() == generated
+    with open(os.path.join(ol_dir, "results.tex")) as f:
+        assert f.read() == generated
+    assert ol_remote.head.commit.hexsha == ol_repo.head.commit.hexsha

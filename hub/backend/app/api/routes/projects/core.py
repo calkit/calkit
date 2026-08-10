@@ -4878,9 +4878,24 @@ def get_project_pipeline(
         mermaid=mermaid,
         dvc_yaml=dvc_content,
         calkit_yaml=calkit_content,
+        ck_stages=list((ck_info.get("pipeline") or {}).get("stages") or {}),
         stage_statuses=stage_statuses,
         status=overall_status,
     )
+
+
+def _abs_path_within(root: str, rel_path: str) -> str:
+    """Resolve ``rel_path`` under ``root``, refusing anything that escapes it.
+
+    Paths that reach us from a request body are only ever meant to name
+    something inside the project's clone, so one that resolves outside it is
+    a bad request rather than a file to go read.
+    """
+    root_real = os.path.realpath(root)
+    resolved = os.path.realpath(os.path.join(root_real, rel_path))
+    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+        raise HTTPException(422, f"Path is outside the project: {rel_path}")
+    return resolved
 
 
 def _load_ck_stage_map(stage_yaml: str) -> Any:
@@ -4997,6 +5012,12 @@ def remove_project_pipeline_stage_defaults(
     # it is a default worth dropping. Deleting in place leaves every
     # surviving key where the author put it.
     keep = stage.to_ck_dict()
+    # `slurm:` is renamed to `scheduler:` when the stage is loaded, so a stage
+    # still using the legacy spelling has no `slurm` key in the dump and would
+    # look like a default worth dropping -- dropping it would delete the
+    # scheduler config outright. Keep it under the name the author wrote.
+    if "slurm" in stage_map and "scheduler" in keep:
+        keep["slurm"] = keep.pop("scheduler")
     removed = [key for key in stage_map if key not in keep]
     for key in removed:
         del stage_map[key]
@@ -5041,7 +5062,13 @@ def detect_project_pipeline_stage_inputs(
         raise HTTPException(
             422, "Inputs can only be detected for LaTeX stages"
         )
-    wdir = os.path.join(str(repo.working_dir), stage.wdir or "")
+    # `wdir` and `target_path` come straight off the request body, and the
+    # stage models type them as plain strings, so they can climb out of the
+    # clone with `..`. Everything below reads files, so pin both inside the
+    # project before touching the filesystem.
+    root = str(repo.working_dir)
+    wdir = _abs_path_within(root, stage.wdir or "")
+    _abs_path_within(wdir, stage.target_path)
     # An input can be a directory, so anything already covered by one is
     # left off rather than listed again underneath it.
     added = calkit.detect.filter_covered_inputs(

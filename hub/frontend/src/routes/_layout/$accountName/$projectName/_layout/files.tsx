@@ -357,12 +357,15 @@ function Files() {
   // The in-browser LaTeX editor can open a .tex source directly, or a LaTeX
   // publication (whose source we derive as <name>.tex, matching the
   // publications page). deps help load figures from outside the paper dir.
+  // Only a PDF publication gets that treatment: an .html or .md one has no
+  // .tex behind it, and deriving one would open the LaTeX editor on a file
+  // that doesn't exist instead of editing the publication itself.
   const latexTexPath: string | undefined =
     selectedItem?.type === "file"
       ? selectedItem.path.endsWith(".tex")
         ? selectedItem.path
-        : artifactKind === "publication"
-          ? selectedItem.path.replace(/\.[^/.]+$/, ".tex")
+        : artifactKind === "publication" && selectedItem.path.endsWith(".pdf")
+          ? selectedItem.path.replace(/\.pdf$/, ".tex")
           : undefined
       : undefined
   // No pipeline deps here (that lives on the Publication object, not a file

@@ -1,3 +1,4 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Badge,
   Box,
@@ -218,6 +219,21 @@ function SelectedItemInfo({
           <Icon as={MdEdit} mr={1} />
           Edit file
         </Button>
+      ) : selectedItem.type === "file" &&
+        selectedItem.in_repo &&
+        userHasWriteAccess ? (
+        // The in-app editor only handles text it knows how to open, so
+        // anything else keeps the editor it has always had rather than
+        // losing its only way to be edited.
+        <Link
+          href={`https://github.dev/${ownerName}/${projectName}/blob/main/${selectedItem.path}`}
+          isExternal
+        >
+          <Button size="sm" mt={2}>
+            <Icon mr={1} as={MdEdit} />
+            Edit on GitHub.dev <Icon ml={1} as={ExternalLinkIcon} />
+          </Button>
+        </Link>
       ) : (
         ""
       )}

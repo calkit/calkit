@@ -811,6 +811,10 @@ class Pipeline(SQLModel):
     dvc_stages: dict[str, DvcPipelineStage | DvcForeachStage]
     dvc_yaml: str
     calkit_yaml: str | None
+    # Stages declared in calkit.yaml, which is a subset of dvc_stages: the
+    # compiled pipeline also contains stages Calkit generates (LaTeX diffs)
+    # and any hand-written dvc.yaml ones. Only these can be edited.
+    ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
 

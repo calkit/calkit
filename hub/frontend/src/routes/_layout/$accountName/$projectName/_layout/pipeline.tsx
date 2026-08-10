@@ -281,16 +281,13 @@ function ProjectPipeline() {
   const envTo = `/${accountName}/${projectName}/environments`
 
   // Which diagram nodes are stages (the rest are files), so only those become
-  // clickable. Names come from the compiled DVC pipeline, and a matrix stage
-  // is drawn per item as `name@item`, so keep the base name.
+  // clickable. The editor only knows calkit.yaml stages, so use those rather
+  // than the compiled DVC names, which also cover stages Calkit generates
+  // (LaTeX diffs) and hand-written dvc.yaml ones -- clicking either 404s.
+  // Matrix stages are drawn as `name@item`; Mermaid maps those back itself.
   const stageNames = useMemo(
-    () =>
-      new Set(
-        Object.keys(pipelineQuery.data?.dvc_stages ?? {}).map(
-          (n) => n.split("@")[0],
-        ),
-      ),
-    [pipelineQuery.data?.dvc_stages],
+    () => new Set(pipelineQuery.data?.ck_stages ?? []),
+    [pipelineQuery.data?.ck_stages],
   )
   // Editing writes to calkit.yaml, so it's only offered for projects that
   // define their pipeline there, and never while viewing an older revision.

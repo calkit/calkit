@@ -3637,6 +3637,13 @@ export const PipelineSchema = {
       ],
       title: "Calkit Yaml",
     },
+    ck_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Ck Stages",
+    },
     stage_statuses: {
       additionalProperties: {
         $ref: "#/components/schemas/StageStatus",

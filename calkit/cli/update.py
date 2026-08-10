@@ -209,7 +209,7 @@ def update_release(
                 release_body += doi_md + "\n\n"
             if release_description is not None:
                 release_body += release_description
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 f"/projects/{project_name}/github-releases",
                 json=dict(
                     tag_name=name,

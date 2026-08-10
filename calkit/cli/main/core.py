@@ -46,11 +46,11 @@ from calkit.cli.check import (
     check_matlab_env,
     check_venv,
 )
-from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
@@ -59,6 +59,7 @@ from calkit.cli.notebooks import notebooks_app
 from calkit.cli.office import office_app
 from calkit.cli.overleaf import overleaf_app
 from calkit.cli.scheduler import scheduler_app
+from calkit.cli.sync import sync_app
 from calkit.cli.update import update_app
 
 app = typer.Typer(
@@ -82,13 +83,14 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
-app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
+app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
     scheduler_app,
     name="scheduler|sch",
     help="Work with a job scheduler (SLURM or PBS).",
 )
 app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
+app.add_typer(sync_app, name="sync", help="Sync with external systems.")
 
 
 def _to_shell_cmd(cmd: list[str]) -> str:
@@ -129,6 +131,36 @@ def main(
         raise typer.Exit()
     if use_version:
         _exec_with_version(use_version)
+    # Load the project's .env here rather than in the handful of commands
+    # that happen to need a secret from it. Which hub a command targets
+    # must not depend on that: 'calkit run' loaded it and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs.
+    dotenv.load_dotenv(dotenv_path=".env")
+    _warn_on_stale_calkit_env()
+
+
+def _warn_on_stale_calkit_env() -> None:
+    """Warn that ``CALKIT_ENV`` no longer picks a hub.
+
+    It used to, so a leftover one in a shell or a project's .env would
+    otherwise silently stop doing anything.
+    """
+    env = os.environ.get("CALKIT_ENV")
+    if not env or env == "test":
+        return
+    hub_url = calkit.hub.HUB_URLS.get(env)
+    # On stderr: this fires on every command, and some of them write
+    # machine-readable output on stdout
+    warn(
+        f"CALKIT_ENV={env} no longer selects a hub; "
+        + (
+            f"use CALKIT_HUB={hub_url}"
+            if hub_url
+            else "name the hub by its URL in CALKIT_HUB"
+        )
+        + " or the project's 'hub' key",
+        err=True,
+    )
 
 
 def _exec_with_version(version_spec: str) -> None:
@@ -266,11 +298,9 @@ def clone(
                 "{owner_name}/{project_name}"
             )
         owner_name, project_name = url_split
-        typer.echo("Fetching Git repo URL from the Calkit Cloud")
+        typer.echo("Fetching Git repo URL from the hub")
         try:
-            project = calkit.cloud.get(
-                f"/projects/{owner_name}/{project_name}"
-            )
+            project = calkit.hub.get(f"/projects/{owner_name}/{project_name}")
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
@@ -1154,9 +1184,40 @@ def save(
         overleaf_sync(verbose=verbose, no_push=no_push)
 
 
+def _warn_on_hub_mismatch() -> None:
+    """Warn if the project declares a hub other than the one commands are
+    currently targeting.
+
+    The declared hub is respected by default, so this only fires when an
+    explicit override (``CALKIT_HUB`` or ``--hub``) points somewhere
+    else, e.g., when pushing a copy of a project to staging during
+    development.
+    """
+    from calkit import config
+
+    try:
+        declared = calkit.load_calkit_info().get("hub")
+    except Exception:
+        return
+    if not declared or not isinstance(declared, str):
+        return
+    active = calkit.hub.get_hub_url()
+    if config.normalize_hub_url(declared) != active.rstrip("/"):
+        warn(
+            f"This project declares hub {declared}, but commands are "
+            f"currently targeting {active}"
+        )
+
+
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
+    no_dvc: Annotated[
+        bool, typer.Option("--no-dvc", help="Do not pull from DVC.")
+    ] = False,
+    no_git: Annotated[
+        bool, typer.Option("--no-git", help="Do not pull from Git.")
+    ] = False,
     git_args: Annotated[
         list[str],
         typer.Option("--git-arg", help="Additional Git args."),
@@ -1181,58 +1242,63 @@ def pull(
     ] = False,
 ):
     """Pull with both Git and DVC."""
-    typer.echo("Git pulling")
+    _warn_on_hub_mismatch()
     if force:
         if "-f" not in git_args and "--force" not in git_args:
             git_args.append("-f")
         if "-f" not in dvc_args and "--force" not in dvc_args:
             dvc_args.append("-f")
-    try:
-        git_cmd = ["git", "pull"]
-        if not no_recursive and "--recurse-submodules" not in git_args:
-            git_cmd.append("--recurse-submodules")
-        subprocess.check_call(git_cmd + git_args)
-    except subprocess.CalledProcessError:
-        raise_error("Git pull failed")
-    typer.echo("DVC pulling")
-    if not no_check_auth:
-        # Check that our dvc remotes all have our DVC token set for them
-        remotes = calkit.dvc.get_remotes()
-        for name, url in remotes.items():
-            if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
-                typer.echo(f"Checking authentication for DVC remote: {name}")
-                calkit.dvc.set_remote_auth(remote_name=name)
-    if (
-        not no_recursive
-        and "--recursive" not in dvc_args
-        and "-R" not in dvc_args
-    ):
-        dvc_args.append("--recursive")
-    result = calkit.dvc.run_dvc_command(
-        ["pull"] + dvc_args,
-        lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-    )
-    if result != 0:
-        raise_error("DVC pull failed")
-    calkit.dvc.zip.sync_all(direction="to-workspace")
-    if not no_recursive:
-        # Pull DVC in isolated subprojects (those with their own .dvc folder)
-        ck_info = calkit.load_calkit_info()
-        for sp in ck_info.get("subprojects", []):
-            if not isinstance(sp, dict) or not sp.get("path"):
-                continue
-            sp_path = sp["path"]
-            if not os.path.isdir(os.path.join(sp_path, ".dvc")):
-                continue
-            typer.echo(f"DVC pulling subproject: {sp_path}")
-            sp_result = calkit.dvc.run_dvc_command(
-                ["pull"] + dvc_args,
-                cwd=sp_path,
-                lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
-            )
-            if sp_result != 0:
-                raise_error(f"DVC pull failed for subproject: {sp_path}")
-            calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+    if not no_git:
+        typer.echo("Git pulling")
+        try:
+            git_cmd = ["git", "pull"]
+            if not no_recursive and "--recurse-submodules" not in git_args:
+                git_cmd.append("--recurse-submodules")
+            subprocess.check_call(git_cmd + git_args)
+        except subprocess.CalledProcessError:
+            raise_error("Git pull failed")
+    if not no_dvc:
+        typer.echo("DVC pulling")
+        if not no_check_auth:
+            # Check that our dvc remotes all have our DVC token set for them
+            remotes = calkit.dvc.get_remotes()
+            for name, url in remotes.items():
+                if calkit.dvc.detect_calkit_remote_type(name, url) == "http":
+                    typer.echo(
+                        f"Checking authentication for DVC remote: {name}"
+                    )
+                    calkit.dvc.set_remote_auth(remote_name=name)
+        if (
+            not no_recursive
+            and "--recursive" not in dvc_args
+            and "-R" not in dvc_args
+        ):
+            dvc_args.append("--recursive")
+        result = calkit.dvc.run_dvc_command(
+            ["pull"] + dvc_args,
+            lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+        )
+        if result != 0:
+            raise_error("DVC pull failed")
+        calkit.dvc.zip.sync_all(direction="to-workspace")
+        if not no_recursive:
+            # Pull DVC in isolated subprojects (those with their own .dvc folder)
+            ck_info = calkit.load_calkit_info()
+            for sp in ck_info.get("subprojects", []):
+                if not isinstance(sp, dict) or not sp.get("path"):
+                    continue
+                sp_path = sp["path"]
+                if not os.path.isdir(os.path.join(sp_path, ".dvc")):
+                    continue
+                typer.echo(f"DVC pulling subproject: {sp_path}")
+                sp_result = calkit.dvc.run_dvc_command(
+                    ["pull"] + dvc_args,
+                    cwd=sp_path,
+                    lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+                )
+                if sp_result != 0:
+                    raise_error(f"DVC pull failed in subproject: {sp_path}")
+                calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 
 @app.command(name="push")
@@ -1253,6 +1319,7 @@ def push(
     ] = False,
 ):
     """Push with both Git and DVC."""
+    _warn_on_hub_mismatch()
     if not no_dvc:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -1282,16 +1349,6 @@ def push(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
-
-
-@app.command(name="sync")
-def sync(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-):
-    """Sync the project repo by pulling and then pushing."""
-    # TODO: Walk users through merge conflicts if they arise
-    pull(no_check_auth=no_check_auth)
-    push(no_check_auth=no_check_auth)
 
 
 @app.command(name="ignore")
@@ -1417,6 +1474,39 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
                 add_stage_info(stage_name, "status", "failed")
                 break
     return res
+
+
+def _run_dvc_repro(argv: list[str]) -> int | None:
+    """Run ``dvc repro`` via the DVC CLI, tolerating teardown failures.
+
+    Returns DVC's exit code, or ``None`` if the command ran but DVC's
+    post-command teardown failed to import a module. After ``do_run`` finishes,
+    ``dvc.cli.main`` reports anonymous analytics and cleans up cached repos,
+    importing ``dvc.daemon`` and ``dvc.repo.open_repo`` only at that point. In
+    some broken or mixed installs those submodules can't be imported, so the
+    teardown raises a ``ModuleNotFoundError`` that escapes DVC entirely and
+    crashes the run with a confusing traceback once the pipeline has already
+    finished (see issue #1018). That doesn't affect the pipeline result, so
+    swallow it and signal ``None`` so the caller derives success/failure from
+    the run log instead of a lost exit code.
+
+    Only those two modules are tolerated, and deliberately so. ``dvc.cli.main``
+    runs the command inside a broad ``except Exception`` that turns any failure
+    into an exit code, so nothing from the command itself reaches here; but it
+    also imports ``dvc._debug``/``dvc.config``/``dvc.logger`` *before* that
+    block, and a broken install can fail there too. Swallowing those would leave
+    an empty run log and report a pipeline that never ran as successful, so
+    anything but a teardown module must propagate and fail loudly.
+    """
+    from dvc.cli import main as dvc_cli_main
+
+    try:
+        return int(dvc_cli_main(argv))
+    except ModuleNotFoundError as e:
+        if e.name not in ("dvc.daemon", "dvc.repo.open_repo"):
+            raise
+        warn(f"DVC post-run teardown failed and was ignored ({e})")
+        return None
 
 
 def _prune_run_logs(
@@ -1652,6 +1742,29 @@ def _concurrent_scheduler_prepass(
                 )
 
 
+def _get_subproject_targets_for_run(
+    subproject_path: str,
+    targets: list[str] | None,
+    include_dvc_yaml_targets: bool = False,
+) -> tuple[bool, list[str] | None]:
+    """Return whether and which subproject stages a run target selects."""
+    if not targets:
+        return True, None
+    sp = Path(subproject_path).as_posix()
+    target_prefixes = {sp, Path(sp).name}
+    if include_dvc_yaml_targets:
+        target_prefixes.add(f"{sp}/dvc.yaml")
+    selected_stages = []
+    for target in targets:
+        target_prefix, separator, stage_name = target.partition(":")
+        if target_prefix not in target_prefixes:
+            continue
+        if not separator or not stage_name:
+            return True, None
+        selected_stages.append(stage_name)
+    return bool(selected_stages), selected_stages or None
+
+
 @app.command(name="run")
 def run(
     targets: Annotated[
@@ -1828,7 +1941,6 @@ def run(
     import dvc.repo
     import dvc.repo.reproduce
     import dvc.ui
-    from dvc.cli import main as dvc_cli_main
     from git.exc import InvalidGitRepositoryError
 
     import calkit.dvc.zip
@@ -1910,6 +2022,18 @@ def run(
             sp = Path(subproject["path"]).as_posix()
             if not os.path.isdir(sp):
                 continue
+            if single_item:
+                sp_selected, sp_targets = _get_subproject_targets_for_run(
+                    subproject_path=sp,
+                    targets=targets,
+                    include_dvc_yaml_targets=not os.path.isdir(
+                        os.path.join(sp, ".dvc")
+                    ),
+                )
+                if not sp_selected:
+                    continue
+            else:
+                sp_targets = None
             os.chdir(sp)
             try:
                 sp_ck_info = calkit.load_calkit_info()
@@ -1918,7 +2042,7 @@ def run(
                         f"📦 Checking environments for subproject: {sp}"
                     )
                 sp_env_results = calkit.environments.check_all_in_pipeline(
-                    ck_info=sp_ck_info, force=force
+                    ck_info=sp_ck_info, targets=sp_targets, force=force
                 )
                 for env_name, sp_result in sp_env_results.items():
                     if verbose:
@@ -2080,13 +2204,21 @@ def run(
                 with calkit.dvc.dvc_lock_timeout(
                     calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT
                 ):
-                    sp_res = dvc_cli_main(["repro"] + sp_args)
+                    sp_res = _run_dvc_repro(["repro"] + sp_args)
             finally:
                 os.chdir(original_dir)
-            if sp_res != 0:
+            # ``None`` means the stage ran but DVC's teardown failed; treat that
+            # as success since the exit code is unrecoverable here.
+            if sp_res is not None and sp_res != 0:
                 failed = True
         if not args or all(a.startswith("--") for a in args):
-            # Only isolated subproject stage targets were given; skip parent run
+            # Only isolated subproject stage targets were given; skip the parent
+            # run, but still report failure the way the parent path does below,
+            # else a failing subproject stage would exit zero.
+            os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+            if failed:
+                raise_error("Pipeline failed")
+            calkit.echo("Pipeline completed successfully ✅")
             return {}
     if pipeline is not None:
         args += ["--pipeline", pipeline]
@@ -2141,7 +2273,7 @@ def run(
     file_handler.setFormatter(formatter)
     dvc.log.logger.addHandler(file_handler)
     # Remove newline logging in dvc.repo.reproduce
-    dvc.repo.reproduce.logger.setLevel(logging.ERROR)
+    dvc.repo.reproduce.logger.setLevel(logging.WARNING)
     # Disable other misc DVC output
     dvc.ui.ui.write = lambda *args, **kwargs: None
     # Tell `calkit scheduler batch` to resubmit completed jobs under --force;
@@ -2157,14 +2289,21 @@ def run(
         # the instant it finishes) can all hold it momentarily. Without this,
         # such a collision aborts the whole run with "Unable to acquire lock".
         with calkit.dvc.dvc_lock_timeout(calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT):
-            res = dvc_cli_main(["repro"] + args)
+            res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
-    failed = failed or res != 0
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
         stage_run_info = _stage_run_info_from_log_content(log_content)
+    if res is None:
+        # DVC's exit code was lost to a teardown failure; fall back to the log,
+        # which records any stage that failed to reproduce.
+        failed = failed or any(
+            info.get("status") == "failed" for info in stage_run_info.values()
+        )
+    else:
+        failed = failed or res != 0
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

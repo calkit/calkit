@@ -19,15 +19,16 @@
 
 <!-- INCLUDE: docs/index.md -->
 
-It's six months since you submitted your paper,
-do you know exactly how your figures and results were generated?
-
-You will if they're part of a Calkit project.
+Typical research workflows are horizontally-siloed, i.e.,
+various stages--data collection, analysis, writing--are performed in
+disconnected systems,
+turning research into a slow, error-prone, and tedious
+[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
 
 Calkit helps you integrate code, data, figures, results, publications,
 and more into a cohesive, traceable, and portable _knowledge creation system_,
-so every output can be traced back to its source and reproduced with a
-single command.
+so every output can be traced back to its source (provenance)
+and reproduced with a single command.
 
 With industry standard tools combined into a unified and simplified experience
 tailored for research,
@@ -59,7 +60,7 @@ without the cognitive overhead.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud platform](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
@@ -109,12 +110,12 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit.io)
+If you want to use a [Calkit hub](https://docs.calkit.org/hub)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](https://docs.calkit.org/cloud-integration) with:
+you can [connect to the hub](https://docs.calkit.org/hub) with:
 
 ```sh
-calkit cloud login
+calkit hub login
 ```
 
 If you use AI agents like Claude, Copilot, or Codex,
@@ -273,13 +274,13 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+Note the `--hub` flag requires [a hub connection](https://docs.calkit.org/hub)
 to be set up, but can be omitted if the project doesn't need to be backed up to
-the cloud or shared with collaborators.
-Cloud integration can also be set up later.
+the hub or shared with collaborators.
+Hub integration can also be set up later.
 
 Next, move into the project folder and run the pipeline,
 which consists of several stages defined in `calkit.yaml`:

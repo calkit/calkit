@@ -157,6 +157,9 @@ def test_update_environment(tmp_dir):
     subprocess.check_call(
         ["calkit", "new", "julia-env", "-n", "main", "--julia", "1.11"]
     )
+    # Note we add Example, the registry's trivial test package, since nothing
+    # here depends on which package is added, and heavier ones cost tens of
+    # seconds each to download and precompile
     subprocess.check_call(
         [
             "calkit",
@@ -165,9 +168,11 @@ def test_update_environment(tmp_dir):
             "-n",
             "main",
             "--add",
-            "IJulia",
+            "Example",
         ]
     )
+    with open("Project.toml") as f:
+        assert "Example" in f.read()
 
 
 @pytest.fixture

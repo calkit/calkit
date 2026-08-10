@@ -409,3 +409,35 @@ def test_overleaf_sync_trailing_slash_or_space(tmp_dir):
         text=True,
     )
     assert res2.returncode == 0, f"Trailing space sync failed: {res2.stderr}"
+
+
+def test_get_repo_disables_credential_store(tmp_dir):
+    # Set up a repo to act as the Overleaf remote (in the test env the remote
+    # URL is a local directory)
+    pid = str(uuid.uuid4())
+    _make_temp_overleaf_project(pid)
+    dest = calkit.overleaf.get_project_dir(pid)
+    # A fresh clone should reset the credential helper for that repo so only
+    # the token in its remote URL is used, never a stale one from the OS
+    # credential store
+    repo = calkit.overleaf.clone(pid, "sometoken")
+    assert os.path.isdir(os.path.join(dest, ".git"))
+    assert repo.git.config(["--local", "--get", "credential.helper"]) == ""
+    assert (
+        repo.git.config(["--local", "--get", "credential.interactive"])
+        == "false"
+    )
+    # Opening an already-cloned project should refresh the remote URL so an
+    # updated token takes effect, and keep the credential store disabled
+    repo2 = calkit.overleaf.get_repo(pid, "newtoken")
+    assert repo2.git.remote(
+        ["get-url", "origin"]
+    ) == calkit.overleaf.get_git_remote_url(pid, "newtoken")
+    assert repo2.git.config(["--local", "--get", "credential.helper"]) == ""
+    # A project that has not yet been cloned should be cloned
+    pid2 = str(uuid.uuid4())
+    _make_temp_overleaf_project(pid2)
+    calkit.overleaf.get_repo(pid2, "sometoken")
+    assert os.path.isdir(
+        os.path.join(calkit.overleaf.get_project_dir(pid2), ".git")
+    )

@@ -5,7 +5,7 @@ for the project's important metadata, which includes its:
 
 - Global or system-level [dependencies](dependencies.md) or requirements
   (applications, environmental variables, or other configuration steps)
-- Questions the project seeks to answer
+- [Questions](questions.md) the project seeks to answer
 - [Environments](environments.md)
 - [The pipeline](pipeline/index.md)
 - [Datasets](datasets.md)
@@ -25,7 +25,7 @@ and reduce redundant storage.
 ## Showcase
 
 The project showcase is a list of elements that best represent the project,
-shown on the project homepage on the Calkit Cloud web app.
+shown on the project homepage on the hub.
 For example:
 
 ```yaml

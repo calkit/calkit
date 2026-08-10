@@ -115,6 +115,83 @@ def test_inline_subproject(tmp_dir):
         assert "v2" in f.read()
 
 
+def test_single_item_skips_unrelated_subproject_preparation(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("sub1")
+    write_ck_info(
+        "sub1/calkit.yaml",
+        {
+            "pipeline": {
+                "stages": {
+                    "subproject-only": make_stage(
+                        'echo "subproject" > subproject.txt'
+                    )
+                }
+            }
+        },
+    )
+    write_ck_info(
+        "calkit.yaml",
+        {
+            "subprojects": [{"path": "sub1"}],
+            "pipeline": {
+                "stages": {
+                    "parent-only": make_stage('echo "parent" > parent.txt')
+                }
+            },
+        },
+    )
+    result = subprocess.run(
+        ["calkit", "run", "--single-item", "parent-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert os.path.isfile("parent.txt")
+    assert "Checking environments for subproject" not in result.stdout
+    selected_subproject = subprocess.run(
+        ["calkit", "run", "--single-item", "sub1:subproject-only"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert os.path.isfile("sub1/subproject.txt")
+    assert "Checking environments for subproject: sub1" in (
+        selected_subproject.stdout
+    )
+
+    # A DVC-style inline target should still prepare the selected subproject.
+    write_ck_info(
+        "sub1/calkit.yaml",
+        {
+            "pipeline": {
+                "stages": {
+                    "subproject-only": make_stage(
+                        'echo "dvc target" > subproject.txt'
+                    )
+                }
+            }
+        },
+    )
+    calkit.pipeline.to_dvc(write=True, manage_gitignore=False)
+    selected_inline_dvc_target = subprocess.run(
+        [
+            "calkit",
+            "run",
+            "--single-item",
+            "sub1/dvc.yaml:subproject-only",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    with open("sub1/subproject.txt") as f:
+        assert "dvc target" in f.read()
+    assert "Checking environments for subproject: sub1" in (
+        selected_inline_dvc_target.stdout
+    )
+
+
 def init_isolated_subproject(path, stages):
     os.makedirs(path, exist_ok=True)
     subprocess.check_call(["git", "init"], cwd=path)
@@ -211,9 +288,9 @@ def test_isolated_subproject(tmp_dir):
             continue
         for path in stage_info.stale_outputs + stage_info.modified_inputs:
             # All paths must be parent-relative (start with "sub2/")
-            assert path.startswith("sub2/") or path.startswith(
-                "sub2"
-            ), f"Path '{path}' in stage '{stage_name}' is not parent-relative"
+            assert path.startswith("sub2/") or path.startswith("sub2"), (
+                f"Path '{path}' in stage '{stage_name}' is not parent-relative"
+            )
     # --- target shorthand: ck run sub2 → wrapper stage ---
     # out.txt was removed above; re-run via shorthand.
     subprocess.check_call(["calkit", "run", "sub2"])

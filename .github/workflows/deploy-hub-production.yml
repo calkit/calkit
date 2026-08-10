@@ -1,0 +1,108 @@
+name: Deploy hub to production
+
+concurrency: production
+
+# To roll back, dispatch manually and pick the release tag to redeploy
+# from the ref selector
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # Only hub releases deploy here; other release tags in the monorepo
+    # (e.g., v1.2.3 for the package) must not trigger a production deploy
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.event.release.tag_name, 'hub/v')
+    # Named for the deployed domain so the deployments list shows where
+    # this went; the app-level ENVIRONMENT below is a separate concept
+    environment:
+      name: calkit.io
+      url: https://calkit.io
+    runs-on:
+      - self-hosted
+      - production
+    defaults:
+      run:
+        working-directory: hub
+    env:
+      ENVIRONMENT: production
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
+      STACK_NAME: ${{ vars.STACK_NAME }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      FERNET_KEY: "${{ secrets.FERNET_KEY }}"
+      FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
+      FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+      FIRST_SUPERUSER_GITHUB_USERNAME: ${{ vars.FIRST_SUPERUSER_GITHUB_USERNAME }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAILS_FROM_EMAIL: ${{ vars.EMAILS_FROM_EMAIL }}
+      POSTGRES_USER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      DOCKER_IMAGE_BACKEND: "backend-${{ vars.STACK_NAME }}"
+      DOCKER_IMAGE_FRONTEND: "frontend-${{ vars.STACK_NAME }}"
+      GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+      GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      OBJECT_STORAGE_PREFIX: ${{ vars.OBJECT_STORAGE_PREFIX }}
+      OBJECT_STORAGE_ENDPOINT_URL: ${{ vars.OBJECT_STORAGE_ENDPOINT_URL }}
+      OBJECT_STORAGE_KEY: ${{ vars.OBJECT_STORAGE_KEY }}
+      OBJECT_STORAGE_SECRET: ${{ secrets.OBJECT_STORAGE_SECRET }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+      MIXPANEL_TOKEN: ${{ secrets.MIXPANEL_TOKEN }}
+      GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      ZENODO_CLIENT_ID: ${{ secrets.ZENODO_CLIENT_ID }}
+      ZENODO_CLIENT_SECRET: ${{ secrets.ZENODO_CLIENT_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
+      ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
+      GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - name: Validate release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # For release events the ref is the release tag; for manual
+        # dispatch it's whatever was picked in the ref selector, so
+        # check that it's a published hub release before deploying it
+        run: |
+          TAG="${{ github.ref_name }}"
+          echo "Validating release tag: $TAG"
+          case "$TAG" in
+            hub/v*) ;;
+            *)
+              echo "::error::'$TAG' is not a hub release tag (hub/vX.Y.Z); pick one from the ref selector."
+              exit 1
+              ;;
+          esac
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+          if [ "$status" != "200" ]; then
+            echo "::error::'$TAG' is not a published release (HTTP $status); only tagged releases can be deployed."
+            exit 1
+          fi
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The backend image versions itself with hatch-vcs, which reads
+          # the hub/vX.Y.Z tags out of .git during the build; the default
+          # shallow checkout fetches neither tags nor enough history
+          fetch-depth: 0
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans

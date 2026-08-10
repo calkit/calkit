@@ -37,8 +37,11 @@ nav:
   - Home: index.md
   - Installation: installation.md
   - Quickstart: quickstart.md
-  - Cloud integration: cloud-integration.md
+  - Sharing, collaboration, and backup (Calkit hub):
+      - hub/index.md
+      - Running your own: hub/self-hosting.md
   - Use with AI tools: ai-tools.md
+  - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
   - Dependencies, configuration, and secrets: dependencies.md
@@ -56,7 +59,11 @@ nav:
   - Apps: apps.md
   - Releasing/archiving projects and artifacts: releases.md
   - Local server (GUI interaction): local-server.md
+  - LaTeX documents: latex.md
   - Overleaf integration: overleaf.md
+  - Browser extension:
+      - browser-ext/index.md
+      - Privacy policy: browser-ext/privacy.md
   - Subprojects: subprojects.md
   - Examples: examples.md
   - Tutorials:

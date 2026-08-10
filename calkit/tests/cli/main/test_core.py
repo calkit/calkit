@@ -8,6 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from unittest.mock import Mock, patch
 
 import dvc.repo
 import git
@@ -21,14 +22,18 @@ import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
+    _get_subproject_targets_for_run,
     _prune_run_logs,
+    _run_dvc_repro,
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
     _to_shell_cmd,
+    _warn_on_stale_calkit_env,
 )
 from calkit.cli.main.core import (
     app as calkit_app,
 )
+from calkit.cli.main.core import main as calkit_main
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -41,6 +46,52 @@ skipif_windows_mock_scheduler = pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: mock scheduler is not yet Windows-compatible",
 )
+
+
+@pytest.mark.parametrize(
+    ("subproject_path", "targets", "include_dvc_yaml_targets", "expected"),
+    [
+        ("sub1", None, False, (True, None)),
+        ("sub1", ["parent-stage"], False, (False, None)),
+        ("sub1", ["sub1"], False, (True, None)),
+        ("nested/sub1", ["sub1:build"], False, (True, ["build"])),
+        (
+            "nested/sub1",
+            ["nested/sub1:build"],
+            False,
+            (True, ["build"]),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml"],
+            True,
+            (True, None),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml:build"],
+            True,
+            (True, ["build"]),
+        ),
+        (
+            "nested/sub1",
+            ["nested/sub1/dvc.yaml:build"],
+            False,
+            (False, None),
+        ),
+    ],
+)
+def test_get_subproject_targets_for_run(
+    subproject_path, targets, include_dvc_yaml_targets, expected
+):
+    assert (
+        _get_subproject_targets_for_run(
+            subproject_path,
+            targets,
+            include_dvc_yaml_targets=include_dvc_yaml_targets,
+        )
+        == expected
+    )
 
 
 def _repo_test_file(name: str) -> Path:
@@ -339,7 +390,10 @@ def test_run_in_julia_env(tmp_dir):
             "my-julia",
             "--julia=1.11",
             "--no-commit",
-            "Revise",
+            # Example is the registry's trivial test package; nothing here
+            # depends on which packages are installed, and heavier ones cost
+            # tens of seconds each to download and precompile
+            "Example",
             "PkgVersion",
         ]
     )
@@ -353,20 +407,21 @@ def test_run_in_julia_env(tmp_dir):
                 "--",
                 "-e",
                 (
-                    "using Revise; using PkgVersion; "
-                    "println(PkgVersion.Version(Revise))"
+                    "using Example; using PkgVersion; "
+                    "println(PkgVersion.Version(Example))"
                 ),
             ]
         )
         .decode()
         .strip()
     )
+    assert out.splitlines()[-1].split(".")[0].isdigit()
     # Check that we can run a script with arguments
     with open("julia_script.jl", "w") as f:
         f.write(
             "import PkgVersion; "
-            " using Revise; "
-            'println("PkgVersion: ", PkgVersion.Version(Revise)); '
+            " using Example; "
+            'println("PkgVersion: ", PkgVersion.Version(Example)); '
             'println("Arg1: ", ARGS[1]); '
             'println("Arg2: ", ARGS[2])'
         )
@@ -893,7 +948,7 @@ def test_run(tmp_dir):
             "j1",
             "--path",
             "something/Project.toml",
-            "PkgVersion",
+            "Example",
         ]
     )
     subprocess.check_call(
@@ -913,6 +968,83 @@ def test_run(tmp_dir):
     res = calkit.cli.main.run()
     assert "dvc_stages" in res
     assert "stage_run_info" in res
+
+
+def test_run_dvc_repro_tolerates_teardown_failure(monkeypatch, capsys):
+    import dvc.cli
+
+    # Normal invocation returns DVC's exit code unchanged
+    monkeypatch.setattr(dvc.cli, "main", Mock(return_value=7))
+    assert _run_dvc_repro(["repro", "my-stage"]) == 7
+    # DVC lazily imports ``dvc.daemon`` and ``dvc.repo.open_repo`` for
+    # analytics/cleanup only after the command has already run. On a broken
+    # install those imports fail (issue #1018), crashing the run once the
+    # pipeline has finished, so tolerate them and report ``None`` instead.
+    for missing in ["dvc.daemon", "dvc.repo.open_repo"]:
+        monkeypatch.setattr(
+            dvc.cli,
+            "main",
+            Mock(
+                side_effect=ModuleNotFoundError(
+                    f"No module named {missing!r}", name=missing
+                )
+            ),
+        )
+        assert _run_dvc_repro(["repro"]) is None
+        assert "teardown failed" in capsys.readouterr().out
+    # A module DVC imports *before* running the command (dvc._debug, dvc.config,
+    # dvc.logger) failing means the pipeline never ran at all. Swallowing that
+    # would leave an empty log and report success, so it must propagate.
+    monkeypatch.setattr(
+        dvc.cli,
+        "main",
+        Mock(
+            side_effect=ModuleNotFoundError(
+                "No module named 'dvc._debug'", name="dvc._debug"
+            )
+        ),
+    )
+    with pytest.raises(ModuleNotFoundError, match="dvc._debug"):
+        _run_dvc_repro(["repro"])
+    # Non-import errors are unexpected too -- DVC turns real command failures
+    # into an exit code -- so they must propagate rather than be masked.
+    monkeypatch.setattr(
+        dvc.cli, "main", Mock(side_effect=RuntimeError("boom"))
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        _run_dvc_repro(["repro"])
+
+
+def test_run_isolated_subproject_stage_exit_code(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # An isolated subproject is its own Git/DVC repo, so its stage targets run
+    # directly inside it rather than through the parent pipeline
+    os.makedirs("isolated-sp", exist_ok=True)
+    subprocess.check_call(["git", "init"], cwd="isolated-sp")
+    subprocess.check_call(["calkit", "init"], cwd="isolated-sp")
+    ck_info = calkit.load_calkit_info()
+    ck_info["subprojects"] = [{"path": "isolated-sp"}]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # A failing subproject stage must exit nonzero; the isolated-target path
+    # returns before the parent pipeline runs, and used to skip raising
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {
+                "stages": {
+                    "stage-b": {"cmd": 'python -c "import sys; sys.exit(1)"'}
+                }
+            },
+            f,
+        )
+    result = subprocess.run(["calkit", "run", "isolated-sp:stage-b"])
+    assert result.returncode != 0
+    # A passing one still exits zero
+    with open("isolated-sp/dvc.yaml", "w") as f:
+        yaml.dump(
+            {"stages": {"stage-b": {"cmd": "python -c \"print('ok')\""}}}, f
+        )
+    subprocess.check_call(["calkit", "run", "isolated-sp:stage-b"])
 
 
 def test_run_ignore_errors(tmp_dir):
@@ -1903,3 +2035,36 @@ def test_call_dvc_passthrough_hint(tmp_dir):
         "Hint: If DVC failed because a .dvc pointer file is git-ignored"
         in res.stderr
     )
+
+
+def test_dotenv_is_loaded_for_every_command(tmp_dir):
+    # Which hub a command targets must not depend on whether that command
+    # happens to read a secret: 'calkit run' loaded .env and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs
+    with open(".env", "w") as f:
+        f.write("CALKIT_HUB=hub.example.edu\nSOME_PROJECT_SECRET=abc123\n")
+    # patch.dict restores the whole environment, which monkeypatch can't
+    # do for variables load_dotenv puts there itself
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ.pop("SOME_PROJECT_SECRET", None)
+        calkit_main(version=False, use_version=None)
+        assert os.environ["CALKIT_HUB"] == "hub.example.edu"
+        assert os.environ["SOME_PROJECT_SECRET"] == "abc123"
+        assert calkit.config.get_hub() == "https://hub.example.edu"
+
+
+def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
+    # It used to, so a leftover one shouldn't silently stop doing anything
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ["CALKIT_ENV"] = "staging"
+        _warn_on_stale_calkit_env()
+        assert (
+            "CALKIT_ENV=staging no longer selects a hub"
+            in capsys.readouterr().err
+        )
+        # The test environment is the one name that still means something
+        os.environ["CALKIT_ENV"] = "test"
+        _warn_on_stale_calkit_env()
+        assert capsys.readouterr().err == ""

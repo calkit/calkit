@@ -18,7 +18,6 @@
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
-| [`sync`](#top-command-sync)                      | Sync the project repo by pulling and then pushing.                                                           |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
@@ -47,9 +46,10 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
+| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
 
 ## Top-level command details
 
@@ -248,6 +248,8 @@ Options:
 | Option            | Type    | Required | Default | Description                                        |
 | ----------------- | ------- | -------- | ------- | -------------------------------------------------- |
 | `--no-check-auth` | boolean | no       | False   |                                                    |
+| `--no-dvc`        | boolean | no       | False   | Do not pull from DVC.                              |
+| `--no-git`        | boolean | no       | False   | Do not pull from Git.                              |
 | `--git-arg`       | text    | no       |         | Additional Git args.                               |
 | `--dvc-arg`       | text    | no       |         | Additional DVC args.                               |
 | `--force`, `-f`   | boolean | no       | False   | Force pull, potentially overwriting local changes. |
@@ -275,24 +277,6 @@ Options:
 | `--git-arg`       | text    | no       |         | Additional Git args.       |
 | `--dvc-arg`       | text    | no       |         | Additional DVC args.       |
 | `--no-recursive`  | boolean | no       | False   | Do not push to submodules. |
-
-<a id="top-command-sync"></a>
-
-### `calkit sync`
-
-Sync the project repo by pulling and then pushing.
-
-Usage:
-
-```text
-calkit sync [OPTIONS]
-```
-
-Options:
-
-| Option            | Type    | Required | Default | Description |
-| ----------------- | ------- | -------- | ------- | ----------- |
-| `--no-check-auth` | boolean | no       | False   |             |
 
 <a id="top-command-ignore"></a>
 
@@ -668,16 +652,16 @@ Options:
 
 Configure Calkit.
 
-| Command                                                   | Description                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                              |
-| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                  |
-| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                   |
-| [`remote`](#subcommand-config-remote)                     | Setup the Calkit cloud as the default DVC remote and store a token in the local config. |
-| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit cloud token in the local DVC config for all Calkit remotes.              |
-| [`list`](#subcommand-config-list)                         | List keys in the config.                                                                |
-| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                                |
-| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                           |
+| Command                                                   | Description                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                             |
+| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                 |
+| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                  |
+| [`remote`](#subcommand-config-remote)                     | Set up the Calkit hub as the default DVC remote and store a token in the local config. |
+| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit hub token in the local DVC config for all Calkit remotes.               |
+| [`list`](#subcommand-config-list)                         | List keys in the config.                                                               |
+| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                               |
+| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                          |
 
 <a id="subcommand-config-set"></a>
 
@@ -738,7 +722,7 @@ Arguments:
 
 #### `calkit config remote`
 
-Setup the Calkit cloud as the default DVC remote and store a token in the local config.
+Set up the Calkit hub as the default DVC remote and store a token in the local config.
 
 Usage:
 
@@ -757,7 +741,7 @@ Options:
 
 #### `calkit config remote-auth`
 
-Store a Calkit cloud token in the local DVC config for all Calkit remotes.
+Store a Calkit hub token in the local DVC config for all Calkit remotes.
 
 Usage:
 
@@ -861,18 +845,18 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                   |
-| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided. |
-| `--title`           | text    | no       |         | Project title.                                                                |
-| `--description`     | text    | no       |         | Project description.                                                          |
-| `--cloud`           | boolean | no       | False   | Create this project in the cloud (Calkit and GitHub.)                         |
-| `--public`          | boolean | no       | False   | Create as a public project if --cloud is selected.                            |
-| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.          |
-| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.      |
-| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                 |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                      |
-| `--verbose`         | boolean | no       | False   | Print verbose output.                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
 
 <a id="subcommand-new-create-figure-fig"></a>
 
@@ -1134,8 +1118,8 @@ Options:
 | Option                   | Type    | Required | Default | Description                                                                            |
 | ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `--title`                | text    | yes      |         | The title of the publication.                                                          |
-| `--description`          | text    | yes      |         | A description of the publication.                                                      |
 | `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | text    | no       |         | A description of the publication.                                                      |
 | `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
 | `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |
@@ -1829,8 +1813,14 @@ List notebooks in the project.
 Usage:
 
 ```text
-calkit list|ls notebooks|nb
+calkit list|ls notebooks|nb [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-figures-figs"></a>
 
@@ -1935,8 +1925,14 @@ List publications in the project.
 Usage:
 
 ```text
-calkit list|ls publications|pubs
+calkit list|ls publications|pubs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-references-refs"></a>
 
@@ -1947,8 +1943,14 @@ List reference collections in the project.
 Usage:
 
 ```text
-calkit list|ls references|refs
+calkit list|ls references|refs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-environments-envs"></a>
 
@@ -1959,8 +1961,14 @@ List environments in the project.
 Usage:
 
 ```text
-calkit list|ls environments|envs
+calkit list|ls environments|envs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-templates"></a>
 
@@ -1971,8 +1979,14 @@ List all available Calkit templates.
 Usage:
 
 ```text
-calkit list|ls templates
+calkit list|ls templates [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-installers"></a>
 
@@ -1985,8 +1999,14 @@ These can be declared as `kind: app` dependencies in `calkit.yaml` and Calkit wi
 Usage:
 
 ```text
-calkit list|ls installers
+calkit list|ls installers [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-procedures"></a>
 
@@ -1997,8 +2017,14 @@ List procedures in the current project.
 Usage:
 
 ```text
-calkit list|ls procedures
+calkit list|ls procedures [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-releases"></a>
 
@@ -2009,8 +2035,14 @@ List releases.
 Usage:
 
 ```text
-calkit list|ls releases
+calkit list|ls releases [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-list-ls-stages"></a>
 
@@ -2030,6 +2062,7 @@ Options:
 | -------------- | ------- | -------- | ------- | ----------------------- |
 | `--kind`, `-k` | text    | no       |         | Filter stages by kind.  |
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
+| `--json`       | boolean | no       | False   | Output result as JSON.  |
 
 <a id="subcommand-list-ls-remotes"></a>
 
@@ -2040,8 +2073,14 @@ List Git and DVC remotes.
 Usage:
 
 ```text
-calkit list|ls remotes
+calkit list|ls remotes [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="command-group-describe-desc"></a>
 
@@ -2049,11 +2088,11 @@ calkit list|ls remotes
 
 Describe things.
 
-| Command                                      | Description                                                        |
-| -------------------------------------------- | ------------------------------------------------------------------ |
-| [`system`](#subcommand-describe-desc-system) | Describe the system.                                               |
-| [`env`](#subcommand-describe-desc-env)       | Describe a single environment, including spec and lock file paths. |
-| [`envs`](#subcommand-describe-desc-envs)     | Describe all environments, including spec and lock file paths.     |
+| Command                                                             | Description                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2064,38 +2103,51 @@ Describe the system.
 Usage:
 
 ```text
-calkit describe|desc system
+calkit describe|desc system [OPTIONS]
 ```
 
-<a id="subcommand-describe-desc-env"></a>
+Options:
 
-#### `calkit describe|desc env`
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-environment-env"></a>
+
+#### `calkit describe|desc environment|env`
 
 Describe a single environment, including spec and lock file paths.
 
 Usage:
 
 ```text
-calkit describe|desc env [OPTIONS]
+calkit describe|desc environment|env [OPTIONS]
 ```
 
 Options:
 
-| Option         | Type | Required | Default | Description       |
-| -------------- | ---- | -------- | ------- | ----------------- |
-| `--name`, `-n` | text | yes      |         | Environment name. |
+| Option         | Type    | Required | Default | Description            |
+| -------------- | ------- | -------- | ------- | ---------------------- |
+| `--name`, `-n` | text    | yes      |         | Environment name.      |
+| `--json`       | boolean | no       | False   | Output result as JSON. |
 
-<a id="subcommand-describe-desc-envs"></a>
+<a id="subcommand-describe-desc-environments-envs"></a>
 
-#### `calkit describe|desc envs`
+#### `calkit describe|desc environments|envs`
 
 Describe all environments, including spec and lock file paths.
 
 Usage:
 
 ```text
-calkit describe|desc envs
+calkit describe|desc environments|envs [OPTIONS]
 ```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
 
 <a id="command-group-import"></a>
 
@@ -2154,9 +2206,9 @@ calkit import environment [OPTIONS] SRC
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                                                           |
-| -------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit Cloud will be queried. |
+| Argument | Type | Required | Default | Description                                                                                                         |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
 
 Options:
 
@@ -3023,10 +3075,11 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                 |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk. |
+| Command                                        | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
+| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3089,6 +3142,44 @@ Options:
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+
+<a id="subcommand-latex-tex-diff"></a>
+
+#### `calkit latex|tex diff`
+
+Build a PDF showing what changed in a LaTeX document.
+
+Two revisions that turn out to be the same is a result rather than an error: the marked-up document comes out unmarked, which is what "this branch hasn't changed the paper" looks like. A pipeline shouldn't fail depending on which branch it runs from.
+
+Marks up one revision of a document against another with latexdiff, so additions and deletions are visible where they happen rather than as a list of files that changed. A `.dvc` pointer in a pull request says a paper was rebuilt; this says what it now reads.
+
+With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
+
+Usage:
+
+```text
+calkit latex|tex diff [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compare. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
+| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
 
 <a id="command-group-overleaf-ol"></a>
 
@@ -3182,27 +3273,28 @@ Arguments:
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
 
-<a id="command-group-cloud"></a>
+<a id="command-group-hub-cloud"></a>
 
-### `calkit cloud`
+### `calkit hub|cloud`
 
-Interact with a Calkit Cloud.
+Interact with a Calkit hub.
 
-| Command                            | Description                        |
-| ---------------------------------- | ---------------------------------- |
-| [`get`](#subcommand-cloud-get)     | Get a resource from the Cloud API. |
-| [`login`](#subcommand-cloud-login) | Login to the Calkit Cloud.         |
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
 
-<a id="subcommand-cloud-get"></a>
+<a id="subcommand-hub-cloud-get"></a>
 
-#### `calkit cloud get`
+#### `calkit hub|cloud get`
 
-Get a resource from the Cloud API.
+Get a resource from the hub API.
 
 Usage:
 
 ```text
-calkit cloud get ENDPOINT
+calkit hub|cloud get [OPTIONS] ENDPOINT
 ```
 
 Arguments:
@@ -3211,25 +3303,44 @@ Arguments:
 | ---------- | ---- | -------- | ------- | ------------ |
 | `endpoint` | text | yes      |         | API endpoint |
 
-<a id="subcommand-cloud-login"></a>
+Options:
 
-#### `calkit cloud login`
+| Option  | Type | Required | Default | Description                                                                                                                              |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 
-Login to the Calkit Cloud.
+<a id="subcommand-hub-cloud-login"></a>
+
+#### `calkit hub|cloud login`
+
+Log in to a Calkit hub.
 
 First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
 
 Usage:
 
 ```text
-calkit cloud login [OPTIONS]
+calkit hub|cloud login [OPTIONS]
 ```
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                        |
-| --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
+
+<a id="subcommand-hub-cloud-config"></a>
+
+#### `calkit hub|cloud config`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit hub|cloud config COMMAND [ARGS]...
+```
 
 <a id="command-group-scheduler-sch"></a>
 
@@ -3370,3 +3481,93 @@ Usage:
 ```text
 calkit dev ipython [OPTIONS]
 ```
+
+<a id="command-group-sync"></a>
+
+### `calkit sync`
+
+Sync with external systems.
+
+| Command                                 | Description                                          |
+| --------------------------------------- | ---------------------------------------------------- |
+| [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
+| [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
+| [`all`](#subcommand-sync-all)           | Sync all registered systems.                         |
+| [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
+
+<a id="subcommand-sync-git"></a>
+
+#### `calkit sync git`
+
+Sync the Git repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync git [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-dvc"></a>
+
+#### `calkit sync dvc`
+
+Sync the DVC repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync dvc [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-all"></a>
+
+#### `calkit sync all`
+
+Sync all registered systems.
+
+Usage:
+
+```text
+calkit sync all
+```
+
+<a id="subcommand-sync-overleaf"></a>
+
+#### `calkit sync overleaf`
+
+Sync folders with Overleaf.
+
+Usage:
+
+```text
+calkit sync overleaf [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                      |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |

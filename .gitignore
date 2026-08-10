@@ -9,7 +9,7 @@ site
 coverage.xml
 import.log
 tsconfig.tsbuildinfo
-lib
+jupyterlab-ext/lib
 node_modules
 .yarn
 *.eslintcache

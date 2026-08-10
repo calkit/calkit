@@ -1,0 +1,3 @@
+[submodule "examples/basic"]
+	path = examples/basic
+	url = https://github.com/calkit/example-basic.git

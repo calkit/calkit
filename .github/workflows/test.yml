@@ -1,18 +1,60 @@
 name: Run tests
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on: pull_request
 
 env:
   CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
 
 jobs:
+  # Always runs so the gated job below can be a branch protection required
+  # check; hub-only PRs are covered by test-hub.yml instead
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+      jlab: ${{ steps.filter.outputs.jlab }}
+      vscode: ${{ steps.filter.outputs.vscode }}
+      browser: ${{ steps.filter.outputs.browser }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # Negated patterns are ignored under the default 'some'
+          # quantifier, which would make this match every change
+          predicate-quantifier: "every"
+          filters: |
+            cli:
+              - "**"
+              - "!hub/**"
+              - "!vscode-ext/**"
+              - "!browser-ext/**"
+            # The JupyterLab extension depends on the core Python package,
+            # so run its tests for any change outside the other subprojects
+            jlab:
+              - "**"
+              - "!hub/**"
+              - "!vscode-ext/**"
+              - "!browser-ext/**"
+            vscode:
+              - "vscode-ext/**"
+            browser:
+              - "browser-ext/**"
+
   main:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Configure Git Credentials
@@ -22,27 +64,31 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
         with:
           miniforge-version: latest
           auto-activate-base: true
           conda-remove-defaults: true
       - name: Setup Pixi
-        uses: prefix-dev/setup-pixi@v0.9.6
+        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
         with:
           run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@v2
+        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
         with:
           r-version: latest
       - name: Run tests
@@ -55,6 +101,8 @@ jobs:
           uv --version
           uv run pytest -n 4 --durations=10
   jupyterlab-ext:
+    needs: changes
+    if: needs.changes.outputs.jlab == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -62,9 +110,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Install JupyterLab extension dependencies
@@ -90,6 +142,8 @@ jobs:
           path: jupyterlab-ext/ui-tests/test-results/
           retention-days: 7
   vscode-ext:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -97,7 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
           cache: npm
@@ -106,3 +160,24 @@ jobs:
         run: npm ci
       - name: Run VS Code extension tests
         run: npm test
+  browser-ext:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: browser-ext
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: browser-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run browser extension unit tests
+        run: npm test
+      - name: Build browser extension
+        run: npm run build

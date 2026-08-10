@@ -4,6 +4,7 @@ import {
   classifyStaleStage,
   dvcStageOutputPaths,
   expandDvcMatrix,
+  outputEntryPath,
 } from "../pipeline/core";
 
 test("expandDvcMatrix produces the cartesian product, flattening nested values", () => {
@@ -147,4 +148,18 @@ test("classifyStaleStage reports a changed command", () => {
   );
   assert.equal(cls.commandModified, true);
   assert.equal(cls.scriptStale, false);
+});
+
+test("outputEntryPath normalizes string and object-form deps/outs", () => {
+  // Regression for #1031: object-form inputs/outputs (e.g. a dep written as
+  // `- path: data.csv`, or an out carrying `cache: false`) reached path.join
+  // as objects and crashed stage/notebook expansion. Every input/output row in
+  // the sidebar routes through this helper, so both shapes must resolve to a
+  // plain string path.
+  assert.equal(outputEntryPath("data/raw.csv"), "data/raw.csv");
+  assert.equal(outputEntryPath({ path: "data/raw.csv" }), "data/raw.csv");
+  assert.equal(
+    outputEntryPath({ path: "results/out.json", cache: false }),
+    "results/out.json",
+  );
 });

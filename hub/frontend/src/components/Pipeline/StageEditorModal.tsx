@@ -22,13 +22,14 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { EditorView } from "codemirror"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
+import { stageKindFromYaml } from "../../lib/pipelineYaml"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 
@@ -198,8 +199,15 @@ const StageEditorModal = ({
   }
 
   // Detection only means something for a LaTeX document; for any other kind
-  // the backend has nothing to look for.
-  const isLatexStage = /^\s*kind:\s*latex\s*$/m.test(doc ?? "")
+  // the backend has nothing to look for. Parsed rather than pattern-matched,
+  // so a trailing comment, quotes, or odd spacing around the value don't hide
+  // the button, and a kind that merely ends in "latex" (json-to-latex) doesn't
+  // wrongly show it. `doc` only changes when content is loaded or replaced
+  // wholesale, so this isn't re-parsed on every keystroke.
+  const isLatexStage = useMemo(
+    () => stageKindFromYaml(doc ?? "") === "latex",
+    [doc],
+  )
 
   return (
     <>

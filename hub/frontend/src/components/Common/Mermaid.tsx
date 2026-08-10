@@ -115,12 +115,30 @@ const Mermaid = ({
         continue
       }
       const handler = () => onStageClick(name)
+      // Enter and Space are what a button responds to, and Space would
+      // otherwise scroll the page.
+      const keyHandler = (e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onStageClick(name)
+        }
+      }
       node.addEventListener("click", handler)
-      // No <title> tooltip here: both this and the zoom-to-stage effect read
-      // a node's label off its textContent, which a <title> child would join.
+      node.addEventListener("keydown", keyHandler)
+      // Button semantics so the action is reachable by keyboard and announced
+      // by screen readers. The label goes on aria-label rather than a <title>
+      // child: both this and the zoom-to-stage effect read a node's name off
+      // its textContent, which a <title> child would join.
+      node.setAttribute("tabindex", "0")
+      node.setAttribute("role", "button")
+      node.setAttribute("aria-label", `Edit stage ${name}`)
       node.style.cursor = "pointer"
       cleanups.push(() => {
         node.removeEventListener("click", handler)
+        node.removeEventListener("keydown", keyHandler)
+        node.removeAttribute("tabindex")
+        node.removeAttribute("role")
+        node.removeAttribute("aria-label")
         node.style.cursor = ""
       })
     }

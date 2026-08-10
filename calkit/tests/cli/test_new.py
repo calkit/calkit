@@ -263,6 +263,38 @@ def test_new_publication(tmp_dir):
     pub2 = ck_info["publications"][1]
     assert pub2["path"] == "my-paper-2/paper.pdf"
     assert "description" not in pub2
+    # A template that brings its own class and style files declares them as
+    # stage inputs, else editing them wouldn't rebuild the paper and the
+    # in-browser preview couldn't compile it at all
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "jfm-paper",
+            "--template",
+            "latex/jfm",
+            "--kind",
+            "journal-article",
+            "--title",
+            "A JFM paper",
+            "--stage",
+            "build-jfm-paper",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-jfm-paper"]
+    assert stage["inputs"] == [
+        "jfm-paper/jfm.bst",
+        "jfm-paper/jfm.cls",
+        "jfm-paper/lineno-FLM.sty",
+        "jfm-paper/upmath.sty",
+    ]
+    # The article template needs nothing beyond its own .tex
+    article_stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert article_stage.get("inputs", []) == []
 
 
 def test_new_uv_env(tmp_dir):
@@ -672,6 +704,77 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # A document's class, bibliography, and figures become deps automatically,
+    # since LaTeX resolves those itself and the pipeline can't see them
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.png", "wb") as f:
+        f.write(b"not really a PNG")
+    # A DVC-tracked figure is only a pointer file until it's pulled, but it's
+    # still an input
+    with open("figures/dvc-fig.png.dvc", "w") as f:
+        f.write("outs:\n  - path: dvc-fig.png\n")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("myclass.cls", "w") as f:
+        f.write("\\usepackage{mystyle}\n")
+    with open("mystyle.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("paper2.tex", "w") as f:
+        f.write(
+            "\\documentclass{myclass}\n"
+            "\\usepackage{graphicx}\n"
+            "% \\includegraphics{figures/commented}\n"
+            "\\bibliography{refs}\n"
+            "\\includegraphics[width=0.5\\textwidth]{figures/fig}\n"
+            "\\includegraphics{figures/dvc-fig.png}\n"
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-2",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper2.pdf",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    # graphicx lives in TeX Live, not the project, so it isn't an input
+    assert ck_info["pipeline"]["stages"]["build-paper-2"]["inputs"] == [
+        "figures/dvc-fig.png",
+        "figures/fig.png",
+        "myclass.cls",
+        "mystyle.sty",
+        "refs.bib",
+    ]
+    # Detection can be turned off, and explicit inputs are always kept
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-3",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper3.pdf",
+            "--input",
+            "refs.bib",
+            "--no-detect-inputs",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["pipeline"]["stages"]["build-paper-3"]["inputs"] == [
+        "refs.bib"
+    ]
     # output_dir / aux_dir / extra latexmk args flow through to the command
     subprocess.check_call(
         [

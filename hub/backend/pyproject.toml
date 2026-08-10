@@ -1,6 +1,6 @@
 [project]
 name = "app"
-version = "0.1.0"
+dynamic = ["version"]
 description = ""
 requires-python = ">=3.10,<4.0"
 authors = [{ name = "Pete Bachant", email = "petebachant@gmail.com" }]
@@ -41,6 +41,9 @@ dependencies = [
   "python-json-logger>=2.0.0",
   # For signing Zotero's OAuth 1.0a requests
   "requests-oauthlib>=2.0.0",
+  # Reading the text out of a PDF to diff two builds of a document; pure
+  # Python, so the image needs no system packages for it
+  "pypdf>=6.1.1",
 ]
 
 [dependency-groups]
@@ -59,9 +62,36 @@ dev = [
 [tool.uv.sources]
 calkit-python = { workspace = true }
 
+# This package's version is dynamic: hatch-vcs derives it from the Git tags
+# below. uv's build cache keys on the source tree alone, so without this a
+# rebuild at the same sources reuses the wheel it built before the release
+# tag existed, and the image ships the previous version's number. Releases
+# tag a commit that is usually already built (staging deploys every push to
+# main), so `commit` alone would not catch it; `tags` is the one that does.
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+# The hub is released from this monorepo as hub/vX.Y.Z, alongside the
+# Python package's own vX.Y.Z tags, so the pattern has to be anchored on
+# the prefix or the hub would report the CLI's version.
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "^hub/v(?P<version>.+)$"
+
+[tool.hatch.version.raw-options]
+# The repository root, two levels up from this package
+root = "../.."
+# No --dirty: it makes Git compare against the working tree, which runs any
+# clean filters configured in .git/config. Those point at host paths that
+# don't exist inside the image build, and a required filter that can't run
+# is a hard error.
+git_describe_command = [
+  "git", "describe", "--tags", "--long", "--match", "hub/v[0-9]*",
+]
 
 [tool.pytest.ini_options]
 # Anchor pytest's rootdir/config here; without this section pytest ascends

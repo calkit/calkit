@@ -4,6 +4,7 @@ import atexit
 import json
 import os
 import posixpath
+import re
 import shutil
 import stat
 import subprocess
@@ -1303,12 +1304,43 @@ class GitTree(RepoTree):
 
 
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:
-    """Resolve a branch, tag, or commit hash to a Commit object."""
-    for candidate in (ref, f"origin/{ref}"):
+    """Resolve a branch, tag, or commit hash to a Commit object.
+
+    A ref that's missing is the one case worth going to the network for.
+    Clones are cached with a TTL, so anything pushed since the last fetch
+    -- a new branch, or the head commit of a pull request -- reads as
+    missing until that expires, even though it exists on GitHub.
+    """
+
+    def resolve() -> git.Commit | None:
+        for candidate in (ref, f"origin/{ref}"):
+            try:
+                return repo.commit(candidate)
+            except Exception:
+                continue
+        return None
+
+    commit = resolve()
+    if commit is not None:
+        return commit
+    # Anything that isn't a plain ref name is not worth handing to git,
+    # if only to keep a leading dash from being read as an option
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", ref):
         try:
-            return repo.commit(candidate)
-        except Exception:
-            continue
+            # By SHA as well as by name: GitHub serves a commit that's
+            # reachable from any ref, which covers a pull request head
+            # that no local branch points at
+            with _timed("fetch-ref", ref=ref):
+                repo.git.fetch(
+                    ["origin", ref],
+                    kill_after_timeout=GIT_FETCH_TIMEOUT,
+                )
+        except GitCommandError as e:
+            logger.info(f"Could not fetch ref '{ref}': {e}")
+        else:
+            commit = resolve()
+            if commit is not None:
+                return commit
     raise HTTPException(404, f"Git ref '{ref}' was not found")
 
 

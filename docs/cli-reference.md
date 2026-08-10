@@ -1561,6 +1561,7 @@ Options:
 | `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
 | `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
 | `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
 | `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
 | `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
 | `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
@@ -3077,10 +3078,11 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                 |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk. |
+| Command                                        | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
+| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3143,6 +3145,44 @@ Options:
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+
+<a id="subcommand-latex-tex-diff"></a>
+
+#### `calkit latex|tex diff`
+
+Build a PDF showing what changed in a LaTeX document.
+
+Two revisions that turn out to be the same is a result rather than an error: the marked-up document comes out unmarked, which is what "this branch hasn't changed the paper" looks like. A pipeline shouldn't fail depending on which branch it runs from.
+
+Marks up one revision of a document against another with latexdiff, so additions and deletions are visible where they happen rather than as a list of files that changed. A `.dvc` pointer in a pull request says a paper was rebuilt; this says what it now reads.
+
+With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
+
+Usage:
+
+```text
+calkit latex|tex diff [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compare. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
+| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
 
 <a id="command-group-overleaf-ol"></a>
 

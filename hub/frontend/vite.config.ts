@@ -2,8 +2,6 @@ import { TanStackRouterVite } from "@tanstack/router-vite-plugin"
 import react from "@vitejs/plugin-react-swc"
 import { defineConfig } from "vite"
 
-const hash = Math.floor(Math.random() * 90000) + 10000
-
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react(), TanStackRouterVite()],
@@ -19,9 +17,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        entryFileNames: `[name]` + hash + `.js`,
-        chunkFileNames: `[name]` + hash + `.js`,
-        assetFileNames: `[name]` + hash + `.[ext]`,
+        // Content hashes, not a per-build one: nginx serves these immutable
+        // for a year, and a chunk that didn't change has to keep its URL
+        // across deploys. Renaming every file each build meant a tab open
+        // during a deploy 404ed on its next lazy import, and every client
+        // re-downloaded the whole bundle. See the vite:preloadError handler
+        // in main.tsx for the chunks that legitimately do change.
+        entryFileNames: "[name]-[hash].js",
+        chunkFileNames: "[name]-[hash].js",
+        assetFileNames: "[name]-[hash].[ext]",
         manualChunks(id) {
           if (!id.includes("node_modules")) {
             return undefined

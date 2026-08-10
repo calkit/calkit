@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy.exc import DataError
 from sqlmodel import Field, func, select
 
+import app.projects
 import app.stripe
 from app import mixpanel, users, zotero
 from app.api.deps import (

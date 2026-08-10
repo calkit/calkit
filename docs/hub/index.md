@@ -29,6 +29,13 @@ calkit config set default_hub https://your-hub.example.edu
 Commands that take a `--hub` option, like `calkit new project`, can also
 target an instance one-off, e.g., `--hub staging.calkit.io`.
 
+Which hub a command talks to is resolved the same way for every command:
+the `CALKIT_HUB` environment variable, then the `hub` key in the
+project's `calkit.yaml`, then `default_hub`, then calkit.io.
+A hub is always named by its URL.
+A project's `.env` file is loaded first, so `CALKIT_HUB` set there applies
+to the whole project.
+
 Like the rest of Calkit, the hub is free and open source, so
 [you can run your own](self-hosting.md).
 

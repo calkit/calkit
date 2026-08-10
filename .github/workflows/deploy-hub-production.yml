@@ -99,5 +99,33 @@ jobs:
           fi
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The backend image versions itself with hatch-vcs, which reads
+          # the hub/vX.Y.Z tags out of .git during the build; the default
+          # shallow checkout fetches neither tags nor enough history
+          fetch-depth: 0
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans
+      - name: Verify the deployed version
+        # The image derives its version from the Git tags at build time,
+        # which has silently gone wrong before: the build reused a wheel
+        # cached from a build of the same commit made before the release
+        # was tagged, so the deploy succeeded while prod kept reporting the
+        # previous version. A wrong version string here means the image is
+        # not the release it claims to be, which is worth failing over.
+        run: |
+          EXPECTED="${GITHUB_REF_NAME#hub/v}"
+          for _ in $(seq 1 40); do
+            SERVED=$(
+              curl -fsS "https://api.${DOMAIN}/version" |
+                sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p'
+            ) || SERVED=""
+            if [ "$SERVED" = "$EXPECTED" ]; then
+              echo "Production is serving $SERVED"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Deployed stack reports version" \
+            "'${SERVED:-no response}', expected '$EXPECTED'."
+          exit 1

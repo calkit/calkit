@@ -59,10 +59,7 @@ import useCustomToast from "../../../../../hooks/useCustomToast"
 import useProject from "../../../../../hooks/useProject"
 import { formatBibField } from "../../../../../lib/bibtex"
 import { handleError } from "../../../../../lib/errors"
-
-// Where the Zotero OAuth callback should return the user, so connecting from
-// the import flow lands back here with the import modal reopened.
-const ZOTERO_RETURN_KEY = "zoteroAuthReturnTo"
+import { stashZoteroReturn } from "../../../../../lib/zotero"
 
 const referencesSearchSchema = z.object({
   // Selected collection path, so a link restores the same collection.
@@ -480,12 +477,17 @@ const CollectionEntries = memo(function CollectionEntries({
                 ""
               )}
             </Text>
-            {entry.has_pdf || entry.url ? (
+            {entry.has_pdf || entry.url || entry.arxiv_id ? (
               <Icon
                 as={BsFilePdf}
                 ml={1}
                 color="red.500"
                 cursor="pointer"
+                title={
+                  entry.has_pdf || entry.url
+                    ? "View PDF"
+                    : "View PDF from arXiv"
+                }
                 onClick={() => onOpenItem(entry.key)}
               />
             ) : null}
@@ -566,10 +568,7 @@ function References() {
       UsersService.postUserZoteroAuthStart().then((response) => response.data),
     onSuccess: (data) => {
       mixpanel.track("Clicked connect Zotero", { source: "references import" })
-      sessionStorage.setItem(
-        ZOTERO_RETURN_KEY,
-        window.location.pathname + window.location.search,
-      )
+      stashZoteroReturn({ reopenImport: true })
       location.href = data.authorize_url
     },
     onError: (err: AxiosError) => handleError(err, showToast),

@@ -87,6 +87,10 @@ services:
       SMTP_PORT: "1025"
       SMTP_TLS: "false"
       EMAILS_FROM_EMAIL: "noreply@example.com"
+      # The image bakes in whatever version it was built at, which goes
+      # stale as you commit; this keeps /version tracking the working tree
+      # without rebuilding. Resolved by the Makefile.
+      HUB_VERSION: ${HUB_VERSION-}
 
   backend-dvc:
     restart: "no"

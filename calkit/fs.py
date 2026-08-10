@@ -22,8 +22,8 @@ Supported storage backends (via the Calkit hub API):
 
 Multi-backend support:
     By default, the filesystem routes to the Calkit hub API endpoint
-    configured by CALKIT_ENV (production, staging, etc.). To use a different
-    Calkit hub:
+    of the active hub (CALKIT_HUB, the project's declared hub, or
+    default_hub). To use a different Calkit hub:
 
     - DVC config: dvc remote modify myremote endpointurl https://api.other.com
     - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
@@ -156,9 +156,9 @@ class CalkitFileSystem(AbstractFileSystem):
     - endpointurl parameter (for DVC remotes): Route to different Calkit
       instances
     - endpoint_url query parameter (for URIs): Ad-hoc endpoint specification
-    - CALKIT_ENV environment variable: Select production, staging, local, or
-      test
-    - Defaults to production when unspecified
+    - the active hub: CALKIT_HUB, the working directory project's declared
+      ``hub``, or the ``default_hub`` config value
+    - Defaults to calkit.io when unspecified
 
     This design allows for:
 
@@ -173,7 +173,7 @@ class CalkitFileSystem(AbstractFileSystem):
         The protocol scheme for this filesystem ("ck")
     base_url : str
         The Calkit hub API endpoint URL, configured via endpointurl in DVC
-        config, endpoint_url in URI query, or CALKIT_ENV environment variable.
+        config, endpoint_url in URI query, or the active hub.
         Defaults to production (https://api.calkit.io) when unspecified.
     """
 

@@ -362,6 +362,8 @@ Model class: `LatexStage`
 | `aux_dir`               | str \| None                   | no       | null    |
 | `latexmkrc_path`        | str \| None                   | no       | null    |
 | `pdf_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'   |
+| `diffs`                 | list[str \| list[str]]        | no       |         |
+| `diff_pdf_storage`      | Literal['git', 'dvc'] \| None | no       | 'dvc'   |
 | `verbose`               | bool                          | no       | False   |
 | `force`                 | bool                          | no       | False   |
 | `synctex`               | bool                          | no       | True    |

@@ -101,7 +101,9 @@ until you rebuild it: `docker compose build frontend`.
 ## Misc rules
 
 - Git commits and pushes are for humans, not agents.
-- No blank lines in functions.
+- No blank lines in functions. This only covers blank lines we write, not ones
+  the auto-formatter inserts, e.g., ruff-format adds one after an in-function
+  import block. Don't delete those; `ruff format` will just put them back.
 - API endpoint functions should start with their REST verbs,
   e.g., `post_something` or `get_something`.
 - Search inputs should always be clearable.

@@ -80,8 +80,11 @@ const ReferenceItemModal = ({
     : entry?.key
   const hasZotero = Boolean(entry?.zotero_item_key)
 
-  // Load the PDF: prefer the Zotero attachment (proxied, needs auth), else the
-  // repo-stored file's presigned URL.
+  // Load the PDF: prefer the Zotero attachment, then the repo-stored file's
+  // presigned URL, then arXiv for a preprint that has neither. Both the
+  // Zotero and arXiv PDFs come through our API -- Zotero's needs the user's
+  // key, and arXiv sends no CORS headers -- so they're fetched with auth and
+  // handed to the viewer as an object URL.
   useEffect(() => {
     if (!isOpen || !entry) return
     if (objectUrlRef.current) {
@@ -91,12 +94,18 @@ const ReferenceItemModal = ({
     setPdfUrl(undefined)
     setPdfError(false)
     const token = localStorage.getItem("access_token")
-    if (entry.has_pdf && token) {
-      setPdfLoading(true)
-      const url =
-        `${apiUrl}/projects/${ownerName}/${projectName}/zotero/items/` +
+    const proxiedUrl = entry.has_pdf
+      ? `${apiUrl}/projects/${ownerName}/${projectName}/zotero/items/` +
         `${encodeURIComponent(entry.key)}/pdf?path=${encodeURIComponent(bibPath)}`
-      fetch(url, {
+      : !entry.url && entry.arxiv_id
+        ? // The ID can contain a slash (old-style, e.g. math.GT/0309136),
+          // which is a real path segment on our side
+          `${apiUrl}/arxiv/${entry.arxiv_id}/pdf`
+        : undefined
+    if (proxiedUrl && token) {
+      setPdfLoading(true)
+      let cancelled = false
+      fetch(proxiedUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -106,13 +115,28 @@ const ReferenceItemModal = ({
           return r.blob()
         })
         .then((blob) => {
+          // A different reference may have been opened while this was in
+          // flight; its own effect owns the viewer now
+          if (cancelled) return
           const objectUrl = URL.createObjectURL(blob)
           objectUrlRef.current = objectUrl
           setPdfUrl(objectUrl)
         })
-        .catch(() => setPdfError(true))
-        .finally(() => setPdfLoading(false))
-    } else if (entry.url) {
+        .catch(() => {
+          if (!cancelled) setPdfError(true)
+        })
+        .finally(() => {
+          if (!cancelled) setPdfLoading(false)
+        })
+      return () => {
+        cancelled = true
+        if (objectUrlRef.current) {
+          URL.revokeObjectURL(objectUrlRef.current)
+          objectUrlRef.current = undefined
+        }
+      }
+    }
+    if (entry.url) {
       setPdfUrl(entry.url)
     }
     return () => {

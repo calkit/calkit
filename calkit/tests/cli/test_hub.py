@@ -7,45 +7,35 @@ import typer
 from requests.exceptions import HTTPError
 
 import calkit.cli.hub as hub_cli
+import calkit.config
 
 
 def test_use_hub(monkeypatch, tmp_dir):
-    # Monkeypatch CALKIT_ENV first so its original value is restored on
-    # teardown even though config.set_env mutates os.environ directly
-    monkeypatch.setenv("CALKIT_ENV", "test")
-    # Environment names are deployment-internal vocabulary, not hubs
+    # Monkeypatch CALKIT_HUB first so its original value is restored on
+    # teardown even though config.set_hub mutates os.environ directly
+    monkeypatch.setenv("CALKIT_HUB", "https://calkit.io")
+    # The suite runs with CALKIT_ENV=test, which is the one environment
+    # name still honored, and it would short-circuit every check here
+    monkeypatch.delenv("CALKIT_ENV", raising=False)
+    # Environment names are the hub operator's vocabulary, not a hub
     with pytest.raises(typer.Exit):
         hub_cli._use_hub("staging")
-    # A known hub URL resolves, with or without scheme
+    # A hub URL is taken as given, with or without a scheme, and a hub
+    # nobody built in works the same as one that is
     hub_cli._use_hub("https://staging.calkit.io")
-    assert os.environ["CALKIT_ENV"] == "staging"
-    hub_cli._use_hub("calkit.io")
-    assert os.environ["CALKIT_ENV"] == "production"
-    # An unknown hub URL is an error until discovery exists
-    with pytest.raises(typer.Exit):
-        hub_cli._use_hub("https://other-calkit.io")
-    # An explicitly set env is the source of truth when no option is passed
-    monkeypatch.setenv("CALKIT_ENV", "test")
-    hub_cli._use_hub(None)
-    assert os.environ["CALKIT_ENV"] == "test"
-    # With no env set, the project's declared hub picks the instance
+    assert os.environ["CALKIT_HUB"] == "https://staging.calkit.io"
+    assert calkit.config.get_hub() == "staging"
+    hub_cli._use_hub("other-calkit.example.edu")
+    assert os.environ["CALKIT_HUB"] == "https://other-calkit.example.edu"
+    assert calkit.config.get_hub() == "https://other-calkit.example.edu"
+    # Without the option, resolution is left to get_hub, so nothing here
+    # overrides the project's own declaration
+    monkeypatch.delenv("CALKIT_HUB", raising=False)
     with open("calkit.yaml", "w") as f:
         f.write("hub: https://staging.calkit.io\n")
-    monkeypatch.delenv("CALKIT_ENV", raising=False)
     hub_cli._use_hub(None)
-    assert os.environ["CALKIT_ENV"] == "staging"
-    # A declared hub the CLI can't resolve is an error
-    with open("calkit.yaml", "w") as f:
-        f.write("hub: https://other-calkit.io\n")
-    monkeypatch.delenv("CALKIT_ENV", raising=False)
-    with pytest.raises(typer.Exit):
-        hub_cli._use_hub(None)
-    # No option, no env, no declared hub → production default (no change)
-    with open("calkit.yaml", "w") as f:
-        f.write("title: T\n")
-    monkeypatch.delenv("CALKIT_ENV", raising=False)
-    hub_cli._use_hub(None)
-    assert "CALKIT_ENV" not in os.environ
+    assert "CALKIT_HUB" not in os.environ
+    assert calkit.config.get_hub() == "staging"
 
 
 def test_cloud_login_already_logged_in(monkeypatch, capsys):

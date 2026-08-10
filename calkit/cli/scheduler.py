@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import random
 import re
 import shlex
 import shutil
@@ -59,6 +60,10 @@ QUEUE_LOCK_TIMEOUT = 60
 # promptly relative to the runtime of a job worth queueing.
 QUEUE_SLOT_POLL_INTERVAL = 10.0
 MOCK_QUEUE_SLOT_POLL_INTERVAL = 0.25
+# Fraction by which each waiter randomizes its poll interval. A capped sweep
+# leaves one waiting process per unsubmitted case, and without jitter they all
+# wake, take the lock, and query the scheduler in lockstep.
+QUEUE_SLOT_POLL_JITTER = 0.25
 # When set, scheduler commands run jobs on the local host instead of
 # dispatching to a real SLURM/PBS install (see _mock_enabled).
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
@@ -524,16 +529,24 @@ def _queue_lock():
     keeps this to the standard library.
     """
     calkit.ensure_local_dir()
-    conn = sqlite3.connect(QUEUE_LOCK_PATH, timeout=QUEUE_LOCK_TIMEOUT)
+    conn = sqlite3.connect(
+        QUEUE_LOCK_PATH, timeout=QUEUE_LOCK_TIMEOUT, isolation_level=None
+    )
     try:
         while True:
             try:
                 conn.execute("BEGIN IMMEDIATE")
                 break
-            except sqlite3.OperationalError:
+            except sqlite3.OperationalError as e:
                 # Another process is mid-submit. It holds the lock only for as
                 # long as one submit command takes, so retrying is better than
-                # failing the stage.
+                # failing the stage. Only contention is worth retrying though:
+                # a read-only file or a bad disk would never clear, and
+                # retrying those forever would hang the stage with no
+                # explanation instead of surfacing the real problem.
+                msg = str(e).lower()
+                if "locked" not in msg and "busy" not in msg:
+                    raise
                 time.sleep(1)
         try:
             yield
@@ -541,6 +554,37 @@ def _queue_lock():
             conn.rollback()
     finally:
         conn.close()
+
+
+def _parse_max_concurrent_jobs(environment: str, value: object) -> int | None:
+    """Interpret an environment's ``max_concurrent_jobs``, or ``None``.
+
+    The value is read straight out of ``calkit.yaml`` rather than through
+    ``SlurmEnvironment``, so its ``ge=1`` constraint never runs and a
+    hand-edited file can put anything here. Reject what we cannot honor
+    instead of guessing: silently reading a bad value as "no limit" would
+    flood the queue this setting exists to protect, and a negative one would
+    leave the wait below with a condition that can never come true.
+    """
+    if value is None:
+        return None
+    # bool is an int subclass, and `max_concurrent_jobs: true` is a mistake,
+    # not a limit of one.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise_error(
+            f"Environment '{environment}' has an invalid "
+            f"max_concurrent_jobs ({value!r}); expected a positive integer"
+        )
+    # 0 means no limit, matching `calkit update slurm-env
+    # --max-concurrent-jobs 0`.
+    if value == 0:
+        return None
+    if value < 0:
+        raise_error(
+            f"Environment '{environment}' has a negative "
+            f"max_concurrent_jobs ({value}); it must be at least 1"
+        )
+    return value
 
 
 @contextlib.contextmanager
@@ -551,16 +595,25 @@ def _queue_slot(environment: str, name: str, max_jobs: int | None):
     running, then keeps the lock while the caller submits and records the new
     job, so concurrent waiters see it and do not overshoot the limit.
     """
-    if not max_jobs:
+    max_jobs = _parse_max_concurrent_jobs(environment, max_jobs)
+    if max_jobs is None:
         yield
         return
     announced = False
     while True:
-        with _queue_lock():
-            n_queued = _count_queued_jobs(environment, exclude=name)
-            if n_queued < max_jobs:
-                yield
-                return
+        # Check without the lock first. A capped sweep leaves one waiting
+        # process per unsubmitted case, and each poll would otherwise hold the
+        # exclusive lock across a scheduler query---with enough waiters the
+        # lock stays busy and slots go unclaimed long after they free up.
+        # A full queue is the common answer while waiting and needs no lock to
+        # act on; the authoritative check is still made under it below.
+        n_queued = _count_queued_jobs(environment, exclude=name)
+        if n_queued < max_jobs:
+            with _queue_lock():
+                n_queued = _count_queued_jobs(environment, exclude=name)
+                if n_queued < max_jobs:
+                    yield
+                    return
         if not announced:
             typer.echo(
                 f"Waiting for a free slot in environment '{environment}' "
@@ -569,10 +622,19 @@ def _queue_slot(environment: str, name: str, max_jobs: int | None):
             announced = True
         # Mocked jobs run locally and finish in seconds, so a full interval
         # would dominate the runtime of anything using the mock scheduler.
-        time.sleep(
+        interval = (
             MOCK_QUEUE_SLOT_POLL_INTERVAL
             if _mock_enabled()
             else QUEUE_SLOT_POLL_INTERVAL
+        )
+        time.sleep(
+            interval
+            * (
+                1
+                + random.uniform(
+                    -QUEUE_SLOT_POLL_JITTER, QUEUE_SLOT_POLL_JITTER
+                )
+            )
         )
 
 

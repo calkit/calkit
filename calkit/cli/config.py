@@ -83,7 +83,9 @@ def _set_config_value(key: str, value: str) -> None:
 def _get_config_value(key: str) -> None:
     from calkit import config
 
-    val = config.read().model_dump()[key]
+    # Attribute access rather than a full dump, so reading one credential
+    # doesn't ask the keyring for every other one too
+    val = getattr(config.read(), key)
     if val is not None:
         print(val)
     else:

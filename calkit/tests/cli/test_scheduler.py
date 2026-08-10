@@ -1,6 +1,7 @@
 """Tests for ``calkit.cli.scheduler``."""
 
 import os
+import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 import typer
 
+import calkit.cli.scheduler as sched
 from calkit.cli.scheduler import (
     _active_job_ids,
     _build_job_command,
@@ -135,8 +137,6 @@ def test_mock_submit_runs_job_locally(tmp_dir, monkeypatch):
     reason="TODO: mock scheduler invokes a .sh script directly; not portable to Windows",
 )
 def test_wait_until_done_cancels_on_interrupt(tmp_dir, monkeypatch):
-    import calkit.cli.scheduler as sched
-
     monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
     # A long-running job stays active while we wait on it
     with open("job.sh", "w") as f:
@@ -214,10 +214,6 @@ def test_build_slurm_submit_keeps_name():
 
 
 def test_poll_job_pbs(monkeypatch):
-    import subprocess
-
-    import calkit.cli.scheduler as sched
-
     # PBS is polled in two steps: plain `qstat -f` for the active queue, then
     # `qstat -x -f` for the finished-job history view. The fake dispatches on
     # whether `-x` is present so each step can be simulated independently, the
@@ -295,10 +291,6 @@ def test_poll_job_pbs(monkeypatch):
 
 
 def test_poll_job_slurm(monkeypatch):
-    import subprocess
-
-    import calkit.cli.scheduler as sched
-
     queue: dict = {}
 
     def _fake_run(cmd, *args, **kwargs):
@@ -337,8 +329,6 @@ def test_poll_job_slurm(monkeypatch):
 
 
 def test_wait_for_output_file(tmp_dir, monkeypatch):
-    import calkit.cli.scheduler as sched
-
     # Drive the clock and the file's appearance from a scripted sequence of
     # poll ticks so the test is deterministic and does not actually sleep.
     log_path = "job.out"
@@ -384,10 +374,6 @@ def test_parse_slurm_exit_code():
 
 
 def test_slurm_exit_code(monkeypatch):
-    import subprocess
-
-    import calkit.cli.scheduler as sched
-
     responses: dict = {}
 
     def _fake_run(cmd, *args, **kwargs):
@@ -460,10 +446,6 @@ def test_record_job_result(tmp_dir):
 
 
 def test_active_job_ids_slurm(monkeypatch):
-    import subprocess
-
-    import calkit.cli.scheduler as sched
-
     calls: list[list[str]] = []
     result: dict = {}
 
@@ -498,8 +480,6 @@ def test_active_job_ids_slurm(monkeypatch):
 
 
 def test_count_queued_jobs(tmp_dir, monkeypatch):
-    import calkit.cli.scheduler as sched
-
     active = {"1", "2", "3", "4", "5"}
     monkeypatch.setattr(
         sched,
@@ -533,8 +513,6 @@ def test_count_queued_jobs(tmp_dir, monkeypatch):
 
 
 def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):
-    import calkit.cli.scheduler as sched
-
     # No limit means no waiting and no queue queries.
     monkeypatch.setattr(
         sched,
@@ -544,8 +522,14 @@ def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):
     with sched._queue_slot("hpc", "job", None):
         pass
 
-    # With a limit, the slot is granted immediately when there is room.
-    counts = iter([0])
+    # 0 is how the limit is cleared, so it means no limit rather than
+    # "never submit anything".
+    with sched._queue_slot("hpc", "job", 0):
+        pass
+
+    # With a limit, the slot is granted immediately when there is room. Room
+    # is confirmed twice: once cheaply without the lock, then again under it.
+    counts = iter([0, 0])
     monkeypatch.setattr(
         sched, "_count_queued_jobs", lambda *a, **kw: next(counts)
     )
@@ -555,7 +539,7 @@ def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):
     assert entered
 
     # A full queue blocks until a slot frees up, rather than submitting.
-    counts = iter([2, 2, 1])
+    counts = iter([2, 2, 1, 1])
     sleeps: list[float] = []
     monkeypatch.setattr(
         sched, "_count_queued_jobs", lambda *a, **kw: next(counts)
@@ -564,11 +548,48 @@ def test_queue_slot_waits_for_room(tmp_dir, monkeypatch):
     with sched._queue_slot("hpc", "job", 2):
         pass
     assert len(sleeps) == 2
+    # Waiters jitter their polling so a capped sweep's worth of them does not
+    # wake and query the scheduler in lockstep.
+    interval = (
+        sched.MOCK_QUEUE_SLOT_POLL_INTERVAL
+        if sched._mock_enabled()
+        else sched.QUEUE_SLOT_POLL_INTERVAL
+    )
+    jitter = sched.QUEUE_SLOT_POLL_JITTER
+    assert all(
+        interval * (1 - jitter) <= s <= interval * (1 + jitter) for s in sleeps
+    )
+    assert len(set(sleeps)) == len(sleeps)
+
+    # A slot claimed by another process between the unlocked check and the
+    # locked one is not double-booked; we keep waiting instead.
+    counts = iter([1, 2, 1, 1])
+    sleeps.clear()
+    monkeypatch.setattr(
+        sched, "_count_queued_jobs", lambda *a, **kw: next(counts)
+    )
+    with sched._queue_slot("hpc", "job", 2):
+        pass
+    assert len(sleeps) == 1
+
+
+def test_queue_slot_rejects_bad_limits(tmp_dir, monkeypatch):
+    # max_concurrent_jobs comes straight out of calkit.yaml without going
+    # through the model, so a hand-edited value can be anything. A limit we
+    # cannot honor must fail loudly---waiting forever on a condition that can
+    # never come true would look like a hung pipeline.
+    monkeypatch.setattr(
+        sched,
+        "_count_queued_jobs",
+        lambda *a, **kw: pytest.fail("should not check occupancy"),
+    )
+    for bad in [-1, "2", 1.5, True]:
+        with pytest.raises(typer.Exit):
+            with sched._queue_slot("hpc", "job", bad):  # type: ignore
+                pytest.fail("should not have been granted a slot")
 
 
 def test_queue_lock_is_exclusive(tmp_dir):
-    import calkit.cli.scheduler as sched
-
     # A second holder cannot enter while the first is inside the block, which
     # is what stops concurrent submitters from claiming the same free slot.
     order: list[str] = []

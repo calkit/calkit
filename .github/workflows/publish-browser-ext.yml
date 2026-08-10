@@ -1,0 +1,91 @@
+name: Publish browser extension
+
+# The default token needs no write access; the job elevates to attach the
+# package to the release
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build extension package
+    # Tags look like browser-ext/vX.Y.Z, matching the VS Code extension's
+    # convention, so releasing one doesn't publish the other
+    if: startsWith(github.event.release.tag_name, 'browser-ext/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: browser-ext
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: browser-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Derive version from release tag
+        id: version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG_NAME#browser-ext/v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Set the version in the manifest and package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # The Chrome Web Store rejects an upload whose manifest version
+          # isn't higher than the last one, so the tag is the source of
+          # truth for both files rather than something kept in sync by hand
+          node -e "
+            const fs = require('fs')
+            for (const file of ['public/manifest.json', 'package.json']) {
+              const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+              data.version = process.env.VERSION
+              fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n')
+            }
+          "
+      - name: Run tests
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Package for the Chrome Web Store
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Source maps are useful when loading unpacked but only bloat a
+          # store upload, which has a size limit
+          find dist -name '*.map' -delete
+          cd dist && zip -r "../calkit-browser-ext-${VERSION}.zip" .
+      - name: Attach the package to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          gh release upload "$TAG_NAME" \
+            "calkit-browser-ext-${VERSION}.zip" --clobber
+      # Setting CHROME_EXTENSION_ID (a repository variable, not a secret,
+      # since a store listing's ID is public) is what turns publishing on.
+      # Until then a release still carries a store-ready zip to upload by
+      # hand, so this workflow is useful before the listing exists.
+      - name: Publish to the Chrome Web Store
+        if: vars.CHROME_EXTENSION_ID != ''
+        uses: mnao305/chrome-extension-upload@v5
+        with:
+          file-path: browser-ext/calkit-browser-ext-${{ steps.version.outputs.version }}.zip
+          extension-id: ${{ vars.CHROME_EXTENSION_ID }}
+          client-id: ${{ secrets.CHROME_CLIENT_ID }}
+          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
+          refresh-token: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          # Submitted for review rather than left as a draft: a release
+          # tag is already the deliberate act
+          publish: true

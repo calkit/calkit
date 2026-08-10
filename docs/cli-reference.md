@@ -1202,15 +1202,16 @@ calkit new|create slurm-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                |
-| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                          |
-| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                                                      |
-| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                     |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands. |
-| `--description`     | text    | no       |           | Description.                                                                                                               |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
+| `--default-option`      | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-pbs-env"></a>
 
@@ -1226,15 +1227,16 @@ calkit new|create pbs-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                   |
-| ------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                             |
-| `--host`            | text    | no       | localhost | Host where PBS commands should run.                                                                                           |
-| `--default-option`  | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options. |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.      |
-| `--description`     | text    | no       |           | Description.                                                                                                                  |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                            |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                        |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
+| `--default-option`      | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-uv-venv"></a>
 
@@ -1559,6 +1561,7 @@ Options:
 | `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
 | `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
 | `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
 | `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
 | `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
 | `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
@@ -2602,16 +2605,17 @@ calkit update slurm-env [OPTIONS]
 
 Options:
 
-| Option                  | Type | Required | Default | Description                     |
-| ----------------------- | ---- | -------- | ------- | ------------------------------- |
-| `--name`, `-n`          | text | yes      |         | Environment name.               |
-| `--host`                | text | no       |         | SLURM host.                     |
-| `--add-default-option`  | text | no       |         | Add a default sbatch option.    |
-| `--rm-default-option`   | text | no       |         | Remove a default sbatch option. |
-| `--set-default-options` | text | no       |         | Replace default options list.   |
-| `--add-default-setup`   | text | no       |         | Add a default setup command.    |
-| `--rm-default-setup`    | text | no       |         | Remove a default setup command. |
-| `--set-default-setup`   | text | no       |         | Replace default setup list.     |
+| Option                  | Type    | Required | Default | Description                                                                                   |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Environment name.                                                                             |
+| `--host`                | text    | no       |         | SLURM host.                                                                                   |
+| `--add-default-option`  | text    | no       |         | Add a default sbatch option.                                                                  |
+| `--rm-default-option`   | text    | no       |         | Remove a default sbatch option.                                                               |
+| `--set-default-options` | text    | no       |         | Replace default options list.                                                                 |
+| `--add-default-setup`   | text    | no       |         | Add a default setup command.                                                                  |
+| `--rm-default-setup`    | text    | no       |         | Remove a default setup command.                                                               |
+| `--set-default-setup`   | text    | no       |         | Replace default setup list.                                                                   |
+| `--max-concurrent-jobs` | integer | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
 
 <a id="subcommand-update-env"></a>
 
@@ -3074,10 +3078,11 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                 |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk. |
+| Command                                        | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
+| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3140,6 +3145,44 @@ Options:
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+
+<a id="subcommand-latex-tex-diff"></a>
+
+#### `calkit latex|tex diff`
+
+Build a PDF showing what changed in a LaTeX document.
+
+Two revisions that turn out to be the same is a result rather than an error: the marked-up document comes out unmarked, which is what "this branch hasn't changed the paper" looks like. A pipeline shouldn't fail depending on which branch it runs from.
+
+Marks up one revision of a document against another with latexdiff, so additions and deletions are visible where they happen rather than as a list of files that changed. A `.dvc` pointer in a pull request says a paper was rebuilt; this says what it now reads.
+
+With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
+
+Usage:
+
+```text
+calkit latex|tex diff [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compare. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
+| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
 
 <a id="command-group-overleaf-ol"></a>
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import Annotated
 
 import typer
@@ -27,41 +26,18 @@ _HUB_OPTION_HELP = (
 def _use_hub(hub: str | None) -> None:
     """Point subsequent hub API calls at the requested instance.
 
-    Resolution order: the ``--hub`` option, then ``CALKIT_ENV``, then the
-    working directory project's declared ``hub``, then calkit.io.
+    Only ``--hub`` is handled here. Without it, every command already
+    resolves the same way (``CALKIT_HUB``, then the working directory
+    project's declared ``hub``, then ``default_hub``, then calkit.io),
+    and re-deriving that here is how the two used to disagree.
     """
     from calkit import config
 
-    if hub is not None:
-        if hub in ["test", "local", "staging", "production"]:
-            raise_error(
-                "--hub takes a hub URL, e.g., https://staging.calkit.io"
-            )
-        env = calkit.hub.env_for_hub(hub)
-        if env is None:
-            raise_error(
-                f"Unknown hub '{hub}'; arbitrary hub URLs are not yet "
-                "supported"
-            )
-        config.set_env(env)  # type: ignore[arg-type]
+    if hub is None:
         return
-    # An explicitly set environment remains the source of truth
-    if os.environ.get("CALKIT_ENV"):
-        return
-    try:
-        declared = calkit.load_calkit_info().get("hub")
-    except Exception:
-        declared = None
-    if declared:
-        env = calkit.hub.env_for_hub(declared)
-        if env is not None:
-            config.set_env(env)  # type: ignore[arg-type]
-        else:
-            raise_error(
-                f"This project declares hub {declared}, which is not yet "
-                "supported; set CALKIT_ENV or use --hub to pick a built-in "
-                "instance"
-            )
+    if hub in ["test", "local", "staging", "production"]:
+        raise_error("--hub takes a hub URL, e.g., https://staging.calkit.io")
+    config.set_hub(hub)
 
 
 @hub_app.command(name="get")

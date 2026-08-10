@@ -24,13 +24,6 @@ ENV UV_PYTHON_DOWNLOADS=never
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#caching
 ENV UV_LINK_MODE=copy
 
-# The build context excludes .git, so hand hatch-vcs a version for the
-# calkit-python build instead of letting it query Git. The plain variable is
-# required; hatch-vcs doesn't pass a dist name, so the _FOR_CALKIT_PYTHON
-# variant is never consulted. Safe because every other dependency installs
-# from a locked wheel, not from source.
-ENV SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0
-
 # calkit-python's build hooks build the JupyterLab extension, which needs
 # Node and is not used by the backend
 ENV HATCH_BUILD_NO_HOOKS=true
@@ -56,8 +49,15 @@ COPY ./agent-plugin /app/agent-plugin
 COPY ./hub/backend /app/hub/backend
 
 # Sync the project
+#
+# .git is bind-mounted, not copied: hatch-vcs reads the release tags through
+# it to version both workspace members, and a mount leaves nothing behind in
+# the image. This layer already re-runs whenever the sources above change,
+# so making it depend on the repository costs no cache that wasn't already
+# being spent.
 # Ref: https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 RUN --mount=type=cache,target=/root/.cache/uv \
+    --mount=type=bind,source=.git,target=/app/.git,ro \
     uv sync --package app --frozen
 
 # Fail the build if PyYAML wasn't linked against libyaml. The C loader is

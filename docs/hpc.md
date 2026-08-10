@@ -159,8 +159,11 @@ the cache; just editing a script invalidates the affected cases without
 ## Limiting queue usage
 
 Submitting every iteration at once is fine when you have the cluster to
-yourself, but on a shared cluster a long sweep can fill the queue and push
-everyone else's jobs behind yours.
+yourself, but on a shared cluster a long sweep can take up a large share of
+the queue.
+Exactly what that costs depends on the scheduler's policy: with fair-share
+scheduling it mostly delays your own later jobs, and on a first-come,
+first-served queue it delays everyone else's too.
 Set `max_concurrent_jobs` on the environment to cap how many of the project's
 jobs may be in the queue---running or pending---at any one time:
 

@@ -308,6 +308,65 @@ class OverleafSyncPaths:
         """``pipeline_output_paths`` as a sorted list, computed once."""
         return sorted(self.pipeline_output_paths)
 
+    def _is_pipeline_output(self, rel_posix: str) -> bool:
+        """Whether a path is produced by the pipeline rather than authored."""
+        return self._path_matches(rel_posix, self._pipeline_output_path_list)
+
+    @cached_property
+    def map_paths_outputs(self) -> set[str]:
+        """Destinations of ``map-paths`` stages within the synced folder.
+
+        A map-paths stage copies authored files into the document's folder --
+        a shared ``references.bib`` or class file used by several papers.
+        The copy is a pipeline output with no storage, so nothing else here
+        treats it as syncable, but Overleaf needs it to compile the document.
+        """
+        from calkit.models.pipeline import MapPathsStage
+
+        try:
+            ck_info = calkit.load_calkit_info(
+                wdir=str(self.main_repo.working_dir)
+            )
+        except Exception as e:
+            warnings.warn(f"Could not read Calkit pipeline: {e}")
+            return set()
+        stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+        out_paths: list[str] = []
+        for stage in stages.values():
+            if not isinstance(stage, dict) or stage.get("kind") != "map-paths":
+                continue
+            try:
+                # Built through the model so the destination of each mapping
+                # kind is worked out the same way the pipeline works it out.
+                parsed = MapPathsStage(**stage)
+            except Exception as e:
+                warnings.warn(f"Could not read map-paths stage: {e}")
+                continue
+            out_paths.extend(p.out_path for p in parsed.paths)
+        return self._rel_under_folder(out_paths)
+
+    @cached_property
+    def mapped_files(self) -> set[str]:
+        """Files on disk under a map-paths destination.
+
+        Relative to ``path_in_project``. A destination may be a single file
+        or a whole directory, so directories are walked.
+        """
+        root = os.path.join(self.main_repo.working_dir, self.path_in_project)
+        res: set[str] = set()
+        for dest in self.map_paths_outputs:
+            abs_dest = os.path.join(root, dest)
+            if os.path.isfile(abs_dest):
+                res.add(dest)
+            elif os.path.isdir(abs_dest):
+                for dirpath, _, filenames in os.walk(abs_dest):
+                    for name in filenames:
+                        abs_file = os.path.join(dirpath, name)
+                        res.add(
+                            Path(os.path.relpath(abs_file, root)).as_posix()
+                        )
+        return res
+
     def _is_ignored_for_sync(self, rel_posix: str) -> bool:
         """Whether a path (relative to ``path_in_project``) should be treated
         as ignored, and therefore neither synced to/from nor deleted from
@@ -325,16 +384,17 @@ class OverleafSyncPaths:
         if rel_posix in self.stored_files:
             return False
         # A pipeline output that is not stored has storage: null
-        return self._path_matches(rel_posix, self._pipeline_output_path_list)
+        return self._is_pipeline_output(rel_posix)
 
     @cached_property
     def files_to_copy_from_overleaf(self) -> list[str]:
         """Return Overleaf files to copy into the main repo.
 
-        We copy all files from Overleaf unless they are in push-only paths
-        or are ignored in the main repo. This method does not itself apply
-        any special handling for files that were deleted locally since the
-        last sync; such deletions are handled elsewhere in the sync logic.
+        We copy all files from Overleaf unless they are in push-only paths,
+        are produced by the pipeline, or are ignored in the main repo. This
+        method does not itself apply any special handling for files that were
+        deleted locally since the last sync; such deletions are handled
+        elsewhere in the sync logic.
         """
         all_ol_files = calkit.git.ls_files(self.overleaf_repo)
         res = []
@@ -343,6 +403,12 @@ class OverleafSyncPaths:
             # Skip anything ignored for syncing (gitignored or a storage: null
             # pipeline output)
             if self._is_ignored_for_sync(fpath_posix):
+                continue
+            # Skip anything the pipeline produces, even when it's stored in
+            # Git. Pulling an edit into a generated file would look like it
+            # worked and then be overwritten by the next run; the edit belongs
+            # in whatever the stage builds it from.
+            if self._is_pipeline_output(fpath_posix):
                 continue
             # Skip files that are under any push-only path
             if self._path_matches(fpath_posix, self.push_paths):
@@ -355,9 +421,10 @@ class OverleafSyncPaths:
         """Stored files to copy to Overleaf.
 
         We copy all stored files (tracked by Git or cached by DVC) within the
-        synced folder except for private (dot) files, the main PDF, and LaTeX
-        aux/build artifacts. Ignored, untracked, and ``storage: null`` files
-        are treated as ignored and never pushed.
+        synced folder, plus the copies a ``map-paths`` stage puts there,
+        except for private (dot) files, the main PDF, and LaTeX aux/build
+        artifacts. Other ignored, untracked, and ``storage: null`` files are
+        never pushed.
 
         These files are all relative to the path in the project.
         """
@@ -408,7 +475,10 @@ class OverleafSyncPaths:
             return any(p.startswith(".") for p in parts)
 
         results: list[str] = []
-        for rel_posix in sorted(self.stored_files):
+        # Map-paths copies are pushed alongside stored files: the content is
+        # authored (in the source the stage copies from) and Overleaf can't
+        # compile the document without it.
+        for rel_posix in sorted(self.stored_files | self.mapped_files):
             # Skip hidden (dot) files and directories
             if has_hidden_component(rel_posix):
                 continue
@@ -443,6 +513,31 @@ class OverleafSyncPaths:
                 self.files_to_copy_to_overleaf
                 + self.files_to_copy_from_overleaf
             )
+        )
+
+    @cached_property
+    def pipeline_outputs_changed_on_overleaf(self) -> list[str]:
+        """Generated files someone edited on Overleaf since the last sync.
+
+        These edits can't be pulled back -- the next pipeline run would
+        overwrite them -- so they're worth saying out loud rather than
+        dropping quietly.
+        """
+        if not self.last_sync_commit:
+            return []
+        try:
+            changed = self.overleaf_repo.git.diff(
+                "--name-only", f"{self.last_sync_commit}..HEAD"
+            ).split("\n")
+        except (git.BadName, git.GitCommandError, ValueError) as e:
+            warnings.warn(f"Could not diff the Overleaf repo: {e}")
+            return []
+        return sorted(
+            {
+                Path(f).as_posix()
+                for f in changed
+                if f and self._is_pipeline_output(Path(f).as_posix())
+            }
         )
 
     @cached_property
@@ -685,10 +780,19 @@ def sync(
 
     Only "stored" files in the main project -- those tracked by Git or cached
     by DVC -- are synced. They are synced bidirectionally, except for files
-    under ``push_paths``, which are only pushed to Overleaf. Files that are
-    ignored, untracked, or DVC pipeline outputs with no storage
-    (``storage: null``, e.g., LaTeX build artifacts) are treated as ignored:
-    they are never pushed to, pulled from, or deleted from Overleaf. A file is
+    under ``push_paths``, which are only pushed to Overleaf.
+
+    Anything the pipeline produces is push-only, whichever way it's stored.
+    Overleaf needs those files to compile the document, but an edit made to
+    one there can't be pulled back: it would be overwritten by the next run,
+    so it belongs in whatever the stage builds the file from. That includes
+    the copies a ``map-paths`` stage puts in the document's folder (a shared
+    ``references.bib``, say), which are pushed even though they're gitignored
+    -- without them Overleaf can't compile.
+
+    Other files that are ignored, untracked, or DVC pipeline outputs with no
+    storage (``storage: null``, e.g., LaTeX build artifacts) are treated as
+    ignored: never pushed to, pulled from, or deleted from Overleaf. A file is
     only deleted from Overleaf when a previously-synced stored file is
     genuinely removed from the project.
 
@@ -704,7 +808,9 @@ def sync(
     changes staged). See the ``--no-commit`` handling near the end of this
     function.
     """
-    res = {}
+    # Holds a mix of commits, paths, patches, and flags, so it's annotated
+    # rather than inferred from whatever lands in it first.
+    res: dict = {}
     # Normalize ``path_in_project`` as a posix path
     path_in_project = Path(path_in_project).as_posix()
     if sync_info_for_path is None:
@@ -733,6 +839,17 @@ def sync(
     )
     paths_for_overleaf_patch = paths.paths_to_use_for_git_patch
     res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
+    # An edit made on Overleaf to a generated file is about to be overwritten
+    # by this sync, so say so rather than dropping it quietly.
+    generated_edits = paths.pipeline_outputs_changed_on_overleaf
+    res["pipeline_outputs_changed_on_overleaf"] = generated_edits
+    if generated_edits and not push_only:
+        print_info(
+            "Warning: these files were changed on Overleaf but are generated "
+            f"by the pipeline, so those changes will be overwritten: "
+            f"{', '.join(generated_edits)}. Edit what the stage builds them "
+            "from instead."
+        )
     if push_only:
         # When push_only is True, skip pulling from Overleaf and applying
         # patches to local

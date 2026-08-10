@@ -131,6 +131,36 @@ def main(
         raise typer.Exit()
     if use_version:
         _exec_with_version(use_version)
+    # Load the project's .env here rather than in the handful of commands
+    # that happen to need a secret from it. Which hub a command targets
+    # must not depend on that: 'calkit run' loaded it and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs.
+    dotenv.load_dotenv(dotenv_path=".env")
+    _warn_on_stale_calkit_env()
+
+
+def _warn_on_stale_calkit_env() -> None:
+    """Warn that ``CALKIT_ENV`` no longer picks a hub.
+
+    It used to, so a leftover one in a shell or a project's .env would
+    otherwise silently stop doing anything.
+    """
+    env = os.environ.get("CALKIT_ENV")
+    if not env or env == "test":
+        return
+    hub_url = calkit.hub.HUB_URLS.get(env)
+    # On stderr: this fires on every command, and some of them write
+    # machine-readable output on stdout
+    warn(
+        f"CALKIT_ENV={env} no longer selects a hub; "
+        + (
+            f"use CALKIT_HUB={hub_url}"
+            if hub_url
+            else "name the hub by its URL in CALKIT_HUB"
+        )
+        + " or the project's 'hub' key",
+        err=True,
+    )
 
 
 def _exec_with_version(version_spec: str) -> None:
@@ -1159,9 +1189,9 @@ def _warn_on_hub_mismatch() -> None:
     currently targeting.
 
     The declared hub is respected by default, so this only fires when an
-    explicit override (``CALKIT_HUB``, ``CALKIT_ENV``, or ``--hub``)
-    points somewhere else, e.g., when pushing a copy of a project to
-    staging during development.
+    explicit override (``CALKIT_HUB`` or ``--hub``) points somewhere
+    else, e.g., when pushing a copy of a project to staging during
+    development.
     """
     from calkit import config
 

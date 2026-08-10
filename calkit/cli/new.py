@@ -127,7 +127,7 @@ def new_project(
         f"Check out the docs at {docs_url}."
     )
     # Point subsequent hub API calls at the requested instance; 'default'
-    # (a bare --hub) keeps the normal resolution: CALKIT_HUB/CALKIT_ENV if
+    # (a bare --hub) keeps the normal resolution: CALKIT_HUB if
     # set, else the default_hub config value, else calkit.io
     if hub is not None and hub != "default":
         if hub in ["test", "local", "staging", "production"]:

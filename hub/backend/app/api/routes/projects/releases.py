@@ -33,7 +33,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
 import app.projects
-from app import messaging, mixpanel, users
+from app import arxiv, messaging, mixpanel, users
 from app.api.deps import CurrentUser, CurrentUserOptional, SessionDep
 from app.config import settings
 from app.core import ryaml, utcnow
@@ -745,9 +745,6 @@ def post_external_release(
 # External lookups time out rather than hang the request on a slow venue.
 URL_LOOKUP_TIMEOUT = 10
 DOI_RE = re.compile(r"10\.\d{4,9}/[^\s\"'<>]+", re.IGNORECASE)
-ARXIV_ID_RE = re.compile(
-    r"(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+(?:\.[A-Z]{2})?/\d{7})", re.IGNORECASE
-)
 # CSL-JSON resource types mapped to calkit release kinds.
 CSL_KIND_MAP = {
     "dataset": "dataset",
@@ -764,8 +761,8 @@ def _parse_arxiv_id_from_url(url: str) -> str | None:
     lower = url.lower()
     if "arxiv.org" not in lower and "arxiv:" not in lower:
         return None
-    m = ARXIV_ID_RE.search(url)
-    return m.group(1) if m else None
+    m = arxiv.ID_RE.search(url)
+    return m.group(0) if m else None
 
 
 def _parse_doi_from_url(url: str) -> str | None:

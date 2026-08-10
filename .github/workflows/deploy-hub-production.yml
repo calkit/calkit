@@ -99,5 +99,10 @@ jobs:
           fi
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The backend image versions itself with hatch-vcs, which reads
+          # the hub/vX.Y.Z tags out of .git during the build; the default
+          # shallow checkout fetches neither tags nor enough history
+          fetch-depth: 0
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans

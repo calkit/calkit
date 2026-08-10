@@ -44,14 +44,45 @@ your-hub.example.edu` operates on a specific hub's credentials, and the
 `CALKIT_HUB` environment variable selects the active hub for other
 commands.
 
-What doesn't exist yet is API URL discovery: the CLI cannot derive a
-hub's API URL from its web URL, so for now it must be supplied manually
-via the `CALKIT_HUB_API_BASE_URL` environment variable:
+A hub's URL is all that's needed to connect to it:
 
 ```sh
 export CALKIT_HUB=https://your-hub.example.edu
-export CALKIT_HUB_API_BASE_URL=https://api.your-hub.example.edu
 ```
 
-Eventually a project will declare which hub it belongs to via the `hub`
-key in `calkit.yaml`, and the CLI will discover the rest.
+This works because of the rule below, which every instance is expected to
+follow. There's no separate API URL to configure.
+
+## Serve the API from the `api` subdomain
+
+**A hub must serve its API from the `api` subdomain of the host serving
+its web app.** A hub at `https://your-hub.example.edu` serves its API at
+`https://api.your-hub.example.edu`, which is how calkit.io
+(`api.calkit.io`) and the staging instance
+(`api.staging.calkit.io`) are set up.
+
+This is a requirement, not a suggestion. Clients derive the API URL from
+the hub URL, so an instance that puts its API somewhere else can't be
+reached by the CLI, the browser extension, or anything else that only
+knows the hub's URL. Point both hostnames at the same Traefik instance
+and let it route by host.
+
+<!-- prettier-ignore -->
+!!! note
+
+    The local development stack predates this rule and doesn't follow it:
+    its web app is at `http://localhost:5173` while its API is at
+    `http://api.localhost`. Built-in environments carry explicit URLs for
+    that reason, so only self-hosted instances rely on the rule.
+
+If an instance genuinely can't follow the convention, the
+`CALKIT_HUB_API_BASE_URL` environment variable still overrides the
+derived URL for the CLI:
+
+```sh
+export CALKIT_HUB=https://your-hub.example.edu
+export CALKIT_HUB_API_BASE_URL=https://calkit-api.example.edu
+```
+
+Treat that as an escape hatch. Other clients have no equivalent, so an
+instance relying on it won't work with all of them.

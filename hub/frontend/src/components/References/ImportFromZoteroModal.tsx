@@ -29,7 +29,8 @@ import { useState } from "react"
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import { handleError } from "../../lib/errors"
+import { handleError, isProviderNotConnected } from "../../lib/errors"
+import ConnectZoteroPrompt from "../Common/ConnectZoteroPrompt"
 import LoadingSpinner from "../Common/LoadingSpinner"
 
 interface ImportFromZoteroModalProps {
@@ -167,7 +168,12 @@ const ImportFromZoteroModal = ({
         <ModalHeader>Import from Zotero</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={6}>
-          {librariesQuery.isPending ? (
+          {isProviderNotConnected(librariesQuery.error, "Zotero") ? (
+            // Reached by opening this modal without a Zotero account
+            // linked, where the form would otherwise render with nothing
+            // to choose from and no hint as to why
+            <ConnectZoteroPrompt action="import from Zotero" reopenImport />
+          ) : librariesQuery.isPending ? (
             <LoadingSpinner height="80px" />
           ) : (
             <>

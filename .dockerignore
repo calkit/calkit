@@ -1,7 +1,10 @@
 # The hub backend image builds with this directory as its context so it can
 # install the calkit-python workspace member; keep everything it doesn't need
 # out of the context
-.git
+#
+# .git is deliberately NOT excluded: hatch-vcs reads the release tags out of
+# it to version calkit-python and the hub backend at install time. It is
+# bind-mounted into the one RUN that needs it, so it never lands in a layer.
 .venv
 .env
 **/__pycache__

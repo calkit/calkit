@@ -540,6 +540,10 @@ class ProjectBase(SQLModel):
 class Project(ProjectBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     owner_account_id: uuid.UUID = Field(foreign_key="account.id")
+    # When this project's Overleaf links were last read out of its
+    # calkit.yaml. Set even when nothing was found, so a project without
+    # any links isn't re-read on every lookup.
+    overleaf_scanned: datetime | None = Field(default=None)
     parent_project_id: uuid.UUID | None = Field(
         foreign_key="project.id", default=None
     )
@@ -561,6 +565,9 @@ class Project(ProjectBase, table=True):
         back_populates="project", cascade_delete=True
     )
     file_locks: list["FileLock"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    overleaf_links: list["OverleafLink"] = Relationship(
         back_populates="project", cascade_delete=True
     )
     project_comments: list["ProjectComment"] = Relationship(
@@ -1034,6 +1041,23 @@ class ImportedDataset(SQLModel):
     dataset_id: uuid.UUID = Field(foreign_key="dataset.id", primary_key=True)
 
 
+class OverleafLink(SQLModel, table=True):
+    """An index of a folder in a project synced with an Overleaf project.
+
+    The link itself lives in the project's Git repo, under ``overleaf_sync``
+    in calkit.yaml, which stays the source of truth. This table only indexes
+    it, so an Overleaf project ID can be resolved back to the Calkit
+    projects that sync with it without reading every repo.
+    """
+
+    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    path: str = Field(primary_key=True)
+    overleaf_project_id: str = Field(index=True, max_length=255)
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: Project = Relationship(back_populates="overleaf_links")
+
+
 class FileLock(SQLModel, table=True):
     project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
     path: str = Field(primary_key=True)
@@ -1077,6 +1101,10 @@ class _ContentsItemBase(BaseModel):
     calkit_object: dict | None = None
     lock: ItemLock | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Content hash of a DVC-tracked output. Two listings of the same path
+    # at different refs are the same file exactly when this matches, which
+    # size alone can't tell you.
+    md5: str | None = None
     # Pipeline stage that produces this path, if any (from dvc.lock)
     stage: str | None = None
 

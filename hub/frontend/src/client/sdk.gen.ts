@@ -70,6 +70,8 @@ import type {
   FsOpRequest,
   GetAccountErrors,
   GetAccountResponses,
+  GetArxivPdfErrors,
+  GetArxivPdfResponses,
   GetCurrentUserResponses,
   GetDatasetsErrors,
   GetDatasetsResponses,
@@ -77,6 +79,7 @@ import type {
   GetDiscountCodeResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
+  GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
   GetOrgsErrors,
@@ -107,6 +110,10 @@ import type {
   GetProjectDatasetsResponses,
   GetProjectDvcFileErrors,
   GetProjectDvcFileResponses,
+  GetProjectDvcOutputsErrors,
+  GetProjectDvcOutputsResponses,
+  GetProjectDvcOutputTextDiffErrors,
+  GetProjectDvcOutputTextDiffResponses,
   GetProjectEnvironmentsErrors,
   GetProjectEnvironmentsResponses,
   GetProjectErrors,
@@ -122,6 +129,8 @@ import type {
   GetProjectGitContents2Responses,
   GetProjectGitContentsErrors,
   GetProjectGitContentsResponses,
+  GetProjectGithubPullErrors,
+  GetProjectGithubPullResponses,
   GetProjectGithubReleasesErrors,
   GetProjectGithubReleasesResponses,
   GetProjectGitRemoteHeadErrors,
@@ -136,6 +145,8 @@ import type {
   GetProjectIssuesResponses,
   GetProjectNotebooksErrors,
   GetProjectNotebooksResponses,
+  GetProjectOverleafSyncStatusErrors,
+  GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
   GetProjectPresentationsErrors,
@@ -169,6 +180,8 @@ import type {
   GetProjectZoteroItemsResponses,
   GetProjectZoteroLibrariesErrors,
   GetProjectZoteroLibrariesResponses,
+  GetReferencesErrors,
+  GetReferencesResponses,
   GetReleaseCommentsErrors,
   GetReleaseCommentsResponses,
   GetReleaseContentErrors,
@@ -186,6 +199,8 @@ import type {
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
   GetUserOrgsResponses,
+  GetUserOverleafSyncErrors,
+  GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
@@ -1819,6 +1834,29 @@ export class UsersService {
 
 export class MiscService {
   /**
+   * Get Hub Version
+   *
+   * Return the version of the hub serving this request.
+   *
+   * Deliberately unauthenticated: the frontend shows it before anyone signs
+   * in, and a client deciding whether it's talking to a hub new enough for
+   * a given feature shouldn't have to authenticate to find out.
+   */
+  public static getHubVersion<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetHubVersionResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetHubVersionResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/version",
+      ...options,
+    })
+  }
+
+  /**
    * Test Email
    *
    * Test emails.
@@ -2057,6 +2095,41 @@ export class MiscService {
       ...options,
     })
   }
+
+  /**
+   * Get Arxiv Pdf
+   *
+   * Stream a paper's PDF from arXiv.
+   *
+   * Proxied rather than pointed at directly because arXiv sends no CORS
+   * headers, so the PDF viewer can't fetch it from the browser. The ID is
+   * matched against arXiv's own format, which is what keeps this from
+   * being a proxy for arbitrary URLs.
+   *
+   * Old-style IDs contain a slash, hence the path converter.
+   */
+  public static getArxivPdf<ThrowOnError extends boolean = true>(
+    parameters: {
+      arxiv_id: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetArxivPdfResponses, GetArxivPdfErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "path", key: "arxiv_id" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetArxivPdfResponses,
+      GetArxivPdfErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/arxiv/{arxiv_id}/pdf",
+      ...options,
+      ...params,
+    })
+  }
 }
 
 export class ProjectsService {
@@ -2069,6 +2142,8 @@ export class ProjectsService {
       offset?: number
       search_for?: string | null
       owner_name?: string | null
+      github_repo?: string | null
+      min_access_level?: "read" | "write"
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<GetProjectsResponses, GetProjectsErrors, ThrowOnError> {
@@ -2081,6 +2156,8 @@ export class ProjectsService {
             { in: "query", key: "offset" },
             { in: "query", key: "search_for" },
             { in: "query", key: "owner_name" },
+            { in: "query", key: "github_repo" },
+            { in: "query", key: "min_access_level" },
           ],
         },
       ],
@@ -2879,6 +2956,111 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Dvc Outputs
+   *
+   * List every DVC-tracked output in the project at a given ref.
+   *
+   * The contents endpoint lists one directory at a time, and only
+   * presigns a URL when asked for a single path. Comparing two refs --
+   * a pull request against its base -- would mean walking the whole tree
+   * twice and then fetching each artifact individually, so the whole set
+   * comes back here at once, each with the URL of that ref's version.
+   */
+  public static getProjectDvcOutputs<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      ttl?: number | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDvcOutputsResponses,
+    GetProjectDvcOutputsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "ttl" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDvcOutputsResponses,
+      GetProjectDvcOutputsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dvc-outputs",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Dvc Output Text Diff
+   *
+   * Compare the words in a PDF output at two refs.
+   *
+   * Looking at two builds of a paper side by side answers "did the
+   * figures move" well and "did the wording change" badly. This reads the
+   * text out of both and diffs it, which the browser can't do without
+   * shipping a PDF parser.
+   */
+  public static getProjectDvcOutputTextDiff<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      base: string
+      head: string
+      ttl?: number | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDvcOutputTextDiffResponses,
+    GetProjectDvcOutputTextDiffErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "base" },
+            { in: "query", key: "head" },
+            { in: "query", key: "ttl" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDvcOutputTextDiffResponses,
+      GetProjectDvcOutputTextDiffErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dvc-outputs/text-diff",
+      ...options,
+      ...params,
     })
   }
 
@@ -3857,6 +4039,107 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Overleaf Sync Status
+   *
+   * Report what an Overleaf sync would do, without doing it.
+   *
+   * Returns one status per synced folder, optionally narrowed to a single
+   * folder with ``path`` or to the folders synced with a single Overleaf
+   * project with ``overleaf_project_id``.
+   */
+  public static getProjectOverleafSyncStatus<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path?: string | null
+      overleaf_project_id?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectOverleafSyncStatusResponses,
+    GetProjectOverleafSyncStatusErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "overleaf_project_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectOverleafSyncStatusResponses,
+      GetProjectOverleafSyncStatusErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/overleaf-syncs/status",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get User Overleaf Sync
+   *
+   * Find which of the user's projects syncs with an Overleaf project.
+   *
+   * The index answers immediately once a project has been looked at. When
+   * it doesn't, the user's projects are read one at a time until the one
+   * that syncs with this Overleaf project turns up, and what's found is
+   * indexed on the way so the next lookup is a single query.
+   *
+   * ``active_project`` is searched first, since the project someone is
+   * working in is overwhelmingly the one their Overleaf document belongs
+   * to, and finding it there avoids reading anything else.
+   */
+  public static getUserOverleafSync<ThrowOnError extends boolean = true>(
+    parameters: {
+      overleaf_project_id: string
+      active_project?: string | null
+      refresh?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetUserOverleafSyncResponses,
+    GetUserOverleafSyncErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "overleaf_project_id" },
+            { in: "query", key: "active_project" },
+            { in: "query", key: "refresh" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetUserOverleafSyncResponses,
+      GetUserOverleafSyncErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/overleaf-syncs/{overleaf_project_id}",
+      ...options,
+      ...params,
     })
   }
 
@@ -5585,6 +5868,53 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Github Pull
+   *
+   * Read a pull request's refs from GitHub.
+   *
+   * Proxied rather than read from the browser so a private repo works:
+   * the caller has read access to the project here, and the hub holds a
+   * GitHub token, where an unauthenticated request would only ever see
+   * public repos.
+   */
+  public static getProjectGithubPull<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      pull_number: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectGithubPullResponses,
+    GetProjectGithubPullErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "pull_number" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectGithubPullResponses,
+      GetProjectGithubPullErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/github-pulls/{pull_number}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get Project Github Releases
    */
   public static getProjectGithubReleases<ThrowOnError extends boolean = true>(
@@ -5898,6 +6228,67 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+}
+
+export class ReferencesService {
+  /**
+   * Get References
+   *
+   * Read reference collections across projects the user can write to.
+   *
+   * Write access only. Reading a reference needs no more than read access,
+   * so this is narrower than the resource allows, and deliberately: every
+   * project searched has to be cloned and its collections parsed, so
+   * answering across everything readable would mean cloning arbitrary
+   * public projects. There is no ``min_access_level`` parameter because it
+   * would ship with one usable value.
+   *
+   * Every filter is optional. With none, this lists every entry it finds;
+   * with ``doi``, ``arxiv_id``, or ``title``, only entries matching one of
+   * them, which is how a client asks "is this paper already filed?".
+   *
+   * ``project`` narrows the search to the given ``owner/name`` pairs, and
+   * may be repeated: ``?project=me/one&project=me/two``.
+   *
+   * ``max_projects`` bounds the cloning. Projects beyond it are not
+   * searched, and the response does not say so.
+   */
+  public static getReferences<ThrowOnError extends boolean = true>(
+    parameters?: {
+      project?: Array<string> | null
+      doi?: string | null
+      arxiv_id?: string | null
+      title?: string | null
+      max_projects?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetReferencesResponses, GetReferencesErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "project" },
+            { in: "query", key: "doi" },
+            { in: "query", key: "arxiv_id" },
+            { in: "query", key: "title" },
+            { in: "query", key: "max_projects" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetReferencesResponses,
+      GetReferencesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/references",
+      ...options,
+      ...params,
     })
   }
 }

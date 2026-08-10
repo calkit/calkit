@@ -264,7 +264,7 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/references`,
       );
     case "references.search":
-      return request<ReferenceSearchMatch[]>("/user/references/search", {
+      return request<ReferenceSearchMatch[]>("/user/references", {
         query: {
           projects: message.projects,
           doi: message.doi,

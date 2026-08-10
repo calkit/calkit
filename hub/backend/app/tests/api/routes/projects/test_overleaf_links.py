@@ -267,9 +267,9 @@ def test_get_user_reference_matches(
     project_spec = f"{project.owner_account_name}/{project.name}"
 
     def _search(params: dict):
-        with patch("app.api.routes.projects.core.get_repo", return_value=repo):
+        with patch("app.api.routes.users.get_repo", return_value=repo):
             return client.get(
-                f"{settings.API_V1_STR}/user/references/search",
+                f"{settings.API_V1_STR}/user/references",
                 params={"projects": [project_spec], **params},
                 headers=headers,
             )
@@ -300,18 +300,25 @@ def test_get_user_reference_matches(
     resp = _search({"doi": "10.9999/nope"})
     assert resp.status_code == 200
     assert resp.json() == []
-    # Searching needs something to search for, and something to search in
+    # With no filter, everything in the collection comes back, and nothing
+    # in particular was matched against
     resp = _search({})
-    assert resp.status_code == 422
-    resp = client.get(
-        f"{settings.API_V1_STR}/user/references/search",
-        params={"doi": "10.1234/abcd"},
-        headers=headers,
-    )
-    assert resp.status_code == 422
+    assert resp.status_code == 200
+    assert sorted(m["key"] for m in resp.json()) == ["jones2021", "smith2020"]
+    assert {m["matched_on"] for m in resp.json()} == {None}
+    # Naming no project searches the ones the user can write to, which is
+    # what makes this "my references" rather than "this project's"
+    with patch("app.api.routes.users.get_repo", return_value=repo):
+        resp = client.get(
+            f"{settings.API_V1_STR}/user/references",
+            params={"doi": "10.1234/abcd"},
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    assert [m["key"] for m in resp.json()] == ["smith2020"]
     # A project the user can't read is skipped, not an error
     resp = client.get(
-        f"{settings.API_V1_STR}/user/references/search",
+        f"{settings.API_V1_STR}/user/references",
         params={
             "projects": ["someone-else/private-project"],
             "doi": "10.1234/abcd",

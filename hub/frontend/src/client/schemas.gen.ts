@@ -5871,8 +5871,15 @@ export const ReferenceSearchMatchSchema = {
       default: 0,
     },
     matched_on: {
-      type: "string",
-      enum: ["doi", "arxiv_id", "title"],
+      anyOf: [
+        {
+          type: "string",
+          enum: ["doi", "arxiv_id", "title"],
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Matched On",
     },
   },
@@ -5884,7 +5891,6 @@ export const ReferenceSearchMatchSchema = {
     "path",
     "key",
     "type",
-    "matched_on",
   ],
   title: "ReferenceSearchMatch",
 } as const

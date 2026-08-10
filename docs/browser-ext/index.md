@@ -6,12 +6,14 @@ Overleaf for syncing figures, results, and text,
 GitHub for viewing artifacts stored with DVC and viewing LaTeX diffs
 on PRs,
 and journal and preprint webpages for saving reference information directly
-to BibTeX inside your project repo.
+to a BibTeX references collection inside your project repo,
+optionally syncing with Zotero.
 
 ## Signing in
 
-From a connected website,
-click the Calkit toolbar icon in the bottom right and select "Sign in."
+From a compatible website,
+click the Calkit toolbar button in the bottom right corner of the page
+and select "Sign in."
 
 ## Overleaf
 

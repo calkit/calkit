@@ -181,7 +181,8 @@ export interface ReferenceSearchMatch {
   title?: string | null;
   doi?: string | null;
   note_count: number;
-  matched_on: "doi" | "arxiv_id" | "title";
+  /** Null when the caller passed no filter and everything came back. */
+  matched_on: "doi" | "arxiv_id" | "title" | null;
 }
 
 export interface ReferenceNote {

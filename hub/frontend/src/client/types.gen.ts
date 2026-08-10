@@ -3362,7 +3362,7 @@ export type ReferenceSearchMatch = {
   /**
    * Matched On
    */
-  matched_on: "doi" | "arxiv_id" | "title"
+  matched_on?: "doi" | "arxiv_id" | "title" | null
 }
 
 /**
@@ -6547,6 +6547,56 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
+export type GetUserReferencesData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Projects
+     */
+    projects?: Array<string> | null
+    /**
+     * Doi
+     */
+    doi?: string | null
+    /**
+     * Arxiv Id
+     */
+    arxiv_id?: string | null
+    /**
+     * Title
+     */
+    title?: string | null
+    /**
+     * Max Projects
+     */
+    max_projects?: number
+  }
+  url: "/user/references"
+}
+
+export type GetUserReferencesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserReferencesError =
+  GetUserReferencesErrors[keyof GetUserReferencesErrors]
+
+export type GetUserReferencesResponses = {
+  /**
+   * Response Users-Get User References
+   *
+   * Successful Response
+   */
+  200: Array<ReferenceSearchMatch>
+}
+
+export type GetUserReferencesResponse =
+  GetUserReferencesResponses[keyof GetUserReferencesResponses]
+
 export type GetHubVersionData = {
   body?: never
   path?: never
@@ -9415,52 +9465,6 @@ export type PostProjectReferencesResponses = {
 
 export type PostProjectReferencesResponse =
   PostProjectReferencesResponses[keyof PostProjectReferencesResponses]
-
-export type GetUserReferenceMatchesData = {
-  body?: never
-  path?: never
-  query: {
-    /**
-     * Projects
-     */
-    projects: Array<string>
-    /**
-     * Doi
-     */
-    doi?: string | null
-    /**
-     * Arxiv Id
-     */
-    arxiv_id?: string | null
-    /**
-     * Title
-     */
-    title?: string | null
-  }
-  url: "/user/references/search"
-}
-
-export type GetUserReferenceMatchesErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type GetUserReferenceMatchesError =
-  GetUserReferenceMatchesErrors[keyof GetUserReferenceMatchesErrors]
-
-export type GetUserReferenceMatchesResponses = {
-  /**
-   * Response Projects-Get User Reference Matches
-   *
-   * Successful Response
-   */
-  200: Array<ReferenceSearchMatch>
-}
-
-export type GetUserReferenceMatchesResponse =
-  GetUserReferenceMatchesResponses[keyof GetUserReferenceMatchesResponses]
 
 export type PostProjectReferenceItemData = {
   body: ReferenceItemPost

@@ -222,6 +222,11 @@ keep-runtime-typing = true
 [tool.uv.workspace]
 members = ["hub/backend"]
 
+# Version is dynamic, derived from the Git tags by hatch-vcs; see the same
+# setting in hub/backend/pyproject.toml for why uv needs to be told that
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
 # The hub backend's tests need the compose stack and its own environment;

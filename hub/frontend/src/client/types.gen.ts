@@ -6547,56 +6547,6 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
-export type GetUserReferencesData = {
-  body?: never
-  path?: never
-  query?: {
-    /**
-     * Projects
-     */
-    projects?: Array<string> | null
-    /**
-     * Doi
-     */
-    doi?: string | null
-    /**
-     * Arxiv Id
-     */
-    arxiv_id?: string | null
-    /**
-     * Title
-     */
-    title?: string | null
-    /**
-     * Max Projects
-     */
-    max_projects?: number
-  }
-  url: "/user/references"
-}
-
-export type GetUserReferencesErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type GetUserReferencesError =
-  GetUserReferencesErrors[keyof GetUserReferencesErrors]
-
-export type GetUserReferencesResponses = {
-  /**
-   * Response Users-Get User References
-   *
-   * Successful Response
-   */
-  200: Array<ReferenceSearchMatch>
-}
-
-export type GetUserReferencesResponse =
-  GetUserReferencesResponses[keyof GetUserReferencesResponses]
-
 export type GetHubVersionData = {
   body?: never
   path?: never
@@ -10690,6 +10640,55 @@ export type PostProjectFsBatchOpResponses = {
 
 export type PostProjectFsBatchOpResponse =
   PostProjectFsBatchOpResponses[keyof PostProjectFsBatchOpResponses]
+
+export type GetReferencesData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Project
+     */
+    project?: Array<string> | null
+    /**
+     * Doi
+     */
+    doi?: string | null
+    /**
+     * Arxiv Id
+     */
+    arxiv_id?: string | null
+    /**
+     * Title
+     */
+    title?: string | null
+    /**
+     * Max Projects
+     */
+    max_projects?: number
+  }
+  url: "/references"
+}
+
+export type GetReferencesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetReferencesError = GetReferencesErrors[keyof GetReferencesErrors]
+
+export type GetReferencesResponses = {
+  /**
+   * Response References-Get References
+   *
+   * Successful Response
+   */
+  200: Array<ReferenceSearchMatch>
+}
+
+export type GetReferencesResponse =
+  GetReferencesResponses[keyof GetReferencesResponses]
 
 export type GetProjectReleasesData = {
   body?: never

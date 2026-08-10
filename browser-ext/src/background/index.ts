@@ -264,9 +264,10 @@ async function handle(message: Request): Promise<unknown> {
         `${projectPath(message.owner, message.project)}/references`,
       );
     case "references.search":
-      return request<ReferenceSearchMatch[]>("/user/references", {
+      return request<ReferenceSearchMatch[]>("/references", {
         query: {
-          projects: message.projects,
+          // Repeated once per project, which is what the hub expects
+          project: message.projects,
           doi: message.doi,
           arxiv_id: message.arxivId,
           title: message.title,

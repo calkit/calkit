@@ -180,6 +180,8 @@ import type {
   GetProjectZoteroItemsResponses,
   GetProjectZoteroLibrariesErrors,
   GetProjectZoteroLibrariesResponses,
+  GetReferencesErrors,
+  GetReferencesResponses,
   GetReleaseCommentsErrors,
   GetReleaseCommentsResponses,
   GetReleaseContentErrors,
@@ -200,8 +202,6 @@ import type {
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
   GetUserOverleafTokenResponses,
-  GetUserReferencesErrors,
-  GetUserReferencesResponses,
   GetUserStorageResponses,
   GetUserTokensErrors,
   GetUserTokensResponses,
@@ -1828,64 +1828,6 @@ export class UsersService {
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/storage",
       ...options,
-    })
-  }
-
-  /**
-   * Get User References
-   *
-   * Read the reference collections across the user's projects.
-   *
-   * Every filter is optional. With none, this lists every entry it finds;
-   * with ``doi``, ``arxiv_id``, or ``title``, only entries matching one of
-   * them, which is how a client asks "is this paper already filed?".
-   *
-   * ``projects`` narrows the search to the given ``owner/name`` pairs.
-   * Without it, the search covers the projects the user can write to, which
-   * is what "their" references means -- read access would pull in every
-   * public project on the hub.
-   *
-   * Each project has to be cloned and read, so ``max_projects`` bounds the
-   * work. Projects beyond it are not searched.
-   */
-  public static getUserReferences<ThrowOnError extends boolean = true>(
-    parameters?: {
-      projects?: Array<string> | null
-      doi?: string | null
-      arxiv_id?: string | null
-      title?: string | null
-      max_projects?: number
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    GetUserReferencesResponses,
-    GetUserReferencesErrors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "projects" },
-            { in: "query", key: "doi" },
-            { in: "query", key: "arxiv_id" },
-            { in: "query", key: "title" },
-            { in: "query", key: "max_projects" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).get<
-      GetUserReferencesResponses,
-      GetUserReferencesErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/references",
-      ...options,
-      ...params,
     })
   }
 }
@@ -6286,6 +6228,67 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+}
+
+export class ReferencesService {
+  /**
+   * Get References
+   *
+   * Read reference collections across projects the user can write to.
+   *
+   * Write access only. Reading a reference needs no more than read access,
+   * so this is narrower than the resource allows, and deliberately: every
+   * project searched has to be cloned and its collections parsed, so
+   * answering across everything readable would mean cloning arbitrary
+   * public projects. There is no ``min_access_level`` parameter because it
+   * would ship with one usable value.
+   *
+   * Every filter is optional. With none, this lists every entry it finds;
+   * with ``doi``, ``arxiv_id``, or ``title``, only entries matching one of
+   * them, which is how a client asks "is this paper already filed?".
+   *
+   * ``project`` narrows the search to the given ``owner/name`` pairs, and
+   * may be repeated: ``?project=me/one&project=me/two``.
+   *
+   * ``max_projects`` bounds the cloning. Projects beyond it are not
+   * searched, and the response does not say so.
+   */
+  public static getReferences<ThrowOnError extends boolean = true>(
+    parameters?: {
+      project?: Array<string> | null
+      doi?: string | null
+      arxiv_id?: string | null
+      title?: string | null
+      max_projects?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetReferencesResponses, GetReferencesErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "project" },
+            { in: "query", key: "doi" },
+            { in: "query", key: "arxiv_id" },
+            { in: "query", key: "title" },
+            { in: "query", key: "max_projects" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetReferencesResponses,
+      GetReferencesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/references",
+      ...options,
+      ...params,
     })
   }
 }

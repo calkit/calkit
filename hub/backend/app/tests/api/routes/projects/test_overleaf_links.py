@@ -267,10 +267,10 @@ def test_get_user_reference_matches(
     project_spec = f"{project.owner_account_name}/{project.name}"
 
     def _search(params: dict):
-        with patch("app.api.routes.users.get_repo", return_value=repo):
+        with patch("app.api.routes.references.get_repo", return_value=repo):
             return client.get(
-                f"{settings.API_V1_STR}/user/references",
-                params={"projects": [project_spec], **params},
+                f"{settings.API_V1_STR}/references",
+                params={"project": [project_spec], **params},
                 headers=headers,
             )
 
@@ -308,9 +308,9 @@ def test_get_user_reference_matches(
     assert {m["matched_on"] for m in resp.json()} == {None}
     # Naming no project searches the ones the user can write to, which is
     # what makes this "my references" rather than "this project's"
-    with patch("app.api.routes.users.get_repo", return_value=repo):
+    with patch("app.api.routes.references.get_repo", return_value=repo):
         resp = client.get(
-            f"{settings.API_V1_STR}/user/references",
+            f"{settings.API_V1_STR}/references",
             params={"doi": "10.1234/abcd"},
             headers=headers,
         )
@@ -318,9 +318,9 @@ def test_get_user_reference_matches(
     assert [m["key"] for m in resp.json()] == ["smith2020"]
     # A project the user can't read is skipped, not an error
     resp = client.get(
-        f"{settings.API_V1_STR}/user/references",
+        f"{settings.API_V1_STR}/references",
         params={
-            "projects": ["someone-else/private-project"],
+            "project": ["someone-else/private-project"],
             "doi": "10.1234/abcd",
         },
         headers=headers,

@@ -2,6 +2,7 @@ import { Box, Flex, Text } from "@chakra-ui/react"
 import { Suspense, lazy } from "react"
 
 import { type Notebook } from "../../client"
+import { decodeBase64Utf8 } from "../../lib/strings"
 import LoadingSpinner from "../Common/LoadingSpinner"
 
 const IpynbRenderer = lazy(() =>
@@ -18,7 +19,7 @@ interface NotebookViewProps {
 function NotebookView({ notebook }: NotebookViewProps) {
   if (notebook.output_format === "notebook" && notebook.content) {
     try {
-      const json = JSON.parse(atob(notebook.content))
+      const json = JSON.parse(decodeBase64Utf8(notebook.content))
       return (
         <Box
           overflowY="auto"

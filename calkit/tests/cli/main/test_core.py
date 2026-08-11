@@ -2037,6 +2037,55 @@ def test_call_dvc_passthrough_hint(tmp_dir):
     )
 
 
+@skipif_windows_mock_scheduler
+def test_run_scheduler_stage_respects_max_concurrent_jobs(tmp_dir):
+    # An iterate_over stage on a scheduler env normally submits every job at
+    # once. With max_concurrent_jobs set, submissions are paced so the project
+    # never occupies more than that many queue slots---the point being not to
+    # monopolize a shared cluster.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Each job announces itself, holds long enough to overlap with any
+        # concurrently running sibling, records how many were running at that
+        # moment, then leaves.
+        f.write('touch "running-$1"\n')
+        f.write("sleep 1\n")
+        f.write("ls running-* | wc -l >> counts.txt\n")
+        f.write('rm "running-$1"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm", "max_concurrent_jobs": 2}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [
+                        {"arg_name": "x", "values": [1, 2, 3, 4, 5, 6]}
+                    ],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    # Every case still runs to completion---the limit paces the pipeline, it
+    # does not drop work.
+    for x in range(1, 7):
+        assert os.path.exists(f"out-{x}.txt")
+    with open("counts.txt") as f:
+        observed = [int(line) for line in f.read().split() if line]
+    assert len(observed) == 6
+    # Without the limit all six would be in flight together; with it, never
+    # more than two.
+    assert max(observed) <= 2
+
+
 def test_dotenv_is_loaded_for_every_command(tmp_dir):
     # Which hub a command targets must not depend on whether that command
     # happens to read a secret: 'calkit run' loaded .env and 'calkit push'

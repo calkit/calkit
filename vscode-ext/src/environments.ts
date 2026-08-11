@@ -35,6 +35,7 @@ export interface CalkitEnvironment {
   args?: string[];
   default_options?: string[];
   default_setup?: string[];
+  max_concurrent_jobs?: number;
   [key: string]: unknown;
 }
 

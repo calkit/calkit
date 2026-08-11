@@ -269,6 +269,82 @@ def _make_fake_blob(path: str) -> SimpleNamespace:
     return SimpleNamespace(type="blob", path=path)
 
 
+def test_get_project_figures_paginates(client: TestClient) -> None:
+    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_tree = SimpleNamespace()
+    paths = [f"figures/fig{i}.png" for i in range(5)]
+    blobs = [_make_fake_blob(p) for p in paths]
+    fake_commit = SimpleNamespace()
+    fake_commit.tree = SimpleNamespace(traverse=lambda: iter(blobs))
+    fake_repo = SimpleNamespace()
+    fake_repo.head = SimpleNamespace(commit=fake_commit)
+    fake_contents = ContentsItem(
+        name="fig",
+        path="fig",
+        type="file",
+        size=0,
+        in_repo=True,
+        content=None,
+        url=None,
+        storage=None,
+    )
+    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=fake_repo,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=fake_tree,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_and_dvc_outs_from_tree",
+            return_value=CkInfoAndOuts({}, {}, {}, {}),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_contents_from_tree",
+            return_value=fake_contents,
+        ) as mock_contents,
+    ):
+        first = client.get(f"{url}?limit=2&offset=0")
+        # Content is resolved only for the page, not the whole project. This
+        # is the property that keeps the endpoint from scaling with the
+        # project's figure count.
+        assert mock_contents.call_count == 2
+        mock_contents.reset_mock()
+        second = client.get(f"{url}?limit=2&offset=2")
+        assert mock_contents.call_count == 2
+        mock_contents.reset_mock()
+        last = client.get(f"{url}?limit=2&offset=4")
+        assert mock_contents.call_count == 1
+        past_end = client.get(f"{url}?limit=2&offset=10")
+        overshoot = client.get(f"{url}?limit=100&offset=0")
+    # Every page reports the same total so the client can page through.
+    for resp in (first, second, last, past_end, overshoot):
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 5
+    assert [f["path"] for f in first.json()["items"]] == paths[:2]
+    assert [f["path"] for f in second.json()["items"]] == paths[2:4]
+    assert [f["path"] for f in last.json()["items"]] == paths[4:]
+    assert past_end.json()["items"] == []
+    assert [f["path"] for f in overshoot.json()["items"]] == paths
+    assert first.json()["limit"] == 2
+    assert first.json()["offset"] == 0
+    # Out-of-range paging values are rejected rather than silently clamped.
+    assert client.get(f"{url}?limit=0").status_code == 422
+    assert client.get(f"{url}?limit=101").status_code == 422
+    assert client.get(f"{url}?offset=-1").status_code == 422
+
+
 def test_get_project_figures_autodetects_deeply_nested(
     client: TestClient,
 ) -> None:
@@ -336,9 +412,10 @@ def test_get_project_figures_autodetects_deeply_nested(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in detected_paths:
         assert path in returned_paths, f"Expected {path!r} to be detected"
@@ -422,9 +499,10 @@ def test_get_project_figures_autodetects_dvc_stored(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in dvc_detected_paths:
         assert path in returned_paths, (
@@ -492,9 +570,10 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     paths = [fig["path"] for fig in returned_figures]
     assert paths.count(shared_path) == 1, (
         f"Expected {shared_path!r} to appear exactly once, got {paths}"
@@ -568,9 +647,10 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in dvc_pointer_detected:
         assert path in returned_paths, (
@@ -646,9 +726,10 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = [fig["path"] for fig in returned_figures]
     assert returned_paths.count(shared_path) == 1, (
         f"Expected {shared_path!r} to appear exactly once, got {returned_paths}"

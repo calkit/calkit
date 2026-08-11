@@ -228,20 +228,25 @@ function useArtifactAtRef(
         }).then((response) => response.data)
       }
       if (kind === "figure") {
-        const figs = await ProjectsService.getProjectFigures({
-          owner_name: ownerName,
-          project_name: projectName,
-          ref,
-        }).then((response) => response.data)
-        // Fall back to contents API if not declared in calkit.yaml
-        const found = figs.find((f) => f.path === path)
-        if (found) return found
-        return ProjectsService.getProjectContents({
-          owner_name: ownerName,
-          project_name: projectName,
-          path,
-          ref,
-        }).then((response) => response.data)
+        // Fetch just this figure. Listing every figure to pick one out meant
+        // downloading and base64-encoding the whole project's figures on each
+        // ref, which is what made this modal take minutes to open.
+        try {
+          return await ProjectsService.getProjectFigure({
+            owner_name: ownerName,
+            project_name: projectName,
+            figure_path: path,
+            ref,
+          }).then((response) => response.data)
+        } catch {
+          // Fall back to contents API if not declared in calkit.yaml
+          return ProjectsService.getProjectContents({
+            owner_name: ownerName,
+            project_name: projectName,
+            path,
+            ref,
+          }).then((response) => response.data)
+        }
       }
       if (kind === "publication") {
         const pubs = await ProjectsService.getProjectPublications({
@@ -542,9 +547,9 @@ export function ArtifactCompareModal({
     (r: GitRef) => r.kind === "branch",
   )
 
-  // For figure/publication/notebook, fetching without a ref loads ALL items just
-  // to find one--skip that when we already have initialArtifact. For "file", the
-  // fetch is a direct single-file call so it's cheap and always useful.
+  // For publication/notebook, fetching without a ref loads ALL items just to
+  // find one--skip that when we already have initialArtifact. For "file" and
+  // "figure" the fetch is a direct single-item call, so it's cheap.
   // When there is no initialArtifact (e.g. opened from the files page), also
   // enable the query without a ref so the current version is shown on open.
   const artifact1Enabled =

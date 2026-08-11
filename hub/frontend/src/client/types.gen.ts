@@ -1025,6 +1025,30 @@ export type Figure = {
 }
 
 /**
+ * FiguresPage
+ *
+ * A page of project figures, with the total available for paging.
+ */
+export type FiguresPage = {
+  /**
+   * Items
+   */
+  items: Array<Figure>
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Limit
+   */
+  limit: number
+  /**
+   * Offset
+   */
+  offset: number
+}
+
+/**
  * FileLock
  */
 export type FileLock = {
@@ -8016,6 +8040,18 @@ export type GetProjectFiguresData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Limit
+     *
+     * Max number of figures to return
+     */
+    limit?: number
+    /**
+     * Offset
+     *
+     * Number of figures to skip
+     */
+    offset?: number
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }
@@ -8032,11 +8068,9 @@ export type GetProjectFiguresError =
 
 export type GetProjectFiguresResponses = {
   /**
-   * Response Projects-Get Project Figures
-   *
    * Successful Response
    */
-  200: Array<Figure>
+  200: FiguresPage
 }
 
 export type GetProjectFiguresResponse =

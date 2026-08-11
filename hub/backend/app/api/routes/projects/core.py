@@ -1,6 +1,7 @@
 """Main routes for projects."""
 
 import base64
+import concurrent.futures
 import io
 import json
 import logging
@@ -15,7 +16,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Annotated, Any, Literal, NamedTuple, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -37,7 +38,7 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from git.exc import GitCommandError
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session, and_, func, not_, or_, select
+from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.projects
@@ -76,6 +77,7 @@ from app.dvc import (
     run_dvc_command,
 )
 from app.git import (
+    RepoTree,
     get_ck_info,
     get_ck_info_from_repo,
     get_commit_history,
@@ -1840,10 +1842,26 @@ def _build_questions_public(
     }
     figures_by_path: dict[str, Figure] = {}
     if "figure" in kinds:
+        # Only the figures actually cited as evidence need their content
+        # resolved; resolving every figure in the project would make this
+        # scale with the project rather than with the questions.
+        evidence_fig_paths = {
+            ev.get("path")
+            for q in questions_ck
+            for ev in _evidence_of(q)
+            if isinstance(ev, dict) and ev.get("kind") == "figure"
+        }
+        fig_ctx = _discover_figures(project=project, repo=repo, ref=ref)
+        cited = [f for f in fig_ctx.figures if f["path"] in evidence_fig_paths]
         figures_by_path = {
             fig.path: fig
-            for fig in _build_figures(
-                project=project, repo=repo, session=session, ref=ref
+            for fig in _resolve_figures(
+                project=project,
+                repo=repo,
+                session=session,
+                ref=ref,
+                ctx=fig_ctx,
+                figures=cited,
             )
         }
     results_by_path: dict[str, Result] = {}
@@ -2059,14 +2077,33 @@ def put_project_question(
     )[idx]
 
 
-def _build_figures(
+class _FigureContext(NamedTuple):
+    """Everything needed to resolve figure content, computed once per request.
+
+    ``figures`` holds every discovered figure entry (declared and
+    auto-detected) with only the cheap tree-derived fields filled in. The
+    expensive per-figure work happens in ``_resolve_figures``.
+    """
+
+    figures: list[dict[str, Any]]
+    tree: RepoTree
+    ck_info_full: dict[str, Any]
+    dvc_lock_outs: dict[str, Any]
+    zip_path_map: dict[str, Any]
+    dvc_lock: dict[str, Any]
+
+
+def _discover_figures(
     project: Project,
     repo: git.Repo,
-    session: Session,
     ref: str | None,
-) -> list[Figure]:
-    """Build the list of project figures, declared and auto-detected, with
-    content resolved for each.
+) -> _FigureContext:
+    """Find every project figure, declared and auto-detected, without
+    resolving any content.
+
+    Split out from content resolution so callers that only need a subset (a
+    page of the listing, or the few figures a question cites as evidence)
+    don't pay to download and base64-encode every figure in the project.
     """
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -2147,9 +2184,46 @@ def _build_figures(
         if dvc_out.get("type") == "dir":
             continue
         _maybe_add_figure(dvc_path)
+    dvc_lock: dict[str, Any] = {}
+    if figures:
+        try:
+            if tree.is_file("dvc.lock"):
+                dvc_lock = (
+                    ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+                )
+        except Exception as e:
+            logger.warning(f"Failed to read dvc.lock for figures: {e}")
+    return _FigureContext(
+        figures=figures,
+        tree=tree,
+        ck_info_full=ck_info_full,
+        dvc_lock_outs=dvc_lock_outs,
+        zip_path_map=zip_path_map,
+        dvc_lock=dvc_lock,
+    )
+
+
+def _resolve_figures(
+    project: Project,
+    repo: git.Repo,
+    session: Session,
+    ref: str | None,
+    ctx: _FigureContext,
+    figures: list[dict[str, Any]],
+) -> list[Figure]:
+    """Resolve content, comment counts and stage status for ``figures``.
+
+    ``figures`` is normally a slice of ``ctx.figures``. Content resolution
+    hits object storage once per figure, so the figures are resolved
+    concurrently rather than one at a time.
+    """
     if not figures:
         return []
-    # Build comment count map from DB
+    tree = ctx.tree
+    dvc_lock = ctx.dvc_lock
+    # Build comment count map from DB, restricted to the figures we're
+    # actually returning.
+    paths = [fig["path"] for fig in figures]
     comment_counts = dict(
         session.exec(
             select(ProjectComment.artifact_path, func.count())
@@ -2158,18 +2232,15 @@ def _build_figures(
                 ProjectComment.artifact_type == "figure",
                 ProjectComment.parent_id == None,  # noqa: E711
                 ProjectComment.resolved == None,  # noqa: E711
+                col(ProjectComment.artifact_path).in_(paths),
             )
             .group_by(ProjectComment.artifact_path)
         ).all()
     )
-    # Get the figure content and base64 encode it.
     # Staleness is best-effort: never let it block the figure listing.
-    dvc_lock: dict = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
-        dvc_yaml: dict = {}
+        dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
             dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
         stage_statuses = compute_stage_statuses(
@@ -2183,14 +2254,15 @@ def _build_figures(
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
-    for fig in figures:
+
+    def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
         item = app.projects.get_contents_from_tree(
             project=project,
             tree=tree,
             path=fig["path"],
-            ck_info=ck_info_full,
-            dvc_lock_outs=dvc_lock_outs,
-            zip_path_map=zip_path_map,
+            ck_info=ctx.ck_info_full,
+            dvc_lock_outs=ctx.dvc_lock_outs,
+            zip_path_map=ctx.zip_path_map,
         )
         fig["content"] = item.content
         fig["url"] = item.url
@@ -2202,7 +2274,27 @@ def _build_figures(
         if fig.get("stage") and fig["stage"] in stage_statuses:
             fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
         fig["storage"] = item.storage
-    return [Figure.model_validate(fig) for fig in figures]
+        return fig
+
+    # Each figure's content is an independent download, so fan them out. The
+    # cap keeps a single request from monopolizing object-storage connections.
+    if len(figures) > 1:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(figures))
+        ) as pool:
+            resolved = list(pool.map(_resolve, figures))
+    else:
+        resolved = [_resolve(figures[0])]
+    return [Figure.model_validate(fig) for fig in resolved]
+
+
+class FiguresPage(BaseModel):
+    """A page of project figures, with the total available for paging."""
+
+    items: list[Figure]
+    total: int
+    limit: int
+    offset: int
 
 
 @router.get("/projects/{owner_name}/{project_name}/figures")
@@ -2212,7 +2304,17 @@ def get_project_figures(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-) -> list[Figure]:
+    limit: int = Query(
+        20, ge=1, le=100, description="Max number of figures to return"
+    ),
+    offset: int = Query(0, ge=0, description="Number of figures to skip"),
+) -> FiguresPage:
+    """Get a page of the project's figures.
+
+    Figure content is downloaded from object storage and inlined, so this is
+    paginated: a project with hundreds of figures would otherwise take
+    minutes and return a payload measured in hundreds of megabytes.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2227,7 +2329,22 @@ def get_project_figures(
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
     )
-    return _build_figures(project=project, repo=repo, session=session, ref=ref)
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    page = ctx.figures[offset : offset + limit]
+    items = _resolve_figures(
+        project=project,
+        repo=repo,
+        session=session,
+        ref=ref,
+        ctx=ctx,
+        figures=page,
+    )
+    return FiguresPage(
+        items=items,
+        total=len(ctx.figures),
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _build_results(
@@ -2342,7 +2459,10 @@ def get_project_results(
     return _build_results(project=project, repo=repo, ref=ref)
 
 
-@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path}")
+# ``figure_path`` takes the path convertor because figures live in nested
+# directories ("figures/sub/plot.png"); without it the route only matches
+# single-segment names, whether or not the client percent-encodes slashes.
+@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path:path}")
 def get_project_figure(
     owner_name: str,
     project_name: str,

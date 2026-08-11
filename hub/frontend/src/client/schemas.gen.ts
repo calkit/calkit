@@ -1812,6 +1812,35 @@ export const FigureSchema = {
   title: "Figure",
 } as const
 
+export const FiguresPageSchema = {
+  properties: {
+    items: {
+      items: {
+        $ref: "#/components/schemas/Figure",
+      },
+      type: "array",
+      title: "Items",
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    limit: {
+      type: "integer",
+      title: "Limit",
+    },
+    offset: {
+      type: "integer",
+      title: "Offset",
+    },
+  },
+  type: "object",
+  required: ["items", "total", "limit", "offset"],
+  title: "FiguresPage",
+  description:
+    "A page of project figures, with the total available for paging.",
+} as const
+
 export const FileLockSchema = {
   properties: {
     project_id: {

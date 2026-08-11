@@ -36,7 +36,12 @@ const figuresSearchSchema = z.object({
   path: z.string().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
 })
+
+// Each figure's content is fetched and inlined by the API, so pages are kept
+// small; projects with hundreds of figures otherwise take minutes to load.
+const FIGURES_PER_PAGE = 20
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/figures",
@@ -172,20 +177,38 @@ function FigureThumbnail({
 
 function ProjectFigures() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, path: selectedPath, base_ref, compare_ref } = Route.useSearch()
+  const {
+    ref,
+    path: selectedPath,
+    base_ref,
+    compare_ref,
+    page,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const [search, setSearch] = useState("")
+  const currentPage = page ?? 1
+  const offset = (currentPage - 1) * FIGURES_PER_PAGE
 
-  const { isPending: figuresPending, data: figures } = useQuery({
-    queryKey: ["projects", accountName, projectName, "figures", ref],
+  const { isPending: figuresPending, data: figuresPage } = useQuery({
+    queryKey: ["projects", accountName, projectName, "figures", ref, offset],
     queryFn: () =>
       ProjectsService.getProjectFigures({
         owner_name: accountName,
         project_name: projectName,
         ref,
+        limit: FIGURES_PER_PAGE,
+        offset,
       }).then((response) => response.data),
+    // Keep the previous page rendered while the next one loads, so paging
+    // doesn't flash the empty state.
+    placeholderData: (prev) => prev,
   })
+  const figures = figuresPage?.items
+  const totalFigures = figuresPage?.total ?? 0
+  const pageCount = Math.max(1, Math.ceil(totalFigures / FIGURES_PER_PAGE))
+  const goToPage = (p: number) =>
+    navigate({ search: (prev) => ({ ...prev, page: p === 1 ? undefined : p }) })
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
 
@@ -265,12 +288,19 @@ function ProjectFigures() {
             </>
           ) : null}
           <ClearableInput
-            placeholder="Search figures…"
+            placeholder={
+              pageCount > 1 ? "Search this page…" : "Search figures…"
+            }
             size="sm"
             maxW="220px"
             value={search}
             onValueChange={setSearch}
           />
+          {totalFigures > 0 && (
+            <Text fontSize="sm" color="gray.500" ml="auto">
+              {offset + 1}–{offset + (figures?.length ?? 0)} of {totalFigures}
+            </Text>
+          )}
         </Flex>
 
         {figuresPending ? (
@@ -317,19 +347,45 @@ function ProjectFigures() {
             ))}
           </SimpleGrid>
         )}
+
+        {pageCount > 1 && (
+          <Flex align="center" justify="center" gap={3} mt={6}>
+            <Button
+              size="sm"
+              variant="ghost"
+              isDisabled={currentPage <= 1}
+              onClick={() => goToPage(currentPage - 1)}
+            >
+              Previous
+            </Button>
+            <Text fontSize="sm" color="gray.500">
+              Page {currentPage} of {pageCount}
+            </Text>
+            <Button
+              size="sm"
+              variant="ghost"
+              isDisabled={currentPage >= pageCount}
+              onClick={() => goToPage(currentPage + 1)}
+            >
+              Next
+            </Button>
+          </Flex>
+        )}
       </Box>
 
-      {selectedFigure && (
+      {/* A shared link can point at a figure that isn't on the current page;
+          the modal fetches it itself when we have no preloaded copy. */}
+      {selectedPath && (
         <ArtifactCompareModal
           isOpen={Boolean(selectedPath)}
           onClose={closeCompare}
           ownerName={accountName}
           projectName={projectName}
-          path={selectedFigure.path}
+          path={selectedPath}
           kind="figure"
           initialRef={base_ref ?? ref}
           initialRef2={compare_ref}
-          initialArtifact={selectedFigure}
+          initialArtifact={selectedFigure ?? undefined}
           onRefsChange={(r1, r2) =>
             navigate({
               search: (prev) => ({

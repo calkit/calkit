@@ -3256,12 +3256,20 @@ export class ProjectsService {
 
   /**
    * Get Project Figures
+   *
+   * Get a page of the project's figures.
+   *
+   * Figure content is downloaded from object storage and inlined, so this is
+   * paginated: a project with hundreds of figures would otherwise take
+   * minutes and return a payload measured in hundreds of megabytes.
    */
   public static getProjectFigures<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
       ref?: string | null
+      limit?: number
+      offset?: number
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3277,6 +3285,8 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "query", key: "ref" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
           ],
         },
       ],

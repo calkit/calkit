@@ -109,6 +109,11 @@ const useProjectQuestions = (
   return { questionsRequest }
 }
 
+// The figures endpoint is paginated because it inlines each figure's content.
+// Callers here want a browsable list rather than a page, so they take the
+// largest page the API allows.
+const FIGURES_PAGE_LIMIT = 100
+
 const useProjectFigures = (
   accountName: string,
   projectName: string,
@@ -121,7 +126,8 @@ const useProjectFigures = (
         owner_name: accountName,
         project_name: projectName,
         ref,
-      }).then((response) => response.data),
+        limit: FIGURES_PAGE_LIMIT,
+      }).then((response) => response.data?.items),
   })
   return { figuresRequest }
 }

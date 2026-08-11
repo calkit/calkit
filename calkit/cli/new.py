@@ -1572,6 +1572,18 @@ def new_slurm_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the "
+                "queue at once, or 0 for no limit. Submissions beyond this "
+                "wait for a slot, so an iterated stage does not take over a "
+                "shared cluster's queue. Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1612,6 +1624,12 @@ def new_slurm_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 means no limit, the same as it does for `calkit update`.
+        if max_concurrent_jobs:
+            env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env
@@ -1661,6 +1679,18 @@ def new_pbs_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the "
+                "queue at once, or 0 for no limit. Submissions beyond this "
+                "wait for a slot, so an iterated stage does not take over a "
+                "shared cluster's queue. Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1703,6 +1733,12 @@ def new_pbs_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 means no limit, the same as it does for `calkit update`.
+        if max_concurrent_jobs:
+            env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env

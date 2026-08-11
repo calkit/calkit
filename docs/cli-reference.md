@@ -1202,15 +1202,16 @@ calkit new|create slurm-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                |
-| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                          |
-| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                                                      |
-| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                     |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands. |
-| `--description`     | text    | no       |           | Description.                                                                                                               |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
+| `--default-option`      | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-pbs-env"></a>
 
@@ -1226,15 +1227,16 @@ calkit new|create pbs-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                   |
-| ------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                             |
-| `--host`            | text    | no       | localhost | Host where PBS commands should run.                                                                                           |
-| `--default-option`  | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options. |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.      |
-| `--description`     | text    | no       |           | Description.                                                                                                                  |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                            |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                        |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
+| `--default-option`      | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-uv-venv"></a>
 
@@ -2603,16 +2605,17 @@ calkit update slurm-env [OPTIONS]
 
 Options:
 
-| Option                  | Type | Required | Default | Description                     |
-| ----------------------- | ---- | -------- | ------- | ------------------------------- |
-| `--name`, `-n`          | text | yes      |         | Environment name.               |
-| `--host`                | text | no       |         | SLURM host.                     |
-| `--add-default-option`  | text | no       |         | Add a default sbatch option.    |
-| `--rm-default-option`   | text | no       |         | Remove a default sbatch option. |
-| `--set-default-options` | text | no       |         | Replace default options list.   |
-| `--add-default-setup`   | text | no       |         | Add a default setup command.    |
-| `--rm-default-setup`    | text | no       |         | Remove a default setup command. |
-| `--set-default-setup`   | text | no       |         | Replace default setup list.     |
+| Option                  | Type    | Required | Default | Description                                                                                   |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Environment name.                                                                             |
+| `--host`                | text    | no       |         | SLURM host.                                                                                   |
+| `--add-default-option`  | text    | no       |         | Add a default sbatch option.                                                                  |
+| `--rm-default-option`   | text    | no       |         | Remove a default sbatch option.                                                               |
+| `--set-default-options` | text    | no       |         | Replace default options list.                                                                 |
+| `--add-default-setup`   | text    | no       |         | Add a default setup command.                                                                  |
+| `--rm-default-setup`    | text    | no       |         | Remove a default setup command.                                                               |
+| `--set-default-setup`   | text    | no       |         | Replace default setup list.                                                                   |
+| `--max-concurrent-jobs` | integer | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
 
 <a id="subcommand-update-env"></a>
 
@@ -3362,6 +3365,8 @@ Work with a job scheduler (SLURM or PBS).
 Submit a batch job through the scheduler associated with the env.
 
 Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
+
+If the environment sets `max_concurrent_jobs`, submission waits until this project has fewer than that many jobs queued or running, so an iterated stage does not put all of its jobs into a shared cluster's queue at once.
 
 Usage:
 

@@ -746,13 +746,14 @@ Model class: `NixEnvironment`
 
 Model class: `SlurmEnvironment`
 
-| Parameter       | Type             | Required |
-| --------------- | ---------------- | -------- |
-| kind            | Literal['slurm'] | yes      |
-| host            | str              | no       |
-| default_options | list[str]        | no       |
-| default_setup   | list[str]        | no       |
-| description     | str              | no       |
+| Parameter           | Type             | Required |
+| ------------------- | ---------------- | -------- |
+| kind                | Literal['slurm'] | yes      |
+| host                | str              | no       |
+| default_options     | list[str]        | no       |
+| default_setup       | list[str]        | no       |
+| max_concurrent_jobs | int              | no       |
+| description         | str              | no       |
 
 #### `renv`
 

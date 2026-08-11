@@ -38,6 +38,11 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
+# Scheduler environment keys that govern how a job is dispatched rather than
+# what it computes. They are excluded from the environment lock file, so
+# changing them does not invalidate cached results: pacing submissions to be
+# polite to a shared queue must not force every simulation to rerun.
+SCHEDULER_DISPATCH_ONLY_KEYS = {"max_concurrent_jobs"}
 KINDS_NO_CHECK = ["_system", "ssh"]
 
 
@@ -421,6 +426,8 @@ def write_scheduler_env_lock(
     config so DVC can use it as a stage dependency: when the env's
     ``default_options``, ``default_setup``, ``host``, etc. change, the
     lock file changes and any stage that depends on it is invalidated.
+    Keys in ``SCHEDULER_DISPATCH_ONLY_KEYS`` are left out, since they change
+    only when a job is submitted, not what it computes.
 
     Parameters
     ----------
@@ -450,7 +457,9 @@ def write_scheduler_env_lock(
     parent = os.path.dirname(full_path)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    lock_data = dict(env)
+    lock_data = {
+        k: v for k, v in env.items() if k not in SCHEDULER_DISPATCH_ONLY_KEYS
+    }
     # Record when the scheduler is mocked so switching between a mocked run
     # (executed locally) and a real scheduler run changes the lock file and
     # invalidates the cached result

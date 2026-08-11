@@ -54,3 +54,8 @@ without the cognitive overhead.
 - Extensions for doing all of the above graphically in
   [JupyterLab](jupyterlab.md) and
   [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](browser-ext/index.md) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.

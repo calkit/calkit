@@ -9,6 +9,11 @@ and journal and preprint webpages for saving reference information directly
 to a BibTeX references collection inside your project repo,
 optionally syncing with Zotero.
 
+## Installation
+
+The extension is available in the
+[Chrome Web Store](https://chromewebstore.google.com/detail/idhdomgapfolnpffanajdckdaojencal).
+
 ## Signing in
 
 From a compatible website,

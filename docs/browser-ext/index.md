@@ -125,5 +125,4 @@ and add it there.
 
 ## Privacy
 
-What the extension stores and what it sends, and to whom, is in its
-[privacy policy](privacy.md).
+See the [privacy policy](privacy.md).

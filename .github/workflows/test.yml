@@ -56,7 +56,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
@@ -64,7 +64,7 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -108,9 +108,9 @@ jobs:
       run:
         working-directory: jupyterlab-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -149,7 +149,7 @@ jobs:
       run:
         working-directory: vscode-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -168,7 +168,7 @@ jobs:
       run:
         working-directory: browser-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

@@ -385,7 +385,9 @@ def test_sbatchstage():
     - the converted stage emits ``calkit scheduler batch``,
     - sbatch_options land in scheduler.options,
     - stage-level setup commands survive the conversion,
-    - non-default env_default_* modes survive the conversion.
+    - non-default env_default_* modes survive the conversion,
+    - ``scheduler.summary: true`` declares a summary JSON output.
+    - ``summary`` survives the sbatch migration.
     """
     from calkit.models.pipeline import Pipeline, ShellScriptStage
 
@@ -470,6 +472,51 @@ def test_sbatchstage():
     sd_setup = pipeline3.stages["job-setup-ignore"].to_dvc()
     assert "--env-default-options" not in sd_setup["cmd"]
     assert "--env-default-setup ignore" in sd_setup["cmd"]
+    # Opt-in summary output is declared alongside the job log when enabled.
+    pipeline4 = Pipeline.model_validate(
+        {
+            "stages": {
+                "job-summary": {
+                    "kind": "shell-script",
+                    "name": "job-summary",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "scheduler": {"summary": True},
+                }
+            }
+        }
+    )
+    stage_summary = pipeline4.stages["job-summary"]
+    stage_summary._scheduler_kind = "slurm"
+    sd_summary = stage_summary.to_dvc()
+    assert {
+        ".calkit/scheduler/logs/job-summary.out": {
+            "cache": False,
+            "persist": True,
+        }
+    } in sd_summary["outs"]
+    assert {
+        ".calkit/scheduler/logs/job-summary.summary.json": {
+            "cache": False,
+            "persist": True,
+        }
+    } in sd_summary["outs"]
+    # A migrated sbatch stage keeps its summary opt-in.
+    pipeline5 = Pipeline.model_validate(
+        {
+            "stages": {
+                "job-migrate": {
+                    "kind": "sbatch",
+                    "script_path": "scripts/run_job.sh",
+                    "environment": "slurm-env",
+                    "scheduler": {"summary": True},
+                }
+            }
+        }
+    )
+    converted5 = pipeline5.convert_sbatch_stages()
+    assert converted5["job-migrate"]["scheduler"]["summary"] is True
+    assert pipeline5.stages["job-migrate"].scheduler.summary is True
 
 
 def test_mappathsstage():

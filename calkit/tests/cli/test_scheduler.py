@@ -1,14 +1,17 @@
 """Tests for ``calkit.cli.scheduler``."""
 
+import json
 import os
 import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 import typer
 
+import calkit
 import calkit.cli.scheduler as sched
 from calkit.cli.scheduler import (
     _active_job_ids,
@@ -19,6 +22,7 @@ from calkit.cli.scheduler import (
     _finalize_job,
     _is_active,
     _load_jobs,
+    _merge_job_summary,
     _mock_enabled,
     _mock_submit,
     _parse_slurm_exit_code,
@@ -27,8 +31,10 @@ from calkit.cli.scheduler import (
     _record_job_result,
     _sanitize_pbs_job_name,
     _slurm_exit_code,
+    _summary_path,
     _wait_for_output_file,
     _wait_until_done,
+    run_batch,
 )
 
 
@@ -609,3 +615,133 @@ def test_queue_lock_is_exclusive(tmp_dir):
     # Whoever went first finished before the other started.
     assert order[0].startswith("enter")
     assert order[1] == order[0].replace("enter", "exit")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: mock scheduler invokes a .sh script directly; not portable to Windows",
+)
+def test_job_summary(tmp_dir, monkeypatch):
+    warnings: list[str] = []
+    monkeypatch.setenv("CALKIT_MOCK_SCHEDULER", "1")
+    monkeypatch.setattr(
+        "calkit.cli.scheduler.warn", lambda msg: warnings.append(msg)
+    )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": {"slurm": {"kind": "slurm"}}}, f)
+    batch_kwargs: dict[str, Any] = dict(
+        environment="slurm",
+        deps=[],
+        outs=[],
+        options=[],
+        setup_cmds=[],
+        is_command=False,
+    )
+    # A job that writes a valid JSON object gets its payload merged with a
+    # calkit metadata block recording the observed exit code and job id.
+    with open("write_summary.sh", "w") as f:
+        f.write(
+            'printf \'{"score": 42, "gpu": "a100"}\' > '
+            '"$CALKIT_JOB_SUMMARY_PATH"\n'
+        )
+    run_batch(name="job1", target="write_summary.sh", **batch_kwargs)
+    summary_path = ".calkit/scheduler/logs/job1.summary.json"
+    with open(summary_path) as f:
+        data = json.load(f)
+    assert data["score"] == 42
+    assert data["gpu"] == "a100"
+    job_id = _load_jobs()["job1"]["job_id"]
+    assert data["calkit"]["job_id"] == job_id
+    assert data["calkit"]["exit_code"] == 0
+    # A job that writes nothing leaves no summary file behind.
+    with open("no_summary.sh", "w") as f:
+        f.write("echo hello\n")
+    run_batch(name="job2", target="no_summary.sh", **batch_kwargs)
+    assert not os.path.exists(".calkit/scheduler/logs/job2.summary.json")
+    # A reserved top-level ``calkit`` key is overwritten and warned about.
+    with open("reserved_key.sh", "w") as f:
+        f.write(
+            'printf \'{"calkit": {"fake": 1}, "score": 1}\' > '
+            '"$CALKIT_JOB_SUMMARY_PATH"\n'
+        )
+    warnings.clear()
+    run_batch(name="job3", target="reserved_key.sh", **batch_kwargs)
+    assert any("reserved" in w for w in warnings)
+    with open(".calkit/scheduler/logs/job3.summary.json") as f:
+        reserved_data = json.load(f)
+    assert "fake" not in reserved_data["calkit"]
+    assert reserved_data["calkit"]["name"] == "job3"
+    # A top-level JSON list, and separately malformed JSON, are left untouched.
+    for rel_path, raw in [
+        ("list.summary.json", b"[1, 2, 3]\n"),
+        ("bad.summary.json", b"{not json\n"),
+    ]:
+        warnings.clear()
+        with open(rel_path, "wb") as f:
+            f.write(raw)
+        _merge_job_summary("ignored", rel_path)
+        assert warnings
+        with open(rel_path, "rb") as f:
+            assert f.read() == raw
+    # A custom ``--log-path`` places the summary next to that log, not under
+    # ``LOGS_DIR``.
+    os.makedirs("custom", exist_ok=True)
+    with open("custom_log.sh", "w") as f:
+        f.write(
+            'printf \'{"where": "custom"}\' > "$CALKIT_JOB_SUMMARY_PATH"\n'
+        )
+    run_batch(
+        name="job4",
+        target="custom_log.sh",
+        log_path="custom/run.out",
+        **batch_kwargs,
+    )
+    assert os.path.isfile("custom/run.summary.json")
+    assert not os.path.exists(".calkit/scheduler/logs/job4.summary.json")
+    # A failing job still writes its summary before the failure is surfaced.
+    with open("fail_summary.sh", "w") as f:
+        f.write(
+            'printf \'{"attempted": true}\' > "$CALKIT_JOB_SUMMARY_PATH"\n'
+            "exit 7\n"
+        )
+    with pytest.raises(typer.Exit) as exc:
+        run_batch(name="job5", target="fail_summary.sh", **batch_kwargs)
+    assert exc.value.exit_code == 1
+    with open(".calkit/scheduler/logs/job5.summary.json") as f:
+        fail_data = json.load(f)
+    assert fail_data["attempted"] is True
+    assert fail_data["calkit"]["exit_code"] == 7
+    # Resubmitting deletes a stale summary from a prior run before the new job
+    # starts, so leftover payloads cannot be stamped with fresh metadata.
+    stale_path = ".calkit/scheduler/logs/job6.summary.json"
+    os.makedirs(os.path.dirname(stale_path), exist_ok=True)
+    with open(stale_path, "w") as f:
+        json.dump({"stale": True}, f)
+    with open("no_summary.sh", "w") as f:
+        f.write("echo again\n")
+    run_batch(name="job6", target="no_summary.sh", **batch_kwargs)
+    assert not os.path.exists(stale_path)
+    # Re-merging an already-merged summary produces identical bytes.
+    merged_path = ".calkit/scheduler/logs/remerge.summary.json"
+    os.makedirs(os.path.dirname(merged_path), exist_ok=True)
+    with open(merged_path, "w") as f:
+        json.dump({"metric": 1}, f)
+        f.write("\n")
+    _record_job(
+        "remerge",
+        {
+            "kind": "slurm",
+            "job_id": "abc",
+            "dep_md5s": {},
+            "submitted_at": "2020-01-01T00:00:00",
+        },
+    )
+    _record_job_result("remerge", 0)
+    _merge_job_summary("remerge", merged_path)
+    with open(merged_path, "rb") as f:
+        first_bytes = f.read()
+    _merge_job_summary("remerge", merged_path)
+    with open(merged_path, "rb") as f:
+        second_bytes = f.read()
+    assert first_bytes == second_bytes
+    assert _summary_path("custom/run.out") == "custom/run.summary.json"

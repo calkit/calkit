@@ -67,6 +67,7 @@ QUEUE_SLOT_POLL_JITTER = 0.25
 # When set, scheduler commands run jobs on the local host instead of
 # dispatching to a real SLURM/PBS install (see _mock_enabled).
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
+SUMMARY_ENV_VAR = "CALKIT_JOB_SUMMARY_PATH"
 
 
 # A generous busy timeout lets the many batch processes that fan out an
@@ -673,6 +674,59 @@ def _wait_until_done(kind: str, job_id: str, name: str) -> int | None:
         raise typer.Exit(130)
 
 
+def _summary_path(log_path: str) -> str:
+    from calkit.models.pipeline import summary_path_from_log_path
+
+    return summary_path_from_log_path(log_path)
+
+
+def _merge_job_summary(name: str, summary_path: str) -> None:
+    """Merge calkit metadata into a job-written summary file, if present."""
+    if not os.path.isfile(summary_path):
+        return
+    import json
+
+    try:
+        with open(summary_path, "rb") as f:
+            raw = f.read()
+    except OSError:
+        return
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        warn(
+            f"Job '{name}' summary at {summary_path} is not valid JSON; "
+            "leaving it unchanged"
+        )
+        return
+    if not isinstance(payload, dict):
+        warn(
+            f"Job '{name}' summary at {summary_path} is not a JSON object; "
+            "leaving it unchanged"
+        )
+        return
+    info = _load_jobs().get(name)
+    if info is None:
+        return
+    if "calkit" in payload:
+        warn(
+            f"Job '{name}' summary at {summary_path} contains a reserved "
+            "'calkit' key; overwriting it with calkit metadata"
+        )
+    payload["calkit"] = {
+        "name": name,
+        "job_id": info.get("job_id"),
+        "kind": info.get("kind"),
+        "exit_code": info.get("exit_code"),
+        "submitted_at": info.get("submitted_at"),
+        "finished_at": info.get("finished_at"),
+        "dep_md5s": info.get("dep_md5s"),
+    }
+    with open(summary_path, "w") as f:
+        json.dump(payload, f, sort_keys=True, indent=2)
+        f.write("\n")
+
+
 def _wait_for_output_file(log_path: str, timeout: float = 120.0) -> None:
     """Wait for a finished job's output log to be fully written.
 
@@ -729,6 +783,7 @@ def _finalize_job(
     # staged back before we read from or point at it.
     if not _mock_enabled():
         _wait_for_output_file(log_path)
+    _merge_job_summary(name, _summary_path(log_path))
     if exit_code is None:
         warn(
             f"Could not determine exit status for job '{name}' (ID {job_id}); "
@@ -1071,6 +1126,11 @@ def run_batch(
                 raise typer.Exit(0)
     # Job is not running or queued, so we can submit. First, delete any
     # non-persistent outputs.
+    summary_path = os.path.abspath(_summary_path(log_path))
+    os.environ[SUMMARY_ENV_VAR] = summary_path
+    if os.path.isfile(summary_path):
+        typer.echo(f"Deleting stale summary at '{summary_path}'")
+        os.remove(summary_path)
     for out in outs:
         if os.path.exists(out):
             typer.echo(f"Deleting output path '{out}'")

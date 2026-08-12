@@ -112,11 +112,16 @@ def _resolve_github_collaborator_access(
     querying GitHub and caching the result on a miss. Sets
     ``project.current_user_access`` (left None if it can't be determined).
     """
+    # Plain read, deliberately not SELECT ... FOR UPDATE. The row lock would
+    # be held until the request's session closes, so every concurrent request
+    # for this (user, project) would serialize behind whichever one is doing
+    # the slowest Git/object-storage work. Nothing here needs the lock: the
+    # row is write-once, and the insert race below is settled by catching the
+    # unique violation.
     access_query = (
         select(UserProjectAccess)
         .where(UserProjectAccess.project_id == project.id)
         .where(UserProjectAccess.user_id == current_user.id)
-        .with_for_update()
     )
     access = session.exec(access_query).first()
     if access is not None:
@@ -151,8 +156,7 @@ def _resolve_github_collaborator_access(
             f"Failed to fetch permissions from GitHub ({resp.status_code})"
         )
     project.current_user_access = permissions
-    # SELECT ... FOR UPDATE locks nothing when the row doesn't exist yet, so
-    # concurrent requests for the same user and project can both get here and
+    # Concurrent requests for the same user and project can both get here and
     # try to insert. Losing that race is harmless (the winner cached the same
     # permission), but the unique violation would otherwise 500 the request.
     session.add(
@@ -917,11 +921,13 @@ def get_contents_from_tree(
                 url = get_object_url(
                     fp, fname=os.path.basename(dvc_fpath), fs=fs
                 )
+            # No fs.exists() guard: get_data_fpath_for_md5 only returns a path
+            # it has already confirmed exists, so re-checking is a wasted
+            # round trip on every artifact.
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
                 and fp is not None
-                and fs.exists(fp)
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
@@ -967,12 +973,12 @@ def get_contents_from_tree(
             # Read small files inline from object storage, mirroring the
             # Calkit-object branch above, so callers can use their content
             # without a second round trip through the presigned URL.
+            # As above, fp is already known to exist, so no fs.exists() guard.
             content = None
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
                 and fp is not None
-                and fs.exists(fp)
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
@@ -1001,16 +1007,21 @@ def get_ck_info_for_ref(
     repo: git.Repo,
     ref: str | None = None,
     process_includes: bool = False,
+    read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
     the ref or doesn't hold a mapping.
+
+    Pass ``read_only=True`` only when the caller won't write the result back;
+    see ``get_ck_info_from_repo``.
     """
     if ref is None:
         return get_ck_info_from_repo(
             repo=repo,
             process_includes=process_includes,
+            read_only=read_only,
         )
     try:
         ck_item = get_contents_from_repo(

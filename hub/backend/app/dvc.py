@@ -127,6 +127,10 @@ def get_data_fpath_for_md5(
     """Return the first existing object-storage path for a DVC MD5.
 
     Supports both the current `files/md5` layout and the legacy layout.
+
+    Deliberately uncached: the result feeds pipeline staleness checks, where
+    an object that has gone away must be observed as missing. Callers that
+    resolve many artifacts at once should parallelize instead.
     """
     if not md5 or len(md5) < 3:
         return None

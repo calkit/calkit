@@ -6,6 +6,26 @@ import type { AxiosResponse } from "axios"
 import { ProjectsService } from "../client"
 
 /**
+ * HTTP status carried by a thrown request error, or null if it has none.
+ *
+ * The client is configured with `throwOnError`, so failures arrive as thrown
+ * errors rather than a status field, and different layers surface the code in
+ * different places (axios nests it under `response`, some wrappers hoist it).
+ * Checking one spot silently misses the others.
+ */
+export const httpStatus = (error: unknown): number | null => {
+  const e = error as
+    | {
+        status?: number
+        statusCode?: number
+        response?: { status?: number }
+      }
+    | null
+    | undefined
+  return e?.status ?? e?.response?.status ?? e?.statusCode ?? null
+}
+
+/**
  * Extract the body from a response whose endpoint declares a nullable
  * response model. The generated client coerces null JSON bodies to an empty
  * object (its `data ?? {}` fallback), which breaks truthiness guards, so

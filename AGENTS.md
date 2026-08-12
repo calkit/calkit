@@ -6,6 +6,9 @@
 - The JupyterLab extension lives in `src`
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
+- Config Calkit installs into projects, e.g., the dev container and VS Code
+  configs, lives in `calkit/resources`; see the README there before editing,
+  since the dev container spec is generated
 
 ## Working
 

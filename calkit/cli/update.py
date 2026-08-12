@@ -37,21 +37,21 @@ def update_devcontainer(
         ),
     ] = False,
 ):
-    """Update a project's devcontainer to match the latest Calkit spec."""
-    import requests
+    """Update a project's devcontainer to match this version of Calkit's
+    spec.
+    """
+    from calkit import resources as calkit_resources
 
-    url = (
-        "https://raw.githubusercontent.com/calkit/devcontainer/"
-        "refs/heads/main/devcontainer.json"
-    )
-    typer.echo(f"Downloading {url}")
-    resp = requests.get(url)
     out_dir = os.path.join(wdir or ".", ".devcontainer")
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
-        f.write(resp.text)
+        f.write(
+            calkit_resources.read_text(
+                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
+            )
+        )
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
@@ -346,27 +346,19 @@ def update_vscode_config(
         ),
     ] = False,
 ):
-    """Update a project's VS Code config to match the latest Calkit
+    """Update a project's VS Code config to match this version of Calkit's
     recommendations.
     """
-    import requests
+    from calkit import resources as calkit_resources
 
     out_dir = os.path.join(wdir or ".", ".vscode")
     os.makedirs(out_dir, exist_ok=True)
     repo = calkit.git.get_repo(wdir)
-    for fname in ["settings.json", "extensions.json"]:
-        url = (
-            f"https://raw.githubusercontent.com/calkit/vscode-config/"
-            f"refs/heads/main/{fname}"
-        )
-        typer.echo(f"Downloading {url}")
-        resp = requests.get(url)
-        out_dir = os.path.join(wdir or ".", ".vscode")
-        os.makedirs(out_dir, exist_ok=True)
+    for fname in calkit_resources.VSCODE_FNAMES:
         out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
         with open(out_fpath, "w") as f:
-            f.write(resp.text)
+            f.write(calkit_resources.read_text("vscode", fname))
         repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
         repo.git.commit([".vscode", "-m", "Update VS Code config"])

@@ -2318,32 +2318,32 @@ Options:
 
 Update objects.
 
-| Command                                               | Description                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match the latest Calkit spec.                    |
-| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
-| [`release`](#subcommand-update-release)               | Update a release.                                                                   |
-| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
-| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
-| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
-| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
-| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                            |
-| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                          |
-| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                         |
-| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
-| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
-| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                         |
-| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
-| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
-| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
-| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
-| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                              |
+| Command                                               | Description                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match this version of Calkit's spec.              |
+| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).  |
+| [`release`](#subcommand-update-release)               | Update a release.                                                                    |
+| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
+| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.        |
+| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
+| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
+| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
+| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
+| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
+| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
+| [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
+| [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
+| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
+| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 
 <a id="subcommand-update-devcontainer"></a>
 
 #### `calkit update devcontainer`
 
-Update a project's devcontainer to match the latest Calkit spec.
+Update a project's devcontainer to match this version of Calkit's spec.
 
 Usage:
 
@@ -2405,7 +2405,7 @@ Options:
 
 #### `calkit update vscode-config`
 
-Update a project's VS Code config to match the latest Calkit recommendations.
+Update a project's VS Code config to match this version of Calkit's recommendations.
 
 Usage:
 

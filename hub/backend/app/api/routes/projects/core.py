@@ -45,6 +45,7 @@ import app.projects
 import calkit
 import calkit.detect
 import calkit.latex
+import calkit.resources
 from app import (
     arxiv,
     github,
@@ -613,28 +614,18 @@ def post_project(
                 ryaml.dump(ck_info, f)
             repo.git.add("calkit.yaml")
             if project_in.template is None:
-                # Create devcontainer spec
-                dc_url = (
-                    "https://raw.githubusercontent.com/calkit/devcontainer/"
-                    "refs/heads/main/devcontainer.json"
-                )
-                # A dev container spec is a nice-to-have, and can be added
-                # later with the dev container endpoint, so don't fail project
-                # creation if GitHub is slow or the file has moved. Writing a
-                # non-200 body would put an error page in devcontainer.json.
-                try:
-                    dc_resp = requests.get(dc_url, timeout=15)
-                    dc_resp.raise_for_status()
-                except requests.RequestException as e:
-                    logger.warning(f"Failed to fetch dev container spec: {e}")
-                    dc_resp = None
-                if dc_resp is not None:
-                    dc_dir = os.path.join(repo.working_dir, ".devcontainer")
-                    os.makedirs(dc_dir, exist_ok=True)
-                    dc_fpath = os.path.join(dc_dir, "devcontainer.json")
-                    with open(dc_fpath, "w") as f:
-                        f.write(dc_resp.text)
-                    repo.git.add(".devcontainer")
+                # Create devcontainer spec from the one bundled with Calkit
+                dc_dir = os.path.join(repo.working_dir, ".devcontainer")
+                os.makedirs(dc_dir, exist_ok=True)
+                dc_fpath = os.path.join(dc_dir, "devcontainer.json")
+                with open(dc_fpath, "w") as f:
+                    f.write(
+                        calkit.resources.read_text(
+                            "devcontainer",
+                            calkit.resources.DEVCONTAINER_FNAME,
+                        )
+                    )
+                repo.git.add(".devcontainer")
             # Create the README
             logger.info("Creating README.md")
             with open(os.path.join(repo.working_dir, "README.md"), "w") as f:

@@ -1,5 +1,7 @@
 """Tests for ``cli.update``."""
 
+import json
+import os
 import subprocess
 import sys
 
@@ -7,9 +9,40 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.resources
 from calkit.cli.update import update_app
 
 runner = CliRunner()
+
+
+def test_update_devcontainer_and_vscode_config(tmp_dir, monkeypatch):
+    # Both write bundled resources, so neither should touch the network
+    def fail(*args, **kwargs):
+        raise AssertionError("Should not make any HTTP requests")
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fail)
+    subprocess.check_call(["calkit", "init"])
+    result = runner.invoke(update_app, ["devcontainer"])
+    assert result.exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
+    result = runner.invoke(update_app, ["vscode-config"])
+    assert result.exit_code == 0
+    for fname in calkit.resources.VSCODE_FNAMES:
+        with open(os.path.join(".vscode", fname)) as f:
+            assert json.load(f) == calkit.resources.load_json("vscode", fname)
+    repo = calkit.git.get_repo()
+    assert repo.git.ls_files(".devcontainer")
+    assert repo.git.ls_files(".vscode")
+    assert not repo.git.status("--porcelain")
+    # Both commands should be safe to rerun
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert not repo.git.status("--porcelain")
 
 
 def test_update_uv_env(tmp_dir):

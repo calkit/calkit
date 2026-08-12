@@ -5,6 +5,7 @@ import {
   AccordionIcon,
   AccordionItem,
   AccordionPanel,
+  Badge,
   Box,
   Checkbox,
   Flex,
@@ -502,6 +503,11 @@ function ProjectView() {
                                 {`${question.number}. ${question.question}`}
                               </Markdown>
                             </Box>
+                            {question.answer ? (
+                              <Badge colorScheme="green" mx={2}>
+                                answered
+                              </Badge>
+                            ) : null}
                             <AccordionIcon />
                           </AccordionButton>
                         ) : (

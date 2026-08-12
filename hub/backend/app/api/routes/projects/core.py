@@ -2235,11 +2235,15 @@ def _resolve_figures(
         return []
     tree = ctx.tree
     dvc_lock = ctx.dvc_lock
-    # Touch the owner name once, here on the calling thread. It's a computed
-    # field over the `owner_account` relationship, so the first access can
-    # emit a lazy load -- and the Session behind it is not safe to hit from
-    # the several threads that resolve content below.
+    # Warm every lazy-loading attribute the content resolution below reads,
+    # here on the calling thread. Each of these is backed by a relationship
+    # whose first access emits a query, and the Session behind them is not
+    # safe to hit from the several threads that run `_resolve` -- so they
+    # have to be loaded before the pool starts, not inside it.
+    # `owner_account_name` is a computed field over `owner_account`;
+    # `file_locks` is iterated by `get_contents_from_tree` for every path.
     _ = project.owner_account_name
+    _ = len(project.file_locks)
     # Build comment count map from DB, restricted to the figures we're
     # actually returning.
     paths = [fig["path"] for fig in figures]

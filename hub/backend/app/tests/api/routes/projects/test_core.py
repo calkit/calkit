@@ -274,6 +274,7 @@ def test_get_project_figures_paginates(client: TestClient) -> None:
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     paths = [f"figures/fig{i}.png" for i in range(5)]
@@ -356,6 +357,7 @@ def test_get_project_figures_search_content_and_single(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     paths = [f"figures/plot{i}.png" for i in range(30)]
     paths += ["figures/nested/histogram.png"]
@@ -458,6 +460,7 @@ def test_get_project_figures_autodetects_deeply_nested(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     # Blobs that should be detected: file is inside a 'figures' directory
@@ -553,6 +556,7 @@ def test_get_project_figures_autodetects_dvc_stored(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
@@ -637,6 +641,7 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"
@@ -710,6 +715,7 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
@@ -800,6 +806,7 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
         id="00000000-0000-0000-0000-000000000001",
         owner_account_name="test-owner",
         name="test-project",
+        file_locks=[],
     )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"

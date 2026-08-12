@@ -164,7 +164,7 @@ function FigureThumbnail({
               },
             }}
           >
-            <Markdown>{figure.title}</Markdown>
+            <Markdown inline>{figure.title}</Markdown>
           </Box>
           {(figure.comment_count ?? 0) > 0 && (
             <Flex align="center" gap={1} color="gray.500" flexShrink={0}>

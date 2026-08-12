@@ -54,10 +54,10 @@ import {
 import useAuth from "../../hooks/useAuth"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
-import Markdown from "./Markdown"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
 } from "./CommentsPanel"
+import Markdown from "./Markdown"
 import PdfCanvas from "./PdfCanvas"
 import PdfDocumentViewer from "./PdfDocumentViewer"
 const IpynbRenderer = lazy(() =>
@@ -305,9 +305,9 @@ function FigureInfo({
         <Flex fontSize="sm" mb={1} wrap="wrap" align="baseline">
           <Text as="span" fontWeight="semibold" mr={1}>
             Title:
-          </Text>{" "}
+          </Text>
           <Box flex={1} minW={0} color="gray.500" sx={{ "& p": { my: 0 } }}>
-            <Markdown>{figure.title}</Markdown>
+            <Markdown inline>{figure.title}</Markdown>
           </Box>
         </Flex>
       )}

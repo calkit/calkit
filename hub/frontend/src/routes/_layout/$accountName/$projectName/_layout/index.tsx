@@ -174,7 +174,7 @@ function EvidenceItem({
                 },
               }}
             >
-              <Markdown>{fig.title}</Markdown>
+              <Markdown inline>{fig.title}</Markdown>
             </Box>
           ) : (
             <Text fontSize="xs" noOfLines={1} px={2} py={1}>

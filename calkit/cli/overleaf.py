@@ -21,6 +21,10 @@ overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 # expired token. Calkit authenticates only with the token in its config, but a
 # stale token cached by the OS credential manager from an earlier version can
 # still interfere, so we point users there as a fallback.
+# How many times the guided commands retry a failed pull before giving up
+# when running unattended, where there's nobody to stop an endless retry
+_MAX_PULL_ATTEMPTS = 3
+
 PULL_FAILED_MESSAGE = (
     "Failed to pull from Overleaf; "
     "check that your Overleaf token is valid\n"
@@ -811,10 +815,10 @@ def _prepare_to_sync(
     from calkit.cli.main.core import run as calkit_run
     from calkit.cli.main.core import switch_branch
 
-    def confirm(message: str, default: bool = True) -> bool:
+    def confirm(message: str) -> bool:
         if yes:
-            return default
-        return typer.confirm(message, default=default)
+            return True
+        return typer.confirm(message, default=True)
 
     if branch is not None:
         typer.echo(f"Switching to branch '{branch}'")
@@ -822,6 +826,7 @@ def _prepare_to_sync(
     if not no_pull:
         # A failed pull is usually a transient storage error, and syncing on
         # top of half-fetched data is worse than trying again
+        attempts = 0
         while True:
             try:
                 # Arg lists are passed explicitly since their defaults are
@@ -830,8 +835,21 @@ def _prepare_to_sync(
                 break
             except Exception as e:
                 warn(f"Failed to pull: {e}")
-                if not confirm("Try pulling again?", default=False):
-                    if confirm("Continue without pulling?", default=False):
+                attempts += 1
+                # Retrying is the one prompt --yes can't simply answer yes
+                # to, since a pull that keeps failing would loop forever
+                # unattended. Bound it instead.
+                if yes:
+                    if attempts >= _MAX_PULL_ATTEMPTS:
+                        raise_error(
+                            f"Failed to pull after {attempts} attempts; "
+                            "stopping since the project isn't up-to-date"
+                        )
+                    continue
+                if not typer.confirm("Try pulling again?", default=True):
+                    if typer.confirm(
+                        "Continue without pulling?", default=False
+                    ):
                         break
                     raise_error("Stopping since the project isn't up-to-date")
     typer.echo("Checking the project is ready to sync")
@@ -1009,10 +1027,10 @@ def pull_from_overleaf(
     from calkit.cli.main.core import run as calkit_run
     from calkit.cli.main.core import save
 
-    def confirm(message: str, default: bool = True) -> bool:
+    def confirm(message: str) -> bool:
         if yes:
-            return default
-        return typer.confirm(message, default=default)
+            return True
+        return typer.confirm(message, default=True)
 
     _prepare_to_sync(
         branch=branch,

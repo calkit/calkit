@@ -136,8 +136,11 @@ to a branch first:
 calkit overleaf pull -b overleaf-updates
 ```
 
-Both accept the same paths as `sync`, and `--yes`/`-y` answers every prompt
-so they can run unattended, e.g., in CI.
+Both accept the same paths as `sync`, and `--yes`/`-y` answers yes to every
+prompt so they can run unattended, e.g., in CI.
+The one exception is retrying a failed `calkit pull`, which would otherwise
+loop forever with nobody there to stop it; that is retried a few times and
+then gives up.
 
 The same checks apply wherever a sync happens, including
 `calkit save --overleaf` and the sync at the end of `calkit run --overleaf`.
@@ -221,8 +224,14 @@ so it says so and leaves both alone:
 ```
 Warning: references.bib was changed on Overleaf, but
 pubs/shared/references.bib, which it's copied from, has changes of its own;
-leaving it alone. Run the pipeline and sync again, or merge the two by hand.
+leaving both alone, so Overleaf keeps its version. Run the pipeline and sync
+again, or merge the two by hand.
 ```
+
+Note that such a file is also left out of what gets pushed, so the edit
+stays on Overleaf until you merge it.
+Pushing the local copy would overwrite the very edit Calkit just declined to
+pull.
 
 Running the pipeline before syncing (which is
 [the default](#checks-before-syncing)) keeps this from coming up, since the

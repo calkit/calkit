@@ -869,6 +869,11 @@ def test_overleaf_sync_map_paths_edits_go_back_to_source(tmp_dir):
     }
     with open(os.path.join(main_dir, "pubs", "shared", "appendix.tex")) as f:
         assert f.read() == "Appendix, edited here"
+    # Both sides are left alone, so Overleaf keeps its version rather than
+    # having it overwritten by the copy we declined to update
+    assert "appendix.tex" not in res["files_to_copy_to_overleaf"]
+    with open(os.path.join(ol_dir, "appendix.tex")) as f:
+        assert f.read() == "Appendix, edited on Overleaf"
     warned = [m for m in messages if m.startswith("Warning:")]
     assert len(warned) == 2
     assert "numbers.tex" in warned[0]

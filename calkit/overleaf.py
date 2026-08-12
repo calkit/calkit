@@ -1085,12 +1085,17 @@ def sync(
     for dest_rel, src_rel in sorted(diverged.items()):
         print_info(
             f"Warning: {dest_rel} was changed on Overleaf, but {src_rel}, "
-            "which it's copied from, has changes of its own; leaving it "
-            "alone. Run the pipeline and sync again, or merge the two by "
-            "hand."
+            "which it's copied from, has changes of its own; leaving both "
+            "alone, so Overleaf keeps its version. Run the pipeline and sync "
+            "again, or merge the two by hand."
         )
-    # Copy our versions of sync and push paths into the Overleaf project
-    files_to_copy_to_overleaf = paths.files_to_copy_to_overleaf
+    # Copy our versions of sync and push paths into the Overleaf project,
+    # except for copies whose source has diverged: pushing our version would
+    # overwrite the Overleaf edit we just declined to pull, which is the loss
+    # the warning above is there to prevent
+    files_to_copy_to_overleaf = [
+        p for p in paths.files_to_copy_to_overleaf if p not in diverged
+    ]
     res["files_to_copy_to_overleaf"] = files_to_copy_to_overleaf
     if verbose:
         print_info(

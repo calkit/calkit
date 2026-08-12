@@ -156,6 +156,7 @@ export type {
   ExternalTokenResponse,
   FeatureVoteStatus,
   Figure,
+  FiguresPage,
   FileLock,
   FileLockPost,
   FileLockWritable,

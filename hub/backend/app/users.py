@@ -221,17 +221,44 @@ def get_github_token(session: Session, user: User) -> str:
     necessary. Tries new UserExternalCredential table first, falls back to
     legacy UserGitHubToken.
     """
-    # Try new credential system first
-    query = (
-        select(UserExternalCredential)
-        .where(
+
+    def load_credential(lock: bool) -> UserExternalCredential | None:
+        query = select(UserExternalCredential).where(
             UserExternalCredential.user_id == user.id,
             UserExternalCredential.provider == "github",
             UserExternalCredential.label == "default",
         )
-        .with_for_update()
-    )
-    credential = session.exec(query).first()
+        if lock:
+            query = query.with_for_update()
+        return session.exec(query).first()
+
+    def refresh_due(credential: UserExternalCredential) -> bool:
+        return (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=30)) >= credential.expires
+        )
+
+    # Fast path: a plain read, deliberately not SELECT ... FOR UPDATE. That
+    # lock is held until the request's session closes, and `get_repo` asks for
+    # this token on every project read, so taking it here made every
+    # concurrent request for this user queue behind whichever one was doing
+    # the slowest Git/object-storage work -- a whole page's worth of requests
+    # serializing on one row. Only the branches that write it need the lock.
+    credential = load_credential(lock=False)
+    if credential is not None and not refresh_due(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return tokens["access_token"]
+    # Slow path: we're about to write, so re-read under the row lock and
+    # re-check. Whoever held the lock ahead of us may have refreshed already,
+    # and refreshing a second time would invalidate the token they just
+    # stored. Expire first so the locked read repopulates the instance rather
+    # than handing back the copy the identity map already holds.
+    if credential is not None:
+        session.expire(credential)
+    credential = load_credential(lock=True)
+    if credential is not None and not refresh_due(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return tokens["access_token"]
     # Fall back to legacy table if not in new system
     if credential is None:
         logger.info(
@@ -265,12 +292,7 @@ def get_github_token(session: Session, user: User) -> str:
             expires=legacy_token.expires,
             refresh_token_expires=legacy_token.refresh_token_expires,
         )
-    # Check if refresh needed
-    needs_refresh = (
-        credential.expires is not None
-        and (utcnow() + timedelta(minutes=30)) >= credential.expires
-    )
-    if needs_refresh:
+    if refresh_due(credential):
         logger.info(f"Refreshing GitHub token for {user.email}")
         tokens = json.loads(decrypt_secret(credential.secret_payload))
         resp = requests.post(

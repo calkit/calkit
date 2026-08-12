@@ -1,5 +1,8 @@
 """Tests for ``app.users``."""
 
+import json
+from datetime import timedelta
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
@@ -7,7 +10,7 @@ from fastapi import HTTPException
 from fastapi.encoders import jsonable_encoder
 from sqlmodel import Session
 
-from app import users
+from app import users, utcnow
 from app.config import settings
 from app.core import (
     INVALID_ACCOUNT_NAMES,
@@ -141,3 +144,54 @@ def test_update_user(db: Session) -> None:
     assert user_2
     assert user.email == user_2.email
     assert verify_password(new_password, user_2.hashed_password)
+
+
+def test_get_github_token_refreshes_only_when_due(db: Session) -> None:
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=random_email(), password=random_lower_string()
+        ),
+    )
+    payload = json.dumps(
+        {"access_token": "gho_current", "refresh_token": "ghr_current"}
+    )
+    # A credential with plenty of life left is returned straight from the
+    # fast path, which reads without SELECT ... FOR UPDATE so concurrent
+    # requests for this user don't serialize on the row.
+    users.save_external_credential(
+        session=db,
+        user=user,
+        provider="github",
+        secret_payload=payload,
+        expires=utcnow() + timedelta(hours=5),
+        refresh_token_expires=utcnow() + timedelta(days=30),
+    )
+    with mock.patch.object(users.requests, "post") as post:
+        assert users.get_github_token(db, user) == "gho_current"
+        post.assert_not_called()
+    # Inside the 30 minute refresh window it does go to GitHub, and the new
+    # token is what comes back.
+    users.save_external_credential(
+        session=db,
+        user=user,
+        provider="github",
+        secret_payload=payload,
+        expires=utcnow() + timedelta(minutes=5),
+        refresh_token_expires=utcnow() + timedelta(days=30),
+    )
+    refreshed = (
+        "access_token=gho_new&refresh_token=ghr_new"
+        "&expires_in=28800&refresh_token_expires_in=15811200"
+    )
+    with mock.patch.object(
+        users.requests,
+        "post",
+        return_value=SimpleNamespace(status_code=200, text=refreshed),
+    ) as post:
+        assert users.get_github_token(db, user) == "gho_new"
+        assert post.call_count == 1
+    # Once refreshed, the next call is back on the lock-free fast path.
+    with mock.patch.object(users.requests, "post") as post:
+        assert users.get_github_token(db, user) == "gho_new"
+        post.assert_not_called()

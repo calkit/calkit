@@ -1,6 +1,8 @@
 import {
   Alert,
+  AlertDescription,
   AlertIcon,
+  AlertTitle,
   Box,
   Flex,
   Heading,
@@ -316,19 +318,43 @@ function ProjectPipeline() {
           {pipelineQuery.data ? (
             <>
               <Box flex={1} minW={0}>
-                <Mermaid
-                  isDiagramExpanded={isDiagramExpanded}
-                  setIsDiagramExpanded={setIsDiagramExpanded}
-                  zoomToStage={stage}
-                  stageNames={canEditStages ? stageNames : undefined}
-                  onStageClick={canEditStages ? openStageEditor : undefined}
-                >
-                  {String(pipelineQuery.data.mermaid)}
-                </Mermaid>
-                {canEditStages && (
-                  <Text mt={1} fontSize="xs" color="ui.dim">
-                    Click a stage to edit it.
-                  </Text>
+                {pipelineQuery.data.error ? (
+                  // DVC couldn't build the graph, so there's no diagram to
+                  // draw. Show why, since it's the user's pipeline to fix.
+                  <Alert
+                    status="warning"
+                    borderRadius="md"
+                    alignItems="flex-start"
+                  >
+                    <AlertIcon />
+                    <Box>
+                      <AlertTitle>This pipeline isn't valid</AlertTitle>
+                      <AlertDescription
+                        whiteSpace="pre-wrap"
+                        fontSize="sm"
+                        display="block"
+                      >
+                        {pipelineQuery.data.error}
+                      </AlertDescription>
+                    </Box>
+                  </Alert>
+                ) : (
+                  <>
+                    <Mermaid
+                      isDiagramExpanded={isDiagramExpanded}
+                      setIsDiagramExpanded={setIsDiagramExpanded}
+                      zoomToStage={stage}
+                      stageNames={canEditStages ? stageNames : undefined}
+                      onStageClick={canEditStages ? openStageEditor : undefined}
+                    >
+                      {String(pipelineQuery.data.mermaid)}
+                    </Mermaid>
+                    {canEditStages && (
+                      <Text mt={1} fontSize="xs" color="ui.dim">
+                        Click a stage to edit it.
+                      </Text>
+                    )}
+                  </>
                 )}
               </Box>
               <Box flex={1} minW={0}>

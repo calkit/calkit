@@ -51,7 +51,8 @@ For example:
 ```sh
 calkit overleaf import \
     https://www.overleaf.com/project/68000059d42b134573cb2e35 \
-    paper
+    paper \
+    --push-path figures
 ```
 
 This command will link a local project folder, in this case `paper`,
@@ -59,11 +60,18 @@ to the Overleaf project,
 and always push the `paper/figures` folder, i.e.,
 the figures will be one-way synced,
 whereas any other files will be synced bidirectionally.
+Push paths are relative to the publication folder,
+and multiple can be specified.
 
 If necessary, this command will also
 create a TeXlive Docker [environment](environments.md)
 and a build stage in the [pipeline](pipeline/index.md),
 which will build and cache the PDF upon calling `calkit run`.
+
+If the document already exists in your project and the Overleaf project is
+empty, add `--push-only` so the local files are pushed up to Overleaf
+instead of the other way around.
+This also works with `calkit overleaf sync`.
 
 ## Syncing an Overleaf project
 
@@ -73,6 +81,14 @@ To sync a publication linked to an Overleaf project, simply call:
 calkit overleaf sync
 ```
 
+This will sync every publication linked to an Overleaf project.
+If there is more than one and you only want to sync a single publication,
+pass its path, e.g.:
+
+```sh
+calkit overleaf sync paper
+```
+
 After syncing, you'll probably want to ensure the local PDF is up-to-date
 by calling `calkit run`, and if anything has changed,
 commit and push those changes to the hub with
@@ -80,6 +96,19 @@ commit and push those changes to the hub with
 
 For a version that takes care of the surrounding steps for you, see
 [guided syncing](#guided-syncing-push-and-pull) below.
+
+### Checking status
+
+To see what a sync would do before doing it, call:
+
+```sh
+calkit overleaf status
+```
+
+This will pull from Overleaf and print the files that only exist in one of
+the two projects, and those that differ between them,
+which is a good way to check if a collaborator has been editing there.
+It doesn't change the project or the Overleaf document.
 
 ### Checks before syncing
 
@@ -193,6 +222,23 @@ Overleaf can't compile.
 If one of them is edited on Overleaf, `calkit overleaf sync` says which
 files it's about to overwrite.
 
+Everything else is treated as ignored and is never pushed to, pulled from,
+or deleted from Overleaf.
+In particular, this includes:
+
+- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC
+  and are not produced by the pipeline.
+- Pipeline outputs with `storage: null` that aren't copies put in the
+  document's folder by a `map-paths` stage,
+  such as LaTeX build artifacts (`.aux`, aux PDFs, etc.).
+  These are tracked by the pipeline but not stored, so Calkit leaves them
+  alone on both sides.
+
+A file is only deleted from Overleaf when a previously-synced stored file
+is genuinely removed from the project (deleted from Git and DVC).
+A file that merely disappears from disk because it hasn't been pulled, or
+that became an ignored/`storage: null` output, is left in place on Overleaf.
+
 #### Edits to `map-paths` copies
 
 A `map-paths` copy is the one generated file whose edits have somewhere to
@@ -236,22 +282,6 @@ pull.
 Running the pipeline before syncing (which is
 [the default](#checks-before-syncing)) keeps this from coming up, since the
 copy then matches its source.
-
-Everything else is treated as ignored and is never pushed to, pulled from,
-or deleted from Overleaf.
-In particular, this includes:
-
-- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC
-  and are not produced by the pipeline.
-- Pipeline outputs with `storage: null` that aren't materialized in the
-  document's folder, such as LaTeX build artifacts (`.aux`, aux PDFs, etc.).
-  These are tracked by the pipeline but not stored, so Calkit leaves them
-  alone on both sides.
-
-A file is only deleted from Overleaf when a previously-synced stored file
-is genuinely removed from the project (deleted from Git and DVC).
-A file that merely disappears from disk because it hasn't been pulled, or
-that became an ignored/`storage: null` output, is left in place on Overleaf.
 
 ### Syncing without committing (`--no-commit`)
 

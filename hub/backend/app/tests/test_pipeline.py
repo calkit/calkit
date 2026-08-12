@@ -6,6 +6,7 @@ import git
 
 from app.git import get_repo_tree_for_ref
 from app.pipeline import (
+    _precompute_storage_presence,
     calc_overall_pipeline_status,
     compute_stage_statuses,
     find_stage_for_path,
@@ -13,15 +14,35 @@ from app.pipeline import (
 
 
 class FakeFS:
-    """Minimal fsspec-like FS recording which md5s exist in object storage."""
+    """Minimal fsspec-like FS recording which md5s exist in object storage.
 
-    def __init__(self, existing_md5s: set[str] | None = None) -> None:
+    Implements both access patterns the presence check uses: `find` for the
+    listing path it normally takes, and `exists` for the per-md5 fallback.
+    `find_error` forces the fallback.
+    """
+
+    def __init__(
+        self,
+        existing_md5s: set[str] | None = None,
+        find_error: Exception | None = None,
+    ) -> None:
         self._existing = existing_md5s or set()
+        self._find_error = find_error
+        self.find_calls = 0
+        self.exists_calls = 0
 
     def exists(self, path: str) -> bool:
+        self.exists_calls += 1
         return any(
             md5[:2] in path and md5[2:] in path for md5 in self._existing
         )
+
+    def find(self, path: str) -> list[str]:
+        self.find_calls += 1
+        if self._find_error is not None:
+            raise self._find_error
+        # Both layouts put objects at <prefix>/<idx>/<rest>.
+        return [f"{path}/{md5[:2]}/{md5[2:]}" for md5 in self._existing]
 
 
 def _init_repo(repo_dir) -> git.Repo:
@@ -743,3 +764,35 @@ def test_without_cache_token_always_recomputes(tmp_path):
         dvc_yaml, stale_lock, tree, "o", "p", FakeFS()
     )
     assert stale["run"].status == "stale"
+
+
+def test_precompute_storage_presence_lists_then_falls_back() -> None:
+    present = "a" * 32
+    absent = "b" * 32
+    dvc_lock = {
+        "stages": {
+            "train": {
+                "deps": [{"path": "in.csv", "md5": present}],
+                "outs": [{"path": "out.pkl", "md5": absent}],
+            }
+        }
+    }
+    # Normal path: one listing per layout, and no per-md5 probing at all.
+    fs = FakeFS(existing_md5s={present})
+    presence = _precompute_storage_presence(dvc_lock, "owner", "proj", fs)
+    assert presence == {present: True, absent: False}
+    assert fs.find_calls == 2
+    assert fs.exists_calls == 0
+    # When listing fails, fall back to probing each md5 and get the same
+    # answer rather than reporting everything as missing.
+    fallback_fs = FakeFS(
+        existing_md5s={present}, find_error=OSError("listing unavailable")
+    )
+    fallback = _precompute_storage_presence(
+        dvc_lock, "owner", "proj", fallback_fs
+    )
+    assert fallback == presence
+    assert fallback_fs.exists_calls > 0
+    # A project that has pushed nothing reports everything missing.
+    empty = _precompute_storage_presence(dvc_lock, "owner", "proj", FakeFS())
+    assert empty == {present: False, absent: False}

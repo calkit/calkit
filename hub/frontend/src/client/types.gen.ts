@@ -8052,6 +8052,18 @@ export type GetProjectFiguresData = {
      * Number of figures to skip
      */
     offset?: number
+    /**
+     * Q
+     *
+     * Filter figures by path, title or description. Applied across the whole project, before paging.
+     */
+    q?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }

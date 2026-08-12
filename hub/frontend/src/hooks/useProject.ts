@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef } from "react"
 
-import { type Issue, ProjectsService } from "../client"
+import { type Figure, type Issue, ProjectsService } from "../client"
 import { dataOrNull } from "../lib/api"
 import { isAuthenticationError } from "../lib/auth"
 
@@ -109,25 +109,37 @@ const useProjectQuestions = (
   return { questionsRequest }
 }
 
-// The figures endpoint is paginated because it inlines each figure's content.
-// Callers here want a browsable list rather than a page, so they take the
-// largest page the API allows.
 const FIGURES_PAGE_LIMIT = 100
 
+// The figures endpoint is paginated because it inlines each figure's content.
+// Callers here want the complete list to populate a picker, and only need
+// paths and titles for it, so they ask for metadata only (no object-storage
+// reads at all) and page through to the end rather than silently stopping at
+// whatever the first page happened to hold.
 const useProjectFigures = (
   accountName: string,
   projectName: string,
   ref?: string,
 ) => {
   const figuresRequest = useQuery({
-    queryKey: ["projects", accountName, projectName, "figures", ref],
-    queryFn: () =>
-      ProjectsService.getProjectFigures({
-        owner_name: accountName,
-        project_name: projectName,
-        ref,
-        limit: FIGURES_PAGE_LIMIT,
-      }).then((response) => response.data?.items),
+    queryKey: ["projects", accountName, projectName, "figures", ref, "all"],
+    queryFn: async () => {
+      const all: Figure[] = []
+      for (;;) {
+        const page = await ProjectsService.getProjectFigures({
+          owner_name: accountName,
+          project_name: projectName,
+          ref,
+          limit: FIGURES_PAGE_LIMIT,
+          offset: all.length,
+          include_content: false,
+        }).then((response) => response.data)
+        if (!page?.items?.length) break
+        all.push(...page.items)
+        if (all.length >= page.total) break
+      }
+      return all
+    },
   })
   return { figuresRequest }
 }

@@ -65,6 +65,7 @@ from app.config import settings
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
+    load_yaml_fast,
     params_from_url,
     ryaml,
     utcnow,
@@ -2188,9 +2189,8 @@ def _discover_figures(
     if figures:
         try:
             if tree.is_file("dvc.lock"):
-                dvc_lock = (
-                    ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
-                )
+                # Read-only: parsed for stage lookups, never written back.
+                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         except Exception as e:
             logger.warning(f"Failed to read dvc.lock for figures: {e}")
     return _FigureContext(
@@ -2210,17 +2210,27 @@ def _resolve_figures(
     ref: str | None,
     ctx: _FigureContext,
     figures: list[dict[str, Any]],
+    resolve_content: bool = True,
 ) -> list[Figure]:
     """Resolve content, comment counts and stage status for ``figures``.
 
     ``figures`` is normally a slice of ``ctx.figures``. Content resolution
     hits object storage once per figure, so the figures are resolved
     concurrently rather than one at a time.
+
+    ``resolve_content=False`` skips the object-storage work entirely and
+    returns metadata only, for callers that just need to list or pick figures
+    by path and never render them.
     """
     if not figures:
         return []
     tree = ctx.tree
     dvc_lock = ctx.dvc_lock
+    # Touch the owner name once, here on the calling thread. It's a computed
+    # field over the `owner_account` relationship, so the first access can
+    # emit a lazy load -- and the Session behind it is not safe to hit from
+    # the several threads that resolve content below.
+    _ = project.owner_account_name
     # Build comment count map from DB, restricted to the figures we're
     # actually returning.
     paths = [fig["path"] for fig in figures]
@@ -2242,7 +2252,7 @@ def _resolve_figures(
     try:
         dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
-            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_yaml,
             dvc_lock=dvc_lock,
@@ -2255,6 +2265,17 @@ def _resolve_figures(
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
 
+    def _annotate(fig: dict[str, Any]) -> dict[str, Any]:
+        """Attach the metadata that costs no I/O beyond what's already read."""
+        fig["comment_count"] = comment_counts.get(fig["path"], 0)
+        if not fig.get("stage"):
+            auto_stage = find_stage_for_path(fig["path"], dvc_lock)
+            if auto_stage is not None:
+                fig["stage"] = auto_stage
+        if fig.get("stage") and fig["stage"] in stage_statuses:
+            fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
+        return fig
+
     def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
         item = app.projects.get_contents_from_tree(
             project=project,
@@ -2266,19 +2287,17 @@ def _resolve_figures(
         )
         fig["content"] = item.content
         fig["url"] = item.url
-        fig["comment_count"] = comment_counts.get(fig["path"], 0)
-        if not fig.get("stage"):
-            auto_stage = find_stage_for_path(fig["path"], dvc_lock)
-            if auto_stage is not None:
-                fig["stage"] = auto_stage
-        if fig.get("stage") and fig["stage"] in stage_statuses:
-            fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
         fig["storage"] = item.storage
-        return fig
+        return _annotate(fig)
 
-    # Each figure's content is an independent download, so fan them out. The
-    # cap keeps a single request from monopolizing object-storage connections.
-    if len(figures) > 1:
+    if not resolve_content:
+        resolved = [_annotate(fig) for fig in figures]
+    elif len(figures) > 1:
+        # Each figure's content is an independent object-storage download, so
+        # fan them out. The cap keeps a single request from monopolizing
+        # object-storage connections. Git reads inside `get_contents_from_tree`
+        # are serialized by the tree itself (see `GitTree`/`odb_lock`); it's
+        # the storage round trips that actually overlap here.
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=min(8, len(figures))
         ) as pool:
@@ -2308,12 +2327,28 @@ def get_project_figures(
         20, ge=1, le=100, description="Max number of figures to return"
     ),
     offset: int = Query(0, ge=0, description="Number of figures to skip"),
+    q: str | None = Query(
+        None,
+        description=(
+            "Filter figures by path, title or description. Applied across "
+            "the whole project, before paging."
+        ),
+    ),
+    include_content: bool = Query(
+        True,
+        description=(
+            "Inline each figure's content. Set false for a metadata-only "
+            "listing that skips object storage entirely."
+        ),
+    ),
 ) -> FiguresPage:
     """Get a page of the project's figures.
 
     Figure content is downloaded from object storage and inlined, so this is
     paginated: a project with hundreds of figures would otherwise take
-    minutes and return a payload measured in hundreds of megabytes.
+    minutes and return a payload measured in hundreds of megabytes. Callers
+    that only need paths and titles should pass ``include_content=false``,
+    which skips that download entirely.
     """
     project = app.projects.get_project(
         session=session,
@@ -2330,7 +2365,19 @@ def get_project_figures(
         ref=ref,
     )
     ctx = _discover_figures(project=project, repo=repo, ref=ref)
-    page = ctx.figures[offset : offset + limit]
+    # Filter before paging, so search covers every figure in the project
+    # rather than whichever page the client happens to be on, and `total`
+    # describes the match count being paged through.
+    needle = (q or "").strip().lower()
+    matched = [
+        fig
+        for fig in ctx.figures
+        if not needle
+        or needle in fig["path"].lower()
+        or needle in (fig.get("title") or "").lower()
+        or needle in (fig.get("description") or "").lower()
+    ]
+    page = matched[offset : offset + limit]
     items = _resolve_figures(
         project=project,
         repo=repo,
@@ -2338,10 +2385,11 @@ def get_project_figures(
         ref=ref,
         ctx=ctx,
         figures=page,
+        resolve_content=include_content,
     )
     return FiguresPage(
         items=items,
-        total=len(ctx.figures),
+        total=len(matched),
         limit=limit,
         offset=offset,
     )
@@ -2472,6 +2520,13 @@ def get_project_figure(
     ttl: int | None = DEFAULT_REPO_TTL,
     ref: str | None = None,
 ) -> Figure:
+    """Get a single figure, declared or auto-detected.
+
+    Discovery runs the same way it does for the listing, so this resolves
+    every figure the listing would show -- not just the ones declared in
+    calkit.yaml -- and returns them with the same comment counts and stage
+    status attached.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2486,12 +2541,18 @@ def get_project_figure(
         ttl=ttl,
         ref=ref,
     )
-    return app.projects.get_figure_from_repo(
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    matched = [fig for fig in ctx.figures if fig["path"] == figure_path]
+    if not matched:
+        raise HTTPException(404, "Figure not found")
+    return _resolve_figures(
         project=project,
         repo=repo,
-        path=figure_path,
+        session=session,
         ref=ref,
-    )
+        ctx=ctx,
+        figures=matched[:1],
+    )[0]
 
 
 @router.post("/projects/{owner_name}/{project_name}/figures")

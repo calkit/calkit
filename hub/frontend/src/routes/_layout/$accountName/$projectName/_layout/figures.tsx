@@ -17,9 +17,10 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { FaComment, FaPlus, FaRegFileImage, FaRegFilePdf } from "react-icons/fa"
 import { FiFile } from "react-icons/fi"
+import { useDebounce } from "use-debounce"
 import { z } from "zod"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -37,6 +38,7 @@ const figuresSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
+  q: z.string().optional(),
 })
 
 // Each figure's content is fetched and inlined by the API, so pages are kept
@@ -183,15 +185,31 @@ function ProjectFigures() {
     base_ref,
     compare_ref,
     page,
+    q,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
-  const [search, setSearch] = useState("")
+  // Seeded from the URL so a shared link opens on the same results, then kept
+  // local while typing and mirrored back below.
+  const [search, setSearch] = useState(q ?? "")
+  const [debouncedSearch] = useDebounce(search, 300)
   const currentPage = page ?? 1
   const offset = (currentPage - 1) * FIGURES_PER_PAGE
 
-  const { isPending: figuresPending, data: figuresPage } = useQuery({
-    queryKey: ["projects", accountName, projectName, "figures", ref, offset],
+  const {
+    isPending: figuresPending,
+    data: figuresPage,
+    isPlaceholderData,
+  } = useQuery({
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "figures",
+      ref,
+      debouncedSearch,
+      offset,
+    ],
     queryFn: () =>
       ProjectsService.getProjectFigures({
         owner_name: accountName,
@@ -199,6 +217,9 @@ function ProjectFigures() {
         ref,
         limit: FIGURES_PER_PAGE,
         offset,
+        // Filtering happens server-side, across every figure in the project
+        // rather than just the ones on this page.
+        q: debouncedSearch || undefined,
       }).then((response) => response.data),
     // Keep the previous page rendered while the next one loads, so paging
     // doesn't flash the empty state.
@@ -209,6 +230,39 @@ function ProjectFigures() {
   const pageCount = Math.max(1, Math.ceil(totalFigures / FIGURES_PER_PAGE))
   const goToPage = (p: number) =>
     navigate({ search: (prev) => ({ ...prev, page: p === 1 ? undefined : p }) })
+
+  // Mirror the search box into the URL so a link reproduces the same results.
+  // A new query filters the whole project, so the result set changes out from
+  // under whatever page we're on: go back to the first one. Replacing rather
+  // than pushing keeps every keystroke out of the history stack, and the
+  // equality guard stops this from firing on a shared link (which would
+  // otherwise clobber its `page`).
+  useEffect(() => {
+    if ((q ?? "") === debouncedSearch) return
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        q: debouncedSearch || undefined,
+        page: undefined,
+      }),
+      replace: true,
+    })
+  }, [debouncedSearch, q, navigate])
+
+  // `page` comes from the URL, so it can point past the end: a shared link, or
+  // a ref/search change that shrank the result set. Once the API reports the
+  // real total, fall back to the last page that actually exists.
+  useEffect(() => {
+    if (isPlaceholderData || !figuresPage || currentPage <= pageCount) return
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        page: pageCount === 1 ? undefined : pageCount,
+      }),
+      replace: true,
+    })
+  }, [isPlaceholderData, figuresPage, currentPage, pageCount, navigate])
+
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
 
@@ -229,27 +283,41 @@ function ProjectFigures() {
       }),
     })
 
-  const filteredFigures = figures?.filter((f) => {
-    const q = search.toLowerCase()
-    return (
-      f.title.toLowerCase().includes(q) ||
-      f.path.toLowerCase().includes(q) ||
-      (f.description ?? "").toLowerCase().includes(q)
-    )
-  })
+  const selectedIndex = figures?.findIndex((f) => f.path === selectedPath) ?? -1
+  const pageSize = figures?.length ?? 0
 
-  const selectedIndex =
-    filteredFigures?.findIndex((f) => f.path === selectedPath) ?? -1
+  // Stepping off either end of a page continues onto the neighbouring one.
+  // Which figure to open isn't known until that page arrives, so record the
+  // edge we're heading for and open it once the data settles.
+  const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null)
+  useEffect(() => {
+    if (!pendingEdge || isPlaceholderData || !figuresPage) return
+    const items = figuresPage.items
+    const target = pendingEdge === "first" ? items[0] : items[items.length - 1]
+    setPendingEdge(null)
+    if (target) {
+      navigate({ search: (prev) => ({ ...prev, path: target.path }) })
+    }
+  }, [pendingEdge, isPlaceholderData, figuresPage, navigate])
+
+  const stepToPage = (p: number, edge: "first" | "last") => {
+    setPendingEdge(edge)
+    goToPage(p)
+  }
 
   const openPrev =
     selectedIndex > 0
-      ? () => openFigure(filteredFigures![selectedIndex - 1])
-      : undefined
+      ? () => openFigure(figures![selectedIndex - 1])
+      : selectedIndex === 0 && currentPage > 1
+        ? () => stepToPage(currentPage - 1, "last")
+        : undefined
 
   const openNext =
-    selectedIndex < (filteredFigures?.length ?? 0) - 1
-      ? () => openFigure(filteredFigures![selectedIndex + 1])
-      : undefined
+    selectedIndex >= 0 && selectedIndex < pageSize - 1
+      ? () => openFigure(figures![selectedIndex + 1])
+      : selectedIndex === pageSize - 1 && currentPage < pageCount
+        ? () => stepToPage(currentPage + 1, "first")
+        : undefined
 
   return (
     <>
@@ -288,57 +356,57 @@ function ProjectFigures() {
             </>
           ) : null}
           <ClearableInput
-            placeholder={
-              pageCount > 1 ? "Search this page…" : "Search figures…"
-            }
+            placeholder="Search figures…"
             size="sm"
             maxW="220px"
             value={search}
             onValueChange={setSearch}
           />
-          {totalFigures > 0 && (
+          {pageSize > 0 && (
             <Text fontSize="sm" color="gray.500" ml="auto">
-              {offset + 1}–{offset + (figures?.length ?? 0)} of {totalFigures}
+              {offset + 1}–{offset + pageSize} of {totalFigures}
             </Text>
           )}
         </Flex>
 
         {figuresPending ? (
           <LoadingSpinner height="300px" />
-        ) : !filteredFigures || figures?.length === 0 ? (
-          <Flex
-            direction="column"
-            align="center"
-            justify="center"
-            height="300px"
-            color="gray.500"
-          >
-            <Icon as={FaRegFileImage} fontSize="4xl" mb={3} />
-            <Text>No figures found</Text>
-            {ref && (
-              <Button
-                mt={3}
-                size="sm"
-                variant="ghost"
-                onClick={() => navigate({ search: {} })}
-              >
-                Clear ref filter
-              </Button>
-            )}
-          </Flex>
-        ) : filteredFigures?.length === 0 ? (
-          <Flex
-            direction="column"
-            align="center"
-            justify="center"
-            height="200px"
-            color="gray.500"
-          >
-            <Text>No figures match "{search}"</Text>
-          </Flex>
+        ) : pageSize === 0 ? (
+          debouncedSearch ? (
+            <Flex
+              direction="column"
+              align="center"
+              justify="center"
+              height="200px"
+              color="gray.500"
+            >
+              <Text>No figures match "{debouncedSearch}"</Text>
+            </Flex>
+          ) : (
+            <Flex
+              direction="column"
+              align="center"
+              justify="center"
+              height="300px"
+              color="gray.500"
+            >
+              <Icon as={FaRegFileImage} fontSize="4xl" mb={3} />
+              <Text>No figures found</Text>
+              {ref && (
+                <Button
+                  mt={3}
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => navigate({ search: {} })}
+                >
+                  Clear ref filter
+                </Button>
+              )}
+            </Flex>
+          )
         ) : (
           <SimpleGrid columns={{ base: 2, md: 3, lg: 4, xl: 5 }} spacing={4}>
-            {filteredFigures!.map((figure) => (
+            {figures!.map((figure) => (
               <FigureThumbnail
                 key={figure.path}
                 figure={figure}

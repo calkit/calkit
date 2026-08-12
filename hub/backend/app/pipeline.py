@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
+from app.storage import get_data_prefix_for_owner
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +145,66 @@ def _md5_in_object_storage(
         return False
 
 
+def _list_stored_md5s(
+    owner_name: str, project_name: str, fs
+) -> set[str] | None:
+    """Every md5 stored for a project, gathered by listing rather than probing.
+
+    A project's objects all live under one prefix per layout, so a single
+    paginated listing names all of them at once. That beats asking about each
+    md5 individually by a wide margin: on a project with ~6k lock entries,
+    listing takes well under a second where the per-md5 checks take ~12,
+    because the cost stops scaling with the number of artifacts.
+
+    Returns None if a listing fails, so the caller can fall back to probing.
+    """
+    # Mirrors the two layouts `make_data_fpath` writes: the current
+    # `<owner>/<project>/files/md5/<idx>/<rest>` and the legacy
+    # `<owner>/<project>/<idx>/<rest>`.
+    markers = [
+        (
+            f"{get_data_prefix_for_owner(owner_name)}/"
+            f"{project_name.lower()}/files/md5",
+            f"/{project_name.lower()}/files/md5/",
+        ),
+        (
+            f"{get_data_prefix_for_owner(owner_name, lowercase=False)}/"
+            f"{project_name}",
+            f"/{project_name}/",
+        ),
+    ]
+    md5s: set[str] = set()
+    for prefix, marker in markers:
+        try:
+            keys = fs.find(prefix)
+        except FileNotFoundError:
+            # A project that has never pushed under this layout.
+            continue
+        except Exception as e:
+            logger.warning(f"Failed to list object storage at {prefix}: {e}")
+            return None
+        for key in keys:
+            # Split on the marker rather than the prefix: `fs.find` returns
+            # keys without the scheme the prefix carries.
+            _, sep, rel = key.partition(marker)
+            if not sep:
+                continue
+            parts = rel.strip("/").split("/")
+            # Exactly <idx>/<rest>. Anything deeper is the current layout
+            # showing up underneath the legacy prefix, which the first marker
+            # already covered.
+            if len(parts) == 2:
+                md5s.add(parts[0] + parts[1])
+    return md5s
+
+
 def _precompute_storage_presence(
     dvc_lock: dict, owner_name: str, project_name: str, fs
 ) -> dict[str, bool]:
-    """Existence in object storage for every dep/out md5, checked in parallel.
+    """Existence in object storage for every dep/out md5.
 
-    Replaces the serial per-md5 ``fs.exists`` round-trips with one concurrent
-    batch. Returns a ``{md5: present}`` map; md5s absent from the map are
-    treated as not present by callers.
+    Returns a ``{md5: present}`` map; md5s absent from the map are treated as
+    not present by callers.
     """
     md5s: set[str] = set()
     for stage in (dvc_lock.get("stages") or {}).values():
@@ -161,6 +214,10 @@ def _precompute_storage_presence(
                 md5s.add(m)
     if not md5s:
         return {}
+    stored = _list_stored_md5s(owner_name, project_name, fs)
+    if stored is not None:
+        return {m: m in stored for m in md5s}
+    # Listing failed; fall back to probing each md5 concurrently.
     presence: dict[str, bool] = {}
     workers = min(_STORAGE_CHECK_MAX_WORKERS, len(md5s))
     with ThreadPoolExecutor(max_workers=workers) as ex:

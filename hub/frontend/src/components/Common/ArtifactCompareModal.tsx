@@ -238,8 +238,16 @@ function useArtifactAtRef(
             figure_path: path,
             ref,
           }).then((response) => response.data)
-        } catch {
-          // Fall back to contents API if not declared in calkit.yaml
+        } catch (err) {
+          // A 404 is the one expected outcome: the path isn't a figure at
+          // this ref, so show it as a plain file instead. Anything else
+          // (auth, 5xx, network) is a real failure and has to surface --
+          // swallowing it would silently hand back the wrong shape.
+          const status =
+            (err as { status?: number; response?: { status?: number } })
+              ?.status ??
+            (err as { response?: { status?: number } })?.response?.status
+          if (status !== 404) throw err
           return ProjectsService.getProjectContents({
             owner_name: ownerName,
             project_name: projectName,

@@ -270,7 +270,11 @@ def _make_fake_blob(path: str) -> SimpleNamespace:
 
 
 def test_get_project_figures_paginates(client: TestClient) -> None:
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     paths = [f"figures/fig{i}.png" for i in range(5)]
     blobs = [_make_fake_blob(p) for p in paths]
@@ -345,11 +349,116 @@ def test_get_project_figures_paginates(client: TestClient) -> None:
     assert client.get(f"{url}?offset=-1").status_code == 422
 
 
+def test_get_project_figures_search_content_and_single(
+    client: TestClient,
+) -> None:
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
+    paths = [f"figures/plot{i}.png" for i in range(30)]
+    paths += ["figures/nested/histogram.png"]
+    blobs = [_make_fake_blob(p) for p in paths]
+    fake_repo = SimpleNamespace(
+        head=SimpleNamespace(
+            commit=SimpleNamespace(
+                tree=SimpleNamespace(traverse=lambda: iter(blobs))
+            )
+        )
+    )
+    fake_contents = ContentsItem(
+        name="fig",
+        path="fig",
+        type="file",
+        size=0,
+        in_repo=True,
+        content="Zm9v",
+        url="https://example.com/fig.png",
+        storage="git",
+    )
+    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=fake_repo,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=CkInfoAndOuts({}, {}, {}, {}),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_contents_from_tree",
+            return_value=fake_contents,
+        ) as mock_contents,
+    ):
+        # Search spans the whole project, not just the current page: the only
+        # match here is discovered well past the first page of 20.
+        matched = client.get(f"{url}?q=histogram&limit=20&offset=0")
+        # Matching is case-insensitive and substring-based.
+        upper = client.get(f"{url}?q=HISTO&limit=20&offset=0")
+        none_found = client.get(f"{url}?q=nothing-matches-this")
+        # A whitespace-only query means no filter at all.
+        blank = client.get(f"{url}?q=%20%20&limit=100&offset=0")
+        mock_contents.reset_mock()
+        # Metadata-only listings never touch object storage.
+        without = client.get(f"{url}?include_content=false&limit=5")
+        assert mock_contents.call_count == 0
+        with_content = client.get(f"{url}?include_content=true&limit=5")
+        assert mock_contents.call_count == 5
+        # A single figure resolves even though it is auto-detected rather
+        # than declared in calkit.yaml, and its nested path needs the route's
+        # path convertor to match at all.
+        found = client.get(f"{url}/figures/nested/histogram.png")
+        missing = client.get(f"{url}/figures/not-a-figure.png")
+    assert [f["path"] for f in matched.json()["items"]] == [
+        "figures/nested/histogram.png"
+    ]
+    # `total` describes the filtered set so the client pages through matches.
+    assert matched.json()["total"] == 1
+    assert [f["path"] for f in upper.json()["items"]] == [
+        "figures/nested/histogram.png"
+    ]
+    assert none_found.json()["items"] == []
+    assert none_found.json()["total"] == 0
+    assert blank.json()["total"] == len(paths)
+    # Same figures in the same order either way, just without the bytes.
+    assert without.status_code == 200
+    assert [f["path"] for f in without.json()["items"]] == paths[:5]
+    assert without.json()["total"] == len(paths)
+    assert all(f["content"] is None for f in without.json()["items"])
+    assert all(f["url"] is None for f in without.json()["items"])
+    assert all(f["content"] == "Zm9v" for f in with_content.json()["items"])
+    assert found.status_code == 200
+    assert found.json()["path"] == "figures/nested/histogram.png"
+    assert found.json()["content"] == "Zm9v"
+    # Auto-detected figures get a title derived from their path.
+    assert found.json()["title"]
+    assert missing.status_code == 404
+
+
 def test_get_project_figures_autodetects_deeply_nested(
     client: TestClient,
 ) -> None:
     """Figures inside a 'figures' dir at any depth must be auto-detected."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     # Blobs that should be detected: file is inside a 'figures' directory
     # at various depths.
@@ -440,7 +549,11 @@ def test_get_project_figures_autodetects_dvc_stored(
     client: TestClient,
 ) -> None:
     """Figures stored with DVC (in dvc_lock_outs) must be auto-detected."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
     # Repo has no git-tracked blobs
@@ -520,7 +633,11 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
     client: TestClient,
 ) -> None:
     """A figure tracked in both git tree and DVC lock outs must appear once."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"
     fake_blob = _make_fake_blob(shared_path)
@@ -589,7 +706,11 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
     'figures/plot.png.dvc'), the derived path ('figures/plot.png') should be
     checked and added as a figure if it passes the extension/directory filter.
     """
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
     # Blobs that are .dvc pointer files whose derived paths are figures
@@ -675,7 +796,11 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
     If a path is already in dvc_lock_outs (pipeline output), encountering the
     corresponding .dvc blob in the git tree must not produce a duplicate.
     """
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+    )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"
     # Git tree contains a .dvc pointer blob for the same figure

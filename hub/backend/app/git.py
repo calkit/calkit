@@ -9,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
@@ -16,7 +17,6 @@ from contextlib import contextmanager
 from typing import Any
 
 import git
-import yaml  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from filelock import FileLock, Timeout
 from git.exc import GitCommandError
@@ -25,14 +25,8 @@ from sqlmodel import Session, select
 
 import calkit
 from app import github, users
-from app.core import logger, ryaml
+from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
-
-try:
-    # libyaml-backed loader, several times faster than the pure-Python one.
-    from yaml import CSafeLoader as _YamlLoader
-except ImportError:  # pragma: no cover - depends on the libyaml build
-    from yaml import SafeLoader as _YamlLoader
 
 _SYMLINK_MODE = 0o120000
 
@@ -818,23 +812,32 @@ def _dvc_lock_outs_at(commit: git.Commit) -> dict[str, str] | None:
     return _parse_dvc_lock_outs(blob.hexsha, blob.data_stream.read)
 
 
+def _peek_dvc_lock_outs(blob_sha: str) -> dict[str, str] | None:
+    """Return a parsed dvc.lock blob if cached, without parsing on a miss.
+
+    Refreshes LRU recency on a hit exactly as ``_parse_dvc_lock_outs`` does,
+    so a revision that keeps getting read isn't evicted ahead of a colder one.
+    """
+    cached = _DVC_LOCK_PARSE_CACHE.get(blob_sha)
+    if cached is not None:
+        _DVC_LOCK_PARSE_CACHE.move_to_end(blob_sha)
+    return cached
+
+
 def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     """Return {out_path: md5} for a dvc.lock blob, caching by blob SHA.
 
     ``read_bytes`` is a zero-arg callable returning the blob contents, only
     invoked on cache miss so batched callers don't pay the cost twice.
     """
-    cached = _DVC_LOCK_PARSE_CACHE.get(blob_sha)
+    cached = _peek_dvc_lock_outs(blob_sha)
     if cached is not None:
-        _DVC_LOCK_PARSE_CACHE.move_to_end(blob_sha)
         return cached
     try:
-        # Deliberately not ryaml (ruamel round-trip): we only pull plain
-        # strings out of this and never write it back, and ruamel is ~15x
-        # slower here. On a 47 KB dvc.lock that is ~94 ms/parse versus ~6 ms,
-        # which dominates file-history requests that walk hundreds of
-        # revisions.
-        data = yaml.load(read_bytes(), Loader=_YamlLoader) or {}
+        # Not ryaml: we only pull plain strings out of this and never write it
+        # back. On a 47 KB dvc.lock that is ~6 ms/parse versus ~94 ms, which
+        # dominates file-history requests walking hundreds of revisions.
+        data = load_yaml_fast(read_bytes()) or {}
     except Exception:
         data = {}
     outs: dict[str, str] = {}
@@ -928,9 +931,10 @@ def _batch_check_blobs(repo: git.Repo, specs: list[str]) -> dict[str, str]:
     """Return ``{spec: blob_sha}`` via ``git cat-file --batch-check``.
 
     Unlike ``_batch_read_blobs`` this transfers only object headers, not
-    content. Callers use it to collapse many commits onto the far smaller set
-    of distinct blobs they actually point at, so an unchanged file across
-    hundreds of commits costs one read instead of hundreds.
+    content. Naming the blob a commit points at is what lets a caller answer
+    from ``_DVC_LOCK_PARSE_CACHE`` (keyed by blob SHA, and shared across
+    requests) without transferring the blob at all -- so a revision parsed by
+    an earlier request costs nothing here beyond its header.
     """
     results: dict[str, str] = {}
     if not specs:
@@ -1146,13 +1150,17 @@ def get_file_history(
                 if sha is None:
                     md5_at[j] = None
                     continue
-                cached_outs = _DVC_LOCK_PARSE_CACHE.get(sha)
+                cached_outs = _peek_dvc_lock_outs(sha)
                 if cached_outs is not None:
                     md5_at[j] = cached_outs.get(path) or None
                 else:
                     pending.append((j, sha))
             if pending:
-                blobs = _batch_read_blobs(repo, [s for _, s in pending])
+                # Two commits in the window can point at the same dvc.lock
+                # blob (merges, reverts); read each distinct one once.
+                blobs = _batch_read_blobs(
+                    repo, list(dict.fromkeys(s for _, s in pending))
+                )
                 for j, sha in pending:
                     entry = blobs.get(sha)
                     if entry is None:
@@ -1331,77 +1339,118 @@ class WorkingTree(RepoTree):
         return os.listdir(self._abs(path))
 
 
+_ODB_LOCK_ATTR = "_calkit_odb_lock"
+_ODB_LOCK_GUARD = threading.Lock()
+
+
+def odb_lock(repo: git.Repo) -> threading.RLock:
+    """Return the lock serializing object-database reads for ``repo``.
+
+    GitPython funnels every object read through a single persistent
+    ``git cat-file --batch`` subprocess hanging off the repo's ``Git``
+    instance, and ``Git.stream_object_data`` documents itself as not
+    thread-safe. Concurrent readers interleave on that one pipe and either
+    raise ("SHA ... could not be resolved") or deadlock on it outright, so
+    any caller fanning tree reads across threads has to serialize them.
+
+    Scoped to the ``Repo`` *instance*, not the repo directory: ``get_repo``
+    builds a fresh ``Repo`` (and thus a fresh subprocess) per request, so
+    keying on the directory would serialize unrelated requests for nothing.
+    """
+    with _ODB_LOCK_GUARD:
+        lock = getattr(repo, _ODB_LOCK_ATTR, None)
+        if lock is None:
+            lock = threading.RLock()
+            setattr(repo, _ODB_LOCK_ATTR, lock)
+        return lock
+
+
 class GitTree(RepoTree):
     """RepoTree that reads directly from git's object database.
 
     No working-tree checkout required--file content streams straight from
     blob objects. Suitable for browsing any historical ref without touching
     the filesystem beyond the git object store.
+
+    Every method holds the repo's ``odb_lock`` for the duration of its git
+    reads, which makes this class safe to share across a thread pool. The
+    lock covers only the git access; callers that overlap slow object-storage
+    work around these calls still get to run that part concurrently.
     """
 
     def __init__(self, repo: git.Repo, ref: str) -> None:
-        self._git_tree = _resolve_commit(repo, ref).tree
+        self._lock = odb_lock(repo)
+        with self._lock:
+            self._git_tree = _resolve_commit(repo, ref).tree
 
     def _get(self, path: str) -> git.Blob | git.Tree:
+        # Caller must hold self._lock: resolving a path walks intermediate
+        # tree objects, each of which is an object-database read.
         try:
             return self._git_tree[path]  # type: ignore[return-value]
         except KeyError:
             raise KeyError(path)
 
     def exists(self, path: str) -> bool:
-        try:
-            self._get(path)
-            return True
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                self._get(path)
+                return True
+            except KeyError:
+                return False
 
     def is_file(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            return isinstance(e, git.Blob) and e.mode != _SYMLINK_MODE
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                e = self._get(path)
+                return isinstance(e, git.Blob) and e.mode != _SYMLINK_MODE
+            except KeyError:
+                return False
 
     def is_dir(self, path: str | None) -> bool:
         if not path:
             return True  # root is always a tree
-        try:
-            return isinstance(self._get(path), git.Tree)
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                return isinstance(self._get(path), git.Tree)
+            except KeyError:
+                return False
 
     def is_symlink(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            return isinstance(e, git.Blob) and e.mode == _SYMLINK_MODE
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                e = self._get(path)
+                return isinstance(e, git.Blob) and e.mode == _SYMLINK_MODE
+            except KeyError:
+                return False
 
     def is_safe_symlink(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            if not isinstance(e, git.Blob) or e.mode != _SYMLINK_MODE:
+        with self._lock:
+            try:
+                e = self._get(path)
+                if not isinstance(e, git.Blob) or e.mode != _SYMLINK_MODE:
+                    return False
+                target = e.data_stream.read().decode()
+            except Exception:
                 return False
-            target = e.data_stream.read().decode()
-            parent = posixpath.dirname(path)
-            resolved = posixpath.normpath(posixpath.join(parent, target))
-            return not resolved.startswith("..") and not posixpath.isabs(
-                resolved
-            )
-        except Exception:
-            return False
+        parent = posixpath.dirname(path)
+        resolved = posixpath.normpath(posixpath.join(parent, target))
+        return not resolved.startswith("..") and not posixpath.isabs(resolved)
 
     def read_bytes(self, path: str) -> bytes:
-        return self._get(path).data_stream.read()
+        with self._lock:
+            return self._get(path).data_stream.read()
 
     def size(self, path: str) -> int:
-        return self._get(path).size
+        with self._lock:
+            return self._get(path).size
 
     def listdir(self, path: str | None) -> list[str]:
-        t = self._git_tree if not path else self._get(path)
-        if not isinstance(t, git.Tree):
-            raise NotADirectoryError(path)
-        return [posixpath.basename(item.path) for item in t]
+        with self._lock:
+            t = self._git_tree if not path else self._get(path)
+            if not isinstance(t, git.Tree):
+                raise NotADirectoryError(path)
+            return [posixpath.basename(item.path) for item in t]
 
 
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:

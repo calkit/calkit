@@ -4,9 +4,17 @@ import csv
 import logging
 import os
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import ruamel.yaml
+import yaml  # type: ignore[import-untyped]
+
+try:
+    # libyaml-backed loader, several times faster than the pure-Python one.
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover - depends on the libyaml build
+    from yaml import SafeLoader as _YamlLoader  # type: ignore[assignment]
 
 # NOTE: logging handlers/formatters are configured centrally in app.main.
 # Do not call logging.basicConfig() here: app.core is imported before
@@ -19,6 +27,19 @@ ryaml = ruamel.yaml.YAML()
 ryaml.indent(mapping=2, sequence=4, offset=2)
 ryaml.preserve_quotes = True
 ryaml.width = 70
+
+
+def load_yaml_fast(data: str | bytes) -> Any:
+    """Parse YAML we only read from and never write back.
+
+    ``ryaml`` is a ruamel round-trip parser: it preserves comments, quoting
+    and key order so a file can be re-serialized faithfully, and pays for
+    that in speed. Anything we merely inspect (dvc.lock, dvc.yaml) should
+    come through here instead. On a 1.4 MB dvc.lock that is ~0.4s against
+    ~3.2s, which is the difference between a page load and a page wait.
+    """
+    return yaml.load(data, Loader=_YamlLoader)
+
 
 CATEGORIES_SINGULAR_TO_PLURAL = {
     "figure": "figures",

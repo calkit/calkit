@@ -33,7 +33,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
-import { Suspense, lazy, useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useRef, useState } from "react"
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued"
 import {
   FaChevronLeft,
@@ -53,6 +53,7 @@ import {
   type Publication,
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import { httpStatus } from "../../lib/api"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
 import SharedCommentsPanel, {
@@ -244,11 +245,7 @@ function useArtifactAtRef(
           // this ref, so show it as a plain file instead. Anything else
           // (auth, 5xx, network) is a real failure and has to surface --
           // swallowing it would silently hand back the wrong shape.
-          const status =
-            (err as { status?: number; response?: { status?: number } })
-              ?.status ??
-            (err as { response?: { status?: number } })?.response?.status
-          if (status !== 404) throw err
+          if (httpStatus(err) !== 404) throw err
           return ProjectsService.getProjectContents({
             owner_name: ownerName,
             project_name: projectName,
@@ -513,6 +510,14 @@ export function ArtifactCompareModal({
     onRefsChange?.(ref1, ref2)
   }, [ref1, ref2])
 
+  // Read the handlers through a ref so the listener is attached once. Keying
+  // the effect on them instead re-registers whenever the parent hands over
+  // new closures, which it does on every render while the carousel rolls onto
+  // the next page -- and because effects run after paint, a key pressed in
+  // that gap reaches the previous, now-stale handler and does nothing. That
+  // is precisely when someone flipping quickly is pressing.
+  const navHandlers = useRef({ onPrev, onNext })
+  navHandlers.current = { onPrev, onNext }
   useEffect(() => {
     if (!isOpen) return
     const handleKey = (e: KeyboardEvent) => {
@@ -529,12 +534,12 @@ export function ArtifactCompareModal({
       ) {
         return
       }
-      if (e.key === "ArrowLeft") onPrev?.()
-      else onNext?.()
+      if (e.key === "ArrowLeft") navHandlers.current.onPrev?.()
+      else navHandlers.current.onNext?.()
     }
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
-  }, [isOpen, onPrev, onNext])
+  }, [isOpen])
 
   // Comments and file history are the slow panels here, and arrowing through
   // the carousel changes `path` on every keypress. Hold their fetches until

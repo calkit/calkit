@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef } from "react"
 
 import { type Figure, type Issue, ProjectsService } from "../client"
-import { dataOrNull } from "../lib/api"
+import { dataOrNull, httpStatus } from "../lib/api"
 import { isAuthenticationError } from "../lib/auth"
 
 const useProject = (accountName: string, projectName: string, ref?: string) => {
@@ -88,6 +88,13 @@ const useProjectReadme = (
         path: "README.md",
         ref,
       }).then((response) => response.data),
+    // A project with no README 404s, and that's an answer, not a failure.
+    // The default three retries turned one miss into four requests against
+    // an endpoint that resolves the project's whole DVC index, and the
+    // backoff between them (1s, 2s, 4s) kept the README panel spinning for
+    // seconds after the first reply had already settled the question.
+    retry: (failureCount, error) =>
+      httpStatus(error) !== 404 && failureCount < 3,
   })
   return { readmeRequest }
 }

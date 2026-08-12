@@ -156,11 +156,17 @@ test("carousel arrows roll over onto the neighbouring page", async ({
   await page.keyboard.press("ArrowRight")
   await expect(page).toHaveURL(/page=2/)
   await expect(page).toHaveURL(/path=figures%2Ffig020\.png/)
+  // The grid behind the modal is the signal that the new page has actually
+  // rendered. A rollover in flight deliberately ignores further presses, and
+  // the URL updates a render before that state clears, so asserting on the
+  // URL alone would fire the next key into the gap.
+  await expect(range(page)).toHaveText(`21–40 of ${TOTAL}`)
 
   // Left from the start of a page goes back and opens the previous last.
   await page.keyboard.press("ArrowLeft")
   await expect(page).toHaveURL(/path=figures%2Ffig019\.png/)
   await expect(page).not.toHaveURL(/page=2/)
+  await expect(range(page)).toHaveText(`1–20 of ${TOTAL}`)
 })
 
 test("holds off comment/history fetches while flipping the carousel", async ({

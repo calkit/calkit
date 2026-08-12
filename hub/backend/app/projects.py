@@ -1007,16 +1007,21 @@ def get_ck_info_for_ref(
     repo: git.Repo,
     ref: str | None = None,
     process_includes: bool = False,
+    read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
     the ref or doesn't hold a mapping.
+
+    Pass ``read_only=True`` only when the caller won't write the result back;
+    see ``get_ck_info_from_repo``.
     """
     if ref is None:
         return get_ck_info_from_repo(
             repo=repo,
             process_includes=process_includes,
+            read_only=read_only,
         )
     try:
         ck_item = get_contents_from_repo(

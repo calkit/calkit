@@ -808,6 +808,11 @@ class StageStatus(SQLModel):
 
 class Pipeline(SQLModel):
     mermaid: str
+    # Set when the pipeline is invalid, e.g. two stages writing overlapping
+    # outputs. The rest of this response still describes what's declared, so
+    # the page can show the stages alongside an explanation instead of
+    # failing outright.
+    error: str | None = None
     dvc_stages: dict[str, DvcPipelineStage | DvcForeachStage]
     dvc_yaml: str
     calkit_yaml: str | None

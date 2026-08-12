@@ -299,6 +299,27 @@ def get_repo(
             return repo
         try:
             with lock:
+                # Re-check the TTL now that we hold the lock. A page load
+                # fires many requests at once, so they all see the same
+                # expired timestamp and queue here together -- and without
+                # this, every one of them would fetch in turn, each paying
+                # the network round trip and the working-tree reset behind
+                # it. The winner touches `updated_fpath` below, so everyone
+                # behind it can see the refresh already happened and go
+                # straight to reading. An explicit `ttl=None`/`0` still
+                # always refreshes, which is what callers asking for that
+                # mean.
+                if os.path.isfile(updated_fpath):
+                    last_updated = os.path.getmtime(updated_fpath)
+                ttl_expired = ttl is None or (
+                    (time.time() - last_updated) > ttl
+                )
+                if not ttl_expired and not is_shallow:
+                    if access_token:
+                        repo.git.update_environment(
+                            **_make_git_auth_env(access_token)
+                        )
+                    return repo
                 # Migrate repos cloned with an embedded token in the remote
                 # URL to the plain URL so our credential helper is used
                 # instead. Plain https URLs from GitHub never contain "@", so
@@ -338,14 +359,33 @@ def get_repo(
                                 ["origin", branch_name],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
-                        # If we had any failed previous transactions, reset
-                        # and clean
-                        repo.git.reset()
-                        repo.git.clean("-fd")
-                        repo.git.stash("save", "Auto-stash before pull")
-                        repo.git.checkout([f"origin/{branch_name}"])
-                        repo.git.branch(["-D", branch_name])
-                        repo.git.checkout(["-b", branch_name])
+                        # Only rewrite the working tree when the remote
+                        # actually moved. The reset/clean/checkout dance below
+                        # rewrites files that concurrent readers of this same
+                        # checkout are parsing right now -- the file lock
+                        # serializes writers against each other, not against
+                        # readers -- and a torn read of calkit.yaml surfaces
+                        # as a bogus parse error or a 500. The fetch itself
+                        # only writes .git, so it is safe to leave running on
+                        # every refresh; skipping the rewrite when there is
+                        # nothing new removes the hazard from the common case.
+                        try:
+                            local_sha = repo.head.commit.hexsha
+                            remote_sha = repo.commit(
+                                f"origin/{branch_name}"
+                            ).hexsha
+                        except Exception as e:
+                            logger.warning(f"Could not compare to origin: {e}")
+                            local_sha, remote_sha = None, None
+                        if local_sha is None or local_sha != remote_sha:
+                            # If we had any failed previous transactions, reset
+                            # and clean
+                            repo.git.reset()
+                            repo.git.clean("-fd")
+                            repo.git.stash("save", "Auto-stash before pull")
+                            repo.git.checkout([f"origin/{branch_name}"])
+                            repo.git.branch(["-D", branch_name])
+                            repo.git.checkout(["-b", branch_name])
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(
@@ -440,10 +480,20 @@ def get_zip_path_map_from_repo(repo: git.Repo) -> dict:
         return {}
 
 
-def get_ck_info_from_repo(repo: git.Repo, process_includes=False) -> dict:
+def get_ck_info_from_repo(
+    repo: git.Repo, process_includes=False, read_only: bool = False
+) -> dict:
+    """Load calkit.yaml from the repo's working tree.
+
+    Pass ``read_only=True`` when the result is only inspected, never written
+    back: it swaps ruamel's round-trip parser for the C loader, which is far
+    faster but drops the comments and quoting a faithful rewrite needs.
+    """
     try:
         ck_info = calkit.load_calkit_info(
-            wdir=repo.working_dir, process_includes=process_includes
+            wdir=repo.working_dir,
+            process_includes=process_includes,
+            read_only=read_only,
         )
     except (YAMLError, IndexError) as e:
         # A user's calkit.yaml can be malformed (e.g., multiple YAML documents

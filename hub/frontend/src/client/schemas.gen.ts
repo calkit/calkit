@@ -3637,6 +3637,17 @@ export const PipelineSchema = {
       type: "string",
       title: "Mermaid",
     },
+    error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Error",
+    },
     dvc_stages: {
       additionalProperties: {
         anyOf: [

@@ -3,18 +3,19 @@
 import csv
 import logging
 import os
+import threading
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import ruamel.yaml
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 try:
     # libyaml-backed loader, several times faster than the pure-Python one.
     from yaml import CSafeLoader as _YamlLoader
 except ImportError:  # pragma: no cover - depends on the libyaml build
-    from yaml import SafeLoader as _YamlLoader  # type: ignore[assignment]
+    from yaml import SafeLoader as _YamlLoader
 
 # NOTE: logging handlers/formatters are configured centrally in app.main.
 # Do not call logging.basicConfig() here: app.core is imported before
@@ -23,10 +24,44 @@ except ImportError:  # pragma: no cover - depends on the libyaml build
 # break every Loki `| json` query / Alloy stage.json extraction).
 logger = logging.getLogger(__name__)
 
-ryaml = ruamel.yaml.YAML()
-ryaml.indent(mapping=2, sequence=4, offset=2)
-ryaml.preserve_quotes = True
-ryaml.width = 70
+
+class _ThreadLocalYAML(threading.local):
+    """Holds one configured ruamel ``YAML`` per thread.
+
+    A ``YAML`` instance carries scanner, parser and composer state for the
+    duration of a load, so two threads sharing one interleave their parses
+    and corrupt each other. Sync endpoints run in a threadpool, so a single
+    shared instance here means concurrent requests reading the same file get
+    bogus ``ParserError``/``ComposerError`` at random lines, an ``IndexError``
+    from the scanner, or an internal ``AttributeError`` that escapes the YAML
+    error handling and 500s the request.
+    """
+
+    def __init__(self) -> None:
+        self.yaml = ruamel.yaml.YAML()
+        self.yaml.indent(mapping=2, sequence=4, offset=2)
+        self.yaml.preserve_quotes = True
+        self.yaml.width = 70
+
+
+_yaml_local = _ThreadLocalYAML()
+
+
+class _ThreadLocalYAMLProxy:
+    """Forwards to the calling thread's ``YAML``.
+
+    Keeps ``ryaml`` usable as the module-level object it has always been, so
+    no call site has to know about any of this.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_yaml_local.yaml, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_yaml_local.yaml, name, value)
+
+
+ryaml = _ThreadLocalYAMLProxy()
 
 
 def load_yaml_fast(data: str | bytes) -> Any:

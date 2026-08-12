@@ -2194,6 +2194,10 @@ export type Pipeline = {
    */
   mermaid: string
   /**
+   * Error
+   */
+  error?: string | null
+  /**
    * Dvc Stages
    */
   dvc_stages: {

@@ -919,6 +919,64 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
     assert mock_get_ck_info.call_args.kwargs["ref"] == "some-branch"
 
 
+def test_get_project_pipeline_reports_invalid_pipeline(
+    client: TestClient,
+) -> None:
+    fake_project = SimpleNamespace()
+    fake_repo = SimpleNamespace()
+    # Two stages writing overlapping outputs: valid YAML, but DVC rejects it
+    # when it builds the graph. That's the user's pipeline to fix, so the
+    # endpoint has to say so rather than 500.
+    files = {
+        "dvc.yaml": (
+            "stages:\n"
+            "  make-dir:\n"
+            "    cmd: python a.py\n"
+            "    outs:\n"
+            "    - results\n"
+            "  make-file:\n"
+            "    cmd: python b.py\n"
+            "    outs:\n"
+            "    - results/out.csv\n"
+        ),
+    }
+
+    class FakeTree:
+        def is_file(self, path: str) -> bool:
+            return path in files
+
+        def read_text(self, path: str, encoding: str = "utf-8") -> str:
+            return files[path]
+
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=FakeTree(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
+        )
+    assert response.status_code == 200
+    body = response.json()
+    # The reason is reported, and names the conflict so it's actionable.
+    assert body["error"]
+    assert "overlap" in body["error"].lower()
+    # No diagram, but the declared stages still come back so the page has
+    # something to show alongside the explanation.
+    assert body["mermaid"] == ""
+    assert set(body["dvc_stages"]) == {"make-dir", "make-file"}
+
+
 class _EmptyTree:
     """A repo tree with no files (defeats auto-detection in tests)."""
 

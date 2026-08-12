@@ -20,6 +20,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       jlab: ${{ steps.filter.outputs.jlab }}
       vscode: ${{ steps.filter.outputs.vscode }}
+      browser: ${{ steps.filter.outputs.browser }}
     steps:
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -32,14 +33,18 @@ jobs:
               - "**"
               - "!hub/**"
               - "!vscode-ext/**"
+              - "!browser-ext/**"
             # The JupyterLab extension depends on the core Python package,
             # so run its tests for any change outside the other subprojects
             jlab:
               - "**"
               - "!hub/**"
               - "!vscode-ext/**"
+              - "!browser-ext/**"
             vscode:
               - "vscode-ext/**"
+            browser:
+              - "browser-ext/**"
 
   main:
     needs: changes
@@ -49,9 +54,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
@@ -59,13 +64,13 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
           miniforge-version: latest
           auto-activate-base: true
@@ -103,9 +108,9 @@ jobs:
       run:
         working-directory: jupyterlab-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -131,7 +136,7 @@ jobs:
           uv run jlpm playwright test -u --reporter=list
       - name: Upload Playwright test results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: jupyterlab-ext/ui-tests/test-results/
@@ -144,7 +149,7 @@ jobs:
       run:
         working-directory: vscode-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -155,3 +160,24 @@ jobs:
         run: npm ci
       - name: Run VS Code extension tests
         run: npm test
+  browser-ext:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: browser-ext
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: browser-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run browser extension unit tests
+        run: npm test
+      - name: Build browser extension
+        run: npm run build

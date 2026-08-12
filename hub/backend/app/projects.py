@@ -8,6 +8,7 @@ import os
 import threading
 import time
 from collections import OrderedDict
+from copy import deepcopy
 from typing import Literal, NamedTuple
 
 import git
@@ -16,7 +17,7 @@ import sqlalchemy
 import yaml
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+from sqlmodel import Session, and_, or_, select
 
 import app.users
 from app.config import settings
@@ -30,7 +31,12 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
-from app.core import CATEGORIES_PLURAL_TO_SINGULAR, params_from_url, ryaml
+from app.core import (
+    CATEGORIES_PLURAL_TO_SINGULAR,
+    params_from_url,
+    ryaml,
+    utcnow,
+)
 from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
 from app.git import (
     RepoTree,
@@ -39,16 +45,20 @@ from app.git import (
     get_repo_tree_for_ref,
 )
 from app.models import (
+    Account,
     ContentsItem,
     Figure,
     ItemLock,
     Notebook,
     Org,
+    OverleafLink,
     Project,
     Publication,
     User,
+    UserOrgMembership,
     UserProjectAccess,
 )
+from app.models.core import ROLE_IDS
 from app.pipeline import find_stage_for_path
 from app.storage import (
     get_object_fs,
@@ -246,6 +256,52 @@ def get_project(
     return project
 
 
+def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
+    """Every DVC-tracked output in a tree, keyed by path.
+
+    Two sources: dvc.lock, which covers anything a pipeline stage
+    produces, and the standalone ``.dvc`` pointer files that ``dvc add``
+    leaves next to a tracked file, which the lock knows nothing about.
+    """
+    outs: dict[str, dict] = dict(
+        get_ck_info_and_dvc_outs_from_tree(
+            project=project, tree=tree
+        ).dvc_lock_outs
+    )
+
+    def walk(dirname: str) -> list[str]:
+        found = []
+        for name in tree.listdir(dirname or None):
+            path = os.path.join(dirname, name) if dirname else name
+            if path in [".git", ".dvc"]:
+                continue
+            if tree.is_dir(path):
+                found += walk(path)
+            elif path.endswith(".dvc"):
+                found.append(path)
+        return found
+
+    for pointer_path in walk(""):
+        try:
+            data = yaml.safe_load(tree.read_text(pointer_path))
+            out = (data.get("outs") or [{}])[0]
+        except Exception as e:
+            logger.warning(f"Failed to read DVC pointer {pointer_path}: {e}")
+            continue
+        if not isinstance(out, dict) or not out.get("md5"):
+            continue
+        declared = out.get("path")
+        path = (
+            os.path.normpath(
+                os.path.join(os.path.dirname(pointer_path), declared)
+            )
+            if declared
+            else pointer_path[: -len(".dvc")]
+        )
+        outs.setdefault(path, out)
+    return outs
+
+
 def get_contents_from_repo(
     project: Project,
     repo: git.Repo,
@@ -257,6 +313,180 @@ def get_contents_from_repo(
         tree=get_repo_tree_for_ref(repo, ref),
         path=path,
     )
+
+
+def writable_project_clause(current_user: User):
+    """Projects the user can write to, as a SQL predicate.
+
+    Shared rather than inlined at each call site because it restates the
+    access rules get_project applies per project, and two copies of an
+    access rule drift into two different answers about who can write.
+    """
+    return or_(
+        Project.owner_account_id == current_user.account.id,
+        and_(
+            UserProjectAccess.user_id == current_user.id,
+            or_(
+                UserProjectAccess.role_id >= ROLE_IDS["write"],  # type: ignore
+                UserProjectAccess.github_access.in_(["write", "admin"]),  # type: ignore
+            ),
+        ),
+        Project.owner_account.has(  # type: ignore
+            and_(
+                Account.org_id.is_not(None),  # type: ignore
+                select(UserOrgMembership)
+                .where(
+                    UserOrgMembership.user_id == current_user.id,
+                    UserOrgMembership.org_id == Account.org_id,
+                    # A plain org member only gets read on the org's
+                    # projects; admins and owners get full access
+                    UserOrgMembership.role_id >= ROLE_IDS["admin"],
+                )
+                .exists(),
+            )
+        ),
+    )
+
+
+def overleaf_links_from_ck_info(ck_info: dict) -> dict[str, str]:
+    """Map synced folder to Overleaf project ID, as calkit.yaml declares it.
+
+    Only the committed ``overleaf_sync`` block is read, not the private
+    sync state, so this works on a calkit.yaml fetched on its own without
+    the rest of the repo.
+    """
+    import calkit.overleaf
+
+    declared: dict[str, str] = {}
+    for path, info in (ck_info.get("overleaf_sync") or {}).items():
+        if not isinstance(info, dict):
+            continue
+        project_id = info.get("project_id")
+        if not project_id and info.get("url"):
+            project_id = calkit.overleaf.project_id_from_url(info["url"])
+        if project_id:
+            declared[str(path)] = str(project_id)
+    return declared
+
+
+def store_overleaf_links(
+    session: Session, project: Project, declared: dict[str, str]
+) -> list[OverleafLink]:
+    """Make the index for a project match ``declared`` exactly."""
+    existing = {
+        link.path: link
+        for link in session.exec(
+            select(OverleafLink).where(OverleafLink.project_id == project.id)
+        ).all()
+    }
+    changed = False
+    for path, overleaf_project_id in declared.items():
+        link = existing.get(path)
+        if link is None:
+            session.add(
+                OverleafLink(
+                    project_id=project.id,
+                    path=path,
+                    overleaf_project_id=overleaf_project_id,
+                )
+            )
+            changed = True
+        elif link.overleaf_project_id != overleaf_project_id:
+            link.overleaf_project_id = overleaf_project_id
+            link.updated = utcnow()
+            session.add(link)
+            changed = True
+    for path, link in existing.items():
+        if path not in declared:
+            session.delete(link)
+            changed = True
+    if changed:
+        session.commit()
+    return list(
+        session.exec(
+            select(OverleafLink).where(OverleafLink.project_id == project.id)
+        ).all()
+    )
+
+
+def scan_overleaf_links(
+    session: Session, project: Project, user: User
+) -> list[OverleafLink]:
+    """Read a project's Overleaf links from its calkit.yaml on GitHub.
+
+    Fetching the one file through the GitHub API costs a single request,
+    where cloning the repo to read the same file costs a clone. That is
+    what makes it reasonable to walk a user's projects looking for the one
+    that syncs with a given Overleaf project.
+
+    The scan timestamp is recorded either way, so a project with no links,
+    no calkit.yaml, or no readable repo isn't re-fetched on every lookup.
+    """
+    declared: dict[str, str] = {}
+    if project.github_repo:
+        try:
+            token = app.users.get_github_token(session, user)
+        except HTTPException:
+            token = None
+        if token is not None:
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{project.github_repo}"
+                    "/contents/calkit.yaml",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/vnd.github.raw+json",
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    declared = overleaf_links_from_ck_info(
+                        _yaml_load(resp.text) or {}
+                    )
+            except Exception as e:
+                logger.info(
+                    f"Could not read calkit.yaml for {project.id}: {e}"
+                )
+    links = store_overleaf_links(session, project, declared)
+    project.overleaf_scanned = utcnow()
+    session.add(project)
+    session.commit()
+    return links
+
+
+def record_overleaf_links(
+    session: Session,
+    project: Project,
+    repo: git.Repo,
+    ck_info: dict | None = None,
+) -> list[OverleafLink]:
+    """Index the project's Overleaf links so an Overleaf project ID can be
+    resolved back to this project.
+
+    The repo stays the source of truth, so this refreshes the index to match
+    what calkit.yaml declares, dropping links that are no longer there.
+    """
+    import calkit.overleaf
+
+    try:
+        sync_info = calkit.overleaf.get_sync_info(
+            wdir=repo.working_dir, ck_info=deepcopy(ck_info)
+        )
+    except Exception as e:
+        logger.warning(f"Could not read Overleaf sync info: {e}")
+        return []
+    declared = {}
+    for path, info in sync_info.items():
+        overleaf_project_id = info.get("project_id")
+        if overleaf_project_id:
+            declared[path] = str(overleaf_project_id)
+    links = store_overleaf_links(session, project, declared)
+    # Reading the repo is the most authoritative look there is, so it also
+    # satisfies the scan the lazy lookup would otherwise do
+    project.overleaf_scanned = utcnow()
+    session.add(project)
+    session.commit()
+    return links
 
 
 def get_ck_info_and_dvc_outs_from_tree(
@@ -495,6 +725,9 @@ def get_contents_from_tree(
             # fallthrough `else` case where the path has no metadata source.
             size: int | None = None
             obj_type: str = "file"
+            # Only DVC-tracked paths have one, and it must not carry over
+            # from the previous path in the loop
+            md5: str | None = None
             if in_repo:
                 size = tree.size(p)
                 obj_type = "file" if tree.is_file(p) else "dir"
@@ -502,6 +735,7 @@ def get_contents_from_tree(
             elif p in dvc_lock_outs:
                 size = dvc_lock_outs[p].get("size")
                 obj_type = dvc_lock_outs[p]["type"]
+                md5 = dvc_lock_outs[p].get("md5")
                 storage = "dvc"
             elif p in dvc_pointer_outs:
                 dvc_out = dvc_pointer_outs[p]
@@ -520,6 +754,7 @@ def get_contents_from_tree(
                 type=obj_type,
                 calkit_object=ck_objects.get(p),
                 storage=storage,
+                md5=md5,
             )
             contents.append(ContentsItem.model_validate(obj))
         for ck_path, ck_obj in ck_objects.items():
@@ -883,42 +1118,59 @@ def get_notebook_from_repo(
     """
     ck_info = get_ck_info_for_ref(project=project, repo=repo, ref=ref)
     notebooks = ck_info.get("notebooks", [])
-    for notebook in notebooks:
-        if notebook.get("path") == path:
-            item = get_contents_from_repo(
-                project=project,
-                repo=repo,
-                path=path,
-                ref=ref,
-            )
-            try:
-                # If the notebook has HTML output, return that
-                html_path = get_executed_notebook_path(
-                    notebook_path=path, to="html"
-                )
-                html_item = get_contents_from_repo(
-                    project=project,
-                    repo=repo,
-                    path=html_path,
-                    ref=ref,
-                )
-                item = html_item
+    notebook = None
+    for nb in notebooks:
+        if nb.get("path") == path:
+            notebook = nb
+            break
+    # Notebooks don't need to be declared in the ``notebooks`` list, e.g., one
+    # defined as a jupyter-notebook pipeline stage, so fall back to the path
+    # itself and let fetching its contents below decide whether it exists
+    if notebook is None:
+        notebook = {"path": path}
+    # Associate with a jupyter-notebook stage if one runs this notebook
+    if not notebook.get("stage"):
+        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+        for stage_name, stage in stages.items():
+            if (
+                isinstance(stage, dict)
+                and stage.get("kind") == "jupyter-notebook"
+                and stage.get("notebook_path") == path
+            ):
+                notebook["stage"] = stage_name
+                break
+    item = get_contents_from_repo(
+        project=project,
+        repo=repo,
+        path=path,
+        ref=ref,
+    )
+    try:
+        # If the notebook has HTML output, return that
+        html_path = get_executed_notebook_path(notebook_path=path, to="html")
+        html_item = get_contents_from_repo(
+            project=project,
+            repo=repo,
+            path=html_path,
+            ref=ref,
+        )
+        item = html_item
+        notebook["output_format"] = "html"
+    except HTTPException as e:
+        logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+    notebook["url"] = item.url
+    notebook["content"] = item.content
+    notebook["storage"] = item.storage
+    # Figure out the output format from the URL content disposition
+    if item.url is not None:
+        params = params_from_url(item.url)
+        rcd = params.get("response-content-disposition")
+        if rcd is not None:
+            if rcd[0].endswith(".ipynb"):
+                notebook["output_format"] = "notebook"
+            elif rcd[0].endswith(".html"):
                 notebook["output_format"] = "html"
-            except HTTPException as e:
-                logger.info(
-                    f"Notebook HTML does not exist at {html_path}: {e}"
-                )
-            notebook["url"] = item.url
-            notebook["content"] = item.content
-            notebook["storage"] = item.storage
-            # Figure out the output format from the URL content disposition
-            if item.url is not None:
-                params = params_from_url(item.url)
-                rcd = params.get("response-content-disposition")
-                if rcd is not None:
-                    if rcd[0].endswith(".ipynb"):
-                        notebook["output_format"] = "notebook"
-                    elif rcd[0].endswith(".html"):
-                        notebook["output_format"] = "html"
-            return Notebook.model_validate(notebook)
-    raise HTTPException(404, "Notebook not found")
+    # Default to the raw notebook if no HTML version was found
+    if not notebook.get("output_format") and item.content and not item.url:
+        notebook["output_format"] = "notebook"
+    return Notebook.model_validate(notebook)

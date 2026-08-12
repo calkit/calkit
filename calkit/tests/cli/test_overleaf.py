@@ -441,3 +441,195 @@ def test_get_repo_disables_credential_store(tmp_dir):
     assert os.path.isdir(
         os.path.join(calkit.overleaf.get_project_dir(pid2), ".git")
     )
+
+
+def test_overleaf_sync_paths_stage_outputs(tmp_dir):
+    # Regression test for issue #979: a map-paths stage copies shared files
+    # (a bibliography, a class file) into each publication's folder, so those
+    # copies are gitignored pipeline outputs. They still have to reach
+    # Overleaf, or the document can't compile there -- and edits made to them
+    # on Overleaf must not be pulled back, since the next run overwrites them.
+    # The same push-only rule covers stage outputs that are stored in Git,
+    # such as a json-to-latex stage's .tex.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    ol_dir = os.path.join(str(tmp_dir), "ol")
+    os.makedirs(os.path.join(main_dir, "pubs", "shared"))
+    os.makedirs(os.path.join(main_dir, "pubs", "mypub1", "figures"))
+    os.makedirs(ol_dir)
+    main_repo = git.Repo.init(main_dir)
+    ol_repo = git.Repo.init(ol_dir)
+
+    def write(*parts, content="x"):
+        with open(os.path.join(main_dir, *parts), "w") as f:
+            f.write(content)
+
+    # Authored files: the document, and the shared files it needs
+    write("pubs", "mypub1", "main.tex", content="Hello")
+    write("pubs", "shared", "references.bib", content="@article{a}")
+    write("pubs", "shared", "template.cls", content="\\ProvidesClass{t}")
+    # The map-paths copies, as they exist after a run
+    write("pubs", "mypub1", "references.bib", content="@article{a}")
+    write("pubs", "mypub1", "template.cls", content="\\ProvidesClass{t}")
+    # A git-stored stage output (json-to-latex) and an uncached build artifact
+    write("pubs", "mypub1", "results.tex", content="\\newcommand{\\r}{1}")
+    write("pubs", "mypub1", "figures", "fig.pdf", content="build artifact")
+    # The copies are gitignored, exactly as Calkit writes them
+    with open(os.path.join(main_dir, ".gitignore"), "w") as f:
+        f.write("/pubs/mypub1/references.bib\n/pubs/mypub1/template.cls\n")
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "shared-to-mypub1": {
+                    "kind": "map-paths",
+                    "paths": [
+                        {
+                            "kind": "file-to-dir",
+                            "src": "pubs/shared/references.bib",
+                            "dest": "pubs/mypub1",
+                        },
+                        {
+                            "kind": "file-to-file",
+                            "src": "pubs/shared/template.cls",
+                            "dest": "pubs/mypub1/template.cls",
+                        },
+                    ],
+                }
+            }
+        }
+    }
+    with open(os.path.join(main_dir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    dvc_yaml = {
+        "stages": {
+            "shared-to-mypub1": {
+                "cmd": "calkit map-paths",
+                "outs": [
+                    {"pubs/mypub1/references.bib": {"cache": False}},
+                    {"pubs/mypub1/template.cls": {"cache": False}},
+                ],
+            },
+            "results-to-tex": {
+                "cmd": "calkit latex from-json",
+                "outs": [{"pubs/mypub1/results.tex": {"cache": False}}],
+            },
+            "build": {
+                "cmd": "echo build",
+                "outs": [{"pubs/mypub1/figures": {"cache": False}}],
+            },
+        }
+    }
+    with open(os.path.join(main_dir, "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    main_repo.git.add(
+        "pubs/mypub1/main.tex",
+        "pubs/mypub1/results.tex",
+        "pubs/shared/references.bib",
+        "pubs/shared/template.cls",
+        ".gitignore",
+        "calkit.yaml",
+        "dvc.yaml",
+    )
+    main_repo.git.commit(["-m", "Init project"])
+    for name, content in [
+        ("main.tex", "Hello"),
+        ("references.bib", "@article{a, note={edited on Overleaf}}"),
+        ("results.tex", "\\newcommand{\\r}{2}"),
+    ]:
+        with open(os.path.join(ol_dir, name), "w") as f:
+            f.write(content)
+    ol_repo.git.add(".")
+    ol_repo.git.commit(["-m", "Overleaf state"])
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pubs/mypub1",
+        sync_info_for_path={},
+        last_sync_commit=ol_repo.head.commit.hexsha,
+    )
+    # The map-paths destinations are found and resolved per mapping kind:
+    # file-to-dir keeps the source's filename inside the destination
+    assert paths.map_paths_outputs == {"references.bib", "template.cls"}
+    assert paths.mapped_files == {"references.bib", "template.cls"}
+    # The gitignored copies are still not "stored"
+    assert "references.bib" not in paths.stored_files
+    # ...but they are pushed, so Overleaf can compile the document. The
+    # uncached build artifact still is not.
+    assert set(paths.files_to_copy_to_overleaf) == {
+        "main.tex",
+        "references.bib",
+        "results.tex",
+        "template.cls",
+    }
+    # Nothing the pipeline produces comes back, whether it's gitignored
+    # (references.bib) or stored in Git (results.tex)
+    assert set(paths.files_to_copy_from_overleaf) == {"main.tex"}
+    # ...and none of it is deleted from Overleaf either
+    assert paths.stale_files_in_overleaf == []
+
+
+def test_overleaf_sync_all_overleaf_files_are_pipeline_outputs(tmp_dir):
+    # When every file on Overleaf is a pipeline output there is nothing to
+    # pull, which leaves no paths to pass to git format-patch -- and an empty
+    # pathspec after `--` means *everything* to Git, not nothing. Without a
+    # guard, the sync pulls in exactly the edits it just decided to skip.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    ol_dir = os.path.join(str(tmp_dir), "ol")
+    ol_remote_dir = os.path.join(str(tmp_dir), "ol-remote")
+    os.makedirs(os.path.join(main_dir, "pubs", "mypub1"))
+    os.makedirs(ol_dir)
+    main_repo = git.Repo.init(main_dir)
+    ol_remote = git.Repo.init(path=ol_remote_dir, bare=True)
+    ol_repo = git.Repo.init(ol_dir)
+    generated = "\\newcommand{\\r}{1}"
+    results_fpath = os.path.join(main_dir, "pubs", "mypub1", "results.tex")
+    with open(results_fpath, "w") as f:
+        f.write(generated)
+    ck_info = {"pipeline": {"stages": {}}}
+    with open(os.path.join(main_dir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    dvc_yaml = {
+        "stages": {
+            "results-to-tex": {
+                "cmd": "calkit latex from-json",
+                "outs": [{"pubs/mypub1/results.tex": {"cache": False}}],
+            }
+        }
+    }
+    with open(os.path.join(main_dir, "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    main_repo.git.add("pubs/mypub1/results.tex", "calkit.yaml", "dvc.yaml")
+    main_repo.git.commit(["-m", "Init project"])
+    # Overleaf holds only that generated file, and it was edited there
+    with open(os.path.join(ol_dir, "results.tex"), "w") as f:
+        f.write(generated)
+    ol_repo.git.add(".")
+    ol_repo.git.commit(["-m", "Overleaf state"])
+    last_sync_commit = ol_repo.head.commit.hexsha
+    with open(os.path.join(ol_dir, "results.tex"), "w") as f:
+        f.write("\\newcommand{\\r}{999}")
+    ol_repo.git.commit(["results.tex", "-m", "Update on Overleaf"])
+    ol_repo.git.remote(["add", "origin", ol_remote_dir])
+    ol_repo.git.push(["--set-upstream", "origin", ol_repo.active_branch.name])
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pubs/mypub1",
+        sync_info_for_path={},
+        last_sync_commit=last_sync_commit,
+    )
+    assert paths.paths_to_use_for_git_patch == []
+    res = calkit.overleaf.sync(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pubs/mypub1",
+        sync_info_for_path={},
+        last_sync_commit=last_sync_commit,
+        print_info=lambda *a, **k: None,
+    )
+    assert res["patch"] is None
+    # The Overleaf edit stayed on Overleaf, and our version was pushed back
+    with open(results_fpath) as f:
+        assert f.read() == generated
+    with open(os.path.join(ol_dir, "results.tex")) as f:
+        assert f.read() == generated
+    assert ol_remote.head.commit.hexsha == ol_repo.head.commit.hexsha

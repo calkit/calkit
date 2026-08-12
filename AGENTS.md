@@ -5,6 +5,7 @@
 - The main Python package/CLI lives in `calkit`
 - The JupyterLab extension lives in `src`
 - The VS Code extension lives in `vscode-ext`
+- The Chrome extension lives in `browser-ext`
 
 ## Working
 

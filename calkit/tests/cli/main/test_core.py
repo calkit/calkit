@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import dvc.repo
 import git
@@ -28,10 +28,12 @@ from calkit.cli.main.core import (
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
     _to_shell_cmd,
+    _warn_on_stale_calkit_env,
 )
 from calkit.cli.main.core import (
     app as calkit_app,
 )
+from calkit.cli.main.core import main as calkit_main
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -2033,3 +2035,85 @@ def test_call_dvc_passthrough_hint(tmp_dir):
         "Hint: If DVC failed because a .dvc pointer file is git-ignored"
         in res.stderr
     )
+
+
+@skipif_windows_mock_scheduler
+def test_run_scheduler_stage_respects_max_concurrent_jobs(tmp_dir):
+    # An iterate_over stage on a scheduler env normally submits every job at
+    # once. With max_concurrent_jobs set, submissions are paced so the project
+    # never occupies more than that many queue slots---the point being not to
+    # monopolize a shared cluster.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Each job announces itself, holds long enough to overlap with any
+        # concurrently running sibling, records how many were running at that
+        # moment, then leaves.
+        f.write('touch "running-$1"\n')
+        f.write("sleep 1\n")
+        f.write("ls running-* | wc -l >> counts.txt\n")
+        f.write('rm "running-$1"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm", "max_concurrent_jobs": 2}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [
+                        {"arg_name": "x", "values": [1, 2, 3, 4, 5, 6]}
+                    ],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    # Every case still runs to completion---the limit paces the pipeline, it
+    # does not drop work.
+    for x in range(1, 7):
+        assert os.path.exists(f"out-{x}.txt")
+    with open("counts.txt") as f:
+        observed = [int(line) for line in f.read().split() if line]
+    assert len(observed) == 6
+    # Without the limit all six would be in flight together; with it, never
+    # more than two.
+    assert max(observed) <= 2
+
+
+def test_dotenv_is_loaded_for_every_command(tmp_dir):
+    # Which hub a command targets must not depend on whether that command
+    # happens to read a secret: 'calkit run' loaded .env and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs
+    with open(".env", "w") as f:
+        f.write("CALKIT_HUB=hub.example.edu\nSOME_PROJECT_SECRET=abc123\n")
+    # patch.dict restores the whole environment, which monkeypatch can't
+    # do for variables load_dotenv puts there itself
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ.pop("SOME_PROJECT_SECRET", None)
+        calkit_main(version=False, use_version=None)
+        assert os.environ["CALKIT_HUB"] == "hub.example.edu"
+        assert os.environ["SOME_PROJECT_SECRET"] == "abc123"
+        assert calkit.config.get_hub() == "https://hub.example.edu"
+
+
+def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
+    # It used to, so a leftover one shouldn't silently stop doing anything
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ["CALKIT_ENV"] = "staging"
+        _warn_on_stale_calkit_env()
+        assert (
+            "CALKIT_ENV=staging no longer selects a hub"
+            in capsys.readouterr().err
+        )
+        # The test environment is the one name that still means something
+        os.environ["CALKIT_ENV"] = "test"
+        _warn_on_stale_calkit_env()
+        assert capsys.readouterr().err == ""

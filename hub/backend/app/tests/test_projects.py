@@ -328,3 +328,69 @@ def test_get_contents_dvc_pointer_dir_shown(
     assert data_entry.storage == "dvc"
     assert data_entry.type == "dir"
     assert data_entry.size == 99999
+
+
+def test_get_notebook_from_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    # A notebook declared only as a jupyter-notebook pipeline stage, plus one
+    # declared in the notebooks list, and one that's simply committed
+    (repo_dir / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    report:\n"
+        "      kind: jupyter-notebook\n"
+        "      notebook_path: notebooks/report.ipynb\n"
+        "notebooks:\n"
+        "  - path: notebooks/declared.ipynb\n"
+        "    title: Declared notebook\n"
+    )
+    nb_dir = repo_dir / "notebooks"
+    nb_dir.mkdir()
+    for name in ["report.ipynb", "declared.ipynb", "raw.ipynb"]:
+        (nb_dir / name).write_text('{"cells": [], "nbformat": 4}\n')
+    # Only the stage notebook has an HTML export committed
+    html_dir = repo_dir / ".calkit" / "notebooks" / "html" / "notebooks"
+    html_dir.mkdir(parents=True)
+    (html_dir / "report.html").write_text("<html>report</html>\n")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add notebooks"])
+    # The stage-only notebook resolves, prefers its HTML export, and gets its
+    # stage attached
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="notebooks/report.ipynb"
+    )
+    assert nb.path == "notebooks/report.ipynb"
+    assert nb.stage == "report"
+    assert nb.output_format == "html"
+    assert nb.content is not None
+    assert "report" in base64.b64decode(nb.content).decode()
+    # A declared notebook keeps its metadata, and with no HTML export falls
+    # back to the raw notebook
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="notebooks/declared.ipynb"
+    )
+    assert nb.title == "Declared notebook"
+    assert nb.stage is None
+    assert nb.output_format == "notebook"
+    # An undeclared notebook with no stage still resolves
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="notebooks/raw.ipynb"
+    )
+    assert nb.output_format == "notebook"
+    # A path that doesn't exist is a 404
+    with pytest.raises(HTTPException) as exc_info:
+        app.projects.get_notebook_from_repo(
+            project=project, repo=repo, path="notebooks/nope.ipynb"
+        )
+    assert exc_info.value.status_code == 404

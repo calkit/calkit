@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import sys
 import uuid
 
 import calkit
@@ -101,13 +102,28 @@ def test_get_set():
     )
     with open(fpath, "r") as f:
         cfg = calkit.ryaml.load(f)
-    if calkit.config.KEYRING_SUPPORTED:
+    # Asked of a fresh process, since that's what wrote the file. This
+    # process may have probed the keyring under different conditions, and
+    # a disagreement here reads as a bug in the config file's contents.
+    if _keyring_supported_in_a_subprocess():
         assert "token" not in cfg
     else:
         assert cfg["token"] == "this-is-a-new-token"
     # Hub scoping shares the same config file, so check it here rather
     # than in a separate test that could run in a parallel worker
     _check_hub_scoping()
+
+
+def _keyring_supported_in_a_subprocess() -> bool:
+    out = subprocess.check_output(
+        [
+            sys.executable,
+            "-c",
+            "import calkit.config as c; print(c.supports_keyring())",
+        ],
+        text=True,
+    )
+    return out.strip() == "True"
 
 
 def _check_hub_scoping():

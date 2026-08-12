@@ -1,6 +1,7 @@
 """Tests for ``calkit.git``."""
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -399,3 +400,64 @@ def test_ensure_path_is_ignored_stale_negation_after_direct_rule(tmp_dir):
         lines = f.read().splitlines()
     assert "!results/output.json" not in lines
     assert "results/output.json" in lines
+
+
+def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
+    # A CI checkout is usually shallow and often has only the branch being
+    # built, so a comparison against another branch fails on a repo that
+    # looks fine otherwise
+    import calkit.git
+
+    origin = os.path.join(tmp_dir, "origin")
+    os.makedirs(origin)
+    subprocess.check_call(["git", "init", "-q", "-b", "main", origin])
+    with open(os.path.join(origin, "f.txt"), "w") as f:
+        f.write("one\n")
+    subprocess.check_call(["git", "-C", origin, "add", "-A"])
+    subprocess.check_call(
+        [
+            "git",
+            "-C",
+            origin,
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qm",
+            "first",
+        ]
+    )
+    main_sha = subprocess.check_output(
+        ["git", "-C", origin, "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.check_call(["git", "-C", origin, "checkout", "-qb", "work"])
+    with open(os.path.join(origin, "f.txt"), "w") as f:
+        f.write("two\n")
+    subprocess.check_call(
+        [
+            "git",
+            "-C",
+            origin,
+            "-c",
+            "user.email=t@e.com",
+            "-c",
+            "user.name=T",
+            "commit",
+            "-qam",
+            "second",
+        ]
+    )
+    clone = os.path.join(tmp_dir, "clone")
+    subprocess.check_call(
+        ["git", "clone", "-q", "--depth", "1", f"file://{origin}", clone]
+    )
+    repo = calkit.git.get_repo(clone)
+    # The other branch isn't here at all, not even as a tracking ref
+    assert repo.git.rev_parse("--is-shallow-repository").strip() == "true"
+    assert calkit.git.resolve_ref(repo, "main") == main_sha
+    # What's already here needs no network
+    assert calkit.git.resolve_ref(repo, "HEAD") is not None
+    # A revision that doesn't exist is reported as missing rather than
+    # retried forever
+    assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None

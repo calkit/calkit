@@ -8,7 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import dvc.repo
 import git
@@ -23,15 +23,17 @@ from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
-    _prune_run_logs,
+    _prune_run_files,
     _run_dvc_repro,
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
     _to_shell_cmd,
+    _warn_on_stale_calkit_env,
 )
 from calkit.cli.main.core import (
     app as calkit_app,
 )
+from calkit.cli.main.core import main as calkit_main
 
 skipif_windows_docker = pytest.mark.skipif(
     sys.platform == "win32",
@@ -1391,52 +1393,53 @@ def test_run_writes_private_logs(tmp_dir):
     assert os.path.isdir(os.path.join(".calkit", "systems"))
 
 
-def test_prune_run_logs(tmp_dir):
+def _run_prefix(second: int, run_id: str | None = None) -> str:
+    """Build a run filename prefix like the ones `calkit run` writes."""
+    return f"2026-05-23T10-00-{second:02d}-" + (run_id or f"{second:032x}")
+
+
+def test_prune_run_files(tmp_dir):
     logs_dir = "logs"
     os.makedirs(logs_dir)
-    # Logs are named by start timestamp, so name order is time order
-    names = [f"2026-05-23T10-00-{i:02d}-abc.log" for i in range(12)]
-    for n in names:
-        with open(os.path.join(logs_dir, n), "w") as f:
-            f.write("x")
-    # A non-log file should be left untouched
+    # Run artifacts are named by start timestamp, so name order is time order
+    prefixes = [_run_prefix(i) for i in range(12)]
+    for prefix in prefixes:
+        # Each run writes a main log plus one log per stage
+        for name in [f"{prefix}.log", f"{prefix}-a.log", f"{prefix}-b.log"]:
+            with open(os.path.join(logs_dir, name), "w") as f:
+                f.write("x")
+    # A file that isn't a run artifact should be left untouched
     with open(os.path.join(logs_dir, "keep.txt"), "w") as f:
         f.write("x")
-    _prune_run_logs(logs_dir, keep=10)
+    _prune_run_files(logs_dir, keep=10)
     remaining = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
-    assert remaining == names[-10:]
+    # Pruning is per run, not per file, so many stages can't evict older runs
+    assert len(remaining) == 30
+    assert {f.split(".log")[0][:52] for f in remaining} == set(prefixes[-10:])
     assert os.path.isfile(os.path.join(logs_dir, "keep.txt"))
     # Pruning is a no-op when at or below the cap, and when the dir is missing
-    _prune_run_logs(logs_dir, keep=10)
-    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
-    _prune_run_logs("does-not-exist", keep=10)
-    # The active log is never deleted, even if its name sorts oldest (e.g.
-    # clock skew or an unusual name).
-    old_active = "1999-01-01T00-00-00-active.log"
-    with open(os.path.join(logs_dir, old_active), "w") as f:
+    _prune_run_files(logs_dir, keep=10)
+    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 30
+    _prune_run_files("does-not-exist", keep=10)
+    # The active run is never deleted, even if its name sorts oldest (e.g.
+    # clock skew)
+    active = "1999-01-01T00-00-00-" + "f" * 32
+    with open(os.path.join(logs_dir, active + ".log"), "w") as f:
         f.write("x")
-    _prune_run_logs(logs_dir, keep=10, protect=old_active)
-    assert os.path.isfile(os.path.join(logs_dir, old_active))
+    _prune_run_files(logs_dir, keep=10, protect=active)
+    assert os.path.isfile(os.path.join(logs_dir, active + ".log"))
 
 
-def test_prune_run_logs_json_suffix(tmp_dir):
+def test_prune_run_files_run_info(tmp_dir):
     runs_dir = "runs"
     os.makedirs(runs_dir)
-    for i in range(15):
-        name = f"2025-01-01T00-00-{i:02d}-{i:02d}.json"
-        with open(os.path.join(runs_dir, name), "w") as f:
+    prefixes = [_run_prefix(i) for i in range(15)]
+    for prefix in prefixes:
+        with open(os.path.join(runs_dir, prefix + ".json"), "w") as f:
             f.write("{}")
-    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    _prune_run_files(runs_dir, keep=10)
     remaining = sorted(os.listdir(runs_dir))
-    assert len(remaining) == 10
-    # Oldest by name are removed; newest 10 kept
-    assert remaining[0] == "2025-01-01T00-00-05-05.json"
-    assert remaining[-1] == "2025-01-01T00-00-14-14.json"
-    # A .log file in the same dir must be untouched by a .json prune
-    with open(os.path.join(runs_dir, "keep.log"), "w") as f:
-        f.write("x")
-    _prune_run_logs(runs_dir, keep=10, suffix=".json")
-    assert os.path.isfile(os.path.join(runs_dir, "keep.log"))
+    assert remaining == [p + ".json" for p in prefixes[-10:]]
 
 
 def test_map_paths(tmp_dir):
@@ -2060,8 +2063,8 @@ def test_call_dvc_passthrough_hint(tmp_dir):
     )
 
 
-def test_run_captures_stage_logs(tmp_dir, capsys):
-    """Test that stage stdout and stderr are captured and teed to the terminal."""
+def test_run_captures_stage_logs(tmp_dir):
+    """Test stage stdout and stderr are captured and teed to the terminal."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
     # Create a Python script that prints to stdout and stderr
@@ -2108,9 +2111,7 @@ def test_run_captures_stage_logs_failure(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # Create a Python script that fails
     script = (
-        "import sys\n"
-        "sys.stdout.write('FAIL_OUT_MARKER\\n')\n"
-        "sys.exit(1)\n"
+        "import sys\nsys.stdout.write('FAIL_OUT_MARKER\\n')\nsys.exit(1)\n"
     )
     with open("stage_fail.py", "w") as f:
         f.write(script)
@@ -2139,7 +2140,7 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
     """Test that --log copies stage logs to the tracked directory."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
-    script = "import sys\n" "sys.stdout.write('OUT_MARKER\\n')\n"
+    script = "import sys\nsys.stdout.write('OUT_MARKER\\n')\n"
     with open("stage_script.py", "w") as f:
         f.write(script)
     dvc_yaml = {
@@ -2152,9 +2153,10 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(dvc_yaml, f)
 
-    res = subprocess.run(["calkit", "run", "--log"])
+    res = subprocess.run(
+        ["calkit", "run", "--log"], capture_output=True, text=True
+    )
     assert res.returncode == 0
-
     tracked_logs = os.path.join(".calkit", "logs")
     log_files = [
         f for f in os.listdir(tracked_logs) if "test_stage_log.log" in f
@@ -2163,3 +2165,85 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
     with open(os.path.join(tracked_logs, log_files[0])) as f:
         log_content = f.read()
     assert "OUT_MARKER" in log_content
+
+
+@skipif_windows_mock_scheduler
+def test_run_scheduler_stage_respects_max_concurrent_jobs(tmp_dir):
+    # An iterate_over stage on a scheduler env normally submits every job at
+    # once. With max_concurrent_jobs set, submissions are paced so the project
+    # never occupies more than that many queue slots---the point being not to
+    # monopolize a shared cluster.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Each job announces itself, holds long enough to overlap with any
+        # concurrently running sibling, records how many were running at that
+        # moment, then leaves.
+        f.write('touch "running-$1"\n')
+        f.write("sleep 1\n")
+        f.write("ls running-* | wc -l >> counts.txt\n")
+        f.write('rm "running-$1"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm", "max_concurrent_jobs": 2}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [
+                        {"arg_name": "x", "values": [1, 2, 3, 4, 5, 6]}
+                    ],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    # Every case still runs to completion---the limit paces the pipeline, it
+    # does not drop work.
+    for x in range(1, 7):
+        assert os.path.exists(f"out-{x}.txt")
+    with open("counts.txt") as f:
+        observed = [int(line) for line in f.read().split() if line]
+    assert len(observed) == 6
+    # Without the limit all six would be in flight together; with it, never
+    # more than two.
+    assert max(observed) <= 2
+
+
+def test_dotenv_is_loaded_for_every_command(tmp_dir):
+    # Which hub a command targets must not depend on whether that command
+    # happens to read a secret: 'calkit run' loaded .env and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs
+    with open(".env", "w") as f:
+        f.write("CALKIT_HUB=hub.example.edu\nSOME_PROJECT_SECRET=abc123\n")
+    # patch.dict restores the whole environment, which monkeypatch can't
+    # do for variables load_dotenv puts there itself
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ.pop("SOME_PROJECT_SECRET", None)
+        calkit_main(version=False, use_version=None)
+        assert os.environ["CALKIT_HUB"] == "hub.example.edu"
+        assert os.environ["SOME_PROJECT_SECRET"] == "abc123"
+        assert calkit.config.get_hub() == "https://hub.example.edu"
+
+
+def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
+    # It used to, so a leftover one shouldn't silently stop doing anything
+    with patch.dict(os.environ):
+        os.environ.pop("CALKIT_HUB", None)
+        os.environ["CALKIT_ENV"] = "staging"
+        _warn_on_stale_calkit_env()
+        assert (
+            "CALKIT_ENV=staging no longer selects a hub"
+            in capsys.readouterr().err
+        )
+        # The test environment is the one name that still means something
+        os.environ["CALKIT_ENV"] = "test"
+        _warn_on_stale_calkit_env()
+        assert capsys.readouterr().err == ""

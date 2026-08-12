@@ -380,6 +380,10 @@ export type ContentsItem = {
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
   /**
+   * Md5
+   */
+  md5?: string | null
+  /**
    * Stage
    */
   stage?: string | null
@@ -628,6 +632,24 @@ export type DeviceTokenRequest = {
 }
 
 /**
+ * DiffSegment
+ */
+export type DiffSegment = {
+  /**
+   * Kind
+   */
+  kind: "equal" | "insert" | "delete"
+  /**
+   * Text
+   */
+  text: string
+  /**
+   * Elided
+   */
+  elided?: boolean
+}
+
+/**
  * DiscountCode
  */
 export type DiscountCode = {
@@ -758,6 +780,42 @@ export type DvcForeachStage = {
    */
   foreach: Array<string> | string
   do: DvcPipelineStage
+}
+
+/**
+ * DvcOutput
+ *
+ * A DVC-tracked output as it stands at one Git ref.
+ */
+export type DvcOutput = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Type
+   */
+  type?: string
+  /**
+   * Size
+   */
+  size?: number | null
+  /**
+   * Md5
+   */
+  md5?: string | null
+  /**
+   * Storage
+   */
+  storage?: string
+  /**
+   * Url
+   */
+  url?: string | null
 }
 
 /**
@@ -964,6 +1022,30 @@ export type Figure = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+}
+
+/**
+ * FiguresPage
+ *
+ * A page of project figures, with the total available for paging.
+ */
+export type FiguresPage = {
+  /**
+   * Items
+   */
+  items: Array<Figure>
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Limit
+   */
+  limit: number
+  /**
+   * Offset
+   */
+  offset: number
 }
 
 /**
@@ -1376,6 +1458,36 @@ export type GitRemoteHead = {
 }
 
 /**
+ * GithubPullRequest
+ */
+export type GithubPullRequest = {
+  /**
+   * Number
+   */
+  number: number
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Head Ref
+   */
+  head_ref: string
+  /**
+   * Base Ref
+   */
+  base_ref: string
+  /**
+   * Head Sha
+   */
+  head_sha: string
+  /**
+   * Base Sha
+   */
+  base_sha: string
+}
+
+/**
  * HTTPValidationError
  */
 export type HttpValidationError = {
@@ -1417,6 +1529,16 @@ export type HttpRequestAccess = {
    * Expires At
    */
   expires_at?: string | null
+}
+
+/**
+ * HubVersion
+ */
+export type HubVersion = {
+  /**
+   * Version
+   */
+  version: string
 }
 
 /**
@@ -1907,6 +2029,54 @@ export type OrgsResponse = {
 }
 
 /**
+ * OverleafLinkPublic
+ */
+export type OverleafLinkPublic = {
+  /**
+   * Overleaf Project Id
+   */
+  overleaf_project_id: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Project Owner Name
+   */
+  project_owner_name: string
+  /**
+   * Project Name
+   */
+  project_name: string
+  /**
+   * Project Title
+   */
+  project_title: string
+  /**
+   * Current User Access
+   */
+  current_user_access: "read" | "write" | "admin" | "owner" | null
+}
+
+/**
+ * OverleafLookup
+ */
+export type OverleafLookup = {
+  /**
+   * Links
+   */
+  links: Array<OverleafLinkPublic>
+  /**
+   * Projects Scanned
+   */
+  projects_scanned: number
+  /**
+   * Projects Remaining
+   */
+  projects_remaining: number
+}
+
+/**
  * OverleafSyncPost
  */
 export type OverleafSyncPost = {
@@ -1943,6 +2113,79 @@ export type OverleafSyncResponse = {
 }
 
 /**
+ * OverleafSyncStatus
+ */
+export type OverleafSyncStatus = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Overleaf Project Id
+   */
+  overleaf_project_id?: string | null
+  /**
+   * Overleaf Url
+   */
+  overleaf_url?: string | null
+  /**
+   * Last Sync Commit
+   */
+  last_sync_commit?: string | null
+  /**
+   * Project Commit
+   */
+  project_commit: string
+  /**
+   * Overleaf Commit
+   */
+  overleaf_commit: string
+  /**
+   * Commits From Overleaf
+   */
+  commits_from_overleaf: number
+  /**
+   * Files To Push
+   */
+  files_to_push: Array<OverleafSyncStatusFile>
+  /**
+   * Files To Delete
+   */
+  files_to_delete: Array<OverleafSyncStatusFile>
+  /**
+   * In Sync
+   */
+  in_sync: boolean
+}
+
+/**
+ * OverleafSyncStatusFile
+ */
+export type OverleafSyncStatusFile = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Project Path
+   */
+  project_path: string
+  /**
+   * State
+   */
+  state: "new" | "modified" | "deleted"
+  /**
+   * Figure
+   */
+  figure: boolean
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
+}
+
+/**
  * Pipeline
  */
 export type Pipeline = {
@@ -1950,6 +2193,10 @@ export type Pipeline = {
    * Mermaid
    */
   mermaid: string
+  /**
+   * Error
+   */
+  error?: string | null
   /**
    * Dvc Stages
    */
@@ -1965,6 +2212,10 @@ export type Pipeline = {
    */
   calkit_yaml: string | null
   /**
+   * Ck Stages
+   */
+  ck_stages?: Array<string>
+  /**
    * Stage Statuses
    */
   stage_statuses?: {
@@ -1974,6 +2225,74 @@ export type Pipeline = {
    * Status
    */
   status?: "up-to-date" | "stale" | "unknown"
+}
+
+/**
+ * PipelineStage
+ *
+ * One stage of the Calkit pipeline, as editable YAML.
+ *
+ * The YAML is the stage's body only (no name key), exactly as it sits in
+ * calkit.yaml -- same key order, same comments.
+ */
+export type PipelineStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdit
+ *
+ * A stage edit to compute, against the editor's unsaved content.
+ *
+ * The YAML is what's in the editor rather than what's committed, so
+ * re-detecting right after changing ``target_path`` looks at the new
+ * target.
+ */
+export type PipelineStageEdit = {
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdited
+ *
+ * The stage after an edit, plus what the edit touched.
+ *
+ * ``changed`` is what the user should see happened: the inputs added, or
+ * the default-valued keys removed.
+ */
+export type PipelineStageEdited = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Changed
+   */
+  changed: Array<string>
+}
+
+/**
+ * PipelineStagePut
+ */
+export type PipelineStagePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -2970,6 +3289,10 @@ export type ReferenceEntry = {
     [key: string]: unknown
   }
   /**
+   * Arxiv Id
+   */
+  arxiv_id?: string | null
+  /**
    * Zotero Item Key
    */
   zotero_item_key?: string | null
@@ -3094,6 +3417,52 @@ export type ReferenceNotesResponse = {
    * Notes
    */
   notes: Array<ReferenceNote>
+}
+
+/**
+ * ReferenceSearchMatch
+ */
+export type ReferenceSearchMatch = {
+  /**
+   * Project Owner Name
+   */
+  project_owner_name: string
+  /**
+   * Project Name
+   */
+  project_name: string
+  /**
+   * Project Title
+   */
+  project_title: string
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Type
+   */
+  type: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Doi
+   */
+  doi?: string | null
+  /**
+   * Note Count
+   */
+  note_count?: number
+  /**
+   * Matched On
+   */
+  matched_on?: "doi" | "arxiv_id" | "title" | null
 }
 
 /**
@@ -4128,6 +4497,36 @@ export type SubscriptionUpdate = {
 }
 
 /**
+ * TextDiff
+ */
+export type TextDiff = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Base Ref
+   */
+  base_ref: string
+  /**
+   * Head Ref
+   */
+  head_ref: string
+  /**
+   * Identical
+   */
+  identical: boolean
+  /**
+   * Segments
+   */
+  segments: Array<DiffSegment>
+  /**
+   * Truncated
+   */
+  truncated?: boolean
+}
+
+/**
  * Token
  */
 export type Token = {
@@ -4731,6 +5130,10 @@ export type ContentsItemBase = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * Md5
+   */
+  md5?: string | null
   /**
    * Stage
    */
@@ -6244,6 +6647,23 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
+export type GetHubVersionData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/version"
+}
+
+export type GetHubVersionResponses = {
+  /**
+   * Successful Response
+   */
+  200: HubVersion
+}
+
+export type GetHubVersionResponse =
+  GetHubVersionResponses[keyof GetHubVersionResponses]
+
 export type TestEmailData = {
   body?: never
   path?: never
@@ -6475,6 +6895,34 @@ export type MarkAllNotificationsReadResponses = {
 export type MarkAllNotificationsReadResponse =
   MarkAllNotificationsReadResponses[keyof MarkAllNotificationsReadResponses]
 
+export type GetArxivPdfData = {
+  body?: never
+  path: {
+    /**
+     * Arxiv Id
+     */
+    arxiv_id: string
+  }
+  query?: never
+  url: "/arxiv/{arxiv_id}/pdf"
+}
+
+export type GetArxivPdfErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetArxivPdfError = GetArxivPdfErrors[keyof GetArxivPdfErrors]
+
+export type GetArxivPdfResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
 export type GetProjectsData = {
   body?: never
   path?: never
@@ -6495,6 +6943,14 @@ export type GetProjectsData = {
      * Owner Name
      */
     owner_name?: string | null
+    /**
+     * Github Repo
+     */
+    github_repo?: string | null
+    /**
+     * Min Access Level
+     */
+    min_access_level?: "read" | "write"
   }
   url: "/projects"
 }
@@ -7305,6 +7761,106 @@ export type PutProjectContentsResponses = {
 export type PutProjectContentsResponse =
   PutProjectContentsResponses[keyof PutProjectContentsResponses]
 
+export type GetProjectDvcOutputsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Ttl
+     */
+    ttl?: number | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dvc-outputs"
+}
+
+export type GetProjectDvcOutputsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDvcOutputsError =
+  GetProjectDvcOutputsErrors[keyof GetProjectDvcOutputsErrors]
+
+export type GetProjectDvcOutputsResponses = {
+  /**
+   * Response Projects-Get Project Dvc Outputs
+   *
+   * Successful Response
+   */
+  200: Array<DvcOutput>
+}
+
+export type GetProjectDvcOutputsResponse =
+  GetProjectDvcOutputsResponses[keyof GetProjectDvcOutputsResponses]
+
+export type GetProjectDvcOutputTextDiffData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Base
+     */
+    base: string
+    /**
+     * Head
+     */
+    head: string
+    /**
+     * Ttl
+     */
+    ttl?: number | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dvc-outputs/text-diff"
+}
+
+export type GetProjectDvcOutputTextDiffErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDvcOutputTextDiffError =
+  GetProjectDvcOutputTextDiffErrors[keyof GetProjectDvcOutputTextDiffErrors]
+
+export type GetProjectDvcOutputTextDiffResponses = {
+  /**
+   * Successful Response
+   */
+  200: TextDiff
+}
+
+export type GetProjectDvcOutputTextDiffResponse =
+  GetProjectDvcOutputTextDiffResponses[keyof GetProjectDvcOutputTextDiffResponses]
+
 export type GetProjectContentPathsData = {
   body?: never
   path: {
@@ -7488,6 +8044,30 @@ export type GetProjectFiguresData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Limit
+     *
+     * Max number of figures to return
+     */
+    limit?: number
+    /**
+     * Offset
+     *
+     * Number of figures to skip
+     */
+    offset?: number
+    /**
+     * Q
+     *
+     * Filter figures by path, title or description. Applied across the whole project, before paging.
+     */
+    q?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }
@@ -7504,11 +8084,9 @@ export type GetProjectFiguresError =
 
 export type GetProjectFiguresResponses = {
   /**
-   * Response Projects-Get Project Figures
-   *
    * Successful Response
    */
-  200: Array<Figure>
+  200: FiguresPage
 }
 
 export type GetProjectFiguresResponse =
@@ -8206,6 +8784,94 @@ export type PostProjectOverleafSyncResponses = {
 export type PostProjectOverleafSyncResponse =
   PostProjectOverleafSyncResponses[keyof PostProjectOverleafSyncResponses]
 
+export type GetProjectOverleafSyncStatusData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Path
+     */
+    path?: string | null
+    /**
+     * Overleaf Project Id
+     */
+    overleaf_project_id?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/overleaf-syncs/status"
+}
+
+export type GetProjectOverleafSyncStatusErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectOverleafSyncStatusError =
+  GetProjectOverleafSyncStatusErrors[keyof GetProjectOverleafSyncStatusErrors]
+
+export type GetProjectOverleafSyncStatusResponses = {
+  /**
+   * Response Projects-Get Project Overleaf Sync Status
+   *
+   * Successful Response
+   */
+  200: Array<OverleafSyncStatus>
+}
+
+export type GetProjectOverleafSyncStatusResponse =
+  GetProjectOverleafSyncStatusResponses[keyof GetProjectOverleafSyncStatusResponses]
+
+export type GetUserOverleafSyncData = {
+  body?: never
+  path: {
+    /**
+     * Overleaf Project Id
+     */
+    overleaf_project_id: string
+  }
+  query?: {
+    /**
+     * Active Project
+     */
+    active_project?: string | null
+    /**
+     * Refresh
+     */
+    refresh?: boolean
+  }
+  url: "/user/overleaf-syncs/{overleaf_project_id}"
+}
+
+export type GetUserOverleafSyncErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetUserOverleafSyncError =
+  GetUserOverleafSyncErrors[keyof GetUserOverleafSyncErrors]
+
+export type GetUserOverleafSyncResponses = {
+  /**
+   * Successful Response
+   */
+  200: OverleafLookup
+}
+
+export type GetUserOverleafSyncResponse =
+  GetUserOverleafSyncResponses[keyof GetUserOverleafSyncResponses]
+
 export type PostProjectSyncData = {
   body?: never
   path: {
@@ -8284,6 +8950,171 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type GetProjectPipelineStageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type GetProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineStageError =
+  GetProjectPipelineStageErrors[keyof GetProjectPipelineStageErrors]
+
+export type GetProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type GetProjectPipelineStageResponse =
+  GetProjectPipelineStageResponses[keyof GetProjectPipelineStageResponses]
+
+export type PutProjectPipelineStageData = {
+  body: PipelineStagePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type PutProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineStageError =
+  PutProjectPipelineStageErrors[keyof PutProjectPipelineStageErrors]
+
+export type PutProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PutProjectPipelineStageResponse =
+  PutProjectPipelineStageResponses[keyof PutProjectPipelineStageResponses]
+
+export type RemoveProjectPipelineStageDefaultsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/remove-defaults"
+}
+
+export type RemoveProjectPipelineStageDefaultsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type RemoveProjectPipelineStageDefaultsError =
+  RemoveProjectPipelineStageDefaultsErrors[keyof RemoveProjectPipelineStageDefaultsErrors]
+
+export type RemoveProjectPipelineStageDefaultsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type RemoveProjectPipelineStageDefaultsResponse =
+  RemoveProjectPipelineStageDefaultsResponses[keyof RemoveProjectPipelineStageDefaultsResponses]
+
+export type DetectProjectPipelineStageInputsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/detect-inputs"
+}
+
+export type DetectProjectPipelineStageInputsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DetectProjectPipelineStageInputsError =
+  DetectProjectPipelineStageInputsErrors[keyof DetectProjectPipelineStageInputsErrors]
+
+export type DetectProjectPipelineStageInputsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type DetectProjectPipelineStageInputsResponse =
+  DetectProjectPipelineStageInputsResponses[keyof DetectProjectPipelineStageInputsResponses]
 
 export type GetProjectCollaboratorsData = {
   body?: never
@@ -9780,6 +10611,46 @@ export type GetProjectShowcaseResponses = {
 export type GetProjectShowcaseResponse =
   GetProjectShowcaseResponses[keyof GetProjectShowcaseResponses]
 
+export type GetProjectGithubPullData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Pull Number
+     */
+    pull_number: number
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/github-pulls/{pull_number}"
+}
+
+export type GetProjectGithubPullErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectGithubPullError =
+  GetProjectGithubPullErrors[keyof GetProjectGithubPullErrors]
+
+export type GetProjectGithubPullResponses = {
+  /**
+   * Successful Response
+   */
+  200: GithubPullRequest
+}
+
+export type GetProjectGithubPullResponse =
+  GetProjectGithubPullResponses[keyof GetProjectGithubPullResponses]
+
 export type GetProjectGithubReleasesData = {
   body?: never
   path: {
@@ -10056,6 +10927,55 @@ export type PostProjectFsBatchOpResponses = {
 
 export type PostProjectFsBatchOpResponse =
   PostProjectFsBatchOpResponses[keyof PostProjectFsBatchOpResponses]
+
+export type GetReferencesData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Project
+     */
+    project?: Array<string> | null
+    /**
+     * Doi
+     */
+    doi?: string | null
+    /**
+     * Arxiv Id
+     */
+    arxiv_id?: string | null
+    /**
+     * Title
+     */
+    title?: string | null
+    /**
+     * Max Projects
+     */
+    max_projects?: number
+  }
+  url: "/references"
+}
+
+export type GetReferencesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetReferencesError = GetReferencesErrors[keyof GetReferencesErrors]
+
+export type GetReferencesResponses = {
+  /**
+   * Response References-Get References
+   *
+   * Successful Response
+   */
+  200: Array<ReferenceSearchMatch>
+}
+
+export type GetReferencesResponse =
+  GetReferencesResponses[keyof GetReferencesResponses]
 
 export type GetProjectReleasesData = {
   body?: never

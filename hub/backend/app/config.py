@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     DOMAIN: str = "localhost"
     ENVIRONMENT: Literal["local", "staging", "production"] = "local"
+    # Set at image build time from the hub/vX.Y.Z release tag, since the
+    # build context has no .git to derive it from. Empty in a development
+    # checkout, where app.version asks Git directly instead.
+    HUB_VERSION: str = ""
     FRONTEND_HOST: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]

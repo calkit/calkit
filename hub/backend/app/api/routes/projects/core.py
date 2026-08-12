@@ -1,10 +1,12 @@
 """Main routes for projects."""
 
 import base64
+import concurrent.futures
 import io
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -14,7 +16,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Literal, Optional, cast
+from typing import Annotated, Any, Literal, NamedTuple, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -36,12 +38,23 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from git.exc import GitCommandError
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session, and_, func, not_, or_, select
+from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.projects
 import calkit
-from app import github, messaging, mixpanel, orgs, users, zotero
+import calkit.detect
+import calkit.latex
+from app import (
+    arxiv,
+    github,
+    messaging,
+    mixpanel,
+    orgs,
+    pdftext,
+    users,
+    zotero,
+)
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -52,17 +65,20 @@ from app.config import settings
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
+    load_yaml_fast,
     params_from_url,
     ryaml,
     utcnow,
 )
 from app.dvc import (
     expand_dvc_lock_outs,
+    get_data_fpath_for_md5,
     make_mermaid_diagram,
     output_from_pipeline,
     run_dvc_command,
 )
 from app.git import (
+    RepoTree,
     get_ck_info,
     get_ck_info_from_repo,
     get_commit_history,
@@ -86,7 +102,12 @@ from app.models import (
     Notification,
     Org,
     OrgSubscription,
+    OverleafLink,
     Pipeline,
+    PipelineStage,
+    PipelineStageEdit,
+    PipelineStageEdited,
+    PipelineStagePut,
     Presentation,
     Project,
     ProjectComment,
@@ -106,6 +127,7 @@ from app.models import (
     QuestionPublic,
     QuestionPut,
     Result,
+    StageStatus,
     User,
     UserOrgMembership,
     UserProjectAccess,
@@ -141,6 +163,9 @@ from app.storage import (
 )
 from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
+from calkit.models.pipeline import LatexStage as CkLatexStage
+from calkit.models.pipeline import Pipeline as CkPipeline
+from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
 
 logging.basicConfig(level=logging.INFO)
@@ -199,9 +224,18 @@ def get_projects(
     offset: int = 0,
     search_for: str | None = None,
     owner_name: str | None = None,
+    github_repo: str | None = None,
+    min_access_level: Literal["read", "write"] = "read",
 ) -> ProjectsPublic:
     if current_user is None:
+        if min_access_level != "read":
+            raise HTTPException(403, "User is not authenticated")
         where_clause = Project.is_public
+    elif min_access_level == "write":
+        # GitHub-derived access is only present once it has been resolved
+        # and cached for this user, so a GitHub collaborator who has never
+        # opened the project won't appear until they do.
+        where_clause = app.projects.writable_project_clause(current_user)
     else:
         where_clause = or_(
             Project.is_public,
@@ -232,6 +266,18 @@ def get_projects(
         where_clause = and_(
             where_clause,
             Project.owner_account.has(Account.name == owner_name.lower()),  # type: ignore
+        )
+    if github_repo is not None:
+        # An exact repo lookup, e.g. for resolving the project behind a
+        # GitHub page. The repo URL is stored with or without the .git
+        # suffix depending on how the project was created.
+        repo_url = f"https://github.com/{github_repo.strip('/')}"
+        where_clause = and_(
+            where_clause,
+            or_(
+                func.lower(Project.git_repo_url) == repo_url.lower(),
+                func.lower(Project.git_repo_url) == f"{repo_url.lower()}.git",
+            ),
         )
     if search_for is not None:
         search_for = f"%{search_for}%"
@@ -1278,6 +1324,165 @@ def get_project_contents(
     )
 
 
+class DvcOutput(BaseModel):
+    """A DVC-tracked output as it stands at one Git ref."""
+
+    path: str
+    name: str
+    type: str = "file"
+    size: int | None = None
+    md5: str | None = None
+    storage: str = "dvc"
+    # Presigned, and specific to this ref's version of the artifact. None
+    # when the object was never pushed to storage, or for a directory.
+    url: str | None = None
+
+
+@router.get("/projects/{owner_name}/{project_name}/dvc-outputs")
+def get_project_dvc_outputs(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUserOptional,
+    ref: str | None = None,
+    ttl: int | None = DEFAULT_REPO_TTL,
+) -> list[DvcOutput]:
+    """List every DVC-tracked output in the project at a given ref.
+
+    The contents endpoint lists one directory at a time, and only
+    presigns a URL when asked for a single path. Comparing two refs --
+    a pull request against its base -- would mean walking the whole tree
+    twice and then fetching each artifact individually, so the whole set
+    comes back here at once, each with the URL of that ref's version.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=ttl,
+        ref=ref,
+    )
+    tree = app.projects.get_repo_tree_for_ref(repo, ref)
+    outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    zip_path_map = app.projects.get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    ).zip_path_map
+    fs = get_object_fs()
+    resp = []
+    for path, out in sorted(outs.items()):
+        md5 = out.get("md5") or ""
+        is_dir = out.get("type") == "dir" or md5.endswith(".dir")
+        url = None
+        if md5 and not is_dir:
+            fpath = get_data_fpath_for_md5(
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                md5=md5,
+                fs=fs,
+            )
+            if fpath is not None:
+                url = get_object_url(
+                    fpath, fname=os.path.basename(path), fs=fs
+                )
+        resp.append(
+            DvcOutput(
+                path=path,
+                name=os.path.basename(path),
+                type="dir" if is_dir else "file",
+                size=out.get("size"),
+                md5=md5 or None,
+                storage="dvc-zip" if path in zip_path_map else "dvc",
+                url=url,
+            )
+        )
+    return resp
+
+
+@router.get("/projects/{owner_name}/{project_name}/dvc-outputs/text-diff")
+def get_project_dvc_output_text_diff(
+    owner_name: str,
+    project_name: str,
+    session: SessionDep,
+    current_user: CurrentUserOptional,
+    path: str,
+    base: str,
+    head: str,
+    ttl: int | None = DEFAULT_REPO_TTL,
+) -> pdftext.TextDiff:
+    """Compare the words in a PDF output at two refs.
+
+    Looking at two builds of a paper side by side answers "did the
+    figures move" well and "did the wording change" badly. This reads the
+    text out of both and diffs it, which the browser can't do without
+    shipping a PDF parser.
+    """
+    if not path.lower().endswith(".pdf"):
+        raise HTTPException(422, "Only PDFs can be compared as text")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    fs = get_object_fs()
+
+    def read(ref: str) -> tuple[str, bool]:
+        repo = get_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            ttl=ttl,
+            ref=ref,
+        )
+        tree = app.projects.get_repo_tree_for_ref(repo, ref)
+        outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+        out = outs.get(path)
+        if out is None or not out.get("md5"):
+            raise HTTPException(404, f"'{path}' is not DVC-tracked at {ref}")
+        size = out.get("size")
+        if size is not None and size > pdftext.MAX_PDF_BYTES:
+            raise HTTPException(413, f"'{path}' is too large to compare")
+        fpath = get_data_fpath_for_md5(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            md5=out["md5"],
+            fs=fs,
+        )
+        if fpath is None:
+            raise HTTPException(
+                404, f"'{path}' has not been pushed to storage at {ref}"
+            )
+        with fs.open(fpath, "rb") as f:
+            data = f.read(pdftext.MAX_PDF_BYTES + 1)
+        if len(data) > pdftext.MAX_PDF_BYTES:
+            raise HTTPException(413, f"'{path}' is too large to compare")
+        try:
+            return pdftext.extract_text(data)
+        except Exception as e:
+            logger.warning(f"Failed to read text from {path} at {ref}: {e}")
+            raise HTTPException(422, f"Could not read the text of '{path}'")
+
+    base_text, base_truncated = read(base)
+    head_text, head_truncated = read(head)
+    diff = pdftext.diff(
+        base=base_text,
+        head=head_text,
+        path=path,
+        base_ref=base,
+        head_ref=head,
+    )
+    diff.truncated = base_truncated or head_truncated
+    return diff
+
+
 @router.get("/projects/{owner_name}/{project_name}/contents-paths")
 def get_project_content_paths(
     owner_name: str,
@@ -1638,10 +1843,26 @@ def _build_questions_public(
     }
     figures_by_path: dict[str, Figure] = {}
     if "figure" in kinds:
+        # Only the figures actually cited as evidence need their content
+        # resolved; resolving every figure in the project would make this
+        # scale with the project rather than with the questions.
+        evidence_fig_paths = {
+            ev.get("path")
+            for q in questions_ck
+            for ev in _evidence_of(q)
+            if isinstance(ev, dict) and ev.get("kind") == "figure"
+        }
+        fig_ctx = _discover_figures(project=project, repo=repo, ref=ref)
+        cited = [f for f in fig_ctx.figures if f["path"] in evidence_fig_paths]
         figures_by_path = {
             fig.path: fig
-            for fig in _build_figures(
-                project=project, repo=repo, session=session, ref=ref
+            for fig in _resolve_figures(
+                project=project,
+                repo=repo,
+                session=session,
+                ref=ref,
+                ctx=fig_ctx,
+                figures=cited,
             )
         }
     results_by_path: dict[str, Result] = {}
@@ -1712,7 +1933,12 @@ def get_project_questions(
         ref=ref,
     )
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=ref
+        project=project,
+        repo=repo,
+        ref=ref,
+        # This route only reads; the POST/PUT handlers below load their own
+        # copy through ruamel so their rewrites keep comments intact.
+        read_only=True,
     )
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
@@ -1857,19 +2083,42 @@ def put_project_question(
     )[idx]
 
 
-def _build_figures(
+class _FigureContext(NamedTuple):
+    """Everything needed to resolve figure content, computed once per request.
+
+    ``figures`` holds every discovered figure entry (declared and
+    auto-detected) with only the cheap tree-derived fields filled in. The
+    expensive per-figure work happens in ``_resolve_figures``.
+    """
+
+    figures: list[dict[str, Any]]
+    tree: RepoTree
+    ck_info_full: dict[str, Any]
+    dvc_lock_outs: dict[str, Any]
+    zip_path_map: dict[str, Any]
+    dvc_lock: dict[str, Any]
+
+
+def _discover_figures(
     project: Project,
     repo: git.Repo,
-    session: Session,
     ref: str | None,
-) -> list[Figure]:
-    """Build the list of project figures, declared and auto-detected, with
-    content resolved for each.
+) -> _FigureContext:
+    """Find every project figure, declared and auto-detected, without
+    resolving any content.
+
+    Split out from content resolution so callers that only need a subset (a
+    page of the listing, or the few figures a question cites as evidence)
+    don't pay to download and base64-encode every figure in the project.
     """
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
         repo=repo,
         ref=ref,
+        # Discovery only reads this metadata, so skip ruamel's round-trip
+        # parser; on a 42 KB calkit.yaml that is ~5 ms instead of ~78 ms,
+        # paid on every page of the listing.
+        read_only=True,
     )
     figures = ck_info.get("figures", [])
     # Declared figures (from calkit.yaml) may omit a title; fill one in so
@@ -1945,9 +2194,59 @@ def _build_figures(
         if dvc_out.get("type") == "dir":
             continue
         _maybe_add_figure(dvc_path)
+    dvc_lock: dict[str, Any] = {}
+    if figures:
+        try:
+            if tree.is_file("dvc.lock"):
+                # Read-only: parsed for stage lookups, never written back.
+                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        except Exception as e:
+            logger.warning(f"Failed to read dvc.lock for figures: {e}")
+    return _FigureContext(
+        figures=figures,
+        tree=tree,
+        ck_info_full=ck_info_full,
+        dvc_lock_outs=dvc_lock_outs,
+        zip_path_map=zip_path_map,
+        dvc_lock=dvc_lock,
+    )
+
+
+def _resolve_figures(
+    project: Project,
+    repo: git.Repo,
+    session: Session,
+    ref: str | None,
+    ctx: _FigureContext,
+    figures: list[dict[str, Any]],
+    resolve_content: bool = True,
+) -> list[Figure]:
+    """Resolve content, comment counts and stage status for ``figures``.
+
+    ``figures`` is normally a slice of ``ctx.figures``. Content resolution
+    hits object storage once per figure, so the figures are resolved
+    concurrently rather than one at a time.
+
+    ``resolve_content=False`` skips the object-storage work entirely and
+    returns metadata only, for callers that just need to list or pick figures
+    by path and never render them.
+    """
     if not figures:
         return []
-    # Build comment count map from DB
+    tree = ctx.tree
+    dvc_lock = ctx.dvc_lock
+    # Warm every lazy-loading attribute the content resolution below reads,
+    # here on the calling thread. Each of these is backed by a relationship
+    # whose first access emits a query, and the Session behind them is not
+    # safe to hit from the several threads that run `_resolve` -- so they
+    # have to be loaded before the pool starts, not inside it.
+    # `owner_account_name` is a computed field over `owner_account`;
+    # `file_locks` is iterated by `get_contents_from_tree` for every path.
+    _ = project.owner_account_name
+    _ = len(project.file_locks)
+    # Build comment count map from DB, restricted to the figures we're
+    # actually returning.
+    paths = [fig["path"] for fig in figures]
     comment_counts = dict(
         session.exec(
             select(ProjectComment.artifact_path, func.count())
@@ -1956,20 +2255,17 @@ def _build_figures(
                 ProjectComment.artifact_type == "figure",
                 ProjectComment.parent_id == None,  # noqa: E711
                 ProjectComment.resolved == None,  # noqa: E711
+                col(ProjectComment.artifact_path).in_(paths),
             )
             .group_by(ProjectComment.artifact_path)
         ).all()
     )
-    # Get the figure content and base64 encode it.
     # Staleness is best-effort: never let it block the figure listing.
-    dvc_lock: dict = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
-        dvc_yaml: dict = {}
+        dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
-            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_yaml,
             dvc_lock=dvc_lock,
@@ -1981,26 +2277,58 @@ def _build_figures(
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
-    for fig in figures:
-        item = app.projects.get_contents_from_tree(
-            project=project,
-            tree=tree,
-            path=fig["path"],
-            ck_info=ck_info_full,
-            dvc_lock_outs=dvc_lock_outs,
-            zip_path_map=zip_path_map,
-        )
-        fig["content"] = item.content
-        fig["url"] = item.url
+
+    def _annotate(fig: dict[str, Any]) -> dict[str, Any]:
+        """Attach the metadata that costs no I/O beyond what's already read."""
         fig["comment_count"] = comment_counts.get(fig["path"], 0)
         if not fig.get("stage"):
-            auto_stage = find_stage_for_path(fig["path"], dvc_lock)
+            auto_stage = find_stage_for_path(
+                fig["path"], dvc_lock, valid_stages=set(stage_statuses)
+            )
             if auto_stage is not None:
                 fig["stage"] = auto_stage
         if fig.get("stage") and fig["stage"] in stage_statuses:
             fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
+        return fig
+
+    def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
+        item = app.projects.get_contents_from_tree(
+            project=project,
+            tree=tree,
+            path=fig["path"],
+            ck_info=ctx.ck_info_full,
+            dvc_lock_outs=ctx.dvc_lock_outs,
+            zip_path_map=ctx.zip_path_map,
+        )
+        fig["content"] = item.content
+        fig["url"] = item.url
         fig["storage"] = item.storage
-    return [Figure.model_validate(fig) for fig in figures]
+        return _annotate(fig)
+
+    if not resolve_content:
+        resolved = [_annotate(fig) for fig in figures]
+    elif len(figures) > 1:
+        # Each figure's content is an independent object-storage download, so
+        # fan them out. The cap keeps a single request from monopolizing
+        # object-storage connections. Git reads inside `get_contents_from_tree`
+        # are serialized by the tree itself (see `GitTree`/`odb_lock`); it's
+        # the storage round trips that actually overlap here.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(figures))
+        ) as pool:
+            resolved = list(pool.map(_resolve, figures))
+    else:
+        resolved = [_resolve(figures[0])]
+    return [Figure.model_validate(fig) for fig in resolved]
+
+
+class FiguresPage(BaseModel):
+    """A page of project figures, with the total available for paging."""
+
+    items: list[Figure]
+    total: int
+    limit: int
+    offset: int
 
 
 @router.get("/projects/{owner_name}/{project_name}/figures")
@@ -2010,7 +2338,33 @@ def get_project_figures(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-) -> list[Figure]:
+    limit: int = Query(
+        20, ge=1, le=100, description="Max number of figures to return"
+    ),
+    offset: int = Query(0, ge=0, description="Number of figures to skip"),
+    q: str | None = Query(
+        None,
+        description=(
+            "Filter figures by path, title or description. Applied across "
+            "the whole project, before paging."
+        ),
+    ),
+    include_content: bool = Query(
+        True,
+        description=(
+            "Inline each figure's content. Set false for a metadata-only "
+            "listing that skips object storage entirely."
+        ),
+    ),
+) -> FiguresPage:
+    """Get a page of the project's figures.
+
+    Figure content is downloaded from object storage and inlined, so this is
+    paginated: a project with hundreds of figures would otherwise take
+    minutes and return a payload measured in hundreds of megabytes. Callers
+    that only need paths and titles should pass ``include_content=false``,
+    which skips that download entirely.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2025,7 +2379,35 @@ def get_project_figures(
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
     )
-    return _build_figures(project=project, repo=repo, session=session, ref=ref)
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    # Filter before paging, so search covers every figure in the project
+    # rather than whichever page the client happens to be on, and `total`
+    # describes the match count being paged through.
+    needle = (q or "").strip().lower()
+    matched = [
+        fig
+        for fig in ctx.figures
+        if not needle
+        or needle in fig["path"].lower()
+        or needle in (fig.get("title") or "").lower()
+        or needle in (fig.get("description") or "").lower()
+    ]
+    page = matched[offset : offset + limit]
+    items = _resolve_figures(
+        project=project,
+        repo=repo,
+        session=session,
+        ref=ref,
+        ctx=ctx,
+        figures=page,
+        resolve_content=include_content,
+    )
+    return FiguresPage(
+        items=items,
+        total=len(matched),
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _build_results(
@@ -2140,7 +2522,10 @@ def get_project_results(
     return _build_results(project=project, repo=repo, ref=ref)
 
 
-@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path}")
+# ``figure_path`` takes the path convertor because figures live in nested
+# directories ("figures/sub/plot.png"); without it the route only matches
+# single-segment names, whether or not the client percent-encodes slashes.
+@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path:path}")
 def get_project_figure(
     owner_name: str,
     project_name: str,
@@ -2150,6 +2535,13 @@ def get_project_figure(
     ttl: int | None = DEFAULT_REPO_TTL,
     ref: str | None = None,
 ) -> Figure:
+    """Get a single figure, declared or auto-detected.
+
+    Discovery runs the same way it does for the listing, so this resolves
+    every figure the listing would show -- not just the ones declared in
+    calkit.yaml -- and returns them with the same comment counts and stage
+    status attached.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2164,12 +2556,18 @@ def get_project_figure(
         ttl=ttl,
         ref=ref,
     )
-    return app.projects.get_figure_from_repo(
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    matched = [fig for fig in ctx.figures if fig["path"] == figure_path]
+    if not matched:
+        raise HTTPException(404, "Figure not found")
+    return _resolve_figures(
         project=project,
         repo=repo,
-        path=figure_path,
+        session=session,
         ref=ref,
-    )
+        ctx=ctx,
+        figures=matched[:1],
+    )[0]
 
 
 @router.post("/projects/{owner_name}/{project_name}/figures")
@@ -2705,7 +3103,6 @@ def _make_comment_title(comment: str) -> str:
     Strips trailing ``.`` and ``!`` but preserves ``?`` so questions read
     naturally as titles.
     """
-    import re
 
     m = re.search(r"([.!?])\s", comment)
     if m:
@@ -4149,6 +4546,10 @@ async def post_project_overleaf_publication(
     )
     repo.git.commit(["-m", commit_msg])
     repo.git.push(["origin", repo.active_branch.name])
+    if not import_zip_mode:
+        app.projects.record_overleaf_links(
+            session=session, project=project, repo=repo
+        )
     return Publication.model_validate(publication)
 
 
@@ -4187,6 +4588,9 @@ def post_project_overleaf_sync(
     ck_info = get_ck_info_from_repo(repo)
     overleaf_sync_info = calkit.overleaf.get_sync_info(
         wdir=repo.working_dir, ck_info=ck_info, fix_legacy=True
+    )
+    app.projects.record_overleaf_links(
+        session=session, project=project, repo=repo
     )
     if Path(req.path).as_posix() in overleaf_sync_info:
         path_in_project = Path(req.path).as_posix()
@@ -4246,6 +4650,295 @@ def post_project_overleaf_sync(
         project_commit=last_project_commit,
         committed_overleaf=committed_overleaf,
         committed_project=committed_project,
+    )
+
+
+class OverleafSyncStatusFile(BaseModel):
+    path: str
+    project_path: str
+    state: Literal["new", "modified", "deleted"]
+    figure: bool
+    # Pipeline status of the stage that produces this path, if it has one,
+    # so a figure that is stale in the project can be told apart from one
+    # that is merely not yet pushed to Overleaf
+    stage: str | None = None
+    stage_status: StageStatus | None = None
+
+
+class OverleafSyncStatus(BaseModel):
+    path: str
+    overleaf_project_id: str | None = None
+    overleaf_url: str | None = None
+    last_sync_commit: str | None = None
+    project_commit: str
+    overleaf_commit: str
+    commits_from_overleaf: int
+    files_to_push: list[OverleafSyncStatusFile]
+    files_to_delete: list[OverleafSyncStatusFile]
+    in_sync: bool
+
+
+@router.get("/projects/{owner_name}/{project_name}/overleaf-syncs/status")
+def get_project_overleaf_sync_status(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    path: str | None = None,
+    overleaf_project_id: str | None = None,
+) -> list[OverleafSyncStatus]:
+    """Report what an Overleaf sync would do, without doing it.
+
+    Returns one status per synced folder, optionally narrowed to a single
+    folder with ``path`` or to the folders synced with a single Overleaf
+    project with ``overleaf_project_id``.
+    """
+    try:
+        users.get_overleaf_token(session=session, user=current_user)
+    except HTTPException:
+        raise HTTPException(401, "Overleaf token not found")
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(project=project, user=current_user, session=session)
+    ck_info = get_ck_info_from_repo(repo)
+    sync_info = calkit.overleaf.get_sync_info(
+        wdir=repo.working_dir, ck_info=deepcopy(ck_info)
+    )
+    # Reading the repo is the expensive part, so keep the link index fresh
+    # while we have it, which is what makes the reverse lookup work
+    app.projects.record_overleaf_links(
+        session=session, project=project, repo=repo, ck_info=ck_info
+    )
+    if path is not None:
+        path = Path(path).as_posix().rstrip("/")
+        if path not in sync_info:
+            raise HTTPException(404, "Overleaf sync info not found for path")
+    # Stage statuses let us say whether a figure is stale in the project
+    # itself, not just out of date on Overleaf. Best-effort: never fail the
+    # status check over it.
+    stage_statuses: dict = {}
+    dvc_lock: dict = {}
+    try:
+        tree = app.projects.get_repo_tree_for_ref(repo, None)
+        if tree.is_file("dvc.lock"):
+            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+        dvc_yaml: dict = {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+        stage_statuses = compute_stage_statuses(
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            tree=tree,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            fs=get_object_fs(),
+            cache_token=resolve_commit_sha(repo, None),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to compute pipeline status for sync: {e}")
+
+    def _to_status_file(file_info: dict) -> OverleafSyncStatusFile:
+        stage = find_stage_for_path(file_info["project_path"], dvc_lock)
+        stage_status = stage_statuses.get(stage) if stage else None
+        return OverleafSyncStatusFile(
+            path=file_info["path"],
+            project_path=file_info["project_path"],
+            state=file_info["state"],
+            figure=file_info["figure"],
+            stage=stage,
+            stage_status=(
+                StageStatus.model_validate(stage_status.model_dump())
+                if stage_status is not None
+                else None
+            ),
+        )
+
+    resp = []
+    for path_in_project, sync_info_for_path in sync_info.items():
+        if path is not None and path_in_project != path:
+            continue
+        this_overleaf_project_id = sync_info_for_path.get("project_id")
+        if (
+            overleaf_project_id is not None
+            and this_overleaf_project_id != overleaf_project_id
+        ):
+            continue
+        if not this_overleaf_project_id:
+            logger.info(f"No Overleaf project ID for '{path_in_project}'")
+            continue
+        overleaf_repo = get_overleaf_repo(
+            project=project,
+            user=current_user,
+            session=session,
+            overleaf_project_id=this_overleaf_project_id,
+        )
+        status = calkit.overleaf.get_sync_status(
+            main_repo=repo,
+            overleaf_repo=overleaf_repo,
+            path_in_project=path_in_project,
+            sync_info_for_path=sync_info_for_path,
+            ck_info=ck_info,
+        )
+        resp.append(
+            OverleafSyncStatus(
+                path=status["path_in_project"],
+                overleaf_project_id=status["overleaf_project_id"],
+                overleaf_url=calkit.overleaf.project_id_to_url(
+                    this_overleaf_project_id
+                ),
+                last_sync_commit=status["last_sync_commit"],
+                project_commit=status["project_commit"],
+                overleaf_commit=status["overleaf_commit"],
+                commits_from_overleaf=status["commits_from_overleaf"],
+                files_to_push=[
+                    _to_status_file(f) for f in status["files_to_push"]
+                ],
+                files_to_delete=[
+                    _to_status_file(f) for f in status["files_to_delete"]
+                ],
+                in_sync=status["in_sync"],
+            )
+        )
+    return resp
+
+
+class OverleafLinkPublic(BaseModel):
+    overleaf_project_id: str
+    path: str
+    project_owner_name: str
+    project_name: str
+    project_title: str
+    current_user_access: Literal["read", "write", "admin", "owner"] | None
+
+
+def _indexed_overleaf_links(
+    session: Session, current_user: User, overleaf_project_id: str
+) -> list[OverleafLinkPublic]:
+    """Read the index, dropping projects the user can't see."""
+    links = session.exec(
+        select(OverleafLink).where(
+            OverleafLink.overleaf_project_id == overleaf_project_id
+        )
+    ).all()
+    resp = []
+    for link in links:
+        project = link.project
+        try:
+            project = app.projects.get_project(
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                session=session,
+                current_user=current_user,
+                min_access_level="read",
+            )
+        except HTTPException:
+            continue
+        resp.append(
+            OverleafLinkPublic(
+                overleaf_project_id=link.overleaf_project_id,
+                path=link.path,
+                project_owner_name=project.owner_account_name,
+                project_name=project.name,
+                project_title=project.title,
+                current_user_access=project.current_user_access,
+            )
+        )
+    return resp
+
+
+class OverleafLookup(BaseModel):
+    links: list[OverleafLinkPublic]
+    # How much of the search happened, so a caller can tell "no project
+    # syncs with this" apart from "not all of them have been looked at"
+    projects_scanned: int
+    projects_remaining: int
+
+
+# A project's Overleaf links change about as often as its calkit.yaml, so
+# a scan stays good for a day. ``refresh`` overrides it for the case where
+# the link was only just added.
+OVERLEAF_SCAN_TTL = timedelta(hours=24)
+# Each unscanned project costs one GitHub request, so a single lookup does
+# a bounded amount of work and reports what it left for the next one.
+MAX_OVERLEAF_SCANS = 25
+
+
+@router.get("/user/overleaf-syncs/{overleaf_project_id}")
+def get_user_overleaf_sync(
+    overleaf_project_id: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    active_project: str | None = None,
+    refresh: bool = False,
+) -> OverleafLookup:
+    """Find which of the user's projects syncs with an Overleaf project.
+
+    The index answers immediately once a project has been looked at. When
+    it doesn't, the user's projects are read one at a time until the one
+    that syncs with this Overleaf project turns up, and what's found is
+    indexed on the way so the next lookup is a single query.
+
+    ``active_project`` is searched first, since the project someone is
+    working in is overwhelmingly the one their Overleaf document belongs
+    to, and finding it there avoids reading anything else.
+    """
+    if not refresh:
+        links = _indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        )
+        if links:
+            return OverleafLookup(
+                links=links, projects_scanned=0, projects_remaining=0
+            )
+    candidates = session.exec(
+        select(Project)
+        .distinct()
+        .join(Project.user_access_records, isouter=True)  # type: ignore
+        .where(app.projects.writable_project_clause(current_user))
+        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+    ).all()
+    cutoff = utcnow() - OVERLEAF_SCAN_TTL
+    to_scan = [
+        project
+        for project in candidates
+        if refresh
+        or project.overleaf_scanned is None
+        or project.overleaf_scanned < cutoff
+    ]
+    if active_project and active_project.count("/") == 1:
+        hint_owner, hint_name = active_project.split("/")
+        to_scan.sort(
+            key=lambda project: (
+                project.owner_account_name.lower() != hint_owner.lower()
+                or project.name.lower() != hint_name.lower()
+            )
+        )
+    scanned = 0
+    for project in to_scan[:MAX_OVERLEAF_SCANS]:
+        app.projects.scan_overleaf_links(
+            session=session, project=project, user=current_user
+        )
+        scanned += 1
+        links = _indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        )
+        if links:
+            return OverleafLookup(
+                links=links,
+                projects_scanned=scanned,
+                projects_remaining=max(len(to_scan) - scanned, 0),
+            )
+    return OverleafLookup(
+        links=_indexed_overleaf_links(
+            session, current_user, overleaf_project_id
+        ),
+        projects_scanned=scanned,
+        projects_remaining=max(len(to_scan) - scanned, 0),
     )
 
 
@@ -4352,11 +5045,25 @@ def get_project_pipeline(
         params = ryaml.load(tree.read_text("params.yaml"))
     else:
         params = None
-    # Generate Mermaid diagram
-    mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
-    logger.info(
-        f"Created Mermaid diagram for {owner_name}/{project_name}:\n{mermaid}"
-    )
+    # Generate Mermaid diagram. A dvc.yaml can be invalid in ways only DVC
+    # finds when it builds the graph -- two stages writing overlapping
+    # outputs, a dependency cycle -- and that's the user's pipeline to fix,
+    # not a server fault. Report it and carry on: the stages and their
+    # statuses below are still worth showing.
+    mermaid = ""
+    pipeline_error: str | None = None
+    try:
+        mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
+        logger.info(
+            f"Created Mermaid diagram for {owner_name}/{project_name}:\n"
+            f"{mermaid}"
+        )
+    except Exception as e:
+        pipeline_error = str(e).strip() or type(e).__name__
+        logger.info(
+            f"Invalid pipeline for {owner_name}/{project_name}: "
+            f"{type(e).__name__}: {e}"
+        )
     # Compute per-stage staleness against the committed dvc.lock
     stage_statuses: dict = {}
     overall_status = "unknown"
@@ -4379,11 +5086,260 @@ def get_project_pipeline(
     return Pipeline(
         dvc_stages=dvc_pipeline["stages"],
         mermaid=mermaid,
+        error=pipeline_error,
         dvc_yaml=dvc_content,
         calkit_yaml=calkit_content,
+        ck_stages=list((ck_info.get("pipeline") or {}).get("stages") or {}),
         stage_statuses=stage_statuses,
         status=overall_status,
     )
+
+
+def _abs_path_within(root: str, rel_path: str) -> str:
+    """Resolve ``rel_path`` under ``root``, refusing anything that escapes it.
+
+    Paths that reach us from a request body are only ever meant to name
+    something inside the project's clone, so one that resolves outside it is
+    a bad request rather than a file to go read.
+    """
+    root_real = os.path.realpath(root)
+    resolved = os.path.realpath(os.path.join(root_real, rel_path))
+    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+        raise HTTPException(422, f"Path is outside the project: {rel_path}")
+    return resolved
+
+
+def _load_ck_stage_map(stage_yaml: str) -> Any:
+    """Parse one stage's YAML, keeping key order and comments.
+
+    ``ryaml`` is round-trip, so what comes back is a CommentedMap that
+    dumps in the order it was written. Everything here works on that map
+    rather than on a model dump, which would come back in the model's
+    field order and drop the author's comments.
+    """
+    try:
+        stage_map = ryaml.load(stage_yaml)
+    except Exception as e:
+        raise HTTPException(422, f"Invalid YAML: {e}")
+    if not isinstance(stage_map, dict):
+        raise HTTPException(422, "A stage must be a YAML mapping")
+    return stage_map
+
+
+def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:
+    """Check a stage against the models, returning the parsed stage.
+
+    Validation goes through the same discriminated union the CLI uses, so
+    an unknown kind or a missing required field is a 422 here rather than
+    a broken pipeline later.
+    """
+    try:
+        # Validating as a one-stage pipeline gets the kind-based dispatch
+        # (and the name/key consistency check) for free.
+        stage = CkPipeline(stages={stage_name: dict(stage_map)}).stages[
+            stage_name
+        ]
+    except Exception as e:
+        raise HTTPException(422, f"Invalid stage: {e}")
+    # Pipeline validation fills in name from the key, which is redundant
+    # with the key itself in calkit.yaml.
+    stage.name = None
+    return stage
+
+
+def _dump_ck_stage_map(stage_map: Any) -> str:
+    stream = io.StringIO()
+    ryaml.dump(stage_map, stream)
+    return stream.getvalue()
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+)
+def get_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> PipelineStage:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref
+    )
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if stage_name not in stages:
+        raise HTTPException(404, "Stage not found")
+    # Handed back exactly as written, comments and all. Tidying it up is the
+    # "Remove empty/default keys" action, not something a read does silently.
+    return PipelineStage(
+        name=stage_name, yaml=_dump_ck_stage_map(stages[stage_name])
+    )
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/remove-defaults"
+)
+def remove_project_pipeline_stage_defaults(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStageEdit,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStageEdited:
+    """Drop keys the stage leaves at their default.
+
+    Older versions of Calkit wrote every optional field out, so a stage
+    can carry a dozen nulls that say nothing. Removing them is offered as
+    an action rather than done on save, since it's the user's file and
+    their call. Remaining keys keep the order and comments they had.
+    """
+    app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    stage_map = _load_ck_stage_map(req.yaml)
+    stage = _validate_ck_stage(stage_map, stage_name)
+    # to_ck_dict is exactly the non-default fields, so anything absent from
+    # it is a default worth dropping. Deleting in place leaves every
+    # surviving key where the author put it.
+    keep = stage.to_ck_dict()
+    # `slurm:` is renamed to `scheduler:` when the stage is loaded, so a stage
+    # still using the legacy spelling has no `slurm` key in the dump and would
+    # look like a default worth dropping -- dropping it would delete the
+    # scheduler config outright. Keep it under the name the author wrote.
+    if "slurm" in stage_map and "scheduler" in keep:
+        keep["slurm"] = keep.pop("scheduler")
+    removed = [key for key in stage_map if key not in keep]
+    for key in removed:
+        del stage_map[key]
+    return PipelineStageEdited(
+        yaml=_dump_ck_stage_map(stage_map), changed=removed
+    )
+
+
+@router.post(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/detect-inputs"
+)
+def detect_project_pipeline_stage_inputs(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStageEdit,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStageEdited:
+    """Add the files a LaTeX stage's document reads to its inputs.
+
+    LaTeX resolves its class, style, bibliography, and figure files itself,
+    so they're invisible to the pipeline unless declared -- and undeclared,
+    a change to the class file doesn't rebuild the paper and the in-browser
+    editor can't compile it. Returns the stage with anything found merged
+    in, so the user sees what would be added before saving.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    stage_map = _load_ck_stage_map(req.yaml)
+    stage = _validate_ck_stage(stage_map, stage_name)
+    if not isinstance(stage, CkLatexStage):
+        raise HTTPException(
+            422, "Inputs can only be detected for LaTeX stages"
+        )
+    # `wdir` and `target_path` come straight off the request body, and the
+    # stage models type them as plain strings, so they can climb out of the
+    # clone with `..`. Everything below reads files, so pin both inside the
+    # project before touching the filesystem.
+    root = str(repo.working_dir)
+    wdir = _abs_path_within(root, stage.wdir or "")
+    _abs_path_within(wdir, stage.target_path)
+    # An input can be a directory, so anything already covered by one is
+    # left off rather than listed again underneath it.
+    added = calkit.detect.filter_covered_inputs(
+        calkit.latex.detect_inputs(stage.target_path, wdir=wdir),
+        [i for i in stage.inputs if isinstance(i, str)],
+    )
+    if added:
+        # Appending to the existing list (rather than replacing the key)
+        # keeps `inputs` where the author put it, with its comments.
+        stage_map.setdefault("inputs", [])
+        for path in added:
+            stage_map["inputs"].append(path)
+    return PipelineStageEdited(
+        yaml=_dump_ck_stage_map(stage_map), changed=added
+    )
+
+
+@router.put(
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+)
+def put_project_pipeline_stage(
+    owner_name: str,
+    project_name: str,
+    stage_name: str,
+    req: PipelineStagePut,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> PipelineStage:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    # Write into the file as it is on disk, not the include-processed view,
+    # so a project that splits its pipeline across files keeps that split.
+    ck_info = get_ck_info_from_repo(repo=repo, process_includes=False)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    if stage_name not in stages:
+        raise HTTPException(404, "Stage not found")
+    stage_map = _load_ck_stage_map(req.yaml)
+    # Validated but written as the user wrote it: same key order, same
+    # comments. Tidying is the "remove defaults" action, not a side effect
+    # of saving.
+    _validate_ck_stage(stage_map, stage_name)
+    stages[stage_name] = stage_map
+    ck_info["pipeline"]["stages"] = stages
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    if repo.is_dirty():
+        repo.git.commit(
+            ["-m", req.message or f"Update pipeline stage {stage_name}"]
+        )
+        repo.git.push(["origin", repo.active_branch.name])
+    return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
 
 
 class Collaborator(BaseModel):
@@ -5048,6 +6004,9 @@ class ReferenceEntry(BaseModel):
     file_path: str | None = None
     url: str | None = None
     attrs: dict
+    # Set when the entry is an arXiv paper, so the PDF can be fetched even
+    # though nothing is stored in the repo.
+    arxiv_id: str | None = None
     # Zotero linkage (populated for Zotero-linked collections).
     zotero_item_key: str | None = None
     has_pdf: bool = False
@@ -5267,6 +6226,7 @@ def get_project_references(
                             attrs=entry,
                             file_path=file_path,
                             url=url,
+                            arxiv_id=arxiv.id_from_bib_attrs(entry),
                             zotero_item_key=item.get("item_key"),
                             has_pdf=bool(item.get("pdf_attachment_keys")),
                             note_count=note_count,
@@ -5431,10 +6391,18 @@ class ReferenceItemPost(BaseModel):
     fields: dict[str, str] = {}
 
 
-def _load_bib_db(repo, path: str):
+def _load_bib_db(repo, path: str, create: bool = False):
+    """Parse a .bib file from the repo.
+
+    With ``create``, a path that doesn't exist yet yields an empty
+    database instead of a 404, so a project's first reference can be added
+    without the user having to create the file first.
+    """
     full_path = os.path.join(repo.working_dir, path)
     if not os.path.isfile(full_path):
-        raise HTTPException(404, "References file not found")
+        if not create:
+            raise HTTPException(404, "References file not found")
+        return bibtexparser.loads(""), full_path
     with open(full_path) as f:
         return bibtexparser.loads(f.read()), full_path
 
@@ -5463,7 +6431,10 @@ def post_project_reference_item(
         min_access_level="write",
     )
     repo = get_repo(project=project, user=current_user, session=session)
-    db, full_path = _load_bib_db(repo, req.path)
+    # Adding the first reference to a project shouldn't require creating
+    # the collection by hand first
+    db, full_path = _load_bib_db(repo, req.path, create=True)
+    created = not os.path.isfile(full_path)
     if any(e.get("ID") == req.key for e in db.entries):
         raise HTTPException(409, f"An entry '{req.key}' already exists")
     entry = {"ENTRYTYPE": req.type, "ID": req.key}
@@ -5480,11 +6451,31 @@ def post_project_reference_item(
             session=session, user=current_user
         )
         _push_added_reference(repo, api_key, link, req.path, req)
+    os.makedirs(os.path.dirname(full_path) or ".", exist_ok=True)
     with open(full_path, "w") as f:
         f.write(zotero.format_bib(bibtexparser.dumps(db)))
     repo.git.add(req.path)
+    # A brand new collection is declared in calkit.yaml too, so it shows up
+    # as a real collection rather than only being found by the .bib scan
+    if created:
+        ck_info = get_ck_info_from_repo(repo)
+        collections = ck_info.get("references") or []
+        if not any(
+            isinstance(c, dict) and c.get("path") == req.path
+            for c in collections
+        ):
+            collections.append({"path": req.path})
+            ck_info["references"] = collections
+            with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+                ryaml.dump(ck_info, f)
+            repo.git.add("calkit.yaml")
     if repo.git.diff("--cached", "--name-only").strip():
-        repo.git.commit(["-m", f"Add reference '{req.key}'"])
+        message = (
+            f"Add reference '{req.key}'"
+            if not created
+            else f"Add reference '{req.key}' in new collection '{req.path}'"
+        )
+        repo.git.commit(["-m", message])
         repo.git.push(["origin", repo.active_branch.name])
     mixpanel.track(
         user=current_user,
@@ -7171,6 +8162,64 @@ class GitHubRelease(BaseModel):
     body: str
     created: datetime
     published: datetime
+
+
+class GithubPullRequest(BaseModel):
+    number: int
+    title: str
+    head_ref: str
+    base_ref: str
+    head_sha: str
+    base_sha: str
+
+
+@router.get("/projects/{owner_name}/{project_name}/github-pulls/{pull_number}")
+def get_project_github_pull(
+    owner_name: str,
+    project_name: str,
+    pull_number: int,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> GithubPullRequest:
+    """Read a pull request's refs from GitHub.
+
+    Proxied rather than read from the browser so a private repo works:
+    the caller has read access to the project here, and the hub holds a
+    GitHub token, where an unauthenticated request would only ever see
+    public repos.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    if not project.github_repo:
+        raise HTTPException(400, "Project is not backed by a GitHub repo")
+    token = users.get_github_token(session=session, user=current_user)
+    resp = requests.get(
+        f"https://api.github.com/repos/{project.github_repo}"
+        f"/pulls/{pull_number}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        raise HTTPException(
+            resp.status_code, f"Could not read pull request #{pull_number}"
+        )
+    body = resp.json()
+    return GithubPullRequest(
+        number=body["number"],
+        title=body.get("title") or "",
+        head_ref=body["head"]["ref"],
+        base_ref=body["base"]["ref"],
+        head_sha=body["head"]["sha"],
+        base_sha=body["base"]["sha"],
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/github-releases")

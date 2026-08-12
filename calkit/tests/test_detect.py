@@ -1353,3 +1353,58 @@ def test_detection_ignore(tmp_dir):
     in_dir = "notebooks/scratch/data/raw.parquet"
     assert detect_artifact_kind(in_dir) == "dataset"
     assert detect_artifact_kind(in_dir, ignore=ignore) is None
+
+
+def test_filter_covered_inputs():
+    from calkit.detect import filter_covered_inputs
+
+    # A declared directory covers everything inside it, at any depth
+    assert filter_covered_inputs(
+        ["figures/a.png", "figures/sub/b.png", "refs.bib"], ["figures"]
+    ) == ["refs.bib"]
+    # A trailing slash on either side means the same directory
+    assert filter_covered_inputs(["figures/a.png"], ["figures/"]) == []
+    # An exact repeat is covered too, and duplicates within the detected
+    # list collapse
+    assert filter_covered_inputs(
+        ["refs.bib", "refs.bib", "paper/x.cls"], ["refs.bib"]
+    ) == ["paper/x.cls"]
+    # A partial name segment is not a parent directory
+    assert filter_covered_inputs(["figures-old/a.png"], ["figures"]) == [
+        "figures-old/a.png"
+    ]
+    # Nothing declared means nothing filtered, and order is preserved
+    assert filter_covered_inputs(["b.png", "a.png"], []) == ["b.png", "a.png"]
+
+
+def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
+    # What LaTeX resolves by name rather than by path: the document class,
+    # a local style file the class itself loads, the bibliography style,
+    # and a figure written without its extension
+    with open("jfm.cls", "w") as f:
+        f.write("\\usepackage{upmath}\n")
+    with open("upmath.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("jfm.bst", "w") as f:
+        f.write("% nothing\n")
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.pdf", "wb") as f:
+        f.write(b"%PDF-1.4")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("paper.tex", "w") as f:
+        f.write(
+            "\\documentclass{jfm}\n"
+            "\\usepackage{graphicx}\n"
+            "\\bibliographystyle{jfm}\n"
+            "\\includegraphics{figures/fig}\n"
+            "\\bibliography{refs}\n"
+        )
+    inputs = detect_latex_io("paper.tex")["inputs"]
+    assert "jfm.cls" in inputs
+    assert "upmath.sty" in inputs
+    assert "jfm.bst" in inputs
+    assert "figures/fig.pdf" in inputs
+    assert "refs.bib" in inputs
+    # graphicx comes from TeX Live, not the project
+    assert "graphicx.sty" not in inputs

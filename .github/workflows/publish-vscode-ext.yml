@@ -21,7 +21,7 @@ jobs:
       run:
         working-directory: vscode-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -58,7 +58,7 @@ jobs:
           echo "name=calkit-vscode-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
           echo "vsix-path=vscode-ext/dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix" >> "$GITHUB_OUTPUT"
       - name: Upload extension package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.artifact.outputs.name }}
           path: ${{ steps.artifact.outputs.vsix-path }}
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download extension package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: dist
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download extension package
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.artifact-name }}
           path: dist

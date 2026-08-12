@@ -8,12 +8,11 @@ import type { AxiosError } from "axios"
 import { UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import { consumeZoteroReturn } from "../../lib/zotero"
 
 // Zotero uses OAuth 1.0a, so it sends back a verifier rather than a code, and
 // the request token it was issued against stands in for a state parameter.
 // Zotero omits the verifier when the user declines.
-// Kept in sync with the references page, which stashes where to return.
-const ZOTERO_RETURN_KEY = "zoteroAuthReturnTo"
 
 const authParamsSchema = z.object({
   oauth_token: z.string(),
@@ -62,11 +61,14 @@ function ZoteroAuth() {
   // Return to wherever the connect flow was started (e.g. the references import
   // modal), reopening the import modal on success. Falls back to settings.
   const returnToOrigin = (success: boolean) => {
-    const origin = sessionStorage.getItem(ZOTERO_RETURN_KEY)
-    sessionStorage.removeItem(ZOTERO_RETURN_KEY)
+    const origin = consumeZoteroReturn()
     if (origin) {
-      const url = new URL(origin, window.location.origin)
-      if (success) url.searchParams.set("import_zotero_open", "true")
+      const url = new URL(origin.to, window.location.origin)
+      // Only the import flow wants its modal back; connecting from a sync
+      // or an item should land on the page as it was
+      if (success && origin.reopenImport) {
+        url.searchParams.set("import_zotero_open", "true")
+      }
       window.location.assign(url.pathname + url.search)
     } else {
       navigate({ to: "/settings", search: { tab: "connected-accounts" } })

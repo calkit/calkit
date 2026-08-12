@@ -655,6 +655,17 @@ export const ContentsItemSchema = {
       ],
       title: "Storage",
     },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
+    },
     stage: {
       anyOf: [
         {
@@ -1072,6 +1083,28 @@ export const DeviceTokenRequestSchema = {
   title: "DeviceTokenRequest",
 } as const
 
+export const DiffSegmentSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["equal", "insert", "delete"],
+      title: "Kind",
+    },
+    text: {
+      type: "string",
+      title: "Text",
+    },
+    elided: {
+      type: "boolean",
+      title: "Elided",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["kind", "text"],
+  title: "DiffSegment",
+} as const
+
 export const DiscountCodeSchema = {
   properties: {
     id: {
@@ -1331,6 +1364,66 @@ export const DvcForeachStageSchema = {
   type: "object",
   required: ["foreach", "do"],
   title: "DvcForeachStage",
+} as const
+
+export const DvcOutputSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    type: {
+      type: "string",
+      title: "Type",
+      default: "file",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
+    },
+    storage: {
+      type: "string",
+      title: "Storage",
+      default: "dvc",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+  },
+  type: "object",
+  required: ["path", "name"],
+  title: "DvcOutput",
+  description: "A DVC-tracked output as it stands at one Git ref.",
 } as const
 
 export const DvcPipelineStageSchema = {
@@ -1717,6 +1810,35 @@ export const FigureSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Figure",
+} as const
+
+export const FiguresPageSchema = {
+  properties: {
+    items: {
+      items: {
+        $ref: "#/components/schemas/Figure",
+      },
+      type: "array",
+      title: "Items",
+    },
+    total: {
+      type: "integer",
+      title: "Total",
+    },
+    limit: {
+      type: "integer",
+      title: "Limit",
+    },
+    offset: {
+      type: "integer",
+      title: "Offset",
+    },
+  },
+  type: "object",
+  required: ["items", "total", "limit", "offset"],
+  title: "FiguresPage",
+  description:
+    "A page of project figures, with the total available for paging.",
 } as const
 
 export const FileLockSchema = {
@@ -2371,6 +2493,38 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
+export const GithubPullRequestSchema = {
+  properties: {
+    number: {
+      type: "integer",
+      title: "Number",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    head_ref: {
+      type: "string",
+      title: "Head Ref",
+    },
+    base_ref: {
+      type: "string",
+      title: "Base Ref",
+    },
+    head_sha: {
+      type: "string",
+      title: "Head Sha",
+    },
+    base_sha: {
+      type: "string",
+      title: "Base Sha",
+    },
+  },
+  type: "object",
+  required: ["number", "title", "head_ref", "base_ref", "head_sha", "base_sha"],
+  title: "GithubPullRequest",
+} as const
+
 export const HTTPValidationErrorSchema = {
   properties: {
     detail: {
@@ -2442,6 +2596,18 @@ export const HttpRequestAccessSchema = {
   type: "object",
   required: ["url", "http_method"],
   title: "HttpRequestAccess",
+} as const
+
+export const HubVersionSchema = {
+  properties: {
+    version: {
+      type: "string",
+      title: "Version",
+    },
+  },
+  type: "object",
+  required: ["version"],
+  title: "HubVersion",
 } as const
 
 export const ImportInfoSchema = {
@@ -3220,6 +3386,76 @@ export const OrgsResponseSchema = {
   title: "OrgsResponse",
 } as const
 
+export const OverleafLinkPublicSchema = {
+  properties: {
+    overleaf_project_id: {
+      type: "string",
+      title: "Overleaf Project Id",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    project_owner_name: {
+      type: "string",
+      title: "Project Owner Name",
+    },
+    project_name: {
+      type: "string",
+      title: "Project Name",
+    },
+    project_title: {
+      type: "string",
+      title: "Project Title",
+    },
+    current_user_access: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["read", "write", "admin", "owner"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Current User Access",
+    },
+  },
+  type: "object",
+  required: [
+    "overleaf_project_id",
+    "path",
+    "project_owner_name",
+    "project_name",
+    "project_title",
+    "current_user_access",
+  ],
+  title: "OverleafLinkPublic",
+} as const
+
+export const OverleafLookupSchema = {
+  properties: {
+    links: {
+      items: {
+        $ref: "#/components/schemas/OverleafLinkPublic",
+      },
+      type: "array",
+      title: "Links",
+    },
+    projects_scanned: {
+      type: "integer",
+      title: "Projects Scanned",
+    },
+    projects_remaining: {
+      type: "integer",
+      title: "Projects Remaining",
+    },
+  },
+  type: "object",
+  required: ["links", "projects_scanned", "projects_remaining"],
+  title: "OverleafLookup",
+} as const
+
 export const OverleafSyncPostSchema = {
   properties: {
     path: {
@@ -3266,11 +3502,151 @@ export const OverleafSyncResponseSchema = {
   title: "OverleafSyncResponse",
 } as const
 
+export const OverleafSyncStatusSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    overleaf_project_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Project Id",
+    },
+    overleaf_url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Overleaf Url",
+    },
+    last_sync_commit: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Last Sync Commit",
+    },
+    project_commit: {
+      type: "string",
+      title: "Project Commit",
+    },
+    overleaf_commit: {
+      type: "string",
+      title: "Overleaf Commit",
+    },
+    commits_from_overleaf: {
+      type: "integer",
+      title: "Commits From Overleaf",
+    },
+    files_to_push: {
+      items: {
+        $ref: "#/components/schemas/OverleafSyncStatusFile",
+      },
+      type: "array",
+      title: "Files To Push",
+    },
+    files_to_delete: {
+      items: {
+        $ref: "#/components/schemas/OverleafSyncStatusFile",
+      },
+      type: "array",
+      title: "Files To Delete",
+    },
+    in_sync: {
+      type: "boolean",
+      title: "In Sync",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "project_commit",
+    "overleaf_commit",
+    "commits_from_overleaf",
+    "files_to_push",
+    "files_to_delete",
+    "in_sync",
+  ],
+  title: "OverleafSyncStatus",
+} as const
+
+export const OverleafSyncStatusFileSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    project_path: {
+      type: "string",
+      title: "Project Path",
+    },
+    state: {
+      type: "string",
+      enum: ["new", "modified", "deleted"],
+      title: "State",
+    },
+    figure: {
+      type: "boolean",
+      title: "Figure",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_status: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/StageStatus",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["path", "project_path", "state", "figure"],
+  title: "OverleafSyncStatusFile",
+} as const
+
 export const PipelineSchema = {
   properties: {
     mermaid: {
       type: "string",
       title: "Mermaid",
+    },
+    error: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Error",
     },
     dvc_stages: {
       additionalProperties: {
@@ -3301,6 +3677,13 @@ export const PipelineSchema = {
       ],
       title: "Calkit Yaml",
     },
+    ck_stages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Ck Stages",
+    },
     stage_statuses: {
       additionalProperties: {
         $ref: "#/components/schemas/StageStatus",
@@ -3318,6 +3701,82 @@ export const PipelineSchema = {
   type: "object",
   required: ["mermaid", "dvc_stages", "dvc_yaml", "calkit_yaml"],
   title: "Pipeline",
+} as const
+
+export const PipelineStageSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["name", "yaml"],
+  title: "PipelineStage",
+  description:
+    "One stage of the Calkit pipeline, as editable YAML.\n\nThe YAML is the stage's body only (no name key), exactly as it sits in\ncalkit.yaml -- same key order, same comments.",
+} as const
+
+export const PipelineStageEditSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineStageEdit",
+  description:
+    "A stage edit to compute, against the editor's unsaved content.\n\nThe YAML is what's in the editor rather than what's committed, so\nre-detecting right after changing ``target_path`` looks at the new\ntarget.",
+} as const
+
+export const PipelineStageEditedSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    changed: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Changed",
+    },
+  },
+  type: "object",
+  required: ["yaml", "changed"],
+  title: "PipelineStageEdited",
+  description:
+    "The stage after an edit, plus what the edit touched.\n\n``changed`` is what the user should see happened: the inputs added, or\nthe default-valued keys removed.",
+} as const
+
+export const PipelineStagePutSchema = {
+  properties: {
+    yaml: {
+      type: "string",
+      title: "Yaml",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["yaml"],
+  title: "PipelineStagePut",
 } as const
 
 export const PresentationSchema = {
@@ -5296,6 +5755,17 @@ export const ReferenceEntrySchema = {
       type: "object",
       title: "Attrs",
     },
+    arxiv_id: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Arxiv Id",
+    },
     zotero_item_key: {
       anyOf: [
         {
@@ -5468,6 +5938,84 @@ export const ReferenceNotesResponseSchema = {
   type: "object",
   required: ["notes"],
   title: "ReferenceNotesResponse",
+} as const
+
+export const ReferenceSearchMatchSchema = {
+  properties: {
+    project_owner_name: {
+      type: "string",
+      title: "Project Owner Name",
+    },
+    project_name: {
+      type: "string",
+      title: "Project Name",
+    },
+    project_title: {
+      type: "string",
+      title: "Project Title",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    type: {
+      type: "string",
+      title: "Type",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    doi: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Doi",
+    },
+    note_count: {
+      type: "integer",
+      title: "Note Count",
+      default: 0,
+    },
+    matched_on: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["doi", "arxiv_id", "title"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Matched On",
+    },
+  },
+  type: "object",
+  required: [
+    "project_owner_name",
+    "project_name",
+    "project_title",
+    "path",
+    "key",
+    "type",
+  ],
+  title: "ReferenceSearchMatch",
 } as const
 
 export const ReferenceZoteroLinkSchema = {
@@ -7284,6 +7832,42 @@ export const SubscriptionUpdateSchema = {
   title: "SubscriptionUpdate",
 } as const
 
+export const TextDiffSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    base_ref: {
+      type: "string",
+      title: "Base Ref",
+    },
+    head_ref: {
+      type: "string",
+      title: "Head Ref",
+    },
+    identical: {
+      type: "boolean",
+      title: "Identical",
+    },
+    segments: {
+      items: {
+        $ref: "#/components/schemas/DiffSegment",
+      },
+      type: "array",
+      title: "Segments",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "base_ref", "head_ref", "identical", "segments"],
+  title: "TextDiff",
+} as const
+
 export const TokenSchema = {
   properties: {
     access_token: {
@@ -8362,6 +8946,17 @@ export const _ContentsItemBaseSchema = {
         },
       ],
       title: "Storage",
+    },
+    md5: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Md5",
     },
     stage: {
       anyOf: [

@@ -269,11 +269,199 @@ def _make_fake_blob(path: str) -> SimpleNamespace:
     return SimpleNamespace(type="blob", path=path)
 
 
+def test_get_project_figures_paginates(client: TestClient) -> None:
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
+    fake_tree = SimpleNamespace()
+    paths = [f"figures/fig{i}.png" for i in range(5)]
+    blobs = [_make_fake_blob(p) for p in paths]
+    fake_commit = SimpleNamespace()
+    fake_commit.tree = SimpleNamespace(traverse=lambda: iter(blobs))
+    fake_repo = SimpleNamespace()
+    fake_repo.head = SimpleNamespace(commit=fake_commit)
+    fake_contents = ContentsItem(
+        name="fig",
+        path="fig",
+        type="file",
+        size=0,
+        in_repo=True,
+        content=None,
+        url=None,
+        storage=None,
+    )
+    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=fake_repo,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=fake_tree,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_and_dvc_outs_from_tree",
+            return_value=CkInfoAndOuts({}, {}, {}, {}),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_contents_from_tree",
+            return_value=fake_contents,
+        ) as mock_contents,
+    ):
+        first = client.get(f"{url}?limit=2&offset=0")
+        # Content is resolved only for the page, not the whole project. This
+        # is the property that keeps the endpoint from scaling with the
+        # project's figure count.
+        assert mock_contents.call_count == 2
+        mock_contents.reset_mock()
+        second = client.get(f"{url}?limit=2&offset=2")
+        assert mock_contents.call_count == 2
+        mock_contents.reset_mock()
+        last = client.get(f"{url}?limit=2&offset=4")
+        assert mock_contents.call_count == 1
+        past_end = client.get(f"{url}?limit=2&offset=10")
+        overshoot = client.get(f"{url}?limit=100&offset=0")
+    # Every page reports the same total so the client can page through.
+    for resp in (first, second, last, past_end, overshoot):
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 5
+    assert [f["path"] for f in first.json()["items"]] == paths[:2]
+    assert [f["path"] for f in second.json()["items"]] == paths[2:4]
+    assert [f["path"] for f in last.json()["items"]] == paths[4:]
+    assert past_end.json()["items"] == []
+    assert [f["path"] for f in overshoot.json()["items"]] == paths
+    assert first.json()["limit"] == 2
+    assert first.json()["offset"] == 0
+    # Out-of-range paging values are rejected rather than silently clamped.
+    assert client.get(f"{url}?limit=0").status_code == 422
+    assert client.get(f"{url}?limit=101").status_code == 422
+    assert client.get(f"{url}?offset=-1").status_code == 422
+
+
+def test_get_project_figures_search_content_and_single(
+    client: TestClient,
+) -> None:
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
+    paths = [f"figures/plot{i}.png" for i in range(30)]
+    paths += ["figures/nested/histogram.png"]
+    blobs = [_make_fake_blob(p) for p in paths]
+    fake_repo = SimpleNamespace(
+        head=SimpleNamespace(
+            commit=SimpleNamespace(
+                tree=SimpleNamespace(traverse=lambda: iter(blobs))
+            )
+        )
+    )
+    fake_contents = ContentsItem(
+        name="fig",
+        path="fig",
+        type="file",
+        size=0,
+        in_repo=True,
+        content="Zm9v",
+        url="https://example.com/fig.png",
+        storage="git",
+    )
+    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=fake_repo,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects."
+            "get_ck_info_and_dvc_outs_from_tree",
+            return_value=CkInfoAndOuts({}, {}, {}, {}),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_contents_from_tree",
+            return_value=fake_contents,
+        ) as mock_contents,
+    ):
+        # Search spans the whole project, not just the current page: the only
+        # match here is discovered well past the first page of 20.
+        matched = client.get(f"{url}?q=histogram&limit=20&offset=0")
+        # Matching is case-insensitive and substring-based.
+        upper = client.get(f"{url}?q=HISTO&limit=20&offset=0")
+        none_found = client.get(f"{url}?q=nothing-matches-this")
+        # A whitespace-only query means no filter at all.
+        blank = client.get(f"{url}?q=%20%20&limit=100&offset=0")
+        mock_contents.reset_mock()
+        # Metadata-only listings never touch object storage.
+        without = client.get(f"{url}?include_content=false&limit=5")
+        assert mock_contents.call_count == 0
+        with_content = client.get(f"{url}?include_content=true&limit=5")
+        assert mock_contents.call_count == 5
+        # A single figure resolves even though it is auto-detected rather
+        # than declared in calkit.yaml, and its nested path needs the route's
+        # path convertor to match at all.
+        found = client.get(f"{url}/figures/nested/histogram.png")
+        missing = client.get(f"{url}/figures/not-a-figure.png")
+    assert [f["path"] for f in matched.json()["items"]] == [
+        "figures/nested/histogram.png"
+    ]
+    # `total` describes the filtered set so the client pages through matches.
+    assert matched.json()["total"] == 1
+    assert [f["path"] for f in upper.json()["items"]] == [
+        "figures/nested/histogram.png"
+    ]
+    assert none_found.json()["items"] == []
+    assert none_found.json()["total"] == 0
+    assert blank.json()["total"] == len(paths)
+    # Same figures in the same order either way, just without the bytes.
+    assert without.status_code == 200
+    assert [f["path"] for f in without.json()["items"]] == paths[:5]
+    assert without.json()["total"] == len(paths)
+    assert all(f["content"] is None for f in without.json()["items"])
+    assert all(f["url"] is None for f in without.json()["items"])
+    assert all(f["content"] == "Zm9v" for f in with_content.json()["items"])
+    assert found.status_code == 200
+    assert found.json()["path"] == "figures/nested/histogram.png"
+    assert found.json()["content"] == "Zm9v"
+    # Auto-detected figures get a title derived from their path.
+    assert found.json()["title"]
+    assert missing.status_code == 404
+
+
 def test_get_project_figures_autodetects_deeply_nested(
     client: TestClient,
 ) -> None:
     """Figures inside a 'figures' dir at any depth must be auto-detected."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
     fake_tree = SimpleNamespace()
     # Blobs that should be detected: file is inside a 'figures' directory
     # at various depths.
@@ -336,9 +524,10 @@ def test_get_project_figures_autodetects_deeply_nested(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in detected_paths:
         assert path in returned_paths, f"Expected {path!r} to be detected"
@@ -363,7 +552,12 @@ def test_get_project_figures_autodetects_dvc_stored(
     client: TestClient,
 ) -> None:
     """Figures stored with DVC (in dvc_lock_outs) must be auto-detected."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
     # Repo has no git-tracked blobs
@@ -422,9 +616,10 @@ def test_get_project_figures_autodetects_dvc_stored(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in dvc_detected_paths:
         assert path in returned_paths, (
@@ -442,7 +637,12 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
     client: TestClient,
 ) -> None:
     """A figure tracked in both git tree and DVC lock outs must appear once."""
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"
     fake_blob = _make_fake_blob(shared_path)
@@ -492,9 +692,10 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     paths = [fig["path"] for fig in returned_figures]
     assert paths.count(shared_path) == 1, (
         f"Expected {shared_path!r} to appear exactly once, got {paths}"
@@ -510,7 +711,12 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
     'figures/plot.png.dvc'), the derived path ('figures/plot.png') should be
     checked and added as a figure if it passes the extension/directory filter.
     """
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
     fake_tree = SimpleNamespace()
     fake_repo = SimpleNamespace()
     # Blobs that are .dvc pointer files whose derived paths are figures
@@ -568,9 +774,10 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = {fig["path"] for fig in returned_figures}
     for path in dvc_pointer_detected:
         assert path in returned_paths, (
@@ -595,7 +802,12 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
     If a path is already in dvc_lock_outs (pipeline output), encountering the
     corresponding .dvc blob in the git tree must not produce a duplicate.
     """
-    fake_project = SimpleNamespace(id="00000000-0000-0000-0000-000000000001")
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000001",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
     fake_tree = SimpleNamespace()
     shared_path = "figures/shared.png"
     # Git tree contains a .dvc pointer blob for the same figure
@@ -646,9 +858,10 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
     ):
         response = client.get(
             f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+            "?limit=100"
         )
     assert response.status_code == 200
-    returned_figures = response.json()
+    returned_figures = response.json()["items"]
     returned_paths = [fig["path"] for fig in returned_figures]
     assert returned_paths.count(shared_path) == 1, (
         f"Expected {shared_path!r} to appear exactly once, got {returned_paths}"
@@ -711,6 +924,64 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
     mock_get_tree.assert_called_once_with(fake_repo, "some-branch")
     # ...and to the Calkit metadata read for the same reason
     assert mock_get_ck_info.call_args.kwargs["ref"] == "some-branch"
+
+
+def test_get_project_pipeline_reports_invalid_pipeline(
+    client: TestClient,
+) -> None:
+    fake_project = SimpleNamespace()
+    fake_repo = SimpleNamespace()
+    # Two stages writing overlapping outputs: valid YAML, but DVC rejects it
+    # when it builds the graph. That's the user's pipeline to fix, so the
+    # endpoint has to say so rather than 500.
+    files = {
+        "dvc.yaml": (
+            "stages:\n"
+            "  make-dir:\n"
+            "    cmd: python a.py\n"
+            "    outs:\n"
+            "    - results\n"
+            "  make-file:\n"
+            "    cmd: python b.py\n"
+            "    outs:\n"
+            "    - results/out.csv\n"
+        ),
+    }
+
+    class FakeTree:
+        def is_file(self, path: str) -> bool:
+            return path in files
+
+        def read_text(self, path: str, encoding: str = "utf-8") -> str:
+            return files[path]
+
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_repo_tree_for_ref",
+            return_value=FakeTree(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
+        )
+    assert response.status_code == 200
+    body = response.json()
+    # The reason is reported, and names the conflict so it's actionable.
+    assert body["error"]
+    assert "overlap" in body["error"].lower()
+    # No diagram, but the declared stages still come back so the page has
+    # something to show alongside the explanation.
+    assert body["mermaid"] == ""
+    assert set(body["dvc_stages"]) == {"make-dir", "make-file"}
 
 
 class _EmptyTree:
@@ -2416,3 +2687,225 @@ def test_delete_project_references_collection_missing(
     ):
         r = client.delete(f"{base}/references?path=nope.bib", headers=headers)
     assert r.status_code == 404, r.text
+
+
+def _make_stage_repo(working_dir: str, dirty: bool = True) -> SimpleNamespace:
+    """A repo stand-in for the pipeline stage routes.
+
+    Like _make_fake_repo, but with the is_dirty() the stage PUT checks
+    before committing.
+    """
+    repo = _make_fake_repo(working_dir)
+    repo.is_dirty = lambda *a, **k: dirty
+    return repo
+
+
+def test_project_pipeline_stage_edit(
+    client: TestClient, db: Session, tmp_path
+) -> None:
+    project, headers = _make_owner_with_project(db, client)
+    owner_name = project.owner_account.name
+    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    stages_url = f"{base}/pipeline/stages"
+    fake_repo = _make_stage_repo(str(tmp_path))
+    # A paper whose class file is only discoverable by reading the source,
+    # plus a style file the class itself pulls in and a figure directory
+    (tmp_path / "paper").mkdir()
+    (tmp_path / "paper" / "figures").mkdir()
+    (tmp_path / "paper" / "figures" / "fig.pdf").write_bytes(b"%PDF-1.4")
+    (tmp_path / "paper" / "paper.tex").write_text(
+        "\\documentclass{jfm}\n"
+        "\\usepackage{graphicx}\n"
+        "% \\usepackage{commented}\n"
+        "\\includegraphics{figures/fig}\n"
+        "\\begin{document}\\end{document}\n"
+    )
+    (tmp_path / "paper" / "jfm.cls").write_text("\\usepackage{upmath}\n")
+    (tmp_path / "paper" / "upmath.sty").write_text("% nothing\n")
+    (tmp_path / "paper" / "commented.sty").write_text("% nothing\n")
+    # As written by an older Calkit: optional fields spelled out as nulls,
+    # and target_path deliberately last so ordering is observable
+    stage_yaml = (
+        "kind: latex\n"
+        "environment: tex\n"
+        "wdir: null\n"
+        "iterate_over: null\n"
+        "always_run: false\n"
+        "outputs:\n"
+        "  - paper/paper.pdf\n"
+        "target_path: paper/paper.tex\n"
+    )
+    ck_info = {"pipeline": {"stages": {"paper": ryaml.load(stage_yaml)}}}
+
+    def fake_ck_info(*args, **kwargs) -> dict:
+        return ck_info
+
+    with (
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.get_ck_info_from_repo",
+            side_effect=fake_ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            side_effect=fake_ck_info,
+        ),
+    ):
+        # Reading a stage hands it back as written: nothing reordered and
+        # nothing removed, since tidying is the user's call
+        r = client.get(f"{stages_url}/paper", headers=headers)
+        assert r.status_code == 200, r.text
+        assert r.json()["name"] == "paper"
+        as_written = r.json()["yaml"]
+        assert list(ryaml.load(as_written)) == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+        ]
+        # A stage that doesn't exist is a 404, not an empty editor
+        r404 = client.get(f"{stages_url}/nope", headers=headers)
+        assert r404.status_code == 404
+        # Detection finds the class file and what the class itself loads,
+        # skipping TeX Live packages and commented-out ones
+        r = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={"yaml": as_written},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == [
+            "paper/figures/fig.pdf",
+            "paper/jfm.cls",
+            "paper/upmath.sty",
+        ]
+        detected_yaml = r.json()["yaml"]
+        # The keys that were there keep their order; inputs is appended
+        assert list(ryaml.load(detected_yaml))[:7] == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+        ]
+        # Detecting again adds nothing
+        r2 = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={"yaml": detected_yaml},
+        )
+        assert r2.status_code == 200, r2.text
+        assert r2.json()["changed"] == []
+        # A declared directory covers the figures inside it, so they are
+        # not listed individually
+        r3 = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: latex\nenvironment: tex\n"
+                    "target_path: paper/paper.tex\n"
+                    "inputs:\n  - paper/figures\n"
+                )
+            },
+        )
+        assert r3.status_code == 200, r3.text
+        assert r3.json()["changed"] == ["paper/jfm.cls", "paper/upmath.sty"]
+        # Removing defaults drops exactly the keys left at their default,
+        # leaving the rest where they were
+        r = client.post(
+            f"{stages_url}/paper/remove-defaults",
+            headers=headers,
+            json={"yaml": as_written},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == ["wdir", "iterate_over", "always_run"]
+        assert list(ryaml.load(r.json()["yaml"])) == [
+            "kind",
+            "environment",
+            "outputs",
+            "target_path",
+        ]
+        # Saving writes what the user has, untouched apart from validation
+        r = client.put(
+            f"{stages_url}/paper",
+            headers=headers,
+            json={"yaml": detected_yaml, "message": "Declare the class file"},
+        )
+        assert r.status_code == 200, r.text
+        written = ryaml.load((tmp_path / "calkit.yaml").read_text())
+        saved = written["pipeline"]["stages"]["paper"]
+        assert list(saved) == [
+            "kind",
+            "environment",
+            "wdir",
+            "iterate_over",
+            "always_run",
+            "outputs",
+            "target_path",
+            "inputs",
+        ]
+        assert saved["inputs"] == [
+            "paper/figures/fig.pdf",
+            "paper/jfm.cls",
+            "paper/upmath.sty",
+        ]
+        # Bad YAML, an unknown kind, and a missing required field are all
+        # rejected before anything is written
+        for bad in [
+            "kind: latex\n  bad indent: true\n",
+            "kind: not-a-real-kind\nenvironment: tex\n",
+            "kind: latex\nenvironment: tex\n",  # no target_path
+        ]:
+            r = client.put(
+                f"{stages_url}/paper", headers=headers, json={"yaml": bad}
+            )
+            assert r.status_code == 422, f"{bad!r} -> {r.status_code}"
+        # Detection is meaningless for a stage that isn't a document
+        r = client.post(
+            f"{stages_url}/paper/detect-inputs",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: python-script\nenvironment: py\n"
+                    "script_path: scripts/go.py\n"
+                )
+            },
+        )
+        assert r.status_code == 422, r.text
+        # Neither wdir nor target_path may point outside the project, since
+        # both come off the request body and are used to read files
+        for escaping in [
+            "kind: latex\nenvironment: tex\nwdir: ../..\n"
+            "target_path: paper.tex\n",
+            "kind: latex\nenvironment: tex\n"
+            "target_path: ../../../etc/passwd\n",
+        ]:
+            r = client.post(
+                f"{stages_url}/paper/detect-inputs",
+                headers=headers,
+                json={"yaml": escaping},
+            )
+            assert r.status_code == 422, f"{escaping!r} -> {r.status_code}"
+        # A stage still using the legacy `slurm:` spelling keeps it: it is
+        # renamed to `scheduler:` on load, so it isn't a default to drop, and
+        # dropping it would delete the scheduler config outright
+        r = client.post(
+            f"{stages_url}/paper/remove-defaults",
+            headers=headers,
+            json={
+                "yaml": (
+                    "kind: shell-command\nenvironment: tex\n"
+                    "command: echo hi\nwdir: null\n"
+                    "slurm:\n  account: abc\n  time: '01:00:00'\n"
+                )
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["changed"] == ["wdir"]
+        assert "slurm" in ryaml.load(r.json()["yaml"])

@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
+from app.storage import get_data_prefix_for_owner
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +145,66 @@ def _md5_in_object_storage(
         return False
 
 
+def _list_stored_md5s(
+    owner_name: str, project_name: str, fs
+) -> set[str] | None:
+    """Every md5 stored for a project, gathered by listing rather than probing.
+
+    A project's objects all live under one prefix per layout, so a single
+    paginated listing names all of them at once. That beats asking about each
+    md5 individually by a wide margin: on a project with ~6k lock entries,
+    listing takes well under a second where the per-md5 checks take ~12,
+    because the cost stops scaling with the number of artifacts.
+
+    Returns None if a listing fails, so the caller can fall back to probing.
+    """
+    # Mirrors the two layouts `make_data_fpath` writes: the current
+    # `<owner>/<project>/files/md5/<idx>/<rest>` and the legacy
+    # `<owner>/<project>/<idx>/<rest>`.
+    markers = [
+        (
+            f"{get_data_prefix_for_owner(owner_name)}/"
+            f"{project_name.lower()}/files/md5",
+            f"/{project_name.lower()}/files/md5/",
+        ),
+        (
+            f"{get_data_prefix_for_owner(owner_name, lowercase=False)}/"
+            f"{project_name}",
+            f"/{project_name}/",
+        ),
+    ]
+    md5s: set[str] = set()
+    for prefix, marker in markers:
+        try:
+            keys = fs.find(prefix)
+        except FileNotFoundError:
+            # A project that has never pushed under this layout.
+            continue
+        except Exception as e:
+            logger.warning(f"Failed to list object storage at {prefix}: {e}")
+            return None
+        for key in keys:
+            # Split on the marker rather than the prefix: `fs.find` returns
+            # keys without the scheme the prefix carries.
+            _, sep, rel = key.partition(marker)
+            if not sep:
+                continue
+            parts = rel.strip("/").split("/")
+            # Exactly <idx>/<rest>. Anything deeper is the current layout
+            # showing up underneath the legacy prefix, which the first marker
+            # already covered.
+            if len(parts) == 2:
+                md5s.add(parts[0] + parts[1])
+    return md5s
+
+
 def _precompute_storage_presence(
     dvc_lock: dict, owner_name: str, project_name: str, fs
 ) -> dict[str, bool]:
-    """Existence in object storage for every dep/out md5, checked in parallel.
+    """Existence in object storage for every dep/out md5.
 
-    Replaces the serial per-md5 ``fs.exists`` round-trips with one concurrent
-    batch. Returns a ``{md5: present}`` map; md5s absent from the map are
-    treated as not present by callers.
+    Returns a ``{md5: present}`` map; md5s absent from the map are treated as
+    not present by callers.
     """
     md5s: set[str] = set()
     for stage in (dvc_lock.get("stages") or {}).values():
@@ -161,6 +214,10 @@ def _precompute_storage_presence(
                 md5s.add(m)
     if not md5s:
         return {}
+    stored = _list_stored_md5s(owner_name, project_name, fs)
+    if stored is not None:
+        return {m: m in stored for m in md5s}
+    # Listing failed; fall back to probing each md5 concurrently.
     presence: dict[str, bool] = {}
     workers = min(_STORAGE_CHECK_MAX_WORKERS, len(md5s))
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -637,23 +694,40 @@ def color_mermaid_by_status(
     return mermaid.rstrip() + "\n" + "\n".join(extra) + "\n"
 
 
-def find_stage_for_path(path: str, dvc_lock: dict) -> str | None:
+def find_stage_for_path(
+    path: str, dvc_lock: dict, valid_stages: set[str] | None = None
+) -> str | None:
     """Return the stage in ``dvc.lock`` that produces *path*.
 
     Matches an exact out path first; failing that, matches a stage whose out is
     a *directory* containing *path* (e.g. an out of ``figures`` produces
     ``figures/test.png``). Exact matches always win over directory matches.
+
+    ``valid_stages`` limits matching to stages that are part of the current
+    pipeline, and should be passed whenever the caller has that set (the keys
+    of ``compute_stage_statuses``). dvc.lock accumulates entries that are no
+    longer real stages -- a bare ``name`` left from before it became a matrix,
+    or expansions from a matrix combination that has since changed -- and
+    those are exactly the entries staleness reporting drops. Matching one
+    anyway pins the artifact to a stage that has no status, so it silently
+    shows none. Stale entries are still used as a last resort, since naming
+    the stage that most likely produced a file beats naming nothing.
     """
-    dir_match: str | None = None
+    matches: list[tuple[bool, bool, str]] = []  # (is_exact, is_valid, name)
     for stage_name, stage in (dvc_lock.get("stages") or {}).items():
+        is_valid = valid_stages is None or stage_name in valid_stages
         for out in stage.get("outs") or []:
             out_path = out.get("path")
             if not out_path:
                 continue
             if out_path == path:
-                return stage_name
-            if dir_match is None and path.startswith(
-                out_path.rstrip("/") + "/"
-            ):
-                dir_match = stage_name
-    return dir_match
+                if is_valid:
+                    return stage_name
+                matches.append((True, False, stage_name))
+            elif path.startswith(out_path.rstrip("/") + "/"):
+                matches.append((False, is_valid, stage_name))
+    if not matches:
+        return None
+    # Exact beats directory, and a current stage beats a stale one.
+    matches.sort(key=lambda m: (not m[0], not m[1]))
+    return matches[0][2]

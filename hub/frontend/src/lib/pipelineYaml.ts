@@ -108,3 +108,20 @@ export function findStageLineRange(
   }
   return [start, end]
 }
+
+/**
+ * The `kind` of a single pipeline stage's YAML, or null if it has none.
+ *
+ * Parsed rather than pattern-matched: a trailing comment, quotes, or odd
+ * spacing shouldn't change the answer, and a kind that merely ends in
+ * "latex" (`json-to-latex`) isn't a `latex` stage.
+ */
+export function stageKindFromYaml(yamlContent: string): string | null {
+  try {
+    const parsed = jsYaml.load(yamlContent)
+    const kind = (parsed as { kind?: unknown } | null)?.kind
+    return typeof kind === "string" ? kind : null
+  } catch {
+    return null
+  }
+}

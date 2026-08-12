@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from calkit.models.iteration import Metric, ParametersType
 from calkit.models.pipeline import Pipeline
@@ -198,6 +198,11 @@ class SlurmEnvironment(Environment):
     host: str = "localhost"
     default_options: list[str] | None = None
     default_setup: list[str] | None = None
+    # How many of this project's jobs may sit in the queue (running or
+    # pending) at once. Submissions beyond the limit wait for a slot, so an
+    # iterated stage does not flood a shared cluster's queue with every one of
+    # its jobs at the same time. None means no limit.
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
 
 
 class PBSEnvironment(Environment):
@@ -205,6 +210,8 @@ class PBSEnvironment(Environment):
     host: str = "localhost"
     default_options: list[str] | None = None
     default_setup: list[str] | None = None
+    # See ``SlurmEnvironment.max_concurrent_jobs``.
+    max_concurrent_jobs: int | None = Field(default=None, ge=1)
 
 
 class SSHEnvironment(BaseModel):

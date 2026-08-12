@@ -178,7 +178,7 @@ show_error_codes = true
 
 # Third-party modules that ship no type stubs.
 [[tool.mypy.overrides]]
-module = ["sqlitedict", "networkx"]
+module = ["sqlitedict", "networkx", "yaml"]
 ignore_missing_imports = true
 
 # The hub backend is checked strict; mypy can't set ``strict`` per-module,
@@ -221,6 +221,11 @@ keep-runtime-typing = true
 
 [tool.uv.workspace]
 members = ["hub/backend"]
+
+# Version is dynamic, derived from the Git tags by hatch-vcs; see the same
+# setting in hub/backend/pyproject.toml for why uv needs to be told that
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
 
 [tool.pytest.ini_options]
 env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]

@@ -79,3 +79,39 @@ test-jlab-ui: ## Run the JupyterLab UI integration tests.
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm install
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright install
 	@uv run --directory=jupyterlab-ext/ui-tests jlpm playwright test -u --reporter=list
+
+.PHONY: browser-ext
+browser-ext: ## Build the browser extension and package it as a ZIP.
+	@echo "🚀 Building the browser extension"
+	@cd browser-ext && npm ci && npm run build
+	@echo "📦 Packaging the browser extension ZIP"
+	@mkdir -p browser-ext/zip
+# Packaged from a staged copy, never from dist: dist is what gets loaded
+# unpacked for development, and the published manifest drops the local
+# hub's host permission, which development needs.
+	@rm -rf browser-ext/zip/stage
+	@mkdir -p browser-ext/zip/stage
+	@cp -R browser-ext/dist/. browser-ext/zip/stage/
+	@cd browser-ext && node scripts/package-manifest.mjs zip/stage/manifest.json
+# Source maps are useful loading unpacked, but only bloat a store upload, so
+# they stay in dist and are excluded from the archive.
+# zip adds to an existing archive rather than replacing it, so a rebuild at
+# the same commit would otherwise keep files the build no longer produces.
+# $$ escapes the shell's expansion from Make's own.
+	@rm -f "browser-ext/zip/calkit-browser-ext.zip"
+	@cd browser-ext/zip/stage && zip -qr \
+		"../calkit-browser-ext.zip" . \
+		-x '.*' '*/.*' '*.map'
+	@rm -rf browser-ext/zip/stage
+
+.PHONY: browser-ext-dev
+browser-ext-dev: ## Rebuild the browser extension on every change.
+	@echo "🚀 Watching the browser extension"
+# Rebuilds on save. Chrome still needs the extension reloaded, since it
+# reads a content script from disk when a page loads. Vite doesn't type
+# check, so run 'cd browser-ext && npm run check' alongside this.
+	@cd browser-ext && npm ci && npm run dev
+
+.PHONY: browser-ext-clean-zips
+browser-ext-clean-zips: ## Delete all built browser extension ZIPs.
+	@rm -rf browser-ext/zip

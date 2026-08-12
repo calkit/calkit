@@ -3,7 +3,6 @@
 import os
 import subprocess
 import uuid
-from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -276,11 +275,14 @@ def test_execute_operation_retries_transient_5xx():
         assert resp.status_code == 200
 
 
-def _calkit_hub_available(
-    env: Literal["local", "staging", "production"] = "local",
-) -> bool:
-    """Check if the Calkit hub is available."""
-    with patch.dict(os.environ, {"CALKIT_ENV": env}):
+def _calkit_hub_available(hub: str = "localhost:5173") -> bool:
+    """Check if the Calkit hub is available.
+
+    Named by URL, and left with CALKIT_ENV=test in place, so credentials
+    still come from the suite's own isolated config rather than the
+    developer's real ones.
+    """
+    with patch.dict(os.environ, {"CALKIT_HUB": hub}):
         try:
             calkit.hub.get_current_user()
             return True
@@ -310,11 +312,12 @@ def test_calkitfilesystem():
 
 
 @pytest.mark.skipif(
-    not _calkit_hub_available("staging"), reason="Calkit hub not available"
+    not _calkit_hub_available("staging.calkit.io"),
+    reason="Calkit hub not available",
 )
 def test_calkitfilesystem_staging(monkeypatch):
     """Test CalkitFileSystem with staging environment."""
-    monkeypatch.setenv("CALKIT_ENV", "staging")
+    monkeypatch.setenv("CALKIT_HUB", "staging.calkit.io")
     fs = ckfs.CalkitFileSystem()
     assert fs.base_url == "https://api.staging.calkit.io"
     assert fs.protocol == "ck"
@@ -360,21 +363,22 @@ def test_calkitfilesystem_dvc(tmp_dir):
 
 
 @pytest.mark.skipif(
-    not _calkit_hub_available("staging"), reason="Calkit hub not available"
+    not _calkit_hub_available("staging.calkit.io"),
+    reason="Calkit hub not available",
 )
 def test_calkitfilesystem_dvc_staging(monkeypatch, tmp_dir):
     """Test CalkitFileSystem as a DVC remote against the staging
     environment.
     """
-    monkeypatch.setenv("CALKIT_ENV", "staging")
-    # Verify env var is set
+    monkeypatch.setenv("CALKIT_HUB", "staging.calkit.io")
+    # Verify the env var reaches a subprocess, since DVC runs the
+    # filesystem in one
     result = subprocess.run(
-        ["python", "-c", "import os; print(os.environ.get('CALKIT_ENV'))"],
+        ["python", "-c", "import os; print(os.environ.get('CALKIT_HUB'))"],
         capture_output=True,
         text=True,
     )
-    print(f"Subprocess sees CALKIT_ENV={result.stdout.strip()}")
-    assert result.stdout.strip() == "staging"
+    assert result.stdout.strip() == "staging.calkit.io"
     subprocess.run(["calkit", "init"])
     subprocess.run(
         [

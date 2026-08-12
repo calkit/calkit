@@ -15,6 +15,23 @@ interface MermaidProps {
   setIsDiagramExpanded: Function
   /** Pan/zoom the diagram to center the node for this pipeline stage. */
   zoomToStage?: string
+  /**
+   * Called with the stage name when a stage node is clicked. The diagram also
+   * contains file nodes, so `stageNames` decides which nodes are clickable.
+   */
+  onStageClick?: (stageName: string) => void
+  stageNames?: Set<string>
+}
+
+// The stage a node represents, or null if it isn't a stage node. Matrix
+// stages are drawn as `name@item`, and belong to the stage before the `@`.
+function nodeStage(node: SVGGElement, stageNames: Set<string>): string | null {
+  const label = (node.textContent ?? "").trim()
+  if (stageNames.has(label)) {
+    return label
+  }
+  const base = label.split("@")[0]
+  return stageNames.has(base) ? base : null
 }
 
 const Mermaid = ({
@@ -22,6 +39,8 @@ const Mermaid = ({
   isDiagramExpanded,
   setIsDiagramExpanded,
   zoomToStage,
+  onStageClick,
+  stageNames,
 }: MermaidProps) => {
   const zoomBehaviorRef = useRef<ZoomBehavior<Element, unknown> | null>(null)
   // Bumped each time the diagram finishes rendering so the zoom-to-stage
@@ -75,6 +94,60 @@ const Mermaid = ({
       select(".mermaid svg").on("zoom", null)
     }
   }, [children])
+
+  // Make stage nodes clickable, once the diagram is rendered. Listeners go on
+  // the nodes themselves (rather than one delegated handler) so the pointer
+  // cursor only appears on the nodes that actually do something. renderTick
+  // isn't read here but is the point: mermaid replaces the SVG on each render,
+  // so the listeners have to go back onto the new nodes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: renderTick re-attaches after a redraw
+  useEffect(() => {
+    const svgEl = select<SVGSVGElement, unknown>(".mermaid svg").node()
+    if (!svgEl || !onStageClick || !stageNames?.size) {
+      return
+    }
+    const cleanups: Array<() => void> = []
+    for (const node of Array.from(
+      svgEl.querySelectorAll<SVGGElement>(".node"),
+    )) {
+      const name = nodeStage(node, stageNames)
+      if (!name) {
+        continue
+      }
+      const handler = () => onStageClick(name)
+      // Enter and Space are what a button responds to, and Space would
+      // otherwise scroll the page.
+      const keyHandler = (e: KeyboardEvent) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onStageClick(name)
+        }
+      }
+      node.addEventListener("click", handler)
+      node.addEventListener("keydown", keyHandler)
+      // Button semantics so the action is reachable by keyboard and announced
+      // by screen readers. The label goes on aria-label rather than a <title>
+      // child: both this and the zoom-to-stage effect read a node's name off
+      // its textContent, which a <title> child would join.
+      node.setAttribute("tabindex", "0")
+      node.setAttribute("role", "button")
+      node.setAttribute("aria-label", `Edit stage ${name}`)
+      node.style.cursor = "pointer"
+      cleanups.push(() => {
+        node.removeEventListener("click", handler)
+        node.removeEventListener("keydown", keyHandler)
+        node.removeAttribute("tabindex")
+        node.removeAttribute("role")
+        node.removeAttribute("aria-label")
+        node.style.cursor = ""
+      })
+    }
+    return () => {
+      for (const cleanup of cleanups) {
+        cleanup()
+      }
+    }
+  }, [onStageClick, stageNames, renderTick])
 
   // Pan/zoom to the requested stage's node and outline it, once the diagram
   // is rendered.

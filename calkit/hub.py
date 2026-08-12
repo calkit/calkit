@@ -13,6 +13,7 @@ import time
 import webbrowser
 from functools import partial
 from typing import Literal
+from urllib.parse import urlparse
 
 import requests
 from requests.exceptions import ConnectionError as RequestsConnectionError
@@ -161,6 +162,29 @@ HUB_URLS = {
 DEFAULT_HUB_URL = HUB_URLS["production"]
 
 
+def api_url_from_hub_url(hub_url: str) -> str:
+    """Derive a hub's API base URL from its web URL.
+
+    A hub serves its API from the ``api`` subdomain of the host serving its
+    web app, so a hub URL is all that's needed to find its API. Every
+    self-hosted instance is expected to follow this, which is why they need
+    no configuration beyond their URL. The built-in instances are still
+    declared explicitly, since the local development stack predates the rule
+    and doesn't follow it.
+    """
+    hub_url = config.normalize_hub_url(hub_url)
+    parsed = urlparse(hub_url)
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"Cannot determine the API URL for hub '{hub_url}'")
+    # A hub URL that already names the API host is taken as-is, so a
+    # mistakenly-doubled prefix (api.api.example.edu) can't happen
+    netloc = host if host.startswith("api.") else f"api.{host}"
+    if parsed.port is not None:
+        netloc = f"{netloc}:{parsed.port}"
+    return f"{parsed.scheme}://{netloc}"
+
+
 def get_base_url() -> str:
     """Get the API base URL."""
     # CALKIT_CLOUD_BASE_URL is the old name, still honored so existing
@@ -177,15 +201,9 @@ def get_base_url() -> str:
         "test": "http://api.localhost",
     }
     hub = config.get_hub()
-    if hub not in urls:
-        # An arbitrary hub's API URL is not derivable from its web URL,
-        # and discovery doesn't exist yet; fail loudly rather than
-        # silently sending its credentials to a built-in instance
-        raise ValueError(
-            f"The API URL for hub {hub} is unknown; "
-            "set CALKIT_HUB_API_BASE_URL to specify it directly"
-        )
-    return urls[hub]
+    if hub in urls:
+        return urls[hub]
+    return api_url_from_hub_url(hub)
 
 
 def get_hub_url() -> str:
@@ -201,7 +219,8 @@ def env_for_hub(hub_url: str) -> str | None:
     """Return the built-in environment name serving ``hub_url``, if any.
 
     The URL may omit its scheme. Arbitrary (e.g., self-hosted) hub URLs
-    return ``None``, since the CLI cannot yet discover their API URLs.
+    return ``None``; their API URLs come from the ``api`` subdomain rule
+    in ``api_url_from_hub_url`` rather than from a built-in environment.
     """
     hub_url = config.normalize_hub_url(hub_url)
     for env in ["production", "staging", "local"]:

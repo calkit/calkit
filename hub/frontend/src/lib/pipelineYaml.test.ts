@@ -5,6 +5,7 @@ import {
   extractFilePaths,
   findStageLineRange,
   looksLikePath,
+  stageKindFromYaml,
 } from "./pipelineYaml"
 
 const CALKIT_YAML = `pipeline:
@@ -116,5 +117,26 @@ describe("findStageLineRange", () => {
   it("does not match a stage name that is only a substring of another", () => {
     // "data" should not match "collect-data" / "process-data".
     expect(findStageLineRange(CALKIT_YAML, "data")).toBeNull()
+  })
+})
+
+describe("stageKindFromYaml", () => {
+  it("reads the kind regardless of comments, quotes, or spacing", () => {
+    expect(stageKindFromYaml("kind: latex\nenvironment: tex\n")).toBe("latex")
+    expect(stageKindFromYaml("kind: latex  # the paper\n")).toBe("latex")
+    expect(stageKindFromYaml("kind: latex   \n")).toBe("latex")
+    expect(stageKindFromYaml('kind: "latex"\n')).toBe("latex")
+  })
+
+  it("does not confuse another kind for latex", () => {
+    expect(stageKindFromYaml("kind: json-to-latex\n")).toBe("json-to-latex")
+    expect(stageKindFromYaml("kind: python-script\n")).toBe("python-script")
+    // A kind nested under another key is not this stage's kind
+    expect(stageKindFromYaml("outputs:\n  - kind: latex\n")).toBeNull()
+  })
+
+  it("returns null for YAML it can't read", () => {
+    expect(stageKindFromYaml("kind: latex\n  bad indent: true\n")).toBeNull()
+    expect(stageKindFromYaml("")).toBeNull()
   })
 })

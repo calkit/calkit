@@ -540,6 +540,10 @@ class ProjectBase(SQLModel):
 class Project(ProjectBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     owner_account_id: uuid.UUID = Field(foreign_key="account.id")
+    # When this project's Overleaf links were last read out of its
+    # calkit.yaml. Set even when nothing was found, so a project without
+    # any links isn't re-read on every lookup.
+    overleaf_scanned: datetime | None = Field(default=None)
     parent_project_id: uuid.UUID | None = Field(
         foreign_key="project.id", default=None
     )
@@ -561,6 +565,9 @@ class Project(ProjectBase, table=True):
         back_populates="project", cascade_delete=True
     )
     file_locks: list["FileLock"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    overleaf_links: list["OverleafLink"] = Relationship(
         back_populates="project", cascade_delete=True
     )
     project_comments: list["ProjectComment"] = Relationship(
@@ -801,11 +808,58 @@ class StageStatus(SQLModel):
 
 class Pipeline(SQLModel):
     mermaid: str
+    # Set when the pipeline is invalid, e.g. two stages writing overlapping
+    # outputs. The rest of this response still describes what's declared, so
+    # the page can show the stages alongside an explanation instead of
+    # failing outright.
+    error: str | None = None
     dvc_stages: dict[str, DvcPipelineStage | DvcForeachStage]
     dvc_yaml: str
     calkit_yaml: str | None
+    # Stages declared in calkit.yaml, which is a subset of dvc_stages: the
+    # compiled pipeline also contains stages Calkit generates (LaTeX diffs)
+    # and any hand-written dvc.yaml ones. Only these can be edited.
+    ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
+
+
+class PipelineStage(SQLModel):
+    """One stage of the Calkit pipeline, as editable YAML.
+
+    The YAML is the stage's body only (no name key), exactly as it sits in
+    calkit.yaml -- same key order, same comments.
+    """
+
+    name: str
+    yaml: str
+
+
+class PipelineStagePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
+class PipelineStageEdit(SQLModel):
+    """A stage edit to compute, against the editor's unsaved content.
+
+    The YAML is what's in the editor rather than what's committed, so
+    re-detecting right after changing ``target_path`` looks at the new
+    target.
+    """
+
+    yaml: str
+
+
+class PipelineStageEdited(SQLModel):
+    """The stage after an edit, plus what the edit touched.
+
+    ``changed`` is what the user should see happened: the inputs added, or
+    the default-valued keys removed.
+    """
+
+    yaml: str
+    changed: list[str]
 
 
 class Question(SQLModel, table=True):
@@ -1034,6 +1088,23 @@ class ImportedDataset(SQLModel):
     dataset_id: uuid.UUID = Field(foreign_key="dataset.id", primary_key=True)
 
 
+class OverleafLink(SQLModel, table=True):
+    """An index of a folder in a project synced with an Overleaf project.
+
+    The link itself lives in the project's Git repo, under ``overleaf_sync``
+    in calkit.yaml, which stays the source of truth. This table only indexes
+    it, so an Overleaf project ID can be resolved back to the Calkit
+    projects that sync with it without reading every repo.
+    """
+
+    project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
+    path: str = Field(primary_key=True)
+    overleaf_project_id: str = Field(index=True, max_length=255)
+    updated: datetime = Field(default_factory=utcnow)
+    # Relationships
+    project: Project = Relationship(back_populates="overleaf_links")
+
+
 class FileLock(SQLModel, table=True):
     project_id: uuid.UUID = Field(foreign_key="project.id", primary_key=True)
     path: str = Field(primary_key=True)
@@ -1077,6 +1148,10 @@ class _ContentsItemBase(BaseModel):
     calkit_object: dict | None = None
     lock: ItemLock | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Content hash of a DVC-tracked output. Two listings of the same path
+    # at different refs are the same file exactly when this matches, which
+    # size alone can't tell you.
+    md5: str | None = None
     # Pipeline stage that produces this path, if any (from dvc.lock)
     stage: str | None = None
 

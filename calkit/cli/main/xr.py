@@ -110,6 +110,7 @@ def execute_and_record(
 
     from calkit.detect import (
         detect_io,
+        filter_covered_inputs,
         generate_stage_name,
     )
     from calkit.docker import (
@@ -496,11 +497,8 @@ def execute_and_record(
             pass
     # Merge user-specified inputs/outputs with detected ones
     # User-specified take precedence and detected ones are added if not already
-    # present
-    all_inputs = list(inputs)  # Start with user-specified
-    for detected in detected_inputs:
-        if detected not in all_inputs:
-            all_inputs.append(detected)
+    # covered -- a declared directory already covers everything inside it
+    all_inputs = list(inputs) + filter_covered_inputs(detected_inputs, inputs)
     # Convert detected outputs to PathOutput models with storage determination
     detected_output_models: list[str | PathOutput] = []
     for detected in detected_outputs:

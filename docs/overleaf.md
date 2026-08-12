@@ -44,8 +44,8 @@ calkit config set overleaf_token {paste your token here}
 
 ## Importing an Overleaf project
 
-To import an Overleaf project as a Calkit publication,
-use the `calkit import overleaf` command.
+To import an Overleaf project,
+use the `calkit overleaf import` command.
 For example:
 
 ```sh
@@ -94,7 +94,7 @@ Two situations make that misleading, and Calkit refuses to sync in both:
    push preliminary results from a long simulation you're still debugging.
 2. **The current branch is missing commits from the default branch.**
    Syncing from there can take collaborators backwards, quietly reverting
-   writing that has already landed.
+   writing that has already been incorporated.
    Pull, merge, or rebase first, or pass `--any-branch` to sync anyway.
 
 Note that the second check is about content, not branch names.

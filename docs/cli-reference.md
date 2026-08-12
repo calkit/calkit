@@ -2324,7 +2324,7 @@ Update objects.
 | [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).  |
 | [`release`](#subcommand-update-release)               | Update a release.                                                                    |
 | [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
-| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.        |
+| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
 | [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
 | [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
 | [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
@@ -2424,7 +2424,7 @@ Options:
 
 #### `calkit update github-actions`
 
-Update a project's GitHub Actions to match the latest Calkit recommendations.
+Update a project's GitHub Actions to match this version of Calkit's recommendations.
 
 Usage:
 

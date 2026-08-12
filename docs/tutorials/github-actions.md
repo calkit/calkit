@@ -55,7 +55,7 @@ jobs:
       - name: Install Calkit
         run: uv tool install calkit-python
       - name: Run Calkit
-        uses: calkit/run-action@v2
+        uses: calkit/calkit/actions/run@main
 ```
 
 This particular example installs Calkit with uv,

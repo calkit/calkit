@@ -1,0 +1,36 @@
+name: Run pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+# Make sure we only ever run one per branch so we don't have issues pushing
+# after running the pipeline
+concurrency:
+  group: calkit-run-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  main:
+    name: Run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # For PRs, checkout the head ref to avoid detached HEAD
+          ref: ${{ github.head_ref || github.ref_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Configure Git credentials
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+      # This action automatically runs necessary setup steps based on environments
+      - name: Run Calkit
+        uses: calkit/calkit/actions/run@main

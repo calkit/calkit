@@ -384,10 +384,10 @@ def update_github_actions(
         ),
     ] = False,
 ):
-    """Update a project's GitHub Actions to match the latest Calkit
+    """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
     """
-    import requests
+    from calkit import resources as calkit_resources
 
     # First look for any existing workflows that run Calkit to use as the
     # output file name
@@ -401,16 +401,10 @@ def update_github_actions(
                 if "calkit" in f.read().lower():
                     fname_out = fname
                     break
-    url = (
-        "https://raw.githubusercontent.com/calkit/run-action/refs/heads/main"
-        "/example.yml"
-    )
-    typer.echo(f"Downloading {url}")
-    resp = requests.get(url)
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
     with open(out_fpath, "w") as f:
-        f.write(resp.text)
+        f.write(calkit_resources.render_github_actions_workflow())
     if not no_commit:
         rel_path = os.path.join(".github", "workflows", fname_out)
         repo = calkit.git.get_repo(wdir)

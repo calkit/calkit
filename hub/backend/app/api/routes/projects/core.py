@@ -4518,17 +4518,12 @@ async def post_project_overleaf_publication(
                 has_calkit_workflow = True
                 break
         if not has_calkit_workflow:
-            download_url = (
-                "https://raw.githubusercontent.com/calkit/"
-                "run-action/refs/heads/main/example.yml"
-            )
-            download_resp = requests.get(download_url)
             workflow_rel_path = os.path.join(
                 ".github", "workflows", "run-calkit.yml"
             )
             workflow_fpath = os.path.join(repo.working_dir, workflow_rel_path)
             with open(workflow_fpath, "w") as f:
-                f.write(download_resp.text)
+                f.write(calkit.resources.render_github_actions_workflow())
             repo.git.add(workflow_rel_path)
     commit_msg = (
         f"Import Overleaf project ID {overleaf_project_id} to '{path}'"

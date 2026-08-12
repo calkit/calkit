@@ -15,8 +15,8 @@ from calkit.cli.update import update_app
 runner = CliRunner()
 
 
-def test_update_devcontainer_and_vscode_config(tmp_dir, monkeypatch):
-    # Both write bundled resources, so neither should touch the network
+def test_update_project_config(tmp_dir, monkeypatch):
+    # These all write bundled resources, so none should touch the network
     def fail(*args, **kwargs):
         raise AssertionError("Should not make any HTTP requests")
 
@@ -35,13 +35,19 @@ def test_update_devcontainer_and_vscode_config(tmp_dir, monkeypatch):
     for fname in calkit.resources.VSCODE_FNAMES:
         with open(os.path.join(".vscode", fname)) as f:
             assert json.load(f) == calkit.resources.load_json("vscode", fname)
+    result = runner.invoke(update_app, ["github-actions"])
+    assert result.exit_code == 0
+    with open(os.path.join(".github", "workflows", "run-calkit.yml")) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
     repo = calkit.git.get_repo()
     assert repo.git.ls_files(".devcontainer")
     assert repo.git.ls_files(".vscode")
+    assert repo.git.ls_files(".github")
     assert not repo.git.status("--porcelain")
-    # Both commands should be safe to rerun
+    # All three should be safe to rerun
     assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
     assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
     assert not repo.git.status("--porcelain")
 
 

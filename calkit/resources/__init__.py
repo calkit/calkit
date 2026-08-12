@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 
 DEVCONTAINER_FNAME = "devcontainer.json"
 VSCODE_FNAMES = ["settings.json", "extensions.json"]
+GITHUB_ACTIONS_FNAME = "example.yml"
+# The ref the example workflow ships with, which gets pinned to a released
+# version of Calkit when there is one to pin to
+ACTION_REF = "calkit/calkit/actions/run@main"
 
 
 def get_dir() -> str:
@@ -57,3 +62,23 @@ def render_devcontainer_spec() -> dict:
         "settings": settings,
     }
     return spec
+
+
+def render_github_actions_workflow(version: str | None = None) -> str:
+    """Return the example workflow, pinning the action to a Calkit version.
+
+    The action lives in this repo at ``actions/run``, so its refs are
+    Calkit's own release tags, and a project ends up pinned to the version
+    of Calkit that wrote its workflow. Rerunning ``calkit update github-actions`` after
+    upgrading moves the pin.
+    """
+    txt = read_text("github-actions", GITHUB_ACTIONS_FNAME)
+    if version is None:
+        import calkit
+
+        version = calkit.__version__
+    # Development installs report versions like 0.42.2.dev0+g21c9bb93, which
+    # isn't a tag anyone can reference, so those stay on main
+    if re.fullmatch(r"\d+\.\d+\.\d+", version):
+        txt = txt.replace(ACTION_REF, f"calkit/calkit/actions/run@v{version}")
+    return txt

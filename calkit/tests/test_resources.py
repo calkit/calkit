@@ -3,6 +3,9 @@
 import os
 import re
 
+import pytest
+
+import calkit
 import calkit.resources
 
 
@@ -34,6 +37,54 @@ def test_resources():
     # base.json, which only applies inside the container
     for key in settings:
         assert not key.startswith(("workbench.colorTheme", "window."))
+
+
+def test_github_actions_workflow():
+    workflow = calkit.ryaml.load(
+        calkit.resources.read_text(
+            "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
+        )
+    )
+    steps = workflow["jobs"]["main"]["steps"]
+    assert any(
+        step.get("uses") == calkit.resources.ACTION_REF for step in steps
+    )
+    # The action needs these to push results and to exchange an OIDC token
+    # for a Calkit one
+    assert workflow["permissions"]["contents"] == "write"
+    assert workflow["permissions"]["id-token"] == "write"
+    # Released versions get pinned to a tag that exists in this repo; dev
+    # versions have no tag to point at, so they stay on main
+    pinned = calkit.resources.render_github_actions_workflow(version="1.2.3")
+    assert "uses: calkit/calkit/actions/run@v1.2.3" in pinned
+    assert calkit.resources.ACTION_REF not in pinned
+    unpinned = calkit.resources.render_github_actions_workflow(
+        version="1.2.3.dev0+g21c9bb93"
+    )
+    assert calkit.resources.ACTION_REF in unpinned
+    # The bundled copy is generated from the action's own example, which is
+    # only present in the repo, not in an installed package
+    repo_copy = os.path.join(
+        os.path.dirname(os.path.dirname(calkit.resources.get_dir())),
+        "actions",
+        "run",
+        calkit.resources.GITHUB_ACTIONS_FNAME,
+    )
+    if not os.path.isfile(repo_copy):
+        pytest.skip("Not running from a repo checkout")
+    with open(repo_copy) as f:
+        assert f.read() == calkit.resources.read_text(
+            "github-actions", calkit.resources.GITHUB_ACTIONS_FNAME
+        )
+    # Everything the workflow does with the action is defined by it
+    action_path = os.path.join(os.path.dirname(repo_copy), "action.yml")
+    with open(action_path) as f:
+        action = calkit.ryaml.load(f)
+    step = next(
+        s for s in steps if s.get("uses") == calkit.resources.ACTION_REF
+    )
+    for name in step.get("with", {}):
+        assert name in action["inputs"]
 
 
 def test_devcontainer_image_sources():

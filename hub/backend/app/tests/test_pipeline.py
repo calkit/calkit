@@ -796,3 +796,45 @@ def test_precompute_storage_presence_lists_then_falls_back() -> None:
     # A project that has pushed nothing reports everything missing.
     empty = _precompute_storage_presence(dvc_lock, "owner", "proj", FakeFS())
     assert empty == {present: False, absent: False}
+
+
+def test_find_stage_for_path_prefers_current_stages():
+    # dvc.lock keeps entries that are no longer real stages: a bare name left
+    # from before the stage became a matrix, and expansions from an older
+    # matrix shape. Staleness reporting drops both, so matching one pins a
+    # figure to a stage that can never have a status.
+    dvc_lock = {
+        "stages": {
+            "plot": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00-9": {"outs": [{"path": "figures/a.png"}]},
+            "plot@_arg00": {"outs": [{"path": "figures/a.png"}]},
+            "render": {"outs": [{"path": "figures/sub"}]},
+            "render@_arg00": {"outs": [{"path": "figures/sub"}]},
+            "orphan": {"outs": [{"path": "figures/gone.png"}]},
+        }
+    }
+    current = {"plot@_arg00", "render@_arg00"}
+    # An exact match on a current expansion wins over the stale bare entry and
+    # the stale expansion, whatever order they appear in.
+    assert (
+        find_stage_for_path("figures/a.png", dvc_lock, valid_stages=current)
+        == "plot@_arg00"
+    )
+    # Directory outs resolve the same way, including for nested paths.
+    assert (
+        find_stage_for_path(
+            "figures/sub/deep.png", dvc_lock, valid_stages=current
+        )
+        == "render@_arg00"
+    )
+    # With nothing current producing it, naming the stale stage still beats
+    # naming nothing.
+    assert (
+        find_stage_for_path("figures/gone.png", dvc_lock, valid_stages=current)
+        == "orphan"
+    )
+    assert (
+        find_stage_for_path("nope.png", dvc_lock, valid_stages=current) is None
+    )
+    # Omitting valid_stages keeps the old any-match behaviour.
+    assert find_stage_for_path("figures/a.png", dvc_lock) == "plot"

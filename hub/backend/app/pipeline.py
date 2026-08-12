@@ -694,23 +694,40 @@ def color_mermaid_by_status(
     return mermaid.rstrip() + "\n" + "\n".join(extra) + "\n"
 
 
-def find_stage_for_path(path: str, dvc_lock: dict) -> str | None:
+def find_stage_for_path(
+    path: str, dvc_lock: dict, valid_stages: set[str] | None = None
+) -> str | None:
     """Return the stage in ``dvc.lock`` that produces *path*.
 
     Matches an exact out path first; failing that, matches a stage whose out is
     a *directory* containing *path* (e.g. an out of ``figures`` produces
     ``figures/test.png``). Exact matches always win over directory matches.
+
+    ``valid_stages`` limits matching to stages that are part of the current
+    pipeline, and should be passed whenever the caller has that set (the keys
+    of ``compute_stage_statuses``). dvc.lock accumulates entries that are no
+    longer real stages -- a bare ``name`` left from before it became a matrix,
+    or expansions from a matrix combination that has since changed -- and
+    those are exactly the entries staleness reporting drops. Matching one
+    anyway pins the artifact to a stage that has no status, so it silently
+    shows none. Stale entries are still used as a last resort, since naming
+    the stage that most likely produced a file beats naming nothing.
     """
-    dir_match: str | None = None
+    matches: list[tuple[bool, bool, str]] = []  # (is_exact, is_valid, name)
     for stage_name, stage in (dvc_lock.get("stages") or {}).items():
+        is_valid = valid_stages is None or stage_name in valid_stages
         for out in stage.get("outs") or []:
             out_path = out.get("path")
             if not out_path:
                 continue
             if out_path == path:
-                return stage_name
-            if dir_match is None and path.startswith(
-                out_path.rstrip("/") + "/"
-            ):
-                dir_match = stage_name
-    return dir_match
+                if is_valid:
+                    return stage_name
+                matches.append((True, False, stage_name))
+            elif path.startswith(out_path.rstrip("/") + "/"):
+                matches.append((False, is_valid, stage_name))
+    if not matches:
+        return None
+    # Exact beats directory, and a current stage beats a stale one.
+    matches.sort(key=lambda m: (not m[0], not m[1]))
+    return matches[0][2]

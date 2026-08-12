@@ -41,6 +41,7 @@ import {
   FaCodeBranch,
   FaLink,
 } from "react-icons/fa"
+import { useDebounce } from "use-debounce"
 import Tooltip from "./Tooltip"
 
 import {
@@ -374,11 +375,14 @@ function FigureComments({
   projectName,
   path,
   gitRef,
+  fetchEnabled = true,
 }: {
   ownerName: string
   projectName: string
   path: string
   gitRef?: string | undefined
+  /** False while the carousel is still settling; see `pathSettled`. */
+  fetchEnabled?: boolean
 }) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -407,6 +411,7 @@ function FigureComments({
         artifact_type: "figure",
         artifact_path: path,
       }).then((response) => response.data),
+    enabled: fetchEnabled,
   })
   const postMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
@@ -511,13 +516,35 @@ export function ArtifactCompareModal({
   useEffect(() => {
     if (!isOpen) return
     const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+      // The comment box lives in this modal, so arrows have to stay with the
+      // field being typed in rather than paging the carousel underneath it.
+      const el = e.target as HTMLElement | null
+      if (
+        el?.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(el?.tagName ?? "") ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey
+      ) {
+        return
+      }
       if (e.key === "ArrowLeft") onPrev?.()
-      else if (e.key === "ArrowRight") onNext?.()
+      else onNext?.()
     }
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
   }, [isOpen, onPrev, onNext])
 
+  // Comments and file history are the slow panels here, and arrowing through
+  // the carousel changes `path` on every keypress. Hold their fetches until
+  // the path stops moving, so a run of presses costs one request for the
+  // figure you land on instead of one per figure you pass through. The keys
+  // still use the live `path`, so anything already cached (a figure you've
+  // been to before) renders immediately rather than waiting out the delay,
+  // and no panel ever shows another figure's data.
+  const [settledPath] = useDebounce(path, 300)
+  const pathSettled = settledPath === path
   const artifactStorage = (initialArtifact as { storage?: string } | undefined)
     ?.storage as "git" | "dvc" | "dvc-zip" | undefined
   const historyQuery = useQuery({
@@ -537,7 +564,7 @@ export function ArtifactCompareModal({
         limit: 50,
         storage: artifactStorage ?? null,
       }).then((response) => response.data)) as unknown as CommitHistory[],
-    enabled: isOpen,
+    enabled: isOpen && pathSettled,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -1009,6 +1036,7 @@ export function ArtifactCompareModal({
                   projectName={projectName}
                   path={path}
                   gitRef={ref1}
+                  fetchEnabled={pathSettled}
                 />
               </Box>
             )}

@@ -5,20 +5,29 @@ import {
   Flex,
   Heading,
   Icon,
+  IconButton,
   Image,
   Menu,
   MenuButton,
   MenuItem,
   MenuList,
   SimpleGrid,
+  Spinner,
   Text,
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
-import { FaComment, FaPlus, FaRegFileImage, FaRegFilePdf } from "react-icons/fa"
+import { useCallback, useEffect, useState } from "react"
+import {
+  FaAngleDoubleLeft,
+  FaAngleDoubleRight,
+  FaComment,
+  FaPlus,
+  FaRegFileImage,
+  FaRegFilePdf,
+} from "react-icons/fa"
 import { FiFile } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
@@ -228,8 +237,13 @@ function ProjectFigures() {
   const figures = figuresPage?.items
   const totalFigures = figuresPage?.total ?? 0
   const pageCount = Math.max(1, Math.ceil(totalFigures / FIGURES_PER_PAGE))
-  const goToPage = (p: number) =>
-    navigate({ search: (prev) => ({ ...prev, page: p === 1 ? undefined : p }) })
+  const goToPage = useCallback(
+    (p: number) =>
+      navigate({
+        search: (prev) => ({ ...prev, page: p === 1 ? undefined : p }),
+      }),
+    [navigate],
+  )
 
   // Mirror the search box into the URL so a link reproduces the same results.
   // A new query filters the whole project, so the result set changes out from
@@ -287,13 +301,23 @@ function ProjectFigures() {
   const pageSize = figures?.length ?? 0
 
   // Stepping off either end of a page continues onto the neighbouring one.
-  // Which figure to open isn't known until that page arrives, so record the
-  // edge we're heading for and open it once the data settles.
-  const [pendingEdge, setPendingEdge] = useState<"first" | "last" | null>(null)
+  // Which figure to open isn't known until that page arrives, so record where
+  // we're heading and open it once the data settles.
+  const [pendingEdge, setPendingEdge] = useState<{
+    offset: number
+    edge: "first" | "last"
+  } | null>(null)
   useEffect(() => {
     if (!pendingEdge || isPlaceholderData || !figuresPage) return
+    // Wait for the page we actually asked for. Setting `pendingEdge` and the
+    // new `page` happens in one tick, so the first render after it still
+    // holds the outgoing page's items -- and those are real, not placeholder,
+    // data. Matching on the offset the response echoes back is what stops us
+    // opening a figure from the page we just left.
+    if (figuresPage.offset !== pendingEdge.offset) return
     const items = figuresPage.items
-    const target = pendingEdge === "first" ? items[0] : items[items.length - 1]
+    const target =
+      pendingEdge.edge === "first" ? items[0] : items[items.length - 1]
     setPendingEdge(null)
     if (target) {
       navigate({ search: (prev) => ({ ...prev, path: target.path }) })
@@ -301,19 +325,55 @@ function ProjectFigures() {
   }, [pendingEdge, isPlaceholderData, figuresPage, navigate])
 
   const stepToPage = (p: number, edge: "first" | "last") => {
-    setPendingEdge(edge)
+    setPendingEdge({ offset: (p - 1) * FIGURES_PER_PAGE, edge })
     goToPage(p)
   }
 
-  const openPrev =
-    selectedIndex > 0
+  // Left/right page the grid when no figure is open. The modal binds the same
+  // keys for its own carousel, so it takes over whenever one is.
+  useEffect(() => {
+    if (selectedPath) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+      // Never steal the arrow keys from a field being typed in (the search
+      // box lives on this page) or from a modifier-based browser shortcut.
+      const el = e.target as HTMLElement | null
+      if (
+        el?.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(el?.tagName ?? "") ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey
+      ) {
+        return
+      }
+      const next = e.key === "ArrowLeft" ? currentPage - 1 : currentPage + 1
+      if (next < 1 || next > pageCount) return
+      e.preventDefault()
+      goToPage(next)
+    }
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [selectedPath, currentPage, pageCount, goToPage])
+
+  // Mid-rollover the open figure belongs to the page being left, so it isn't
+  // in `figures` and neither arrow can be computed. Hand back inert handlers
+  // rather than nothing, so the carousel's buttons stay put instead of
+  // blinking out until the next page lands.
+  const rolling = pendingEdge !== null
+  const inert = () => {}
+
+  const openPrev = rolling
+    ? inert
+    : selectedIndex > 0
       ? () => openFigure(figures![selectedIndex - 1])
       : selectedIndex === 0 && currentPage > 1
         ? () => stepToPage(currentPage - 1, "last")
         : undefined
 
-  const openNext =
-    selectedIndex >= 0 && selectedIndex < pageSize - 1
+  const openNext = rolling
+    ? inert
+    : selectedIndex >= 0 && selectedIndex < pageSize - 1
       ? () => openFigure(figures![selectedIndex + 1])
       : selectedIndex === pageSize - 1 && currentPage < pageCount
         ? () => stepToPage(currentPage + 1, "first")
@@ -405,19 +465,51 @@ function ProjectFigures() {
             </Flex>
           )
         ) : (
-          <SimpleGrid columns={{ base: 2, md: 3, lg: 4, xl: 5 }} spacing={4}>
-            {figures!.map((figure) => (
-              <FigureThumbnail
-                key={figure.path}
-                figure={figure}
-                onClick={() => openFigure(figure)}
-              />
-            ))}
-          </SimpleGrid>
+          // The previous page stays mounted while the next one loads so the
+          // grid doesn't collapse and rebound. Dimming it behind a spinner is
+          // what distinguishes "still loading" from "these are your figures",
+          // which stale thumbnails on their own can't.
+          <Box position="relative">
+            <SimpleGrid
+              columns={{ base: 2, md: 3, lg: 4, xl: 5 }}
+              spacing={4}
+              opacity={isPlaceholderData ? 0.4 : 1}
+              transition="opacity 0.15s"
+              pointerEvents={isPlaceholderData ? "none" : undefined}
+              aria-busy={isPlaceholderData}
+            >
+              {figures!.map((figure) => (
+                <FigureThumbnail
+                  key={figure.path}
+                  figure={figure}
+                  onClick={() => openFigure(figure)}
+                />
+              ))}
+            </SimpleGrid>
+            {isPlaceholderData && (
+              <Flex
+                position="absolute"
+                inset={0}
+                align="center"
+                justify="center"
+              >
+                <Spinner size="lg" thickness="3px" color="ui.main" />
+              </Flex>
+            )}
+          </Box>
         )}
 
         {pageCount > 1 && (
           <Flex align="center" justify="center" gap={3} mt={6}>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              aria-label="First page"
+              title="First page"
+              icon={<FaAngleDoubleLeft />}
+              isDisabled={currentPage <= 1}
+              onClick={() => goToPage(1)}
+            />
             <Button
               size="sm"
               variant="ghost"
@@ -437,6 +529,15 @@ function ProjectFigures() {
             >
               Next
             </Button>
+            <IconButton
+              size="sm"
+              variant="ghost"
+              aria-label="Last page"
+              title="Last page"
+              icon={<FaAngleDoubleRight />}
+              isDisabled={currentPage >= pageCount}
+              onClick={() => goToPage(pageCount)}
+            />
           </Flex>
         )}
       </Box>

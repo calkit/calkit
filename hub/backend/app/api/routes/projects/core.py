@@ -2269,7 +2269,9 @@ def _resolve_figures(
         """Attach the metadata that costs no I/O beyond what's already read."""
         fig["comment_count"] = comment_counts.get(fig["path"], 0)
         if not fig.get("stage"):
-            auto_stage = find_stage_for_path(fig["path"], dvc_lock)
+            auto_stage = find_stage_for_path(
+                fig["path"], dvc_lock, valid_stages=set(stage_statuses)
+            )
             if auto_stage is not None:
                 fig["stage"] = auto_stage
         if fig.get("stage") and fig["stage"] in stage_statuses:

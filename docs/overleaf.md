@@ -78,6 +78,72 @@ by calling `calkit run`, and if anything has changed,
 commit and push those changes to the hub with
 `calkit save -am "Run pipeline"`.
 
+For a version that takes care of the surrounding steps for you, see
+[guided syncing](#guided-syncing-push-and-pull) below.
+
+### Checks before syncing
+
+An Overleaf project has no branches, so whatever is synced there is what
+every collaborator sees and writes against.
+Two situations make that misleading, and Calkit refuses to sync in both:
+
+1. **The pipeline is out-of-date.**
+   Syncing would send figures or results that don't match the code that
+   supposedly produced them.
+   Run `calkit run` first, or pass `--allow-stale` to sync anyway, e.g., to
+   push preliminary results from a long simulation you're still debugging.
+2. **The current branch is missing commits from the default branch.**
+   Syncing from there can take collaborators backwards, quietly reverting
+   writing that has already landed.
+   Pull, merge, or rebase first, or pass `--any-branch` to sync anyway.
+
+Note that the second check is about content, not branch names.
+Working on a branch is fine as long as it contains everything already on the
+default branch, so a branch cut from the tip of `main` syncs happily,
+while a local `main` that's behind the remote does not.
+This matters when `main` is protected: pulling from Overleaf creates commits,
+so it can't happen on a branch you can't commit to.
+Create a branch from the tip of `main` and sync from there.
+
+### Guided syncing (`push` and `pull`)
+
+`calkit overleaf push` and `calkit overleaf pull` wrap `sync` with the
+steps that surround it, so a collaborator doesn't have to remember the order.
+
+To send the project's current figures and text to Overleaf:
+
+```sh
+calkit overleaf push
+```
+
+This pulls the latest Git and DVC data, checks the pipeline is up-to-date
+(offering to run it if it isn't), then pushes to Overleaf without pulling
+anything back.
+
+To bring collaborators' writing back into the project:
+
+```sh
+calkit overleaf pull
+```
+
+This does the same preparation, shows what has changed on Overleaf and asks
+you to confirm, syncs in both directions, then offers to run the pipeline and
+save the result.
+If the default branch is protected, pass `--branch`/`-b` to create or switch
+to a branch first:
+
+```sh
+calkit overleaf pull -b overleaf-updates
+```
+
+Both accept the same paths as `sync`, and `--yes`/`-y` answers every prompt
+so they can run unattended, e.g., in CI.
+
+The same checks apply wherever a sync happens, including
+`calkit save --overleaf` and the sync at the end of `calkit run --overleaf`.
+The sync at the _start_ of `calkit run --overleaf` is exempt, since running
+the pipeline is what's about to make it current.
+
 ### A clean working tree is required
 
 Syncing requires the synced folder to have no uncommitted changes.
@@ -123,6 +189,44 @@ Those copies are pushed even though they're gitignored, since without them
 Overleaf can't compile.
 If one of them is edited on Overleaf, `calkit overleaf sync` says which
 files it's about to overwrite.
+
+#### Edits to `map-paths` copies
+
+A `map-paths` copy is the one generated file whose edits have somewhere to
+go: the file the stage copies it from.
+So when a collaborator adds a reference to `references.bib` on Overleaf, and
+that file is copied into the document's folder from a shared location,
+Calkit writes the change back to the shared file:
+
+```
+Applying Overleaf's change to references.bib to pubs/shared/references.bib,
+which it's copied from
+Run the pipeline to rebuild from the updated source(s)
+```
+
+The shared file is committed along with the rest of the sync, and the next
+`calkit run` rebuilds every copy from it, so the change reaches the other
+publications that share it too.
+
+This only applies when the source is authored.
+If a `map-paths` stage copies from a file that another stage generates, an
+edit made to the copy on Overleaf has nowhere to survive, so Calkit reports
+it as overwritten instead.
+
+Calkit also won't overwrite a source that has changes of its own, i.e., one
+that no longer matches the copy the last run made from it.
+That means both sides changed, and picking one would throw the other away,
+so it says so and leaves both alone:
+
+```
+Warning: references.bib was changed on Overleaf, but
+pubs/shared/references.bib, which it's copied from, has changes of its own;
+leaving it alone. Run the pipeline and sync again, or merge the two by hand.
+```
+
+Running the pipeline before syncing (which is
+[the default](#checks-before-syncing)) keeps this from coming up, since the
+copy then matches its source.
 
 Everything else is treated as ignored and is never pushed to, pulled from,
 or deleted from Overleaf.

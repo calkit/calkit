@@ -2062,9 +2062,16 @@ def run(
                 )
             finally:
                 os.chdir(prev_cwd)
-    # If specified, perform initial Overleaf sync
+    # If specified, perform initial Overleaf sync. A stale pipeline is
+    # expected here -- fixing it is what this command is about to do -- so
+    # the usual refusal to sync from one doesn't apply until afterwards.
     if sync_overleaf:
-        overleaf_sync(no_commit=False, no_push=True, verbose=verbose)
+        overleaf_sync(
+            no_commit=False,
+            no_push=True,
+            verbose=verbose,
+            allow_stale=True,
+        )
     # Compile the DVC pipeline (and subproject pipelines)
     dvc_stages = None
     if ck_info.get("pipeline", {}) or ck_info.get("subprojects"):

@@ -25,6 +25,96 @@ def get_repo(path: str | None = None) -> git.Repo:
     return git.Repo(path, search_parent_directories=True)
 
 
+def get_default_branch(repo: git.Repo) -> str | None:
+    """The name of the project's default branch, e.g., ``main``.
+
+    Determined from the remote's HEAD when there is one, since that's what
+    the hosting service considers the trunk, and falls back to whichever
+    conventional name the repo actually has. Returns None if neither
+    answers, e.g., in a repo with no commits.
+    """
+    try:
+        ref = repo.remotes.origin.refs.HEAD.reference.name
+        # e.g., 'origin/main'
+        return ref.split("/", 1)[1] if "/" in ref else ref
+    except Exception:
+        pass
+    local_branches = set()
+    try:
+        local_branches = {h.name for h in repo.heads}
+    except Exception:
+        pass
+    remote_branches = set()
+    try:
+        remote_branches = {
+            r.name.split("/", 1)[1]
+            for r in repo.remotes.origin.refs
+            if "/" in r.name
+        }
+    except Exception:
+        pass
+    for candidate in ["main", "master"]:
+        if candidate in local_branches or candidate in remote_branches:
+            return candidate
+    return None
+
+
+def check_branch_is_current(
+    repo: git.Repo, branch: str | None = None, fetch: bool = True
+) -> str | None:
+    """Check that the checked-out branch contains everything on the default
+    branch, returning a message describing the problem if it doesn't.
+
+    A branch cut from the default branch's tip passes -- what matters is
+    that no work already on the trunk is missing, not which branch the work
+    happens on. The default branch itself is checked the same way, since a
+    local copy of it can be behind the remote. Returns None when the check
+    passes or when there's nothing to check against (no remote, no default
+    branch, or a repo whose refs can't be resolved).
+    """
+    if branch is None:
+        branch = get_default_branch(repo)
+    if branch is None:
+        return None
+    try:
+        current = repo.active_branch.name
+    except Exception:
+        # Detached HEAD, e.g., a CI checkout of a tag
+        current = None
+    if fetch and repo.remotes:
+        try:
+            repo.git.fetch("origin", branch)
+        except Exception:
+            pass
+    # Prefer the remote's copy, since that's the shared state; a local
+    # default branch can itself be behind
+    ref = None
+    for candidate in [f"origin/{branch}", branch]:
+        try:
+            if repo.git.rev_parse("--verify", "--quiet", candidate):
+                ref = candidate
+                break
+        except Exception:
+            continue
+    if ref is None:
+        return None
+    try:
+        tip = str(repo.git.rev_parse(ref)).strip()
+        merge_base = str(repo.git.merge_base("HEAD", ref)).strip()
+    except Exception:
+        return None
+    if merge_base == tip:
+        return None
+    try:
+        behind = str(repo.git.rev_list("--count", f"HEAD..{ref}")).strip()
+    except Exception:
+        behind = "some"
+    return (
+        f"Branch '{current or 'HEAD'}' is missing {behind} commit(s) from "
+        f"'{ref}'"
+    )
+
+
 def get_staged_files(
     path: str | None = None, repo: git.Repo | None = None
 ) -> list[str]:

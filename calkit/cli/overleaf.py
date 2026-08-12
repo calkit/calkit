@@ -933,7 +933,7 @@ def push_to_overleaf(
         allow_stale=True,
         any_branch=True,
     )
-    typer.echo("Overleaf is up-to-date with this project ✅")
+    calkit.echo("Overleaf is up-to-date with this project ✅")
 
 
 @overleaf_app.command(name="pull")

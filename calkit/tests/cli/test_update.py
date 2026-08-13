@@ -1,5 +1,7 @@
 """Tests for ``cli.update``."""
 
+import json
+import os
 import subprocess
 import sys
 
@@ -7,9 +9,105 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.resources
 from calkit.cli.update import update_app
 
 runner = CliRunner()
+
+
+def test_update_project_config(tmp_dir, monkeypatch):
+    # These all write bundled resources, so none should touch the network
+    def fail(*args, **kwargs):
+        raise AssertionError("Should not make any HTTP requests")
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fail)
+    subprocess.check_call(["calkit", "init"])
+    result = runner.invoke(update_app, ["devcontainer"])
+    assert result.exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
+    result = runner.invoke(update_app, ["vscode-config"])
+    assert result.exit_code == 0
+    for fname in calkit.resources.VSCODE_FNAMES:
+        with open(os.path.join(".vscode", fname)) as f:
+            assert json.load(f) == calkit.resources.load_json("vscode", fname)
+    result = runner.invoke(update_app, ["github-actions"])
+    assert result.exit_code == 0
+    with open(os.path.join(".github", "workflows", "run-calkit.yml")) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    repo = calkit.git.get_repo()
+    assert repo.git.ls_files(".devcontainer")
+    assert repo.git.ls_files(".vscode")
+    assert repo.git.ls_files(".github")
+    assert not repo.git.status("--porcelain")
+    # All three should be safe to rerun
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    assert not repo.git.status("--porcelain")
+
+
+def test_update_github_actions(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    workflow_dir = os.path.join(".github", "workflows")
+    ref = calkit.resources.get_action_ref()
+    # A project that mentions Calkit in an unrelated workflow should get its
+    # own, and that workflow should be left alone
+    os.makedirs(workflow_dir, exist_ok=True)
+    other_fpath = os.path.join(workflow_dir, "docs.yml")
+    other_txt = "name: Docs\njobs:\n  main:\n    steps:\n      - run: calkit\n"
+    with open(other_fpath, "w") as f:
+        f.write(other_txt)
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(other_fpath) as f:
+        assert f.read() == other_txt
+    out_fpath = os.path.join(workflow_dir, "run-calkit.yml")
+    with open(out_fpath) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    # A workflow written by an older version of Calkit, which is still the
+    # example, should be replaced outright so it picks up any other changes
+    # to it, wherever it lives
+    os.remove(out_fpath)
+    old_fpath = os.path.join(workflow_dir, "run.yml")
+    with open(old_fpath, "w") as f:
+        f.write(
+            calkit.resources.render_github_actions_workflow(version="0.1.0")
+        )
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    assert not os.path.isfile(out_fpath)
+    with open(old_fpath) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    # A customized workflow, here one still pointing at the action's previous
+    # home, should only have its action ref updated
+    custom_txt = (
+        "name: Run pipeline\n"
+        "jobs:\n"
+        "  main:\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: calkit/run-action@v2\n"
+        "        with:\n"
+        "          extra-args: --no-check\n"
+        "      - run: echo custom\n"
+    )
+    with open(old_fpath, "w") as f:
+        f.write(custom_txt)
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(old_fpath) as f:
+        updated_txt = f.read()
+    assert updated_txt == custom_txt.replace("calkit/run-action@v2", ref)
+    # Rerunning should be a no-op, and shouldn't leave anything uncommitted
+    repo = calkit.git.get_repo()
+    repo.git.add(".github")
+    repo.git.commit(["-m", "Add workflows"])
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(old_fpath) as f:
+        assert f.read() == updated_txt
+    assert not repo.git.status("--porcelain")
 
 
 def test_update_uv_env(tmp_dir):

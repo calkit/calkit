@@ -3225,7 +3225,6 @@ Options:
 | `--target`, `-T`      | text    | no       |         | Target TeX file path inside Overleaf project.                                                                              |
 | `--description`, `-d` | text    | no       |         | Description of the publication.                                                                                            |
 | `--kind`              | text    | no       |         | What of the publication this is, e.g., 'journal-article'.                                                                  |
-| `--sync-path`, `-s`   | text    | no       |         | Paths to sync from the Overleaf project, e.g., 'main.tex'. Note that multiple can be specified.                            |
 | `--push-path`, `-p`   | text    | no       |         | Paths to push to the Overleaf project, e.g., 'figures'. Note that these are relative to the publication working directory. |
 | `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
@@ -3261,6 +3260,7 @@ Options:
 | `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 | `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
 | `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -3302,14 +3302,15 @@ Arguments:
 
 Options:
 
-| Option           | Type    | Required | Default | Description                                                                 |
-| ---------------- | ------- | -------- | ------- | --------------------------------------------------------------------------- |
-| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pushing.                           |
-| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                  |
-| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                    |
-| `--allow-stale`  | boolean | no       | False   | Push even if the pipeline is out-of-date.                                   |
-| `--any-branch`   | boolean | no       | False   | Push even if the current branch is missing commits from the default branch. |
-| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                      |
+| Option           | Type    | Required | Default | Description                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pushing.                                                                |
+| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                       |
+| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                         |
+| `--allow-stale`  | boolean | no       | False   | Push even if the pipeline is out-of-date.                                                                        |
+| `--any-branch`   | boolean | no       | False   | Push even if the current branch is missing commits from the default branch.                                      |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for. |
+| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                           |
 
 <a id="subcommand-overleaf-ol-pull"></a>
 
@@ -3341,6 +3342,7 @@ Options:
 | `--no-run`       | boolean | no       | False   | Do not run the pipeline after pulling.                                                                                                      |
 | `--allow-stale`  | boolean | no       | False   | Pull even if the pipeline is out-of-date.                                                                                                   |
 | `--any-branch`   | boolean | no       | False   | Pull even if the current branch is missing commits from the default branch.                                                                 |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
 | `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
 
 <a id="command-group-hub-cloud"></a>
@@ -3645,3 +3647,4 @@ Options:
 | `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
 | `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
 | `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |

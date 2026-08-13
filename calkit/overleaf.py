@@ -10,6 +10,7 @@ from copy import deepcopy
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
+from typing import Callable
 
 import git
 
@@ -105,9 +106,13 @@ def get_sync_info(
     wdir: str | PathLike | None = None,
     ck_info: dict | None = None,
     fix_legacy: bool = False,
+    print_info: Callable[[str], None] | None = None,
 ) -> dict:
     """Load in a dictionary of Overleaf sync data, keyed by path relative to
     ``wdir`` (the project working directory).
+
+    With ``fix_legacy``, settings that are no longer used are dropped from
+    ``calkit.yaml``, and ``print_info`` is called to say so if given.
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -149,16 +154,29 @@ def get_sync_info(
             dirinfo["project_id"] = project_id_from_url(dirinfo["url"])
     if fix_legacy:
         overleaf_sync_for_ck_info = ck_info.get("overleaf_sync", {})
+        dropped_sync_paths = []
         for synced_dir, info in overleaf_info.items():
             info_in_ck = overleaf_sync_for_ck_info.get(synced_dir, {})
             if "url" not in info_in_ck:
                 info_in_ck["url"] = project_id_to_url(info["project_id"])
-            if "sync_paths" in info:
-                info_in_ck["sync_paths"] = info["sync_paths"]
+            # sync_paths no longer does anything, since every stored file is
+            # synced both ways unless it's a push path or something the
+            # pipeline produces, so it's dropped rather than carried forward
+            if "sync_paths" in info_in_ck or "sync_paths" in info:
+                dropped_sync_paths.append(synced_dir)
+                info_in_ck.pop("sync_paths", None)
+                info.pop("sync_paths", None)
             if "push_paths" in info:
                 info_in_ck["push_paths"] = info["push_paths"]
             overleaf_sync_for_ck_info[synced_dir] = info_in_ck
         ck_info["overleaf_sync"] = overleaf_sync_for_ck_info
+        if dropped_sync_paths and print_info is not None:
+            print_info(
+                "Removed 'sync_paths' from calkit.yaml for "
+                f"{', '.join(dropped_sync_paths)}; "
+                "it's no longer necessary, since all stored files are synced "
+                "both ways unless they're push paths or pipeline outputs"
+            )
         with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
             calkit.ryaml.dump(ck_info, f)
         os.makedirs(os.path.join(wdir, ".calkit"), exist_ok=True)
@@ -219,7 +237,6 @@ class OverleafSyncPaths:
         self.overleaf_repo = overleaf_repo
         self.path_in_project = path_in_project
         self.sync_info_for_path = deepcopy(sync_info_for_path)
-        self.sync_paths_from_config = sync_info_for_path.get("sync_paths", [])
         self.push_paths_from_config = sync_info_for_path.get("push_paths", [])
         self.last_sync_commit = last_sync_commit
 
@@ -585,13 +602,8 @@ class OverleafSyncPaths:
         )
 
     @cached_property
-    def pipeline_outputs_changed_on_overleaf(self) -> list[str]:
-        """Generated files someone edited on Overleaf since the last sync.
-
-        These edits can't be pulled back -- the next pipeline run would
-        overwrite them -- so they're worth saying out loud rather than
-        dropping quietly.
-        """
+    def files_changed_on_overleaf(self) -> list[str]:
+        """Files edited on Overleaf since the last sync."""
         if not self.last_sync_commit:
             return []
         try:
@@ -601,13 +613,39 @@ class OverleafSyncPaths:
         except (git.BadName, git.GitCommandError, ValueError) as e:
             warnings.warn(f"Could not diff the Overleaf repo: {e}")
             return []
-        return sorted(
-            {
-                Path(f).as_posix()
-                for f in changed
-                if f and self._is_pipeline_output(Path(f).as_posix())
-            }
-        )
+        return sorted({Path(f).as_posix() for f in changed if f})
+
+    @cached_property
+    def pipeline_outputs_changed_on_overleaf(self) -> list[str]:
+        """Generated files someone edited on Overleaf since the last sync.
+
+        These edits can't be pulled back -- the next pipeline run would
+        overwrite them -- so they're worth saying out loud rather than
+        dropping quietly.
+        """
+        return [
+            f
+            for f in self.files_changed_on_overleaf
+            if self._is_pipeline_output(f)
+        ]
+
+    @cached_property
+    def push_path_edits_on_overleaf(self) -> list[str]:
+        """Authored push-only files someone edited on Overleaf since the last
+        sync.
+
+        A push path says the project is the source of truth for that file, so
+        this sync is about to overwrite whatever was written there. Unlike a
+        pipeline output, nothing regenerates it and no warning would make the
+        content recoverable, so the sync stops instead. Pipeline outputs are
+        left out here since they're reported on their own.
+        """
+        return [
+            f
+            for f in self.files_changed_on_overleaf
+            if self._path_matches(f, self.push_paths)
+            and not self._is_pipeline_output(f)
+        ]
 
     @cached_property
     def files_in_overleaf_last_sync(self) -> set[str]:
@@ -838,6 +876,7 @@ def sync(
     verbose: bool = False,
     resolving_conflict: bool = False,
     push_only: bool = False,
+    force: bool = False,
 ) -> dict:
     """Sync between the main project repo and Overleaf repo.
 
@@ -864,6 +903,12 @@ def sync(
     the stage copies it from, so the next run rebuilds the copy from it
     rather than discarding it. That doesn't apply when the source is itself
     generated by another stage; those edits are only reported.
+
+    A push path declares the project the source of truth for those files, so
+    if one has been edited on Overleaf since the last sync, this raises rather
+    than overwriting it. Nothing regenerates such a file, so the edit would
+    only exist in the Overleaf project's history. Pass ``force`` to overwrite
+    them anyway.
 
     Other files that are ignored, untracked, or DVC pipeline outputs with no
     storage (``storage: null``, e.g., LaTeX build artifacts) are treated as
@@ -914,6 +959,18 @@ def sync(
     )
     paths_for_overleaf_patch = paths.paths_to_use_for_git_patch
     res["paths_for_overleaf_patch"] = paths_for_overleaf_patch
+    # Stop before touching anything if someone has edited a file the project
+    # is supposed to own. Nothing regenerates these, so overwriting one loses
+    # the only copy outside the Overleaf project's own history.
+    push_path_edits = paths.push_path_edits_on_overleaf
+    res["push_path_edits_on_overleaf"] = push_path_edits
+    if push_path_edits and not force:
+        raise RuntimeError(
+            "These files were changed on Overleaf but are push-only, so this "
+            f"sync would overwrite them: {', '.join(push_path_edits)}. "
+            "Copy the changes into the project if you want to keep them, or "
+            "sync with --force to overwrite them."
+        )
     # An edit made on Overleaf to a generated file is about to be overwritten
     # by this sync. A map-paths copy is the one case where the edit has
     # somewhere to go -- the file the stage copies from -- so it's sent there.

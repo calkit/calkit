@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 import git
+import pytest
 from typer.testing import CliRunner
 
 import calkit
@@ -1039,3 +1040,153 @@ def test_overleaf_push_and_pull(tmp_dir):
     assert res.returncode == 0, res.stdout + res.stderr
     with open(os.path.join("paper", "main.tex")) as f:
         assert f.read() == "This text was written on Overleaf"
+
+
+def test_overleaf_sync_push_path_edits_need_force(tmp_dir):
+    # A push path says the project owns the file, so an edit made to one on
+    # Overleaf would be silently destroyed by the next sync. Nothing
+    # regenerates it, unlike a pipeline output, so the sync stops until the
+    # user decides. Generated files under a push path keep their own warning.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    ol_dir = os.path.join(str(tmp_dir), "ol")
+    ol_remote_dir = os.path.join(str(tmp_dir), "ol-remote")
+    os.makedirs(os.path.join(main_dir, "pub", "figures"))
+    os.makedirs(ol_dir)
+    main_repo = git.Repo.init(main_dir)
+    ol_remote = git.Repo.init(path=ol_remote_dir, bare=True)
+    ol_repo = git.Repo.init(ol_dir)
+    for parts, content in [
+        (("pub", "main.tex"), "Hello"),
+        (("pub", "figures", "photo.txt"), "A hand-made figure"),
+        (("pub", "figures", "plot.txt"), "A generated figure"),
+    ]:
+        with open(os.path.join(main_dir, *parts), "w") as f:
+            f.write(content)
+    dvc_yaml = {
+        "stages": {
+            "plot": {
+                "cmd": "echo plot",
+                "outs": [{"pub/figures/plot.txt": {"cache": False}}],
+            }
+        }
+    }
+    with open(os.path.join(main_dir, "dvc.yaml"), "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    with open(os.path.join(main_dir, "calkit.yaml"), "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": {}}}, f)
+    main_repo.git.add(
+        "pub/main.tex",
+        "pub/figures/photo.txt",
+        "pub/figures/plot.txt",
+        "dvc.yaml",
+        "calkit.yaml",
+    )
+    main_repo.git.commit(["-m", "Init project"])
+    os.makedirs(os.path.join(ol_dir, "figures"))
+    for parts, content in [
+        (("main.tex",), "Hello"),
+        (("figures", "photo.txt"), "A hand-made figure"),
+        (("figures", "plot.txt"), "A generated figure"),
+    ]:
+        with open(os.path.join(ol_dir, *parts), "w") as f:
+            f.write(content)
+    ol_repo.git.add(".")
+    ol_repo.git.commit(["-m", "Overleaf state"])
+    last_sync_commit = ol_repo.head.commit.hexsha
+    ol_repo.git.remote(["add", "origin", ol_remote_dir])
+    ol_repo.git.push(["--set-upstream", "origin", ol_repo.active_branch.name])
+    sync_info = {"push_paths": ["figures"]}
+    # Both files under the push path are edited on Overleaf
+    for parts, content in [
+        (("figures", "photo.txt"), "Replaced on Overleaf"),
+        (("figures", "plot.txt"), "Replaced on Overleaf"),
+    ]:
+        with open(os.path.join(ol_dir, *parts), "w") as f:
+            f.write(content)
+    ol_repo.git.commit(["-a", "-m", "Update on Overleaf"])
+    paths = calkit.overleaf.OverleafSyncPaths(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pub",
+        sync_info_for_path=sync_info,
+        last_sync_commit=last_sync_commit,
+    )
+    # Only the authored one blocks; the generated one is reported separately
+    assert paths.push_path_edits_on_overleaf == ["figures/photo.txt"]
+    assert paths.pipeline_outputs_changed_on_overleaf == ["figures/plot.txt"]
+    kwargs = dict(
+        main_repo=main_repo,
+        overleaf_repo=ol_repo,
+        path_in_project="pub",
+        sync_info_for_path=sync_info,
+        last_sync_commit=last_sync_commit,
+        print_info=lambda *a, **k: None,
+    )
+    with pytest.raises(RuntimeError, match="figures/photo.txt"):
+        calkit.overleaf.sync(**kwargs)
+    # Nothing was touched on either side by the refused sync
+    with open(os.path.join(ol_dir, "figures", "photo.txt")) as f:
+        assert f.read() == "Replaced on Overleaf"
+    assert not main_repo.git.status("--porcelain")
+    # With --force, the project's version wins
+    res = calkit.overleaf.sync(**kwargs, force=True)
+    assert res["push_path_edits_on_overleaf"] == ["figures/photo.txt"]
+    with open(os.path.join(ol_dir, "figures", "photo.txt")) as f:
+        assert f.read() == "A hand-made figure"
+    with open(os.path.join(main_dir, "pub", "figures", "photo.txt")) as f:
+        assert f.read() == "A hand-made figure"
+    assert ol_remote.head.commit.hexsha == ol_repo.head.commit.hexsha
+
+
+def test_overleaf_sync_drops_legacy_sync_paths(tmp_dir):
+    # sync_paths stopped doing anything once every stored file started
+    # syncing both ways, so a project carrying one gets it removed on the
+    # next sync, and is told why.
+    pid = str(uuid.uuid4())
+    ol_repo = _make_temp_overleaf_project(pid)
+    ol_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    subprocess.run(["calkit", "init"], check=True)
+    repo = git.Repo()
+    tmp_remote = (
+        Path(tempfile.gettempdir()) / "overleaf-sync-remotes" / pid
+    ).as_posix()
+    os.makedirs(tmp_remote, exist_ok=True)
+    remote_repo = git.Repo.init(path=tmp_remote, bare=True)
+    remote_repo.git.config(["receive.denyCurrentBranch", "ignore"])
+    repo.git.remote(["add", "origin", tmp_remote])
+    ol_url = calkit.overleaf.get_git_remote_url(pid, "no token")
+    subprocess.run(
+        [
+            "calkit",
+            "overleaf",
+            "import",
+            ol_url,
+            "paper",
+            "--title",
+            "Test Pub",
+            "--push-path",
+            "figures",
+        ],
+        check=True,
+    )
+    # Nothing writes sync_paths anymore, so put one there as an older
+    # version of Calkit would have
+    ck_info = calkit.load_calkit_info()
+    ck_info["overleaf_sync"]["paper"]["sync_paths"] = ["main.tex"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", "Add legacy sync_paths"])
+    res = subprocess.run(
+        ["calkit", "overleaf", "sync", "--allow-stale"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "Removed 'sync_paths' from calkit.yaml" in res.stdout
+    ck_info = calkit.load_calkit_info()
+    assert "sync_paths" not in ck_info["overleaf_sync"]["paper"]
+    # Push paths are kept, and the removal is committed rather than left
+    # dirty in the working tree
+    assert ck_info["overleaf_sync"]["paper"]["push_paths"] == ["figures"]
+    assert not repo.git.status("--porcelain")

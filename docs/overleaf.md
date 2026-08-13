@@ -210,6 +210,21 @@ These are synced bidirectionally, except for files under `push_paths`
 (see [importing](#importing-an-overleaf-project)), which are pushed to
 Overleaf one-way only.
 
+A push path says the project is the source of truth for those files,
+so if one has been edited on Overleaf since the last sync,
+Calkit stops rather than overwriting it:
+
+```
+These files were changed on Overleaf but are push-only, so this sync would
+overwrite them: figures/photo.txt. Copy the changes into the project if you
+want to keep them, or sync with --force to overwrite them.
+```
+
+Nothing regenerates such a file, so unlike a pipeline output,
+the only other copy would be in the Overleaf project's history.
+Once you've copied anything worth keeping into the project,
+sync with `--force`/`-f` to overwrite what's there.
+
 Anything the pipeline produces is pushed one-way, however it's stored.
 Overleaf needs those files to compile the document, but an edit made to one
 of them there can't come back: the next run would overwrite it, so it

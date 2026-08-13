@@ -21,10 +21,6 @@ overleaf_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 # expired token. Calkit authenticates only with the token in its config, but a
 # stale token cached by the OS credential manager from an earlier version can
 # still interfere, so we point users there as a fallback.
-# How many times the guided commands retry a failed pull before giving up
-# when running unattended, where there's nobody to stop an endless retry
-_MAX_PULL_ATTEMPTS = 3
-
 PULL_FAILED_MESSAGE = (
     "Failed to pull from Overleaf; "
     "check that your Overleaf token is valid\n"
@@ -34,6 +30,10 @@ PULL_FAILED_MESSAGE = (
     "'git.overleaf.com' credential from your OS credential manager (Windows "
     "Credential Manager, macOS Keychain, or your Linux keyring) and try again."
 )
+
+# How many times the guided commands retry a failed pull before giving up
+# when running unattended, where there's nobody to stop an endless retry
+_MAX_PULL_ATTEMPTS = 3
 
 
 def _extract_title_from_tex(tex_file_path: str) -> str | None:
@@ -139,17 +139,6 @@ def import_publication(
             help="What of the publication this is, e.g., 'journal-article'.",
         ),
     ] = None,
-    sync_paths: Annotated[
-        list[str],
-        typer.Option(
-            "--sync-path",
-            "-s",
-            help=(
-                "Paths to sync from the Overleaf project, e.g., 'main.tex'. "
-                "Note that multiple can be specified."
-            ),
-        ),
-    ] = [],
     push_paths: Annotated[
         list[str],
         typer.Option(
@@ -322,9 +311,7 @@ def import_publication(
             name=stage_name,
             environment=tex_env_name,
             target_path=target_tex_path,
-            inputs=[
-                os.path.join(dest_dir, p) for p in sync_paths + push_paths
-            ],
+            inputs=[os.path.join(dest_dir, p) for p in push_paths],
             no_check=True,
             no_commit=True,
         )
@@ -345,8 +332,6 @@ def import_publication(
     if dest_dir in ol_sync:
         raise_error(f"'{dest_dir}' is already synced with Overleaf")
     ol_sync[dest_dir] = dict(url=src_url)
-    if sync_paths:
-        ol_sync[dest_dir]["sync_paths"] = sync_paths
     if push_paths:
         ol_sync[dest_dir]["push_paths"] = push_paths
     ck_info["overleaf_sync"] = ol_sync
@@ -521,10 +506,23 @@ def sync(
             ),
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
 ):
     """Sync folders with Overleaf."""
     # Read all synced folders, fixing legacy schema if applicable
-    overleaf_info = calkit.overleaf.get_sync_info(fix_legacy=True)
+    overleaf_info = calkit.overleaf.get_sync_info(
+        fix_legacy=True, print_info=typer.echo
+    )
     if not overleaf_info:
         raise_error("No Overleaf sync info found")
     overleaf_sync_dirs = list(overleaf_info.keys())
@@ -655,6 +653,7 @@ def sync(
                 resolving_conflict=resolve,
                 print_info=typer.echo,
                 push_only=push_only,
+                force=force,
             )
         except Exception as e:
             raise_error(str(e))
@@ -927,6 +926,17 @@ def push_to_overleaf(
             ),
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Enable verbose output.")
     ] = False,
@@ -950,6 +960,7 @@ def push_to_overleaf(
         verbose=verbose,
         allow_stale=True,
         any_branch=True,
+        force=force,
     )
     calkit.echo("Overleaf is up-to-date with this project ✅")
 
@@ -1014,6 +1025,17 @@ def pull_from_overleaf(
             ),
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            "-f",
+            help=(
+                "Overwrite changes made on Overleaf to push-only paths, "
+                "which the project is meant to be the source of truth for."
+            ),
+        ),
+    ] = False,
     verbose: Annotated[
         bool, typer.Option("--verbose", help="Enable verbose output.")
     ] = False,
@@ -1048,6 +1070,7 @@ def pull_from_overleaf(
         verbose=verbose,
         allow_stale=True,
         any_branch=True,
+        force=force,
     )
     # An Overleaf edit to a map-paths copy lands in the file it's copied
     # from, so the document is only rebuilt from it after a run

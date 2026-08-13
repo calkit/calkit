@@ -9,7 +9,6 @@ import logging
 import os
 import platform as _platform
 import posixpath
-import re
 import shutil
 import signal
 import subprocess
@@ -1397,6 +1396,13 @@ def run_local_server():
     )
 
 
+# Stage output is teed into the run log and can look exactly like a DVC log
+# record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
+# one in user scripts), so it's bracketed by these and skipped when parsing.
+STAGE_OUTPUT_START = "--- calkit stage output ---"
+STAGE_OUTPUT_END = "--- end calkit stage output ---"
+
+
 def _stage_run_info_from_log_content(log_content: str) -> dict:
     def add_stage_info(stage_name: str, key: str, value: str | datetime):
         if isinstance(value, datetime):
@@ -1411,7 +1417,16 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     lines = log_content.splitlines()
     current_stage_name = None
     current_stage_status = None
+    in_stage_output = False
     for line in lines:
+        if line == STAGE_OUTPUT_START:
+            in_stage_output = True
+            continue
+        if line == STAGE_OUTPUT_END:
+            in_stage_output = False
+            continue
+        if in_stage_output:
+            continue
         # Log lines should be able to be split into timestamp, type, message
         ls = line.split(" -", maxsplit=2)
         if len(ls) < 2:
@@ -1512,50 +1527,30 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
         return None
 
 
-RUN_FNAME_PREFIX_REGEX = re.compile(
-    r"^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-[0-9a-f]{32})"
-)
-
-
-def _run_fname_prefix(start_time: datetime, run_id: str) -> str:
-    """Build the filename prefix shared by all of a run's artifacts."""
-    return start_time.isoformat(timespec="seconds").replace(":", "-") + (
-        "-" + run_id
-    )
-
-
-def _prune_run_files(
-    dir_path: str, keep: int = 10, protect: str | None = None
+def _prune_run_logs(
+    logs_dir: str,
+    keep: int = 10,
+    protect: str | None = None,
+    suffix: str = ".log",
 ) -> None:
-    """Keep only files from the most recent ``keep`` runs in ``dir_path``.
+    """Keep only the most recent ``keep`` files in ``logs_dir``.
 
-    All of a run's artifacts---its main log, one log per stage, and its run
-    info JSON---are named ``{start timestamp}-{run ID}[-{stage name}].{ext}``,
-    so files are grouped by that prefix and every file belonging to a run
-    older than the most recent ``keep`` is removed. Grouping by run rather
-    than by file matters because a pipeline with many stages would otherwise
-    push earlier runs out of the history after a single run. ``protect`` (the
-    active run's prefix) is never deleted, guarding against clock skew that
-    could otherwise sort the live run into the prune set. Files that don't
-    look like run artifacts are left alone.
+    Files are named by their start timestamp, so sorting by name orders
+    them by time; the oldest beyond ``keep`` are removed so the directory
+    doesn't grow without bound. ``protect`` (the active run's filename) is
+    never deleted, guarding against clock skew or odd names that could
+    otherwise sort the live file into the prune set.
     """
-    if not os.path.isdir(dir_path):
+    if not os.path.isdir(logs_dir):
         return
-    runs: dict[str, list[str]] = {}
-    for fname in os.listdir(dir_path):
-        match = RUN_FNAME_PREFIX_REGEX.match(fname)
-        if match is None:
+    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(suffix))
+    for fname in logs[:-keep]:
+        if fname == protect:
             continue
-        runs.setdefault(match.group(1), []).append(fname)
-    prefixes = sorted(runs)
-    for prefix in prefixes[: max(len(prefixes) - max(keep, 0), 0)]:
-        if prefix == protect:
-            continue
-        for fname in runs[prefix]:
-            try:
-                os.remove(os.path.join(dir_path, fname))
-            except OSError:
-                pass
+        try:
+            os.remove(os.path.join(logs_dir, fname))
+        except OSError:
+            pass
 
 
 def _get_latest_run_log_content() -> str | None:
@@ -2288,7 +2283,11 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    run_fname_prefix = _run_fname_prefix(start_time_no_tz, run_id)
+    run_fname_prefix = (
+        start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
+        + "-"
+        + run_id
+    )
     log_fname = run_fname_prefix + ".log"
     # Always write the run log under the gitignored .calkit/local/logs so
     # `calkit status` can report which stage is running while the pipeline
@@ -2300,14 +2299,14 @@ def run(
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
-    # Create a file handler for dvc.stage.run logger
-    file_handler = logging.FileHandler(log_fpath, mode="w")
+    # Create a file handler for dvc.stage.run logger. Append mode matters:
+    # stage output is teed into this file through a second handle, and a
+    # truncating handle would overwrite it.
+    file_handler = logging.FileHandler(log_fpath, mode="a")
     run_history_length = calkit.config.read().run_history_length
-    # Keep the private log directory bounded; the new run counts toward the
-    # cap and is protected so its logs can never be pruned out from under it.
-    _prune_run_files(
-        local_logs_dir, keep=run_history_length, protect=run_fname_prefix
-    )
+    # Keep the private log directory bounded; the new log counts toward the
+    # cap and is protected so it can never be pruned out from under this run.
+    _prune_run_logs(local_logs_dir, keep=run_history_length, protect=log_fname)
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime
@@ -2323,56 +2322,26 @@ def run(
         os.environ["CALKIT_FORCE"] = "1"
     import dvc.stage.run
 
-    # DVC only logs its own wrapper output, so the stage processes' stdout and
-    # stderr are teed into a per-stage log file here. ``cmd_run`` is wrapped to
-    # name the log for the stage it's about to run, and ``_run``, which
-    # actually spawns the process, is wrapped to do the teeing.
-    orig_cmd_run = dvc.stage.run.cmd_run
+    # DVC logs only its own output, so tee each stage process's stdout and
+    # stderr into the run log as well as the terminal. DVC's repro is serial,
+    # so stages can't interleave here.
     orig_run = dvc.stage.run._run
-    # Which stage log the process spawned by ``_run`` belongs to. This is kept
-    # in thread-local state, rather than swapping ``_run`` itself per stage, so
-    # that stages DVC runs concurrently (with core.jobs > 1) each tee into
-    # their own log instead of racing over one global function.
-    stage_log_state = threading.local()
-
-    def _patched_cmd_run(stage, dry=False, run_env=None):
-        if dry:
-            return orig_cmd_run(stage, dry=dry, run_env=run_env)
-        # Stage names can contain characters that are invalid in a filename,
-        # or path separators that would escape the log directory entirely
-        stage_name = re.sub(r"[^A-Za-z0-9._-]", "_", stage.name)
-        stage_log_fname = run_fname_prefix + "-" + stage_name + ".log"
-        stage_log_path = os.path.join(local_logs_dir, stage_log_fname)
-        prev_stage_log_path = getattr(stage_log_state, "path", None)
-        stage_log_state.path = stage_log_path
-        try:
-            return orig_cmd_run(stage, dry=dry, run_env=run_env)
-        finally:
-            stage_log_state.path = prev_stage_log_path
-            # The log won't exist if the stage failed before its process was
-            # spawned, in which case there's nothing to save
-            if save_logs and os.path.isfile(stage_log_path):
-                shutil.copy2(
-                    stage_log_path,
-                    os.path.join(".calkit", "logs", stage_log_fname),
-                )
 
     def _patched_run(executable, cmd, **kwargs):
-        stage_log_path = getattr(stage_log_state, "path", None)
-        if stage_log_path is None:
-            return orig_run(executable, cmd, **kwargs)
         kwargs["stdout"] = subprocess.PIPE
         kwargs["stderr"] = subprocess.STDOUT
         kwargs["universal_newlines"] = True
         kwargs["bufsize"] = 1
         exec_cmd = dvc.stage.run._make_cmd(executable, cmd)
-        # Like DVC, ignore SIGINT while the stage runs so the signal reaches
-        # the child process group and it can shut down on its own terms. Only
-        # the main thread can install signal handlers.
+        # Like DVC, ignore SIGINT while the stage runs so it reaches the child
+        # process group; only the main thread can set signal handlers
         in_main_thread = threading.current_thread() is threading.main_thread()
         old_handler = None
         handler_set = False
-        with open(stage_log_path, "a", encoding="utf-8") as stage_log_f:
+        ended_with_newline = True
+        with open(log_fpath, "a", encoding="utf-8") as log_f:
+            log_f.write(STAGE_OUTPUT_START + "\n")
+            log_f.flush()
             try:
                 p = subprocess.Popen(exec_cmd, **kwargs)
                 if in_main_thread:
@@ -2381,8 +2350,9 @@ def run(
                 for line in p.stdout:
                     sys.stdout.write(line)
                     sys.stdout.flush()
-                    stage_log_f.write(line)
-                    stage_log_f.flush()
+                    log_f.write(line)
+                    log_f.flush()
+                    ended_with_newline = line.endswith("\n")
                 p.wait()
                 if p.returncode != 0:
                     raise dvc.stage.run.StageCmdFailedError(cmd, p.returncode)
@@ -2390,8 +2360,12 @@ def run(
                 # SIG_DFL is falsy, so check explicitly for having set it
                 if handler_set:
                     signal.signal(signal.SIGINT, old_handler)
+                log_f.write(
+                    ("" if ended_with_newline else "\n")
+                    + STAGE_OUTPUT_END
+                    + "\n"
+                )
 
-    dvc.stage.run.cmd_run = _patched_cmd_run
     dvc.stage.run._run = _patched_run
 
     try:
@@ -2406,7 +2380,6 @@ def run(
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
-        dvc.stage.run.cmd_run = orig_cmd_run
         dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
@@ -2497,10 +2470,11 @@ def run(
     # Only the local run history is capped. Run info written to the tracked
     # .calkit/runs with --log is version controlled---often deliberately, e.g.
     # to keep a record of CI runs---so pruning it would delete committed files.
-    _prune_run_files(
+    _prune_run_logs(
         local_runs_dir,
         keep=run_history_length,
-        protect=run_fname_prefix,
+        protect=run_info_fname,
+        suffix=".json",
     )
     if save_logs:
         run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)

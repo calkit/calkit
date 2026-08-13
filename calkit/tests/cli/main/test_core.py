@@ -21,9 +21,11 @@ import calkit
 import calkit.cli.main
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
+    STAGE_OUTPUT_END,
+    STAGE_OUTPUT_START,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
-    _prune_run_files,
+    _prune_run_logs,
     _run_dvc_repro,
     _stage_run_info_from_log_content,
     _stage_target_from_cmd,
@@ -1220,6 +1222,31 @@ def _write_fake_run_log() -> None:
         f.write("\n".join(lines) + "\n")
 
 
+def test_stage_run_info_ignores_stage_output():
+    # Stage output shares the log with DVC's records and can be shaped exactly
+    # like one, so it must not be parsed as one
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            STAGE_OUTPUT_START,
+            f"{ts}1,000 - ERROR - a warning from the stage's own logger",
+            f"{ts}1,500 - INFO - Running stage 'not-a-stage':",
+            STAGE_OUTPUT_END,
+            f"{ts}2,000 - INFO - Running stage 'b':",
+            STAGE_OUTPUT_START,
+            "plain output",
+            STAGE_OUTPUT_END,
+            f"{ts}3,000 - INFO - Stage 'c' didn't change, skipping",
+        ]
+    )
+    info = _stage_run_info_from_log_content(content)
+    assert list(info) == ["a", "b", "c"]
+    assert info["a"]["status"] == "completed"
+    assert info["b"]["status"] == "completed"
+    assert info["c"]["status"] == "skipped"
+
+
 def test_get_running_pipeline_status(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # No rwlock present means no run is in progress
@@ -1375,71 +1402,69 @@ def test_run_writes_private_logs(tmp_dir):
     subprocess.check_call(["calkit", "run"])
     local_logs = os.path.join(".calkit", "local", "logs")
     private = [f for f in os.listdir(local_logs) if f.endswith(".log")]
-    # One main run log and one stage log
-    assert len(private) == 2
+    assert len(private) == 1
     assert os.path.isfile(os.path.join(".calkit", "local", ".gitignore"))
     tracked_dir = os.path.join(".calkit", "logs")
     assert not os.path.isdir(tracked_dir) or not [
         f for f in os.listdir(tracked_dir) if f.endswith(".log")
     ]
-    # Without --log, run info and systems are also saved privately to .calkit/local
+    # Run info and system info are saved privately without --log too
     assert os.path.isdir(os.path.join(".calkit", "local", "runs"))
     assert os.path.isdir(os.path.join(".calkit", "local", "systems"))
     # With --log, the log is also saved to the tracked directory plus run info
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
-    assert len(tracked) == 2
+    assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
     assert os.path.isdir(os.path.join(".calkit", "systems"))
 
 
-def _run_prefix(second: int, run_id: str | None = None) -> str:
-    """Build a run filename prefix like the ones `calkit run` writes."""
-    return f"2026-05-23T10-00-{second:02d}-" + (run_id or f"{second:032x}")
-
-
-def test_prune_run_files(tmp_dir):
+def test_prune_run_logs(tmp_dir):
     logs_dir = "logs"
     os.makedirs(logs_dir)
-    # Run artifacts are named by start timestamp, so name order is time order
-    prefixes = [_run_prefix(i) for i in range(12)]
-    for prefix in prefixes:
-        # Each run writes a main log plus one log per stage
-        for name in [f"{prefix}.log", f"{prefix}-a.log", f"{prefix}-b.log"]:
-            with open(os.path.join(logs_dir, name), "w") as f:
-                f.write("x")
-    # A file that isn't a run artifact should be left untouched
+    # Logs are named by start timestamp, so name order is time order
+    names = [f"2026-05-23T10-00-{i:02d}-abc.log" for i in range(12)]
+    for n in names:
+        with open(os.path.join(logs_dir, n), "w") as f:
+            f.write("x")
+    # A non-log file should be left untouched
     with open(os.path.join(logs_dir, "keep.txt"), "w") as f:
         f.write("x")
-    _prune_run_files(logs_dir, keep=10)
+    _prune_run_logs(logs_dir, keep=10)
     remaining = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
-    # Pruning is per run, not per file, so many stages can't evict older runs
-    assert len(remaining) == 30
-    assert {f.split(".log")[0][:52] for f in remaining} == set(prefixes[-10:])
+    assert remaining == names[-10:]
     assert os.path.isfile(os.path.join(logs_dir, "keep.txt"))
     # Pruning is a no-op when at or below the cap, and when the dir is missing
-    _prune_run_files(logs_dir, keep=10)
-    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 30
-    _prune_run_files("does-not-exist", keep=10)
-    # The active run is never deleted, even if its name sorts oldest (e.g.
-    # clock skew)
-    active = "1999-01-01T00-00-00-" + "f" * 32
-    with open(os.path.join(logs_dir, active + ".log"), "w") as f:
+    _prune_run_logs(logs_dir, keep=10)
+    assert len([f for f in os.listdir(logs_dir) if f.endswith(".log")]) == 10
+    _prune_run_logs("does-not-exist", keep=10)
+    # The active log is never deleted, even if its name sorts oldest (e.g.
+    # clock skew or an unusual name).
+    old_active = "1999-01-01T00-00-00-active.log"
+    with open(os.path.join(logs_dir, old_active), "w") as f:
         f.write("x")
-    _prune_run_files(logs_dir, keep=10, protect=active)
-    assert os.path.isfile(os.path.join(logs_dir, active + ".log"))
+    _prune_run_logs(logs_dir, keep=10, protect=old_active)
+    assert os.path.isfile(os.path.join(logs_dir, old_active))
 
 
-def test_prune_run_files_run_info(tmp_dir):
+def test_prune_run_logs_json_suffix(tmp_dir):
     runs_dir = "runs"
     os.makedirs(runs_dir)
-    prefixes = [_run_prefix(i) for i in range(15)]
-    for prefix in prefixes:
-        with open(os.path.join(runs_dir, prefix + ".json"), "w") as f:
+    for i in range(15):
+        name = f"2025-01-01T00-00-{i:02d}-{i:02d}.json"
+        with open(os.path.join(runs_dir, name), "w") as f:
             f.write("{}")
-    _prune_run_files(runs_dir, keep=10)
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
     remaining = sorted(os.listdir(runs_dir))
-    assert remaining == [p + ".json" for p in prefixes[-10:]]
+    assert len(remaining) == 10
+    # Oldest by name are removed; newest 10 kept
+    assert remaining[0] == "2025-01-01T00-00-05-05.json"
+    assert remaining[-1] == "2025-01-01T00-00-14-14.json"
+    # A .log file in the same dir must be untouched by a .json prune
+    with open(os.path.join(runs_dir, "keep.log"), "w") as f:
+        f.write("x")
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    assert os.path.isfile(os.path.join(runs_dir, "keep.log"))
 
 
 def test_map_paths(tmp_dir):
@@ -2063,87 +2088,68 @@ def test_call_dvc_passthrough_hint(tmp_dir):
     )
 
 
+def _read_only_log(logs_dir: str) -> str:
+    log_files = [f for f in os.listdir(logs_dir) if f.endswith(".log")]
+    assert len(log_files) == 1
+    with open(os.path.join(logs_dir, log_files[0])) as f:
+        return f.read()
+
+
 def test_run_captures_stage_logs(tmp_dir):
-    """Test stage stdout and stderr are captured and teed to the terminal."""
+    """Test stage stdout and stderr are teed to the terminal and run log."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
-    # Create a Python script that prints to stdout and stderr
+    # A stage that writes to both streams, the second line shaped like a log
+    # record so it would be misread as one if it weren't bracketed
     script = (
         "import sys\n"
         "sys.stdout.write('OUT_MARKER\\n')\n"
-        "sys.stderr.write('ERR_MARKER\\n')\n"
+        "sys.stderr.write('2026-05-23 10:00:00,000 - ERROR - ERR_MARKER\\n')\n"
     )
     with open("stage_script.py", "w") as f:
         f.write(script)
-    # Add a stage manually via dvc.yaml
-    dvc_yaml = {
-        "stages": {
-            "test_stage": {
-                "cmd": "python stage_script.py",
-            }
-        }
-    }
+    dvc_yaml = {"stages": {"test_stage": {"cmd": "python stage_script.py"}}}
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(dvc_yaml, f)
-    # Run pipeline and capture output at terminal
     res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     assert res.returncode == 0
-    # Both markers should be in the terminal output, since stage stderr is
-    # teed into stdout
+    # Both markers reach the terminal, since stage stderr is teed into stdout
     assert "OUT_MARKER" in res.stdout
     assert "ERR_MARKER" in res.stdout
-    # Verify the log file was created in .calkit/local/logs
-    local_logs = os.path.join(".calkit", "local", "logs")
-    log_files = [f for f in os.listdir(local_logs) if "test_stage.log" in f]
-    assert len(log_files) == 1
-    with open(os.path.join(local_logs, log_files[0])) as f:
-        log_content = f.read()
+    # Stage output and DVC's own records share one log
+    log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
     assert "OUT_MARKER" in log_content
     assert "ERR_MARKER" in log_content
+    assert "Running stage 'test_stage'" in log_content
 
 
 def test_run_captures_stage_logs_failure(tmp_dir):
     """Test that stage output is captured even if the stage fails."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
-    # Create a Python script that fails
     script = (
         "import sys\nsys.stdout.write('FAIL_OUT_MARKER\\n')\nsys.exit(1)\n"
     )
     with open("stage_fail.py", "w") as f:
         f.write(script)
-    dvc_yaml = {
-        "stages": {
-            "fail_stage": {
-                "cmd": "python stage_fail.py",
-            }
-        }
-    }
+    dvc_yaml = {"stages": {"fail_stage": {"cmd": "python stage_fail.py"}}}
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(dvc_yaml, f)
     res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     assert res.returncode != 0
-    local_logs = os.path.join(".calkit", "local", "logs")
-    log_files = [f for f in os.listdir(local_logs) if "fail_stage.log" in f]
-    assert len(log_files) == 1
-    with open(os.path.join(local_logs, log_files[0])) as f:
-        log_content = f.read()
+    log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
     assert "FAIL_OUT_MARKER" in log_content
 
 
 def test_run_log_flag_copies_stage_logs(tmp_dir):
-    """Test that --log copies stage logs to the tracked directory."""
+    """Test that --log copies the log with stage output to the tracked dir."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
     script = "import sys\nsys.stdout.write('OUT_MARKER\\n')\n"
     with open("stage_script.py", "w") as f:
         f.write(script)
     dvc_yaml = {
-        "stages": {
-            "test_stage_log": {
-                "cmd": "python stage_script.py",
-            }
-        }
+        "stages": {"test_stage_log": {"cmd": "python stage_script.py"}}
     }
     with open("dvc.yaml", "w") as f:
         calkit.ryaml.dump(dvc_yaml, f)
@@ -2151,13 +2157,7 @@ def test_run_log_flag_copies_stage_logs(tmp_dir):
         ["calkit", "run", "--log"], capture_output=True, text=True
     )
     assert res.returncode == 0
-    tracked_logs = os.path.join(".calkit", "logs")
-    log_files = [
-        f for f in os.listdir(tracked_logs) if "test_stage_log.log" in f
-    ]
-    assert len(log_files) == 1
-    with open(os.path.join(tracked_logs, log_files[0])) as f:
-        log_content = f.read()
+    log_content = _read_only_log(os.path.join(".calkit", "logs"))
     assert "OUT_MARKER" in log_content
 
 

@@ -618,7 +618,7 @@ def post_project(
                 dc_dir = os.path.join(repo.working_dir, ".devcontainer")
                 os.makedirs(dc_dir, exist_ok=True)
                 dc_fpath = os.path.join(dc_dir, "devcontainer.json")
-                with open(dc_fpath, "w") as f:
+                with open(dc_fpath, "w", encoding="utf-8") as f:
                     f.write(
                         calkit.resources.read_text(
                             "devcontainer",
@@ -4522,7 +4522,7 @@ async def post_project_overleaf_publication(
                 ".github", "workflows", "run-calkit.yml"
             )
             workflow_fpath = os.path.join(repo.working_dir, workflow_rel_path)
-            with open(workflow_fpath, "w") as f:
+            with open(workflow_fpath, "w", encoding="utf-8") as f:
                 f.write(calkit.resources.render_github_actions_workflow())
             repo.git.add(workflow_rel_path)
     commit_msg = (

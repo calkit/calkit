@@ -46,7 +46,7 @@ def update_devcontainer(
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
-    with open(out_fpath, "w") as f:
+    with open(out_fpath, "w", encoding="utf-8") as f:
         f.write(
             calkit_resources.read_text(
                 "devcontainer", calkit_resources.DEVCONTAINER_FNAME
@@ -357,7 +357,7 @@ def update_vscode_config(
     for fname in calkit_resources.VSCODE_FNAMES:
         out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
-        with open(out_fpath, "w") as f:
+        with open(out_fpath, "w", encoding="utf-8") as f:
             f.write(calkit_resources.read_text("vscode", fname))
         repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
@@ -386,25 +386,41 @@ def update_github_actions(
 ):
     """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
+
+    An existing workflow that runs the Calkit action is updated in place,
+    pinning the action to this version of Calkit, so this is safe to rerun
+    after upgrading.
     """
     from calkit import resources as calkit_resources
 
-    # First look for any existing workflows that run Calkit to use as the
-    # output file name
+    # First look for an existing workflow that runs the Calkit action, so
+    # rerunning this updates a project's workflow instead of writing a
+    # second one beside it
     fname_out = "run-calkit.yml"
+    txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in os.listdir(out_dir):
+    for fname in sorted(os.listdir(out_dir)):
         if fname.endswith(".yaml") or fname.endswith(".yml"):
             fpath = os.path.join(out_dir, fname)
-            with open(fpath) as f:
-                if "calkit" in f.read().lower():
-                    fname_out = fname
-                    break
+            with open(fpath, encoding="utf-8") as f:
+                txt = f.read()
+            if calkit_resources.uses_run_action(txt):
+                fname_out = fname
+                # A workflow that's still the example gets replaced outright,
+                # picking up any other improvements to it, but one that's been
+                # customized only has its action ref updated
+                if not calkit_resources.is_default_github_actions_workflow(
+                    txt
+                ):
+                    txt_out = calkit_resources.set_action_ref(txt)
+                break
+    if txt_out is None:
+        txt_out = calkit_resources.render_github_actions_workflow()
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
-    with open(out_fpath, "w") as f:
-        f.write(calkit_resources.render_github_actions_workflow())
+    with open(out_fpath, "w", encoding="utf-8") as f:
+        f.write(txt_out)
     if not no_commit:
         rel_path = os.path.join(".github", "workflows", fname_out)
         repo = calkit.git.get_repo(wdir)

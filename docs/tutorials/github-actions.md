@@ -13,6 +13,10 @@ calkit update github-actions
 
 Note that this command can be run at any time to update to the latest
 recommended workflow configuration.
+The action is pinned to the version of Calkit that wrote the workflow,
+so after upgrading Calkit, rerun the command to move the pin.
+If the workflow has been customized, only the action's version is updated,
+and everything else in it is left alone.
 
 Inside `.github/workflows/run-calkit.yml` you'll then see something like:
 

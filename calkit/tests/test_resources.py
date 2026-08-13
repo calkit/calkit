@@ -9,7 +9,7 @@ import calkit
 import calkit.resources
 
 
-def test_resources():
+def test_resources(monkeypatch):
     resources_dir = calkit.resources.get_dir()
     assert os.path.isdir(resources_dir)
     spec = calkit.resources.load_json(
@@ -37,6 +37,25 @@ def test_resources():
     # base.json, which only applies inside the container
     for key in settings:
         assert not key.startswith(("workbench.colorTheme", "window."))
+    # Only the generated keys come from the VS Code config, so anything else
+    # the base customizes survives being merged with it
+    real_load_json = calkit.resources.load_json
+
+    def load_json_with_extra_customization(*relpath):
+        data = real_load_json(*relpath)
+        if relpath[-1] == "base.json":
+            data["customizations"]["vscode"]["snippets"] = ["python"]
+        return data
+
+    monkeypatch.setattr(
+        calkit.resources, "load_json", load_json_with_extra_customization
+    )
+    merged = calkit.resources.render_devcontainer_spec()["customizations"][
+        "vscode"
+    ]
+    assert merged["snippets"] == ["python"]
+    assert merged["extensions"] == extensions
+    assert merged["settings"] == customizations["settings"]
 
 
 def test_github_actions_workflow():
@@ -62,6 +81,36 @@ def test_github_actions_workflow():
         version="1.2.3.dev0+g21c9bb93"
     )
     assert calkit.resources.ACTION_REF in unpinned
+    # A project's workflow can be repinned in place, at whatever ref and in
+    # whatever style it was written, including the action's previous home,
+    # without touching anything else in it
+    for uses in [
+        "      - uses: calkit/run-action@v2\n",
+        '      - uses: "calkit/calkit/actions/run@v0.1.0"\n',
+        "        uses: calkit/calkit/actions/run@main\n",
+    ]:
+        custom = "# Custom\njobs:\n  main:\n    steps:\n" + uses
+        assert calkit.resources.uses_run_action(custom)
+        updated = calkit.resources.set_action_ref(custom, version="1.2.3")
+        assert "calkit/calkit/actions/run@v1.2.3" in updated
+        assert "run-action" not in updated
+        assert updated.startswith("# Custom\n")
+        assert len(updated.splitlines()) == len(custom.splitlines())
+    # Steps that use other actions, or mention the action outside a ref,
+    # must be left alone
+    other = "      - uses: actions/checkout@v4\n# calkit/run-action@v2\n"
+    assert not calkit.resources.uses_run_action(other)
+    assert calkit.resources.set_action_ref(other, version="1.2.3") == other
+    # Whether a project's workflow is still the example is what decides if
+    # it gets replaced wholesale or only repinned, so the pin itself, and
+    # line endings Git may have translated, can't affect that
+    assert calkit.resources.is_default_github_actions_workflow(pinned)
+    assert calkit.resources.is_default_github_actions_workflow(
+        unpinned.replace("\n", "\r\n")
+    )
+    assert not calkit.resources.is_default_github_actions_workflow(
+        pinned + "\n      - run: echo custom\n"
+    )
     # The bundled copy is generated from the action's own example, which is
     # only present in the repo, not in an installed package
     repo_copy = os.path.join(

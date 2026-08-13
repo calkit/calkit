@@ -111,4 +111,5 @@ This action was previously published from
 [`calkit/run-action`](https://github.com/calkit/run-action), which is no
 longer maintained.
 Workflows referencing `calkit/run-action@v2` still work, but should be
-updated to `calkit/calkit/actions/run@<version>`.
+updated to `calkit/calkit/actions/run@<version>`, which
+`calkit update github-actions` will do in place.

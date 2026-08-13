@@ -23,7 +23,7 @@ ENV PATH=${CONDA_DIR}/bin:${PATH}
 RUN rm -f /etc/apt/sources.list.d/yarn.list && \
     apt-get update > /dev/null && \
     apt-get install --no-install-recommends --yes \
-        wget bzip2 ca-certificates \
+        wget curl bzip2 ca-certificates \
         git \
         tini \
         > /dev/null && \

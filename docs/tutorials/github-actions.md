@@ -79,5 +79,6 @@ to the same branch at the same time.
 
 It's possible to configure the action to not save results, e.g., if you
 just want to check that the pipeline can run without errors.
-See the [documentation](https://github.com/marketplace/actions/run-calkit)
+See the
+[documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.

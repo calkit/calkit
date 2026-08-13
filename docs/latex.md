@@ -116,8 +116,8 @@ It does mean the tracked diff keeps showing a merged branch's changes until
 the pipeline runs on the default branch again, which rebuilds it as the
 plain document.
 Running the pipeline in CI on pushes to the default branch keeps it current;
-the [run action](https://github.com/calkit/run-action) does that in its
-example workflow, and saves the result.
+the [run action](https://github.com/calkit/calkit/tree/main/actions/run) does that
+in its example workflow, and saves the result.
 
 <!-- prettier-ignore -->
 !!! note

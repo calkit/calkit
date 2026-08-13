@@ -1,0 +1,22 @@
+{
+  "recommendations": [
+    "Calkit.calkit-vscode",
+    "james-yu.latex-workshop",
+    "lakefs.lakefs-dvc",
+    "esbenp.prettier-vscode",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "ms-python.autopep8",
+    "ms-toolsai.jupyter",
+    "ms-toolsai.jupyter-keymap",
+    "ms-toolsai.jupyter-renderers",
+    "ms-toolsai.vscode-jupyter-cell-tags",
+    "ms-toolsai.vscode-jupyter-slideshow",
+    "streetsidesoftware.code-spell-checker",
+    "redhat.vscode-yaml",
+    "akamud.vscode-theme-onedark",
+    "mechatroner.rainbow-csv",
+    "julialang.language-julia"
+  ]
+}

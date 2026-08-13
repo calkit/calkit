@@ -17,7 +17,7 @@ frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client
 
 .PHONY: format
-format: sync-docs ## Automatically format files.
+format: sync-docs sync-resources ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 
@@ -50,6 +50,19 @@ sync-docs: ## Sync documentation content from docs/*.md into README.md.
 	@uv run python scripts/generate-docs-references.py
 	@echo "🚀 Syncing documentation"
 	@uv run python scripts/sync-docs.py
+
+.PHONY: sync-resources
+sync-resources: ## Regenerate the dev container spec from the VS Code config.
+	@echo "🚀 Syncing project resources"
+	@uv run python scripts/sync-resources.py
+
+.PHONY: devcontainer-image
+devcontainer-image: ## Build the dev container image and smoke test it.
+	@echo "🚀 Building the dev container image"
+	@docker build -t calkit/devcontainer:dev calkit/resources/devcontainer
+	@echo "🚀 Smoke testing the dev container image"
+	@docker run --rm calkit/devcontainer:dev bash -c \
+		"calkit --version && uv --version && pixi --version && conda --version"
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.

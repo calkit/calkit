@@ -133,7 +133,7 @@ jobs:
       # An unforgeable statement about where and how the image was built,
       # which increases supply chain security for anyone who consumes it
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}

@@ -232,3 +232,39 @@ CALKIT_MOCK_SCHEDULER=1 calkit run
 
 Mock job state lives under `.calkit/local/`, which is always ignored by Git,
 so it never makes its way into your project history.
+
+## Structured job summaries
+
+Scheduler jobs can write structured JSON that Calkit versions alongside the
+job log. Calkit sets the environment variable `CALKIT_JOB_SUMMARY_PATH` to an
+absolute path before your job starts; write whatever JSON object you want there
+from any language, with no Calkit import:
+
+```sh
+printf '{"max_res": 1.2e-3, "gpu": "a100-0"}' > "$CALKIT_JOB_SUMMARY_PATH"
+```
+
+When the job finishes, Calkit merges its own metadata into a reserved top-level
+`calkit` key (job name, id, exit code, timestamps, dependency MD5s). Treat
+`calkit` as reserved—if your script sets it, Calkit's block wins.
+
+By default the summary file is not a declared pipeline output, so existing
+projects are unchanged. Opt in per stage with `summary: true` under the stage's
+`scheduler:` block; Calkit then tracks the file next to the job log with the
+same treatment as the `.out` log (`cache: false`, `persist: true`):
+
+```yaml
+pipeline:
+  stages:
+    benchmark:
+      kind: shell-script
+      environment: cluster1
+      script_path: scripts/run-benchmark.sh
+      scheduler:
+        summary: true
+      outputs:
+        - results/raw
+```
+
+With the default log path, the summary lands at
+`.calkit/scheduler/logs/<stage-name>.summary.json`.

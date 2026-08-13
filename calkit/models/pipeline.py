@@ -58,6 +58,15 @@ RelativeChildPathString = Annotated[
 ]
 
 
+def summary_path_from_log_path(log_path: str) -> str:
+    """Derive a scheduler job's summary path from its log path.
+
+    Shared so the CLI, which tells the job where to write, and the stage
+    definition, which declares the file as an output, cannot disagree.
+    """
+    return os.path.splitext(log_path)[0] + ".summary.json"
+
+
 class StageIteration(BaseModel):
     """A model for the ``iterate_over`` key in a stage definition.
 
@@ -162,6 +171,7 @@ class StageSchedulerOptions(BaseModel):
     env_default_setup: EnvDefaultsMode = "replace"
     log_path: str | None = None
     log_storage: Literal["git", "dvc"] | None = "git"
+    summary: bool = False
 
 
 class Stage(BaseModel):
@@ -403,6 +413,27 @@ class Stage(BaseModel):
             delete_before_run=False,
         )
 
+    @property
+    def scheduler_summary_output(self) -> PathOutput | None:
+        """The structured summary file for a scheduler-batched stage.
+
+        Opt in via ``scheduler.summary: true``. The path mirrors the stage log
+        (``.calkit/scheduler/logs/<name>.summary.json`` by default).
+        """
+        if self.scheduler is None or self._scheduler_kind is None:
+            return None
+        if not self.scheduler.summary:
+            return None
+        log_out = self.scheduler_log_output
+        if log_out is None:
+            return None
+        summary_path = summary_path_from_log_path(log_out.path)
+        return PathOutput(
+            path=summary_path,
+            storage=self.scheduler.log_storage,
+            delete_before_run=False,
+        )
+
     def to_dvc(self) -> dict:
         """Convert to a DVC stage.
 
@@ -427,6 +458,18 @@ class Stage(BaseModel):
                 isinstance(o, dict) and log_out.path in o for o in outs
             ):
                 outs.append(log_entry)
+        summary_out = self.scheduler_summary_output
+        if summary_out is not None:
+            summary_entry = {
+                summary_out.path: {
+                    "cache": summary_out.storage == "dvc",
+                    "persist": True,
+                }
+            }
+            if not any(
+                isinstance(o, dict) and summary_out.path in o for o in outs
+            ):
+                outs.append(summary_entry)
         # Scheduler-batched stages must persist their outputs: `calkit
         # scheduler batch` deletes and recreates them itself, and persisting
         # stops DVC from removing them before a re-run. That lets a job that
@@ -1429,6 +1472,8 @@ class Pipeline(BaseModel):
                     sched_opts["env_default_setup"] = (
                         stage.scheduler.env_default_setup
                     )
+                if stage.scheduler.summary:
+                    sched_opts["summary"] = True
             new_stage = ShellScriptStage(
                 kind="shell-script",
                 name=name,

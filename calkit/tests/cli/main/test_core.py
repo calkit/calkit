@@ -1232,7 +1232,8 @@ def test_stage_run_info_ignores_stage_output():
             STAGE_OUTPUT_START,
             f"{ts}1,000 - ERROR - a warning from the stage's own logger",
             f"{ts}1,500 - INFO - Running stage 'not-a-stage':",
-            STAGE_OUTPUT_END,
+            # Output with no final newline shares a line with the end marker
+            "no trailing newline here" + STAGE_OUTPUT_END,
             f"{ts}2,000 - INFO - Running stage 'b':",
             STAGE_OUTPUT_START,
             "plain output",
@@ -1245,6 +1246,37 @@ def test_stage_run_info_ignores_stage_output():
     assert info["a"]["status"] == "completed"
     assert info["b"]["status"] == "completed"
     assert info["c"]["status"] == "skipped"
+
+
+def test_stage_run_info_last_stage():
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            f"{ts}1,000 - INFO - Updating lock file 'dvc.lock'",
+        ]
+    )
+    # While the run is in progress, the last stage stays open---that's how
+    # status knows it's the one running
+    assert "status" not in _stage_run_info_from_log_content(content)["a"]
+    # Once the run is over, it's closed out with the final record's timestamp
+    info = _stage_run_info_from_log_content(content, run_finished=True)["a"]
+    assert info["status"] == "completed"
+    assert info["end_time"] == datetime.fromisoformat(f"{ts}1,000").isoformat()
+
+
+def test_stage_run_info_last_stage_failed():
+    # A failed last stage must not be closed out as completed
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            f"{ts}1,000 - ERROR - failed to reproduce 'a': boom",
+            "dvc.exceptions.ReproductionError: failed to reproduce 'a'",
+        ]
+    )
+    info = _stage_run_info_from_log_content(content, run_finished=True)
+    assert info["a"]["status"] == "failed"
 
 
 def test_get_running_pipeline_status(tmp_dir):
@@ -2095,16 +2127,25 @@ def _read_only_log(logs_dir: str) -> str:
         return f.read()
 
 
+def _read_only_run_info() -> dict:
+    runs_dir = os.path.join(".calkit", "local", "runs")
+    fnames = os.listdir(runs_dir)
+    assert len(fnames) == 1
+    with open(os.path.join(runs_dir, fnames[0])) as f:
+        return json.load(f)
+
+
 def test_run_captures_stage_logs(tmp_dir):
     """Test stage stdout and stderr are teed to the terminal and run log."""
     subprocess.check_call(["git", "init"])
     subprocess.check_call(["calkit", "init"])
     # A stage that writes to both streams, the second line shaped like a log
-    # record so it would be misread as one if it weren't bracketed
+    # record so it would be misread as one if it weren't bracketed, and no
+    # final newline so the end marker shares its line
     script = (
         "import sys\n"
         "sys.stdout.write('OUT_MARKER\\n')\n"
-        "sys.stderr.write('2026-05-23 10:00:00,000 - ERROR - ERR_MARKER\\n')\n"
+        "sys.stderr.write('2026-05-23 10:00:00,000 - ERROR - ERR_MARKER')\n"
     )
     with open("stage_script.py", "w") as f:
         f.write(script)
@@ -2121,6 +2162,11 @@ def test_run_captures_stage_logs(tmp_dir):
     assert "OUT_MARKER" in log_content
     assert "ERR_MARKER" in log_content
     assert "Running stage 'test_stage'" in log_content
+    # The stage's ERROR line isn't taken for a DVC one, which would leave the
+    # stage unfinished
+    stage_info = _read_only_run_info()["stages"]["test_stage"]
+    assert stage_info["status"] == "completed"
+    assert stage_info["end_time"] >= stage_info["start_time"]
 
 
 def test_run_captures_stage_logs_failure(tmp_dir):

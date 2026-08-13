@@ -1403,7 +1403,16 @@ STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
 
 
-def _stage_run_info_from_log_content(log_content: str) -> dict:
+def _stage_run_info_from_log_content(
+    log_content: str, run_finished: bool = False
+) -> dict:
+    """Parse per-stage timing and status out of a run log.
+
+    ``run_finished`` closes out the last stage, which has no later log record
+    to end it. It's left open while a run is in progress, since that's how
+    ``calkit status`` sees which stage is running.
+    """
+
     def add_stage_info(stage_name: str, key: str, value: str | datetime):
         if isinstance(value, datetime):
             # Convert datetime to ISO format for consistency
@@ -1418,11 +1427,14 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     current_stage_name = None
     current_stage_status = None
     in_stage_output = False
+    last_timestamp = None
     for line in lines:
         if line == STAGE_OUTPUT_START:
             in_stage_output = True
             continue
-        if line == STAGE_OUTPUT_END:
+        # Ends the line it's on, which it shares with any stage output that
+        # lacked a final newline
+        if line.endswith(STAGE_OUTPUT_END):
             in_stage_output = False
             continue
         if in_stage_output:
@@ -1441,6 +1453,7 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
         except ValueError:
             # If the timestamp is not in ISO format, skip this line
             continue
+        last_timestamp = timestamp
         # If we hit an error, the logs should print a traceback and end
         if log_type == "ERROR":
             errored_timestamp = timestamp
@@ -1475,6 +1488,16 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
             add_stage_info(current_stage_name, "start_time", timestamp)
             add_stage_info(current_stage_name, "end_time", timestamp)
             add_stage_info(current_stage_name, "status", current_stage_status)
+    if (
+        run_finished
+        and errored_timestamp is None
+        and current_stage_status == "running"
+        and last_timestamp is not None
+    ):
+        # The last stage has no later record to end it, so use the run's
+        # final record (DVC updates the lock file right after the stage)
+        add_stage_info(current_stage_name, "end_time", last_timestamp)
+        add_stage_info(current_stage_name, "status", "completed")
     if errored_timestamp is not None:
         # Figure out which stage failed
         for line in lines[-1::-1]:
@@ -2338,7 +2361,6 @@ def run(
         in_main_thread = threading.current_thread() is threading.main_thread()
         old_handler = None
         handler_set = False
-        ended_with_newline = True
         with open(log_fpath, "a", encoding="utf-8") as log_f:
             log_f.write(STAGE_OUTPUT_START + "\n")
             log_f.flush()
@@ -2352,7 +2374,6 @@ def run(
                     sys.stdout.flush()
                     log_f.write(line)
                     log_f.flush()
-                    ended_with_newline = line.endswith("\n")
                 p.wait()
                 if p.returncode != 0:
                     raise dvc.stage.run.StageCmdFailedError(cmd, p.returncode)
@@ -2360,11 +2381,9 @@ def run(
                 # SIG_DFL is falsy, so check explicitly for having set it
                 if handler_set:
                     signal.signal(signal.SIGINT, old_handler)
-                log_f.write(
-                    ("" if ended_with_newline else "\n")
-                    + STAGE_OUTPUT_END
-                    + "\n"
-                )
+                # Written as-is so the log stays byte-for-byte what the stage
+                # emitted; it shares a line if the output had no final newline
+                log_f.write(STAGE_OUTPUT_END + "\n")
 
     dvc.stage.run._run = _patched_run
 
@@ -2384,7 +2403,9 @@ def run(
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
-        stage_run_info = _stage_run_info_from_log_content(log_content)
+        stage_run_info = _stage_run_info_from_log_content(
+            log_content, run_finished=True
+        )
     if res is None:
         # DVC's exit code was lost to a teardown failure; fall back to the log,
         # which records any stage that failed to reproduce.

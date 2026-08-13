@@ -30,11 +30,16 @@ make devcontainer-image
 This builds the image for the local platform and smoke tests it.
 CI builds it on every pull request that touches this directory, and pushes
 a multi-platform build to `ghcr.io/calkit/devcontainer` on release, pinned
-to the Calkit version being released via the `CALKIT_VERSION` build arg.
+to the Calkit version being released via the `CALKIT_VERSION` build arg,
+tagged `latest` and `<version>`.
+Image tags carry no `v` prefix, matching how the images this one builds on
+are tagged, so they differ from the Git tag they're built from.
 
-Note that pushing to the `calkit/devcontainer` package requires that
-package's Actions access settings on GitHub to grant write access to the
-`calkit/calkit` repo.
+The package predates this repo, so pushing to it requires that the package's
+[settings](https://github.com/orgs/calkit/packages/container/devcontainer/settings)
+grant `calkit/calkit` the write role under "Manage Actions access".
+The `org.opencontainers.image.source` label in the `Dockerfile` is what
+links the package to this repo once that push happens.
 
 ## Testing the container itself
 

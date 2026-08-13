@@ -91,6 +91,8 @@ jobs:
         id: version
         run: |
           version="${{ github.event.release.tag_name }}"
+          # Both PyPI and the image tag want the bare version, without the
+          # `v` the Git tag carries
           echo "version=${version#v}" >> "$GITHUB_OUTPUT"
       # PyPI's index can lag the upload by a bit, and the build fails outright
       # if the pinned version isn't resolvable yet

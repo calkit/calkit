@@ -1,5 +1,9 @@
 FROM mcr.microsoft.com/devcontainers/python:dev-3.13-bullseye
 
+# GHCR links a package to the repo named here, which is what makes the
+# package inherit this repo's permissions and show its source
+LABEL org.opencontainers.image.source=https://github.com/calkit/calkit
+
 # Install Miniforge
 ARG MINIFORGE_NAME=Miniforge3
 ARG MINIFORGE_VERSION=26.3.2-0

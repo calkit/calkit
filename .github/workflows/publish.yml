@@ -70,3 +70,71 @@ jobs:
           path: dist/
       - name: Publish distribution 📦 to PyPI
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
+  publish-devcontainer:
+    name: Publish the dev container image 🐳
+    # The image installs the version being released from PyPI, so it can't
+    # be built until that version is actually there
+    needs:
+      - publish-to-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    env:
+      IMAGE: ghcr.io/calkit/devcontainer
+    steps:
+      - uses: actions/checkout@v7
+      - name: Determine version
+        id: version
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          # Both PyPI and the image tag want the bare version, without the
+          # `v` the Git tag carries
+          echo "version=${version#v}" >> "$GITHUB_OUTPUT"
+      # PyPI's index can lag the upload by a bit, and the build fails outright
+      # if the pinned version isn't resolvable yet
+      - name: Wait for the release on PyPI
+        run: |
+          url="https://pypi.org/pypi/calkit-python/${{ steps.version.outputs.version }}/json"
+          for i in $(seq 1 30); do
+            if curl -sfo /dev/null "$url"; then
+              echo "Found calkit-python ${{ steps.version.outputs.version }}"
+              exit 0
+            fi
+            echo "Not on PyPI yet; retrying in 20s ($i/30)"
+            sleep 20
+          done
+          echo "calkit-python ${{ steps.version.outputs.version }} never appeared on PyPI"
+          exit 1
+      - name: Log in to the container registry
+        uses: docker/login-action@af63523ba5f55733d817da0fdb813e660152c72c
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: calkit/resources/devcontainer
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: CALKIT_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ steps.version.outputs.version }}
+      # An unforgeable statement about where and how the image was built,
+      # which increases supply chain security for anyone who consumes it
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

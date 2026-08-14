@@ -38,6 +38,7 @@ if TYPE_CHECKING:
         overleaf,
         pipeline,
         releases,
+        resources,
         server,
         templates,
     )
@@ -61,6 +62,7 @@ _SUBMODULES = {
     "github",
     "invenio",
     "releases",
+    "resources",
     "licenses",
     "overleaf",
     "julia",

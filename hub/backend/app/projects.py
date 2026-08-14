@@ -9,7 +9,7 @@ import threading
 import time
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import git
 import requests
@@ -33,6 +33,7 @@ def _yaml_load(data: bytes | str):
 
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
+    normalize_artifact_path,
     params_from_url,
     ryaml,
     utcnow,
@@ -493,6 +494,57 @@ def record_overleaf_links(
     return links
 
 
+# Categories in calkit.yaml whose items are keyed by a path. This is
+# CATEGORIES_PLURAL_TO_SINGULAR plus presentations, which aren't a Calkit
+# object kind but are still declared with a path.
+# The artifact collections whose entries declare a path. Several aren't in
+# CATEGORIES_PLURAL_TO_SINGULAR, which only covers the kinds that can be
+# imported between projects, so they're listed explicitly.
+_PATH_CATEGORIES = list(CATEGORIES_PLURAL_TO_SINGULAR) + [
+    "presentations",
+    "results",
+    "tables",
+]
+
+
+def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
+    """Normalize every artifact path declared in ``ck_info``, in place.
+
+    See ``normalize_artifact_path``: a path written as ``./paper/main.pdf``
+    means the same file as ``paper/main.pdf``, but only the latter matches a
+    dvc.lock out or a Git tree entry, so declared paths have to be cleaned up
+    before anything keys artifacts by path.
+
+    Only safe for metadata that is read and never written back to
+    calkit.yaml, since it rewrites the paths the user declared.
+    """
+    for category in _PATH_CATEGORIES:
+        itemlist = ck_info.get(category)
+        if not isinstance(itemlist, list):
+            continue
+        for item in itemlist:
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("path"), str):
+                item["path"] = normalize_artifact_path(item["path"])
+            # References items carry their own files, each with a path
+            files = item.get("files")
+            if isinstance(files, list):
+                for f in files:
+                    if isinstance(f, dict) and isinstance(f.get("path"), str):
+                        f["path"] = normalize_artifact_path(f["path"])
+    # Showcase elements reference artifacts by path rather than declaring one
+    showcase = ck_info.get("showcase")
+    if isinstance(showcase, list):
+        for element in showcase:
+            if not isinstance(element, dict):
+                continue
+            for key in ("figure", "publication", "notebook"):
+                if isinstance(element.get(key), str):
+                    element[key] = normalize_artifact_path(element[key])
+    return ck_info
+
+
 def get_ck_info_and_dvc_outs_from_tree(
     project: Project,
     tree: RepoTree,
@@ -559,6 +611,10 @@ def get_ck_info_and_dvc_outs_from_tree(
     )
     t1 = time.perf_counter()
     ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
+    # calkit.yaml can hold any YAML value, and only a mapping is usable
+    if not isinstance(ck_info, dict):
+        ck_info = {}
+    normalize_ck_info_paths(ck_info)
     dvc_lock = (_yaml_load(dvc_bytes) or {}) if dvc_bytes else {}
     t_parse = time.perf_counter() - t1
     logger.info(f"Parsed calkit.yaml and dvc.lock in {t_parse * 1000:.0f}ms")
@@ -600,6 +656,10 @@ def get_contents_from_tree(
             raise HTTPException(400, "Absolute paths are not allowed")
         if ".." in path.split(os.sep):
             raise HTTPException(400, "Path traversal is not allowed")
+        # Callers can pass a path straight through from a link or an API
+        # client, e.g. "./paper/main.pdf", but every key matched below is
+        # clean. Normalizing to the repo root means the same as no path.
+        path = normalize_artifact_path(path) or None
     # Reject unsafe symlinks
     if path is not None and tree.is_symlink(path):
         if not tree.is_safe_symlink(path):
@@ -1011,13 +1071,17 @@ def get_ck_info_for_ref(
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
-    the ref or doesn't hold a mapping.
+    the ref or doesn't hold a mapping. Declared artifact paths come back
+    normalized (see ``normalize_ck_info_paths``), so callers must not write
+    the result back to calkit.yaml.
 
     Pass ``read_only=True`` only when the caller won't write the result back;
     see ``get_ck_info_from_repo``.
     """
     if ref is None:
-        return get_ck_info_from_repo(repo=repo, read_only=read_only)
+        return normalize_ck_info_paths(
+            get_ck_info_from_repo(repo=repo, read_only=read_only)
+        )
     try:
         ck_item = get_contents_from_repo(
             project=project,
@@ -1036,7 +1100,7 @@ def get_ck_info_for_ref(
     # mapping is usable project metadata
     if not isinstance(ck_info, dict):
         return {}
-    return ck_info
+    return normalize_ck_info_paths(ck_info)
 
 
 def get_dvc_pipeline_for_ref(

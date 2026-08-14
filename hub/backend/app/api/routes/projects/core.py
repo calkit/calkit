@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -67,6 +68,7 @@ from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
     load_yaml_fast,
+    normalize_artifact_path,
     params_from_url,
     ryaml,
     utcnow,
@@ -202,6 +204,28 @@ def _title_from_path(path: str) -> str:
     # Repo paths are always Posix, so parse them as such regardless of host OS.
     stem = PurePosixPath(path).stem
     return stem.replace("_", " ").replace("-", " ").capitalize()
+
+
+def _normalize_artifact_file_path(path: str) -> str:
+    """Normalize a client-declared artifact file path, checking it's in-repo.
+
+    For artifacts that name a file inside the repo, e.g. a figure or a
+    publication. Callers join the result onto ``repo.working_dir`` to write
+    that file, so an absolute or traversing path would land outside the
+    project, and one that normalizes to the repo root, e.g. "./", names a
+    directory rather than a file. Not for project-scoped paths like a
+    release's, where "." legitimately means the project itself.
+    """
+    # A path declared as "./paper/main.pdf" would never match its
+    # "paper/main.pdf" DVC out, so clean it up before it reaches calkit.yaml
+    path = normalize_artifact_path(path)
+    if not path:
+        raise HTTPException(400, "Path must name a file in the project")
+    if posixpath.isabs(path):
+        raise HTTPException(400, "Absolute paths are not allowed")
+    if ".." in path.split("/"):
+        raise HTTPException(400, "Path traversal is not allowed")
+    return path
 
 
 PRESENTATION_EXTS = {".pdf", ".pptx", ".ppt", ".key", ".odp"}
@@ -2577,6 +2601,7 @@ def post_project_figure(
     stage: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Figure:
+    path = _normalize_artifact_file_path(path)
     file_data: bytes | None = None
     full_fig_path: str | None = None
     if file is not None:
@@ -4059,6 +4084,7 @@ def post_project_publication(
     environment: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Publication:
+    path = _normalize_artifact_file_path(path)
     if file is not None:
         logger.info(
             f"Received publication file {path} with content type: "

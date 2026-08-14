@@ -4,11 +4,16 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
 from app import users, zotero
-from app.api.routes.projects.core import get_project_comments
+from app.api.routes.projects.core import (
+    _normalize_artifact_file_path,
+    get_project_comments,
+)
 from app.config import settings
 from app.core import ryaml
 from app.models import Project, UserCreate
@@ -2909,3 +2914,22 @@ def test_project_pipeline_stage_edit(
         assert r.status_code == 200, r.text
         assert r.json()["changed"] == ["wdir"]
         assert "slurm" in ryaml.load(r.json()["yaml"])
+
+
+def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
+    # A declared path is joined onto the repo's working dir and written to,
+    # so anything that could resolve outside the project is refused
+    assert (
+        _normalize_artifact_file_path("./paper/main.pdf") == "paper/main.pdf"
+    )
+    assert (
+        _normalize_artifact_file_path("figures//plot.png")
+        == "figures/plot.png"
+    )
+    assert _normalize_artifact_file_path("paper/../figures/plot.png") == (
+        "figures/plot.png"
+    )
+    for path in ["", ".", "./", "/tmp/x", "../../etc/passwd", "paper/../.."]:
+        with pytest.raises(HTTPException) as exc_info:
+            _normalize_artifact_file_path(path)
+        assert exc_info.value.status_code == 400, path

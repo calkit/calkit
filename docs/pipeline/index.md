@@ -390,10 +390,10 @@ Model class: `MatlabCommandStage`
 
 Model class: `MatlabScriptStage`
 
-| Kind-specific parameter | Type                                                                                          | Required | Default |
-| ----------------------- | --------------------------------------------------------------------------------------------- | -------- | ------- |
-| `script_path`           | str                                                                                           | yes      |         |
-| `matlab_path`           | Annotated[str, AfterValidator(func=<function _check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+| Kind-specific parameter | Type                                                                                         | Required | Default |
+| ----------------------- | -------------------------------------------------------------------------------------------- | -------- | ------- |
+| `script_path`           | str                                                                                          | yes      |         |
+| `matlab_path`           | Annotated[str, AfterValidator(func=<function check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
 
 ### `python-script`
 

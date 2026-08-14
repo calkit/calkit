@@ -32,7 +32,7 @@ from calkit.models.iteration import (
 )
 
 
-def _check_path_relative_and_child_of_cwd(s: str) -> str:
+def check_path_relative_and_child_of_cwd(s: str) -> str:
     p = Path(s)
     # Enforce that the path is relative
     if p.is_absolute():
@@ -54,7 +54,7 @@ def _check_path_relative_and_child_of_cwd(s: str) -> str:
 
 
 RelativeChildPathString = Annotated[
-    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+    str, AfterValidator(check_path_relative_and_child_of_cwd)
 ]
 
 
@@ -487,8 +487,8 @@ class PythonScriptStage(Stage):
 class MapPathsStage(Stage):
     class CopyFileToFile(BaseModel):
         kind: Literal["file-to-file"] = "file-to-file"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -500,8 +500,8 @@ class MapPathsStage(Stage):
 
     class CopyFileToDir(BaseModel):
         kind: Literal["file-to-dir"] = "file-to-dir"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -513,8 +513,8 @@ class MapPathsStage(Stage):
 
     class DirToDirMerge(BaseModel):
         kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -526,8 +526,8 @@ class MapPathsStage(Stage):
 
     class DirToDirReplace(BaseModel):
         kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:

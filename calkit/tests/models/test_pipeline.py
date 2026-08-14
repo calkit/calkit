@@ -624,3 +624,25 @@ def test_latex_stage_diffs():
                 target_path="pubs/paper-1/main.tex",
                 diffs=bad,
             )
+
+
+def test_mappathsstage_rejects_paths_outside_the_project():
+    # A legitimate mapping is unaffected
+    s = MapPathsStage(
+        name="copy-figures",
+        paths=[
+            dict(kind="dir-to-dir-replace", src="figures", dest="paper/figs")
+        ],
+    )
+    assert s.paths[0].src == "figures"
+    # dir-to-dir-replace deletes its destination, and map-paths is the one
+    # stage kind the hub runs itself, so a '../' escape would let a project
+    # delete or read outside its own directory
+    for bad in [
+        dict(kind="dir-to-dir-replace", src="figures", dest="../../victim"),
+        dict(kind="dir-to-dir-merge", src="../../secrets", dest="paper/figs"),
+        dict(kind="file-to-file", src="/etc/passwd", dest="paper/leak.tex"),
+        dict(kind="file-to-dir", src="results.tex", dest="/tmp/exfil"),
+    ]:
+        with pytest.raises(ValidationError):
+            MapPathsStage(name="copy-figures", paths=[bad])

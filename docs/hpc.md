@@ -4,7 +4,7 @@ Calkit projects can help simplify working on high performance computing (HPC)
 clusters and their job schedulers.
 In general, what you'll want to do is clone the project there,
 run your pipeline (perhaps only certain stages), commit the results,
-then push them up to the cloud.
+then push them up to the hub.
 
 This is different from a more ad hoc workflow where you might copy a few
 files to the cluster, run some jobs, then copy the results back manually.
@@ -31,6 +31,7 @@ environments:
     default_setup: # Optional
       - module purge
       - module load something/cool
+    max_concurrent_jobs: 2 # Optional; see "Limiting queue usage"
   my-conda-env:
     kind: conda
     path: environment.yml
@@ -58,7 +59,7 @@ pipeline:
         - config/simulation.txt
       outputs:
         - path: results/raw
-          storage: null # If the results are too large to push to the cloud
+          storage: null # If the results are too large to push to the hub
 ```
 
 It's also possible to use a nested environment, e.g., if you want to run
@@ -154,6 +155,36 @@ succeeded are skipped and only the failed one is resubmitted.
 (`calkit run --force` re-runs every case serially instead, since it ignores
 the cache; just editing a script invalidates the affected cases without
 `--force`, so they still re-run concurrently.)
+
+## Limiting queue usage
+
+Submitting every iteration at once is fine when you have the cluster to
+yourself, but on a shared cluster a long sweep can take up a large share of
+the queue.
+Exactly what that costs depends on the scheduler's policy: with fair-share
+scheduling it mostly delays your own later jobs, and on a first-come,
+first-served queue it delays everyone else's too.
+Set `max_concurrent_jobs` on the environment to cap how many of the project's
+jobs may be in the queue---running or pending---at any one time:
+
+```yaml
+environments:
+  cluster1:
+    kind: slurm
+    max_concurrent_jobs: 2
+```
+
+With the sweep above, only two `Re` cases are submitted at first; the third is
+submitted when one of them finishes, and so on.
+The pipeline still runs to completion, it just takes a smaller share of the
+queue while it does.
+
+Only jobs Calkit submitted for the current project count toward the limit, so
+it caps what one project's pipeline takes, not everything you have running.
+
+The limit affects when jobs are submitted, never what they compute, so
+changing it does not invalidate cached results---you can turn it on partway
+through a long sweep without losing the cases that already finished.
 
 ## Monitoring
 

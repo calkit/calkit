@@ -88,23 +88,6 @@ class ReferenceCollection(BaseModel):
     files: list[ReferenceFile] = []
 
 
-class IncludedEnvironment(BaseModel):
-    """An environment whose specification lives in another file.
-
-    This variant covers entries that carry only an ``_include`` key, i.e.,
-    with no ``kind`` declared inline.
-    """
-
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-    include: str = Field(
-        alias="_include",
-        description=(
-            "Path to a YAML file whose contents are merged into this "
-            "environment's definition."
-        ),
-    )
-
-
 class Environment(BaseModel):
     """Base class for environments, which is never used directly.
 
@@ -136,14 +119,6 @@ class Environment(BaseModel):
     # and a required ``path`` doesn't conflict with the base's optional one.
     description: str | None = Field(
         default=None, description="A description of the environment."
-    )
-    include: str | None = Field(
-        default=None,
-        alias="_include",
-        description=(
-            "Path to a YAML file whose contents are merged into this "
-            "environment's definition."
-        ),
     )
 
 
@@ -322,6 +297,14 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
+    max_concurrent_jobs: int | None = Field(
+        default=None,
+        ge=1,
+        description="How many of this project's jobs may sit in the queue "
+        "(running or pending) at once. Submissions beyond the limit wait for "
+        "a slot, so an iterated stage does not flood a shared cluster's queue "
+        "with every one of its jobs at the same time. Null means no limit.",
+    )
 
 
 class PBSEnvironment(Environment):
@@ -336,6 +319,12 @@ class PBSEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run at the start of every job script.",
+    )
+    max_concurrent_jobs: int | None = Field(
+        default=None,
+        ge=1,
+        description="How many of this project's jobs may sit in the queue "
+        "(running or pending) at once. Null means no limit.",
     )
 
 
@@ -609,14 +598,23 @@ class ProjectInfo(BaseModel):
     )
     owner: str | None = Field(
         default=None,
-        description="The account name that owns the project on Calkit Cloud.",
+        description="The account name that owns the project on Calkit.",
     )
     description: str | None = Field(
         default=None, description="A short description of the project."
     )
     name: str | None = Field(
         default=None,
-        description="The project's name on Calkit Cloud, e.g., 'my-project'.",
+        description="The project's name on Calkit, e.g., 'my-project'.",
+    )
+    hub: str | None = Field(
+        default=None,
+        description="Base URL of the Calkit Hub on which the project is "
+        "shared, backed up, and collaborated on, e.g., 'calkit.io'. The "
+        "scheme can be omitted, in which case https is inferred, or http "
+        "for a local host. Each project belongs to at most one hub, which "
+        "makes 'ck://' paths resolvable against a known instance. Projects "
+        "with no hub set are assumed to belong to 'calkit.io'.",
     )
     git_repo_url: str | None = Field(
         default=None, description="URL of the project's Git repository."
@@ -683,8 +681,7 @@ class ProjectInfo(BaseModel):
         | UvEnvironment
         | UvVenvEnvironment
         | NixEnvironment
-        | SSHEnvironment
-        | IncludedEnvironment,
+        | SSHEnvironment,
     ] = Field(
         default={},
         description="Environments in which pipeline stages are run, keyed by "
@@ -716,7 +713,7 @@ class ProjectInfo(BaseModel):
     ) = Field(
         default=None,
         description="Elements that best represent the project, shown on its "
-        "Calkit Cloud homepage.",
+        "project homepage on Calkit.",
     )
     subprojects: list[Subproject] = Field(
         default=[],

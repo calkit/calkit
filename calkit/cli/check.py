@@ -327,7 +327,7 @@ def check_environment(
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -520,7 +520,7 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
@@ -1114,6 +1114,9 @@ def check_venv(
         pip_install_args += f" --python {python}"
     # Ensure prefix is natively formatted for the OS
     prefix = os.path.normpath(prefix)
+    prefix_full_path = (
+        prefix if os.path.isabs(prefix) else os.path.join(wdir or ".", prefix)
+    )
 
     def create_venv() -> None:
         if verbose:
@@ -1123,13 +1126,47 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
         if not os.path.isfile(gitignore_fpath):
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
 
-    if not os.path.isdir(prefix):
+    def venv_was_moved() -> bool:
+        """Check if the venv's activate script points somewhere else.
+
+        Renaming or moving a project leaves the absolute path baked into the
+        activate script pointing at the old location, so activating prepends a
+        nonexistent directory to PATH and commands silently resolve to whatever
+        is outside the environment.
+        """
+        if _platform.system() == "Windows":
+            activate_fpath = os.path.join(
+                prefix_full_path, "Scripts", "activate.bat"
+            )
+        else:
+            activate_fpath = os.path.join(prefix_full_path, "bin", "activate")
+        if not os.path.isfile(activate_fpath):
+            return True
+        with open(activate_fpath) as f:
+            content = f.read()
+        this_prefix = os.path.abspath(prefix_full_path)
+        return os.path.normcase(this_prefix) not in os.path.normcase(content)
+
+    if not os.path.isdir(prefix_full_path):
         create_venv()
+    elif venv_was_moved():
+        if not quiet:
+            typer.echo(f"Recreating {kind} at {prefix} since it was moved")
+        # uv refuses to create over an existing env, and packages are
+        # reinstalled from the lock file below
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            # Removal can fail if the environment is in use, e.g., on Windows,
+            # where files can't be removed while open, in which case we keep
+            # it and let the install below attempt a rebuild
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -1197,16 +1234,14 @@ def check_venv(
                 typer.echo(
                     f"Removing existing {kind} at {prefix} and rebuilding"
                 )
-            prefix_full_path = (
-                prefix
-                if os.path.isabs(prefix)
-                else os.path.join(wdir or ".", prefix)
-            )
             if os.path.isdir(prefix_full_path):
+                # This can fail if the environment is in use, e.g., on
+                # Windows, where files can't be removed while open, in which
+                # case we keep it and fall back to rebuilding from the spec
                 shutil.rmtree(prefix_full_path)
             create_venv()
             pip_install_and_freeze(dep_file_txt)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, OSError):
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"

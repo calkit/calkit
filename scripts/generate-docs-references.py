@@ -558,12 +558,8 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
         # a definition, so it's the one field we don't infer from the default.
         required = name == "kind" or field.is_required()
         # Use the alias when there is one, since that's the key actually
-        # written in calkit.yaml, e.g., ``_include``. Leading underscores are
-        # escaped to match what Prettier writes, so running the formatter
-        # after this script is a no-op.
+        # written in calkit.yaml
         param = field.alias or name
-        if param.startswith("_"):
-            param = "\\" + param
         rows.append(
             (
                 param,

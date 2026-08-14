@@ -141,19 +141,6 @@
     "CondaEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -607,19 +594,6 @@
     "DockerEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "args": {
           "anyOf": [
             {
@@ -990,22 +964,6 @@
         "formula"
       ],
       "title": "FormulaParams",
-      "type": "object"
-    },
-    "IncludedEnvironment": {
-      "additionalProperties": false,
-      "description": "An environment whose specification lives in another file.\n\nThis variant covers entries that carry only an ``_include`` key, i.e.,\nwith no ``kind`` declared inline.",
-      "properties": {
-        "_include": {
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include",
-          "type": "string"
-        }
-      },
-      "required": [
-        "_include"
-      ],
-      "title": "IncludedEnvironment",
       "type": "object"
     },
     "Input": {
@@ -1386,19 +1344,6 @@
     "JuliaEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -1832,6 +1777,42 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "diff_pdf_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store the resulting diff PDFs.",
+          "title": "Diff Pdf Storage"
+        },
+        "diffs": {
+          "default": [],
+          "description": "Comparisons to keep for this document, each a pair of revisions. A bare string is shorthand for comparing that revision against the working tree.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "title": "Diffs",
+          "type": "array"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -2524,19 +2505,6 @@
     "MatlabEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -2789,19 +2757,6 @@
     "NixEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -3011,19 +2966,6 @@
     "PBSEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "default_options": {
           "anyOf": [
             {
@@ -3080,6 +3022,20 @@
           "default": "pbs",
           "title": "Kind",
           "type": "string"
+        },
+        "max_concurrent_jobs": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.",
+          "title": "Max Concurrent Jobs"
         }
       },
       "title": "PBSEnvironment",
@@ -3233,19 +3189,6 @@
     "PixiEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -4017,19 +3960,6 @@
     "REnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -4742,19 +4672,6 @@
     "SSHEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -5195,19 +5112,6 @@
     "SlurmEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "default_options": {
           "anyOf": [
             {
@@ -5264,6 +5168,20 @@
           "default": "slurm",
           "title": "Kind",
           "type": "string"
+        },
+        "max_concurrent_jobs": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit.",
+          "title": "Max Concurrent Jobs"
         }
       },
       "title": "SlurmEnvironment",
@@ -5479,19 +5397,6 @@
     "UvEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -5526,19 +5431,6 @@
     "UvVenvEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -5625,19 +5517,6 @@
     "VenvEnvironment": {
       "additionalProperties": false,
       "properties": {
-        "_include": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to a YAML file whose contents are merged into this environment's definition.",
-          "title": "Include"
-        },
         "description": {
           "anyOf": [
             {
@@ -5984,9 +5863,6 @@
           },
           {
             "$ref": "#/$defs/SSHEnvironment"
-          },
-          {
-            "$ref": "#/$defs/IncludedEnvironment"
           }
         ]
       },
@@ -6017,6 +5893,19 @@
       "description": "URL of the project's Git repository.",
       "title": "Git Repo Url"
     },
+    "hub": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Base URL of the Calkit Hub on which the project is shared, backed up, and collaborated on, e.g., 'calkit.io'. The scheme can be omitted, in which case https is inferred, or http for a local host. Each project belongs to at most one hub, which makes 'ck://' paths resolvable against a known instance. Projects with no hub set are assumed to belong to 'calkit.io'.",
+      "title": "Hub"
+    },
     "metrics": {
       "anyOf": [
         {
@@ -6043,7 +5932,7 @@
         }
       ],
       "default": null,
-      "description": "The project's name on Calkit Cloud, e.g., 'my-project'.",
+      "description": "The project's name on Calkit, e.g., 'my-project'.",
       "title": "Name"
     },
     "notebooks": {
@@ -6074,7 +5963,7 @@
         }
       ],
       "default": null,
-      "description": "The account name that owns the project on Calkit Cloud.",
+      "description": "The account name that owns the project on Calkit.",
       "title": "Owner"
     },
     "parameters": {
@@ -6230,7 +6119,7 @@
         }
       ],
       "default": null,
-      "description": "Elements that best represent the project, shown on its Calkit Cloud homepage.",
+      "description": "Elements that best represent the project, shown on its project homepage on Calkit.",
       "title": "Showcase"
     },
     "software": {

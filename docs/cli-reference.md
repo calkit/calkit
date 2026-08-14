@@ -47,7 +47,7 @@
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
-| [`cloud`](#command-group-cloud)                  | Interact with a Calkit Cloud.                                                                                |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
 | [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
 | [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
@@ -673,16 +673,16 @@ Options:
 
 Configure Calkit.
 
-| Command                                                   | Description                                                                             |
-| --------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                              |
-| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                  |
-| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                   |
-| [`remote`](#subcommand-config-remote)                     | Setup the Calkit cloud as the default DVC remote and store a token in the local config. |
-| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit cloud token in the local DVC config for all Calkit remotes.              |
-| [`list`](#subcommand-config-list)                         | List keys in the config.                                                                |
-| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                                |
-| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                           |
+| Command                                                   | Description                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                             |
+| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                 |
+| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                  |
+| [`remote`](#subcommand-config-remote)                     | Set up the Calkit hub as the default DVC remote and store a token in the local config. |
+| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit hub token in the local DVC config for all Calkit remotes.               |
+| [`list`](#subcommand-config-list)                         | List keys in the config.                                                               |
+| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                               |
+| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                          |
 
 <a id="subcommand-config-set"></a>
 
@@ -743,7 +743,7 @@ Arguments:
 
 #### `calkit config remote`
 
-Setup the Calkit cloud as the default DVC remote and store a token in the local config.
+Set up the Calkit hub as the default DVC remote and store a token in the local config.
 
 Usage:
 
@@ -762,7 +762,7 @@ Options:
 
 #### `calkit config remote-auth`
 
-Store a Calkit cloud token in the local DVC config for all Calkit remotes.
+Store a Calkit hub token in the local DVC config for all Calkit remotes.
 
 Usage:
 
@@ -866,18 +866,18 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                   |
-| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided. |
-| `--title`           | text    | no       |         | Project title.                                                                |
-| `--description`     | text    | no       |         | Project description.                                                          |
-| `--cloud`           | boolean | no       | False   | Create this project in the cloud (Calkit and GitHub.)                         |
-| `--public`          | boolean | no       | False   | Create as a public project if --cloud is selected.                            |
-| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.          |
-| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.      |
-| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                 |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                      |
-| `--verbose`         | boolean | no       | False   | Print verbose output.                                                         |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
 
 <a id="subcommand-new-create-figure-fig"></a>
 
@@ -1140,8 +1140,8 @@ Options:
 | Option                   | Type    | Required | Default | Description                                                                            |
 | ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
 | `--title`                | text    | yes      |         | The title of the publication.                                                          |
-| `--description`          | text    | yes      |         | A description of the publication.                                                      |
 | `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | text    | no       |         | A description of the publication.                                                      |
 | `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
 | `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |
@@ -1224,15 +1224,16 @@ calkit new|create slurm-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                |
-| ------------------- | ------- | -------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                          |
-| `--host`            | text    | no       | localhost | Host where SLURM commands should run.                                                                                      |
-| `--default-option`  | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                     |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands. |
-| `--description`     | text    | no       |           | Description.                                                                                                               |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                         |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                     |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
+| `--default-option`      | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-pbs-env"></a>
 
@@ -1248,15 +1249,16 @@ calkit new|create pbs-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default   | Description                                                                                                                   |
-| ------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |           | Environment name.                                                                                                             |
-| `--host`            | text    | no       | localhost | Host where PBS commands should run.                                                                                           |
-| `--default-option`  | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options. |
-| `--default-setup`   | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.      |
-| `--description`     | text    | no       |           | Description.                                                                                                                  |
-| `--overwrite`, `-f` | boolean | no       | False     | Overwrite any existing environment with this name.                                                                            |
-| `--no-commit`       | boolean | no       | False     | Do not commit changes.                                                                                                        |
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
+| `--default-option`      | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
 <a id="subcommand-new-create-uv-venv"></a>
 
@@ -1581,6 +1583,7 @@ Options:
 | `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
 | `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
 | `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
 | `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
 | `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
 | `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
@@ -2228,9 +2231,9 @@ calkit import environment [OPTIONS] SRC
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                                                                                                           |
-| -------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------- |
-| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit Cloud will be queried. |
+| Argument | Type | Required | Default | Description                                                                                                         |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
 
 Options:
 
@@ -2337,32 +2340,32 @@ Options:
 
 Update objects.
 
-| Command                                               | Description                                                                         |
-| ----------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match the latest Calkit spec.                    |
-| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files). |
-| [`release`](#subcommand-update-release)               | Update a release.                                                                   |
-| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match the latest Calkit recommendations.       |
-| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match the latest Calkit recommendations.       |
-| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                        |
-| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                            |
-| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                            |
-| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                          |
-| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                         |
-| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                               |
-| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                        |
-| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                         |
-| [`env`](#subcommand-update-env)                       | Update an environment.                                                              |
-| [`environment`](#subcommand-update-environment)       | Update an environment.                                                              |
-| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                             |
-| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                               |
-| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                              |
+| Command                                               | Description                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match this version of Calkit's spec.              |
+| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).  |
+| [`release`](#subcommand-update-release)               | Update a release.                                                                    |
+| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
+| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
+| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
+| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
+| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
+| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
+| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
+| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
+| [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
+| [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
+| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
+| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
 
 <a id="subcommand-update-devcontainer"></a>
 
 #### `calkit update devcontainer`
 
-Update a project's devcontainer to match the latest Calkit spec.
+Update a project's devcontainer to match this version of Calkit's spec.
 
 Usage:
 
@@ -2424,7 +2427,7 @@ Options:
 
 #### `calkit update vscode-config`
 
-Update a project's VS Code config to match the latest Calkit recommendations.
+Update a project's VS Code config to match this version of Calkit's recommendations.
 
 Usage:
 
@@ -2443,7 +2446,9 @@ Options:
 
 #### `calkit update github-actions`
 
-Update a project's GitHub Actions to match the latest Calkit recommendations.
+Update a project's GitHub Actions to match this version of Calkit's recommendations.
+
+An existing workflow that runs the Calkit action is updated in place, pinning the action to this version of Calkit, so this is safe to rerun after upgrading.
 
 Usage:
 
@@ -2624,16 +2629,17 @@ calkit update slurm-env [OPTIONS]
 
 Options:
 
-| Option                  | Type | Required | Default | Description                     |
-| ----------------------- | ---- | -------- | ------- | ------------------------------- |
-| `--name`, `-n`          | text | yes      |         | Environment name.               |
-| `--host`                | text | no       |         | SLURM host.                     |
-| `--add-default-option`  | text | no       |         | Add a default sbatch option.    |
-| `--rm-default-option`   | text | no       |         | Remove a default sbatch option. |
-| `--set-default-options` | text | no       |         | Replace default options list.   |
-| `--add-default-setup`   | text | no       |         | Add a default setup command.    |
-| `--rm-default-setup`    | text | no       |         | Remove a default setup command. |
-| `--set-default-setup`   | text | no       |         | Replace default setup list.     |
+| Option                  | Type    | Required | Default | Description                                                                                   |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Environment name.                                                                             |
+| `--host`                | text    | no       |         | SLURM host.                                                                                   |
+| `--add-default-option`  | text    | no       |         | Add a default sbatch option.                                                                  |
+| `--rm-default-option`   | text    | no       |         | Remove a default sbatch option.                                                               |
+| `--set-default-options` | text    | no       |         | Replace default options list.                                                                 |
+| `--add-default-setup`   | text    | no       |         | Add a default setup command.                                                                  |
+| `--rm-default-setup`    | text    | no       |         | Remove a default setup command.                                                               |
+| `--set-default-setup`   | text    | no       |         | Replace default setup list.                                                                   |
+| `--max-concurrent-jobs` | integer | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
 
 <a id="subcommand-update-env"></a>
 
@@ -3096,10 +3102,11 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                   |
-| ---------------------------------------------- | --------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                 |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk. |
+| Command                                        | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
+| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3162,6 +3169,44 @@ Options:
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+
+<a id="subcommand-latex-tex-diff"></a>
+
+#### `calkit latex|tex diff`
+
+Build a PDF showing what changed in a LaTeX document.
+
+Two revisions that turn out to be the same is a result rather than an error: the marked-up document comes out unmarked, which is what "this branch hasn't changed the paper" looks like. A pipeline shouldn't fail depending on which branch it runs from.
+
+Marks up one revision of a document against another with latexdiff, so additions and deletions are visible where they happen rather than as a list of files that changed. A `.dvc` pointer in a pull request says a paper was rebuilt; this says what it now reads.
+
+With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
+
+Usage:
+
+```text
+calkit latex|tex diff [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compare. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
+| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
 
 <a id="command-group-overleaf-ol"></a>
 
@@ -3255,27 +3300,28 @@ Arguments:
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
 
-<a id="command-group-cloud"></a>
+<a id="command-group-hub-cloud"></a>
 
-### `calkit cloud`
+### `calkit hub|cloud`
 
-Interact with a Calkit Cloud.
+Interact with a Calkit hub.
 
-| Command                            | Description                        |
-| ---------------------------------- | ---------------------------------- |
-| [`get`](#subcommand-cloud-get)     | Get a resource from the Cloud API. |
-| [`login`](#subcommand-cloud-login) | Login to the Calkit Cloud.         |
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
 
-<a id="subcommand-cloud-get"></a>
+<a id="subcommand-hub-cloud-get"></a>
 
-#### `calkit cloud get`
+#### `calkit hub|cloud get`
 
-Get a resource from the Cloud API.
+Get a resource from the hub API.
 
 Usage:
 
 ```text
-calkit cloud get ENDPOINT
+calkit hub|cloud get [OPTIONS] ENDPOINT
 ```
 
 Arguments:
@@ -3284,25 +3330,44 @@ Arguments:
 | ---------- | ---- | -------- | ------- | ------------ |
 | `endpoint` | text | yes      |         | API endpoint |
 
-<a id="subcommand-cloud-login"></a>
+Options:
 
-#### `calkit cloud login`
+| Option  | Type | Required | Default | Description                                                                                                                              |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 
-Login to the Calkit Cloud.
+<a id="subcommand-hub-cloud-login"></a>
+
+#### `calkit hub|cloud login`
+
+Log in to a Calkit hub.
 
 First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
 
 Usage:
 
 ```text
-calkit cloud login [OPTIONS]
+calkit hub|cloud login [OPTIONS]
 ```
 
 Options:
 
-| Option          | Type    | Required | Default | Description                                                                                        |
-| --------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
-| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config. |
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
+
+<a id="subcommand-hub-cloud-config"></a>
+
+#### `calkit hub|cloud config`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit hub|cloud config COMMAND [ARGS]...
+```
 
 <a id="command-group-scheduler-sch"></a>
 
@@ -3324,6 +3389,8 @@ Work with a job scheduler (SLURM or PBS).
 Submit a batch job through the scheduler associated with the env.
 
 Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
+
+If the environment sets `max_concurrent_jobs`, submission waits until this project has fewer than that many jobs queued or running, so an iterated stage does not put all of its jobs into a shared cluster's queue at once.
 
 Usage:
 

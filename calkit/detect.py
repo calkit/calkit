@@ -10,6 +10,7 @@ import os
 import re
 import shlex
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -450,6 +451,15 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
                 inputs.append(_resolve(match))
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
+    # The patterns above miss everything LaTeX resolves by name rather than
+    # by path: the document class, local style files, the bibliography
+    # style, and figures written without an extension. Those come from
+    # calkit.latex, which resolves against the project and follows the
+    # files it finds, so a class that loads its own styles contributes
+    # them too.
+    import calkit.latex
+
+    inputs += calkit.latex.detect_inputs(tex_path)
     inputs = list(dict.fromkeys(inputs))
     return {"inputs": inputs, "outputs": outputs}
 
@@ -685,6 +695,35 @@ def _resolve_variable_in_call(
                             return base_path
                     return base_path
     return None
+
+
+def filter_covered_inputs(
+    detected: Iterable[str], existing: Iterable[str]
+) -> list[str]:
+    """Drop detected paths an existing input already covers.
+
+    A stage input can be a whole directory: with ``figures`` declared,
+    everything inside it is already a dependency, so listing those files
+    one by one adds noise without adding coverage -- and goes stale the
+    moment one is renamed. An exact repeat of an existing input is covered
+    by the same rule.
+
+    Order is preserved, and duplicates within ``detected`` are dropped.
+    """
+    covered = {
+        path.rstrip("/") for path in existing if isinstance(path, str) and path
+    }
+    out: list[str] = []
+    for path in detected:
+        if not isinstance(path, str) or not path:
+            continue
+        parts = path.rstrip("/").split("/")
+        ancestors = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        if any(ancestor in covered for ancestor in ancestors):
+            continue
+        out.append(path)
+        covered.add(path.rstrip("/"))
+    return out
 
 
 def _is_valid_project_path(path: str) -> bool:
@@ -1896,7 +1935,7 @@ def create_r_description_file(
 # Figure/dataset auto-detection
 # A file is only treated as an auto-detected figure or dataset when it lives in
 # a directory whose name signals its kind. These sets are intentionally narrow
-# (and kept in sync with Calkit Cloud) so we don't flag arbitrary images or
+# (and kept in sync with the Calkit hub) so we don't flag arbitrary images or
 # data files scattered around a repository.
 FIGURE_EXTENSIONS = {
     ".png",

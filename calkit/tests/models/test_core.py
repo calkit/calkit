@@ -9,7 +9,11 @@ from calkit.models.core import ProjectInfo, Publication, Question
 def test_publication_kind_no_longer_allows_presentation():
     # Presentations are a separate top-level concept now.
     with pytest.raises(ValidationError):
-        Publication(path="p.pdf", title="P", kind="presentation")
+        Publication(
+            path="p.pdf",
+            title="P",
+            kind="presentation",  # type: ignore[arg-type]
+        )
     # A normal kind still validates.
     Publication(path="p.pdf", title="P", kind="journal-article")
 
@@ -23,6 +27,16 @@ def test_project_info_has_results_and_presentations():
     )
     assert info.results[0].path == "results/metrics.json"
     assert info.presentations[0].path == "slides/talk.pdf"
+
+
+def test_project_info_hub():
+    # Not declaring a hub is valid and means the default (calkit.io)
+    info = ProjectInfo.model_validate({"title": "T"})
+    assert info.hub is None
+    # A declared hub is a full base URL and round-trips
+    info = ProjectInfo.model_validate({"hub": "https://calkit.io"})
+    assert info.hub == "https://calkit.io"
+    assert info.model_dump()["hub"] == "https://calkit.io"
 
 
 def test_question_accepts_publication_evidence():

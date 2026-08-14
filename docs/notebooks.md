@@ -110,7 +110,7 @@ pipeline:
       html_storage: dvc
       executed_ipynb_storage: null
       cleaned_ipynb_storage: git
-# Optional: Add to project notebooks so they can be viewed on Calkit Cloud
+# Optional: Add to project notebooks so they can be viewed on the hub
 notebooks:
   - path: notebooks/get-data.ipynb
     title: Get data
@@ -230,7 +230,7 @@ cells below.
 Now, the kernel can be restarted and we can use "run all cells above"
 when working on the figure,
 and we'll have `result` nearly instantaneously.
-`result` will also be versioned with DVC and pushed to the cloud by default,
+`result` will also be versioned with DVC and pushed to the hub by default,
 so our collaborators can also take advantage of the caching
 without bloating the Git repo.
 Execution as part of the project's pipeline will also take advantage of

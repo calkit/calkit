@@ -10,8 +10,10 @@ import os
 import platform as _platform
 import posixpath
 import shutil
+import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from copy import deepcopy
@@ -46,11 +48,11 @@ from calkit.cli.check import (
     check_matlab_env,
     check_venv,
 )
-from calkit.cli.cloud import cloud_app
 from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.hub import hub_app
 from calkit.cli.import_ import import_app
 from calkit.cli.latex import latex_app
 from calkit.cli.list import list_app
@@ -83,7 +85,7 @@ app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
-app.add_typer(cloud_app, name="cloud", help="Interact with a Calkit Cloud.")
+app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
     scheduler_app,
     name="scheduler|sch",
@@ -131,6 +133,36 @@ def main(
         raise typer.Exit()
     if use_version:
         _exec_with_version(use_version)
+    # Load the project's .env here rather than in the handful of commands
+    # that happen to need a secret from it. Which hub a command targets
+    # must not depend on that: 'calkit run' loaded it and 'calkit push'
+    # didn't, so a CALKIT_HUB in .env sent the two to different hubs.
+    dotenv.load_dotenv(dotenv_path=".env")
+    _warn_on_stale_calkit_env()
+
+
+def _warn_on_stale_calkit_env() -> None:
+    """Warn that ``CALKIT_ENV`` no longer picks a hub.
+
+    It used to, so a leftover one in a shell or a project's .env would
+    otherwise silently stop doing anything.
+    """
+    env = os.environ.get("CALKIT_ENV")
+    if not env or env == "test":
+        return
+    hub_url = calkit.hub.HUB_URLS.get(env)
+    # On stderr: this fires on every command, and some of them write
+    # machine-readable output on stdout
+    warn(
+        f"CALKIT_ENV={env} no longer selects a hub; "
+        + (
+            f"use CALKIT_HUB={hub_url}"
+            if hub_url
+            else "name the hub by its URL in CALKIT_HUB"
+        )
+        + " or the project's 'hub' key",
+        err=True,
+    )
 
 
 def _exec_with_version(version_spec: str) -> None:
@@ -267,11 +299,9 @@ def clone(
                 "{owner_name}/{project_name}"
             )
         owner_name, project_name = url_split
-        typer.echo("Fetching Git repo URL from the Calkit Cloud")
+        typer.echo("Fetching Git repo URL from the hub")
         try:
-            project = calkit.cloud.get(
-                f"/projects/{owner_name}/{project_name}"
-            )
+            project = calkit.hub.get(f"/projects/{owner_name}/{project_name}")
         except Exception as e:
             raise_error(f"Failed to fetch project information: {e}")
         url = project["git_repo_url"]
@@ -1155,6 +1185,31 @@ def save(
         overleaf_sync(verbose=verbose, no_push=no_push)
 
 
+def _warn_on_hub_mismatch() -> None:
+    """Warn if the project declares a hub other than the one commands are
+    currently targeting.
+
+    The declared hub is respected by default, so this only fires when an
+    explicit override (``CALKIT_HUB`` or ``--hub``) points somewhere
+    else, e.g., when pushing a copy of a project to staging during
+    development.
+    """
+    from calkit import config
+
+    try:
+        declared = calkit.load_calkit_info().get("hub")
+    except Exception:
+        return
+    if not declared or not isinstance(declared, str):
+        return
+    active = calkit.hub.get_hub_url()
+    if config.normalize_hub_url(declared) != active.rstrip("/"):
+        warn(
+            f"This project declares hub {declared}, but commands are "
+            f"currently targeting {active}"
+        )
+
+
 @app.command(name="pull")
 def pull(
     no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
@@ -1188,6 +1243,7 @@ def pull(
     ] = False,
 ):
     """Pull with both Git and DVC."""
+    _warn_on_hub_mismatch()
     if force:
         if "-f" not in git_args and "--force" not in git_args:
             git_args.append("-f")
@@ -1264,6 +1320,7 @@ def push(
     ] = False,
 ):
     """Push with both Git and DVC."""
+    _warn_on_hub_mismatch()
     if not no_dvc:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
@@ -1364,7 +1421,23 @@ def run_local_server():
     )
 
 
-def _stage_run_info_from_log_content(log_content: str) -> dict:
+# Stage output is teed into the run log and can look exactly like a DVC log
+# record (the "%(asctime)s - %(levelname)s - %(message)s" format is a common
+# one in user scripts), so it's bracketed by these and skipped when parsing.
+STAGE_OUTPUT_START = "--- calkit stage output ---"
+STAGE_OUTPUT_END = "--- end calkit stage output ---"
+
+
+def _stage_run_info_from_log_content(
+    log_content: str, run_finished: bool = False
+) -> dict:
+    """Parse per-stage timing and status out of a run log.
+
+    ``run_finished`` closes out the last stage, which has no later log record
+    to end it. It's left open while a run is in progress, since that's how
+    ``calkit status`` sees which stage is running.
+    """
+
     def add_stage_info(stage_name: str, key: str, value: str | datetime):
         if isinstance(value, datetime):
             # Convert datetime to ISO format for consistency
@@ -1378,7 +1451,19 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
     lines = log_content.splitlines()
     current_stage_name = None
     current_stage_status = None
+    in_stage_output = False
+    last_timestamp = None
     for line in lines:
+        if line == STAGE_OUTPUT_START:
+            in_stage_output = True
+            continue
+        # Ends the line it's on, which it shares with any stage output that
+        # lacked a final newline
+        if line.endswith(STAGE_OUTPUT_END):
+            in_stage_output = False
+            continue
+        if in_stage_output:
+            continue
         # Log lines should be able to be split into timestamp, type, message
         ls = line.split(" -", maxsplit=2)
         if len(ls) < 2:
@@ -1393,6 +1478,7 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
         except ValueError:
             # If the timestamp is not in ISO format, skip this line
             continue
+        last_timestamp = timestamp
         # If we hit an error, the logs should print a traceback and end
         if log_type == "ERROR":
             errored_timestamp = timestamp
@@ -1427,6 +1513,16 @@ def _stage_run_info_from_log_content(log_content: str) -> dict:
             add_stage_info(current_stage_name, "start_time", timestamp)
             add_stage_info(current_stage_name, "end_time", timestamp)
             add_stage_info(current_stage_name, "status", current_stage_status)
+    if (
+        run_finished
+        and errored_timestamp is None
+        and current_stage_status == "running"
+        and last_timestamp is not None
+    ):
+        # The last stage has no later record to end it, so use the run's
+        # final record (DVC updates the lock file right after the stage)
+        add_stage_info(current_stage_name, "end_time", last_timestamp)
+        add_stage_info(current_stage_name, "status", "completed")
     if errored_timestamp is not None:
         # Figure out which stage failed
         for line in lines[-1::-1]:
@@ -1480,19 +1576,22 @@ def _run_dvc_repro(argv: list[str]) -> int | None:
 
 
 def _prune_run_logs(
-    logs_dir: str, keep: int = 10, protect: str | None = None
+    logs_dir: str,
+    keep: int = 10,
+    protect: str | None = None,
+    suffix: str = ".log",
 ) -> None:
-    """Keep only the most recent ``keep`` run logs in ``logs_dir``.
+    """Keep only the most recent ``keep`` files in ``logs_dir``.
 
-    Run logs are named by their start timestamp, so sorting by name orders
-    them by time; the oldest beyond ``keep`` are removed so the private log
-    directory doesn't grow without bound. ``protect`` (the active run's log
-    filename) is never deleted, guarding against clock skew or odd names that
-    could otherwise sort the live log into the prune set.
+    Files are named by their start timestamp, so sorting by name orders
+    them by time; the oldest beyond ``keep`` are removed so the directory
+    doesn't grow without bound. ``protect`` (the active run's filename) is
+    never deleted, guarding against clock skew or odd names that could
+    otherwise sort the live file into the prune set.
     """
     if not os.path.isdir(logs_dir):
         return
-    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(".log"))
+    logs = sorted(f for f in os.listdir(logs_dir) if f.endswith(suffix))
     for fname in logs[:-keep]:
         if fname == protect:
             continue
@@ -1910,6 +2009,7 @@ def run(
     import dvc.log
     import dvc.repo
     import dvc.repo.reproduce
+    import dvc.stage.run
     import dvc.ui
     from git.exc import InvalidGitRepositoryError
 
@@ -1945,17 +2045,23 @@ def run(
         calkit.echo("💻 Getting system information")
     # Get system information
     system_info = calkit.get_system_info()
+    # Save the system to .calkit/local/systems unconditionally
+    local_sysinfo_fpath = os.path.join(
+        calkit.ensure_local_dir(), "systems", system_info["id"] + ".json"
+    )
+    os.makedirs(os.path.dirname(local_sysinfo_fpath), exist_ok=True)
+    with open(local_sysinfo_fpath, "w") as f:
+        json.dump(system_info, f, indent=2)
     if save_logs:
-        # Save the system to .calkit/systems
+        for subdir in ("logs", "runs", "systems"):
+            os.makedirs(os.path.join(".calkit", subdir), exist_ok=True)
         if verbose:
             typer.echo("Saving system information:")
             typer.echo(system_info)
         sysinfo_fpath = os.path.join(
             ".calkit", "systems", system_info["id"] + ".json"
         )
-        os.makedirs(os.path.dirname(sysinfo_fpath), exist_ok=True)
-        with open(sysinfo_fpath, "w") as f:
-            json.dump(system_info, f, indent=2)
+        shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
     # First check any system-level dependencies exist
     if not quiet:
         calkit.echo("🔗 Checking system-level dependencies")
@@ -2095,19 +2201,29 @@ def run(
                         targets.append(dvc_stage_name)
         if not targets:
             raise_error("No stages found to run")
-    if save_logs:
-        # Get status of Git repo before running
-        repo = calkit.git.get_repo()
+    # Get status of Git repo before running
+    repo = calkit.git.get_repo()
+    try:
         git_rev = repo.head.commit.hexsha
-        try:
-            git_branch = repo.active_branch.name
-        except TypeError:
-            # If no branch is checked out, we are in a detached HEAD state
-            git_branch = None
-        git_changed_files_before = calkit.git.get_changed_files(repo=repo)
-        git_staged_files_before = calkit.git.get_staged_files(repo=repo)
-        git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
-        # Get status of DVC repo before running
+    except ValueError:
+        # If no commits exist yet
+        git_rev = None
+    try:
+        git_branch = repo.active_branch.name
+    except TypeError:
+        # If no branch is checked out, we are in a detached HEAD state
+        git_branch = None
+    git_changed_files_before = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_before = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_before = calkit.git.get_untracked_files(repo=repo)
+    # Get status of DVC repo before running. This is only done with --log,
+    # since it's a full data status scan, and it takes a read lock on every
+    # tracked output---which a parent `calkit run` holds while running the
+    # stage this run may be nested inside of.
+    dvc_repo = None
+    dvc_status_before = None
+    dvc_data_status_before = None
+    if save_logs:
         dvc_repo = calkit.dvc.get_dvc_repo()
         dvc_status_before = dvc_repo.status()
         dvc_data_status_before = dvc_repo.data_status()
@@ -2216,12 +2332,12 @@ def run(
     start_time_no_tz = calkit.utcnow(remove_tz=True)
     start_time = calkit.utcnow(remove_tz=False)
     run_id = uuid.uuid4().hex
-    log_fname = (
+    run_fname_prefix = (
         start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
         + "-"
         + run_id
-        + ".log"
     )
+    log_fname = run_fname_prefix + ".log"
     # Always write the run log under the gitignored .calkit/local/logs so
     # `calkit status` can report which stage is running while the pipeline
     # holds the DVC lock. With --log, the log is additionally saved to the
@@ -2232,11 +2348,14 @@ def run(
     if verbose:
         typer.echo(f"Starting run ID: {run_id}")
         typer.echo(f"Saving logs to {log_fpath}")
-    # Create a file handler for dvc.stage.run logger
-    file_handler = logging.FileHandler(log_fpath, mode="w")
+    # Create a file handler for dvc.stage.run logger. Append mode matters:
+    # stage output is teed into this file through a second handle, and a
+    # truncating handle would overwrite it.
+    file_handler = logging.FileHandler(log_fpath, mode="a")
+    run_history_length = calkit.config.read().run_history_length
     # Keep the private log directory bounded; the new log counts toward the
     # cap and is protected so it can never be pruned out from under this run.
-    _prune_run_logs(local_logs_dir, keep=10, protect=log_fname)
+    _prune_run_logs(local_logs_dir, keep=run_history_length, protect=log_fname)
     file_handler.setLevel(logging.DEBUG)
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
     formatter.converter = time.gmtime  # Use UTC time for asctime
@@ -2250,6 +2369,47 @@ def run(
     # otherwise it skips jobs it sees as already done.
     if force:
         os.environ["CALKIT_FORCE"] = "1"
+    # DVC logs only its own output, so tee each stage process's stdout and
+    # stderr into the run log as well as the terminal. DVC's repro is serial,
+    # so stages can't interleave here.
+    orig_run = dvc.stage.run._run
+
+    def _patched_run(executable, cmd, **kwargs):
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.STDOUT
+        kwargs["universal_newlines"] = True
+        kwargs["bufsize"] = 1
+        exec_cmd = dvc.stage.run._make_cmd(executable, cmd)
+        # Like DVC, ignore SIGINT while the stage runs so it reaches the child
+        # process group; only the main thread can set signal handlers
+        in_main_thread = threading.current_thread() is threading.main_thread()
+        old_handler = None
+        handler_set = False
+        with open(log_fpath, "a", encoding="utf-8") as log_f:
+            log_f.write(STAGE_OUTPUT_START + "\n")
+            log_f.flush()
+            try:
+                p = subprocess.Popen(exec_cmd, **kwargs)
+                if in_main_thread:
+                    old_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+                    handler_set = True
+                for line in p.stdout:
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                    log_f.write(line)
+                    log_f.flush()
+                p.wait()
+                if p.returncode != 0:
+                    raise dvc.stage.run.StageCmdFailedError(cmd, p.returncode)
+            finally:
+                # SIG_DFL is falsy, so check explicitly for having set it
+                if handler_set:
+                    signal.signal(signal.SIGINT, old_handler)
+                # Written as-is so the log stays byte-for-byte what the stage
+                # emitted; it shares a line if the output had no final newline
+                log_f.write(STAGE_OUTPUT_END + "\n")
+
+    dvc.stage.run._run = _patched_run
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background
@@ -2262,10 +2422,13 @@ def run(
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
+        dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
     with open(log_fpath, "r") as f:
         log_content = f.read()
-        stage_run_info = _stage_run_info_from_log_content(log_content)
+        stage_run_info = _stage_run_info_from_log_content(
+            log_content, run_finished=True
+        )
     if res is None:
         # DVC's exit code was lost to a teardown failure; fall back to the log,
         # which records any stage that failed to reproduce.
@@ -2305,55 +2468,63 @@ def run(
     # Close logger file handler to prevent permissions issues if deleting
     dvc.log.logger.removeHandler(file_handler)
     file_handler.close()
-    if save_logs:
-        # Get Git status after running
-        git_changed_files_after = calkit.git.get_changed_files(repo=repo)
-        git_staged_files_after = calkit.git.get_staged_files(repo=repo)
-        git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
-        # Get DVC status after running
+    # Get Git status after running
+    git_changed_files_after = calkit.git.get_changed_files(repo=repo)
+    git_staged_files_after = calkit.git.get_staged_files(repo=repo)
+    git_untracked_files_after = calkit.git.get_untracked_files(repo=repo)
+    # Get DVC status after running (see above for why only with --log)
+    dvc_status_after = None
+    dvc_data_status_after = None
+    if dvc_repo is not None:
         dvc_status_after = dvc_repo.status()
         dvc_data_status_after = dvc_repo.data_status()
         dvc_data_status_after.pop("git", None)  # Remove git status
-        # Save run information to a file
-        if verbose:
-            typer.echo("Saving run info")
-        run_info = {
-            "id": run_id,
-            "system_id": system_info["id"],
-            "start_time": start_time.isoformat(),
-            "end_time": calkit.utcnow(remove_tz=False).isoformat(),
-            "targets": targets,
-            "force": force,
-            "dvc_args": args,
-            "status": "failed" if failed else "completed",
-            "stages": stage_run_info,
-            "git_rev": git_rev,
-            "git_branch": git_branch,
-            "git_changed_files_before": git_changed_files_before,
-            "git_staged_files_before": git_staged_files_before,
-            "git_untracked_files_before": git_untracked_files_before,
-            "git_changed_files_after": git_changed_files_after,
-            "git_staged_files_after": git_staged_files_after,
-            "git_untracked_files_after": git_untracked_files_after,
-            "dvc_status_before": dvc_status_before,
-            "dvc_data_status_before": dvc_data_status_before,
-            "dvc_status_after": dvc_status_after,
-            "dvc_data_status_after": dvc_data_status_after,
-        }
-        run_info_fpath = os.path.join(
-            ".calkit",
-            "runs",
-            start_time_no_tz.isoformat(timespec="seconds").replace(":", "-")
-            + "-"
-            + run_id
-            + ".json",
-        )
-        os.makedirs(os.path.dirname(run_info_fpath), exist_ok=True)
-        with open(run_info_fpath, "w") as f:
-            json.dump(run_info, f, indent=2)
+    # Save run information to a file
+    if verbose:
+        typer.echo("Saving run info")
+    run_info = {
+        "id": run_id,
+        "system_id": system_info["id"],
+        "start_time": start_time.isoformat(),
+        "end_time": calkit.utcnow(remove_tz=False).isoformat(),
+        "targets": targets,
+        "force": force,
+        "dvc_args": args,
+        "status": "failed" if failed else "completed",
+        "stages": stage_run_info,
+        "git_rev": git_rev,
+        "git_branch": git_branch,
+        "git_changed_files_before": git_changed_files_before,
+        "git_staged_files_before": git_staged_files_before,
+        "git_untracked_files_before": git_untracked_files_before,
+        "git_changed_files_after": git_changed_files_after,
+        "git_staged_files_after": git_staged_files_after,
+        "git_untracked_files_after": git_untracked_files_after,
+        "dvc_status_before": dvc_status_before,
+        "dvc_data_status_before": dvc_data_status_before,
+        "dvc_status_after": dvc_status_after,
+        "dvc_data_status_after": dvc_data_status_after,
+    }
+    run_info_fname = run_fname_prefix + ".json"
+    local_runs_dir = os.path.join(calkit.ensure_local_dir(), "runs")
+    local_run_info_fpath = os.path.join(local_runs_dir, run_info_fname)
+    os.makedirs(local_runs_dir, exist_ok=True)
+    with open(local_run_info_fpath, "w") as f:
+        json.dump(run_info, f, indent=2)
+    # Only the local run history is capped. Run info written to the tracked
+    # .calkit/runs with --log is version controlled---often deliberately, e.g.
+    # to keep a record of CI runs---so pruning it would delete committed files.
+    _prune_run_logs(
+        local_runs_dir,
+        keep=run_history_length,
+        protect=run_info_fname,
+        suffix=".json",
+    )
+    if save_logs:
+        run_info_fpath = os.path.join(".calkit", "runs", run_info_fname)
+        shutil.copy2(local_run_info_fpath, run_info_fpath)
         # Also keep the raw log in the tracked .calkit/logs directory
         saved_log_fpath = os.path.join(".calkit", "logs", log_fname)
-        os.makedirs(os.path.dirname(saved_log_fpath), exist_ok=True)
         shutil.copy2(log_fpath, saved_log_fpath)
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
@@ -2408,6 +2579,26 @@ def manual_step(
         )
     input(message + " (press enter to confirm): ")
     typer.echo("Done")
+
+
+def _env_prefix_exists(
+    env: dict, envs: dict, env_name: str, wdir: str | None
+) -> bool:
+    """Check that a venv-like environment's prefix exists on disk.
+
+    The environment check cache only hashes a prefix that's pinned in
+    ``calkit.yaml``, so a virtual environment living at its default location
+    could have been deleted since the last check without invalidating the
+    cache, in which case it still needs to be rebuilt.
+    """
+    if env.get("kind") not in ["uv-venv", "venv"]:
+        return True
+    if env.get("prefix") or "path" not in env:
+        return True
+    prefix = calkit.environments.get_default_venv_prefix(
+        envs, env["path"], env_name
+    )
+    return os.path.isdir(os.path.join(wdir or ".", prefix))
 
 
 @app.command(
@@ -2476,7 +2667,7 @@ def run_in_env(
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
     try:
         res = env_from_name_and_or_path(
@@ -2499,6 +2690,38 @@ def run_in_env(
         docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
+
+    def save_env_check_cache() -> None:
+        """Record a successful check so repeat calls can skip it."""
+        try:
+            calkit.environments.save_cache(
+                env_name=env_name, env=env, wdir=wdir, success=True
+            )
+        except Exception as e:
+            if verbose:
+                typer.echo(f"Failed to save environment check cache: {e}")
+
+    # This command is typically called once per pipeline stage, so checking
+    # the environment every time is wasteful, and on Windows can fail
+    # outright, e.g., if a package installed into the environment provides
+    # the executable that's currently running. Consult the same cache
+    # ``calkit run`` uses and only check if something relevant has changed.
+    if (
+        not no_check
+        and env["kind"] not in calkit.environments.KINDS_NO_CHECK
+        and calkit.environments.check_cache(
+            env_name=env_name, env=env, wdir=wdir
+        )
+        and _env_prefix_exists(
+            env=env, envs=envs, env_name=env_name, wdir=wdir
+        )
+    ):
+        if verbose:
+            typer.echo(
+                f"Skipping check for environment '{env_name}' since it was "
+                "recently checked and nothing has changed"
+            )
+        no_check = True
     if env["kind"] == "docker":
         if "image" not in env:
             raise_error("Image must be defined for Docker environments")
@@ -2525,6 +2748,7 @@ def run_in_env(
                 args=env.get("args", []),
                 quiet=not verbose,
             )
+            save_env_check_cache()
         docker_cmd = [
             "docker",
             "run",
@@ -2600,6 +2824,7 @@ def run_in_env(
                 relaxed=relaxed_check,
                 quiet=not verbose,
             )
+            save_env_check_cache()
         # TODO: Prefix should only be in the env file or calkit.yaml, not both?
         prefix = env.get("prefix")
         # Conda is often not on the PATH (especially on Windows), so search
@@ -2678,6 +2903,7 @@ def run_in_env(
                 quiet=True,
                 verbose=verbose,
             )
+            save_env_check_cache()
         # Now run the command
         cmd = f"{activate_cmd} && {shell_cmd} && deactivate"  # type: ignore
         if verbose:
@@ -2689,6 +2915,7 @@ def run_in_env(
     elif env["kind"] == "julia":
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
         env_path = env.get("path")
         if env_path is None:
             raise_error(
@@ -2854,6 +3081,7 @@ def run_in_env(
         assert isinstance(env_path, str)
         if not no_check:
             check_renv(env_path=env_path, verbose=verbose)
+            save_env_check_cache()
         # For renv, we need to run from the renv project directory so renv
         # properly initializes the library, but the script needs to run
         # from its original working directory
@@ -2905,6 +3133,7 @@ def run_in_env(
             )
         if not no_check:
             check_nix_env(env=env, verbose=verbose)
+            save_env_check_cache()
         env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
         flake_ref = f"path:{env_dir}"
         shell_name = env.get("shell")
@@ -2936,6 +3165,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),  # type: ignore
             )
+            save_env_check_cache()
         image_name = calkit.matlab.get_docker_image_name(
             ck_info=ck_info,
             env_name=env_name,
@@ -3057,7 +3287,7 @@ def run_procedure(
 
     from calkit.models import Procedure
 
-    ck_info = calkit.load_calkit_info(process_includes="procedures")
+    ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
     if name not in procs:

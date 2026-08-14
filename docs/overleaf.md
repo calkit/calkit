@@ -75,7 +75,7 @@ calkit overleaf sync
 
 After syncing, you'll probably want to ensure the local PDF is up-to-date
 by calling `calkit run`, and if anything has changed,
-commit and push those changes to the cloud with
+commit and push those changes to the hub with
 `calkit save -am "Run pipeline"`.
 
 ### A clean working tree is required
@@ -112,14 +112,27 @@ These are synced bidirectionally, except for files under `push_paths`
 (see [importing](#importing-an-overleaf-project)), which are pushed to
 Overleaf one-way only.
 
+Anything the pipeline produces is pushed one-way, however it's stored.
+Overleaf needs those files to compile the document, but an edit made to one
+of them there can't come back: the next run would overwrite it, so it
+belongs in whatever the stage builds the file from.
+This covers a `json-to-latex` stage's `.tex` and the copies a `map-paths`
+stage puts in the document's folder, such as a `references.bib` or class
+file shared between papers.
+Those copies are pushed even though they're gitignored, since without them
+Overleaf can't compile.
+If one of them is edited on Overleaf, `calkit overleaf sync` says which
+files it's about to overwrite.
+
 Everything else is treated as ignored and is never pushed to, pulled from,
 or deleted from Overleaf.
 In particular, this includes:
 
-- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC.
-- Pipeline outputs with `storage: null`, such as LaTeX build artifacts
-  (`.aux`, aux PDFs, etc.).
-  These can be tracked by the pipeline but not stored, so Calkit leaves them
+- Files ignored by Git (e.g., via `.gitignore`) that are not stored by DVC
+  and are not produced by the pipeline.
+- Pipeline outputs with `storage: null` that aren't materialized in the
+  document's folder, such as LaTeX build artifacts (`.aux`, aux PDFs, etc.).
+  These are tracked by the pipeline but not stored, so Calkit leaves them
   alone on both sides.
 
 A file is only deleted from Overleaf when a previously-synced stored file
@@ -174,7 +187,7 @@ made them yourself.
 
 You can view an example project that uses Overleaf integration on
 [GitHub](https://github.com/calkit/example-overleaf)
-and the [Calkit Cloud](https://calkit.io/calkit/example-overleaf).
+and the [Calkit hub](https://calkit.io/calkit/example-overleaf).
 This project syncs the document text bidirectionally,
 and pushes figures up to Overleaf.
 

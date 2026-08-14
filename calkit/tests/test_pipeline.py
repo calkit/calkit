@@ -2052,9 +2052,9 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
-            assert not _paths_overlap(
-                dep, out
-            ), f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            assert not _paths_overlap(dep, out), (
+                f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            )
 
 
 def test_expand_dep_excluding_subprojects(tmp_dir):
@@ -2394,3 +2394,80 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
     assert not os.path.exists(os.path.join("doc", ".gitignore"))
     with open(os.path.join("sub", "doc", ".gitignore")) as f:
         assert "*.aux" in f.read()
+
+
+def test_to_dvc_latex_diff_stages():
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "pubs/paper-1/main.tex",
+                    "diffs": [["v1", "v2"], "main"],
+                }
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    # Building the document and comparing revisions of it are separate
+    # stages, so adding a comparison doesn't rebuild the paper
+    assert set(stages) == {
+        "paper",
+        "paper-diff-v1-v2",
+        "paper-diff-main",
+    }
+    assert stages["paper"]["outs"] == ["pubs/paper-1/main.pdf"]
+    assert stages["paper-diff-v1-v2"]["outs"] == [
+        ".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf"
+    ]
+    # A generated name that collides with one the user wrote is an error,
+    # not something to work around: the name is addressable and is the
+    # stage's identity in dvc.lock, so it can't be allowed to shift
+    ck_info["pipeline"]["stages"]["paper-diff-v1-v2"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "echo hi",
+    }
+    with pytest.raises(ValueError, match="already exists"):
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+
+
+def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
+    # A resolver is bound to one repo. Caching it on wdir looked harmless
+    # until you notice wdir is usually None, which made every project in a
+    # process share whichever repo was compiled first.
+    import calkit.pipeline
+
+    shas = {}
+    for name in ["one", "two"]:
+        path = os.path.join(tmp_dir, name)
+        os.makedirs(path)
+        subprocess.check_call(["git", "init", "-q", "-b", "main", path])
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(name)
+        subprocess.check_call(["git", "-C", path, "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                path,
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                name,
+            ]
+        )
+        cwd = os.getcwd()
+        os.chdir(path)
+        try:
+            resolve = calkit.pipeline._ref_resolver(None)
+            assert resolve is not None
+            shas[name] = resolve("HEAD")
+        finally:
+            os.chdir(cwd)
+    assert shas["one"] != shas["two"]

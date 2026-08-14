@@ -15,10 +15,14 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, OptionalValueCommand, raise_error, warn
 from calkit.core import ryaml
 
 new_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+
+class _NewProjectCommand(OptionalValueCommand):
+    optional_value_options = {"--hub": "default", "--cloud": "default"}
 
 
 def _check_path_dir(path: str):
@@ -28,7 +32,7 @@ def _check_path_dir(path: str):
         os.makedirs(dirname, exist_ok=True)
 
 
-@new_app.command(name="project")
+@new_app.command(name="project", cls=_NewProjectCommand)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
     name: Annotated[
@@ -48,18 +52,24 @@ def new_project(
     description: Annotated[
         str | None, typer.Option("--description", help="Project description.")
     ] = None,
-    cloud: Annotated[
-        bool,
+    hub: Annotated[
+        str | None,
         typer.Option(
+            "--hub",
             "--cloud",
-            help=("Create this project in the cloud (Calkit and GitHub.)"),
+            help=(
+                "Create this project on a Calkit hub (and GitHub). "
+                "Optionally takes a hub URL; bare --hub (or the special "
+                "value 'default') uses the default_hub config value, "
+                "else calkit.io. --cloud is a deprecated alias."
+            ),
         ),
-    ] = False,
+    ] = None,
     public: Annotated[
         bool,
         typer.Option(
             "--public",
-            help="Create as a public project if --cloud is selected.",
+            help="Create as a public project if --hub is selected.",
         ),
     ] = False,
     git_repo_url: Annotated[
@@ -116,6 +126,19 @@ def new_project(
         "Next, you'll probably want to start building your pipeline.\n\n"
         f"Check out the docs at {docs_url}."
     )
+    # Point subsequent hub API calls at the requested instance; 'default'
+    # (a bare --hub) keeps the normal resolution: CALKIT_HUB if
+    # set, else the default_hub config value, else calkit.io
+    if hub is not None and hub != "default":
+        if hub in ["test", "local", "staging", "production"]:
+            raise_error(
+                "--hub takes a hub URL, e.g., https://staging.calkit.io"
+            )
+        os.environ["CALKIT_HUB"] = hub
+        try:
+            calkit.hub.get_base_url()
+        except ValueError as e:
+            raise_error(str(e))
     abs_path = os.path.abspath(path)
     if template and os.path.exists(abs_path):
         raise_error("Must specify a new directory if using --template")
@@ -146,14 +169,14 @@ def new_project(
                 raise_error(
                     f"Could not detect Git repo URL from existing repo: {e}"
                 )
-        elif not cloud:
+        elif hub is None:
             raise_error(
                 "Existing Git repo has no remotes; "
-                "specify --git-url or use --cloud to create one"
+                "specify --git-url or use --hub to create one"
             )
         # We don't have a project name but do have a Git repo URL, the
         # project name will be the Git repo name lowercased, since that's
-        # how the Calkit Cloud will create the project name by default
+        # how the hub will create the project name by default
         if name is None and git_repo_url is not None:
             name = git_repo_url.split("/")[-1].lower()
         # If this isn't a DVC repo, run `dvc init`
@@ -198,9 +221,9 @@ def new_project(
     if title is None:
         title = typer.prompt("Enter a title (ex: 'My research project')")
     typer.echo(f"Using title: {title}")
-    if cloud:
-        # Cloud should allow None, which will allow us to post just the name
-        # NOTE: This will fail if the user hasn't logged into the Calkit Cloud
+    if hub is not None:
+        # The hub should allow None, which will allow us to post just the name
+        # NOTE: This will fail if the user hasn't logged into the hub
         # in 6 months, since their GitHub refresh token stored is expired
         # Strip control characters (e.g., stray newlines) the API rejects
         if description is not None:
@@ -211,9 +234,9 @@ def new_project(
                 ).strip()
                 or None
             )
-        typer.echo("Creating project in Calkit Cloud")
+        typer.echo("Creating project on the hub")
         try:
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 "/projects",
                 json=dict(
                     name=name,
@@ -225,7 +248,7 @@ def new_project(
                 ),
             )
         except Exception as e:
-            msg = f"Posting new project to cloud failed: {e}"
+            msg = f"Posting new project to the hub failed: {e}"
             if (
                 git_repo_url is not None
                 and "Can only create projects for yourself" in str(e)
@@ -236,7 +259,7 @@ def new_project(
                     msg += (
                         f"\n\nThe owner '{detected_owner}' was detected from "
                         "your Git remote. If this is a GitHub organization, "
-                        "make sure the organization exists in Calkit Cloud "
+                        "make sure the organization exists on the hub "
                         "and that you have write access to it."
                     )
             raise_error(msg)
@@ -297,9 +320,9 @@ def new_project(
                     repo.git.commit(
                         ["calkit.yaml", "-m", "Update calkit.yaml"]
                     )
-            # Set Git remote URL to match the one used in the cloud repo
+            # Set Git remote URL to match the one used in the hub repo
             if repo.remotes:
-                typer.echo("Updating Git remote URL to match cloud repo")
+                typer.echo("Updating Git remote URL to match hub repo")
                 # Use origin if present, otherwise fall back to the first remote
                 remote_names = [r.name for r in repo.remotes]
                 existing_remote = repo.remotes[
@@ -317,7 +340,7 @@ def new_project(
                     )
                 repo.git.remote(["set-url", existing_remote.name, new_url])
             else:
-                typer.echo("Adding Git remote URL for cloud repo")
+                typer.echo("Adding Git remote URL for hub repo")
                 repo.git.remote(["add", "origin", resp["git_repo_url"]])
         try:
             remote_name = calkit.dvc.configure_remote(wdir=abs_path)
@@ -332,14 +355,15 @@ def new_project(
         except Exception:
             warn("Failed to setup Calkit DVC remote")
         prj = calkit.detect_project_name(wdir=abs_path)
-        add_msg = f"\n\nYou can view your project at https://calkit.io/{prj}"
+        hub_url = calkit.hub.get_hub_url()
+        add_msg = f"\n\nYou can view your project at {hub_url}/{prj}"
         typer.echo(success_message + add_msg)
         return
     # If using a template, clone it first
     if template:
         # TODO: If the template is not a Git repo URL, make a request to the
-        # Calkit Cloud to get it?
-        # For now, assume consistency between Calkit Cloud projects and
+        # the hub to get it?
+        # For now, assume consistency between hub projects and
         # GitHub repo URLs
         if "github.com" in template:
             template_git_url = template
@@ -465,14 +489,14 @@ def new_project(
         repo.git.remote(["add", "origin", git_repo_url])
     elif not git_repo_url and not repo.remotes:
         warn("No Git remotes are configured")
-    # Setup Calkit Cloud DVC remote
+    # Setup Calkit DVC remote
     if repo.remotes:
-        typer.echo("Setting up Calkit Cloud DVC remote")
+        typer.echo("Setting up Calkit DVC remote")
         try:
             calkit.dvc.configure_remote(wdir=abs_path)
             calkit.dvc.set_remote_auth(wdir=abs_path)
         except Exception as e:
-            warn(f"Failed to set up Calkit Cloud DVC remote: {e}")
+            warn(f"Failed to set up Calkit DVC remote: {e}")
     if repo.git.diff("--staged") and not no_commit:
         repo.git.commit(["-m", "Initialize Calkit project"])
     typer.echo(success_message)
@@ -1162,18 +1186,18 @@ def new_publication(
     title: Annotated[
         str, typer.Option("--title", help="The title of the publication.")
     ],
-    description: Annotated[
-        str,
-        typer.Option(
-            "--description", help="A description of the publication."
-        ),
-    ],
     kind: Annotated[
         str,
         typer.Option(
             "--kind", help="Kind of the publication, e.g., 'journal-article'."
         ),
     ],
+    description: Annotated[
+        str | None,
+        typer.Option(
+            "--description", help="A description of the publication."
+        ),
+    ] = None,
     stage_name: Annotated[
         str | None,
         typer.Option(
@@ -1226,7 +1250,7 @@ def new_publication(
 ) -> None:
     from calkit.models.pipeline import LatexStage
 
-    ck_info = calkit.load_calkit_info(process_includes=False)
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     envs = ck_info.get("environments", {})
     pub_paths = [p.get("path") for p in pubs]
@@ -1280,9 +1304,11 @@ def new_publication(
         path=pathlib.Path(pub_fpath).as_posix(),
         kind=kind,
         title=title,
-        description=description,
         stage=stage_name,
     )
+    # Keep calkit.yaml free of null entries for optional fields
+    if description is not None:
+        pub["description"] = description
     pubs.append(pub)
     ck_info["publications"] = pubs
     repo = calkit.git.get_repo()
@@ -1295,18 +1321,31 @@ def new_publication(
         )
         envs[env_name] = env
         ck_info["environments"] = envs
+    # Copy in template files if applicable. This happens before the stage is
+    # built so its inputs can be detected from the document itself: a template
+    # like jfm brings its own class, bibliography style, and style files, and
+    # they're only dependencies of building the paper if declared.
+    if template is not None and template_type == "latex":
+        if overwrite and os.path.exists(path):
+            shutil.rmtree(path)
+        calkit.templates.use_template(
+            name=template, dest_dir=path, title=title
+        )
+        repo.git.add(path)
     # Create stage if applicable
     if (
         stage_name is not None
         and template_type == "latex"
         and env_name is not None
     ):
+        target_path = pathlib.Path(path, template_obj.target).as_posix()  # type: ignore
         stage = LatexStage(
             kind="latex",
             environment=env_name,
-            target_path=pathlib.Path(path, template_obj.target).as_posix(),  # type: ignore
+            target_path=target_path,
+            inputs=_add_detected_latex_inputs(target_path, deps),  # type: ignore
             outputs=[pub_fpath],
-        ).model_dump()
+        ).to_ck_dict()
         if "pipeline" not in ck_info:
             ck_info["pipeline"] = {}
         if "stages" not in ck_info["pipeline"]:
@@ -1315,14 +1354,6 @@ def new_publication(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    # Copy in template files if applicable
-    if template is not None and template_type == "latex":
-        if overwrite and os.path.exists(path):
-            shutil.rmtree(path)
-        calkit.templates.use_template(
-            name=template, dest_dir=path, title=title
-        )
-        repo.git.add(path)
     if not no_commit and repo.git.diff("--staged"):
         repo.git.commit(["-m", f"Add new publication {pub_fpath}"])
 
@@ -1407,7 +1438,7 @@ def new_conda_env(
         assert isinstance(packages, list)
         # Write environment to path
         _check_path_dir(path)
-        conda_env = dict(
+        conda_env: dict = dict(
             name=conda_name, channels=["conda-forge"], dependencies=packages
         )
         if prefix is not None:
@@ -1422,7 +1453,7 @@ def new_conda_env(
             ryaml.dump(conda_env, f)
     elif packages is None and os.path.isfile(path):
         with open(path) as f:
-            conda_env: dict = ryaml.load(f)
+            conda_env = ryaml.load(f)
         # Remove prefix
         conda_env.pop("prefix", None)
         if prefix is not None:
@@ -1557,6 +1588,18 @@ def new_slurm_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the "
+                "queue at once, or 0 for no limit. Submissions beyond this "
+                "wait for a slot, so an iterated stage does not take over a "
+                "shared cluster's queue. Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1597,6 +1640,12 @@ def new_slurm_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 means no limit, the same as it does for `calkit update`.
+        if max_concurrent_jobs:
+            env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env
@@ -1646,6 +1695,18 @@ def new_pbs_env(
             ),
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the "
+                "queue at once, or 0 for no limit. Submissions beyond this "
+                "wait for a slot, so an iterated stage does not take over a "
+                "shared cluster's queue. Unlimited by default."
+            ),
+        ),
+    ] = None,
     description: Annotated[
         str | None, typer.Option("--description", help="Description.")
     ] = None,
@@ -1688,6 +1749,12 @@ def new_pbs_env(
         env["default_options"] = normalized_default_options  # type: ignore
     if normalized_default_setup:
         env["default_setup"] = normalized_default_setup  # type: ignore
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 means no limit, the same as it does for `calkit update`.
+        if max_concurrent_jobs:
+            env["max_concurrent_jobs"] = max_concurrent_jobs  # type: ignore
     if description is not None:
         env["description"] = description
     envs[name] = env
@@ -2632,7 +2699,7 @@ def _save_stage(
         env_names = ck_info.get("environments", {})
         if stage.environment not in env_names:
             raise_error(f"Environment {stage.environment} does not exist")
-    stages[name] = stage.model_dump()
+    stages[name] = stage.to_ck_dict()
     with open("calkit.yaml", "w") as f:
         ryaml.dump(ck_info, f)
     if not no_commit:
@@ -2649,6 +2716,28 @@ def _save_stage(
                     f"Add {stage.kind} pipeline stage '{name}'",
                 ]
             )
+
+
+def _add_detected_latex_inputs(
+    target_path: str, inputs: list[str], wdir: str | None = None
+) -> list[str]:
+    """Append the files a LaTeX document reads to a stage's inputs.
+
+    LaTeX resolves its own class, style, bibliography, and figure files,
+    so without this they're invisible to the pipeline: editing the class
+    file wouldn't rebuild the paper, and the web app's in-browser preview,
+    which loads exactly what the stage declares, couldn't compile at all.
+    Anything the user named explicitly is kept and not duplicated.
+    """
+    import calkit.latex
+    from calkit.detect import filter_covered_inputs
+
+    detected = filter_covered_inputs(
+        calkit.latex.detect_inputs(target_path, wdir=wdir), inputs
+    )
+    if detected:
+        typer.echo(f"Detected inputs: {', '.join(detected)}")
+    return list(inputs) + detected
 
 
 def _to_ck_outs(
@@ -2918,6 +3007,16 @@ def new_latex_stage(
         ),
     ] = [],
     inputs: StageArgs.inputs = [],
+    no_detect_inputs: Annotated[
+        bool,
+        typer.Option(
+            "--no-detect-inputs",
+            help=(
+                "Don't add the class, style, bibliography, and figure files "
+                "the document reads as inputs."
+            ),
+        ),
+    ] = False,
     outputs: StageArgs.outputs = [],
     outs_git: StageArgs.outs_git = [],
     outs_git_no_delete: StageArgs.outs_git_no_delete = [],
@@ -2937,6 +3036,8 @@ def new_latex_stage(
         outs_no_store=outs_no_store,
         outs_no_store_no_delete=outs_no_store_no_delete,
     )
+    if not no_detect_inputs:
+        inputs = _add_detected_latex_inputs(target_path, inputs)
     try:
         stage = calkit.models.pipeline.LatexStage(
             kind="latex",
@@ -3852,7 +3953,7 @@ def new_release(
                 release_body += doi_md + "\n\n"
             if release_description is not None:
                 release_body += release_description
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 f"/projects/{project_name}/github-releases",
                 json=dict(
                     tag_name=name,

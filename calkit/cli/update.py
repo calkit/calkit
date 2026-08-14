@@ -37,21 +37,21 @@ def update_devcontainer(
         ),
     ] = False,
 ):
-    """Update a project's devcontainer to match the latest Calkit spec."""
-    import requests
+    """Update a project's devcontainer to match this version of Calkit's
+    spec.
+    """
+    from calkit import resources as calkit_resources
 
-    url = (
-        "https://raw.githubusercontent.com/calkit/devcontainer/"
-        "refs/heads/main/devcontainer.json"
-    )
-    typer.echo(f"Downloading {url}")
-    resp = requests.get(url)
     out_dir = os.path.join(wdir or ".", ".devcontainer")
     os.makedirs(out_dir, exist_ok=True)
     out_fpath = os.path.join(out_dir, "devcontainer.json")
     typer.echo(f"Writing to {out_fpath}")
-    with open(out_fpath, "w") as f:
-        f.write(resp.text)
+    with open(out_fpath, "w", encoding="utf-8") as f:
+        f.write(
+            calkit_resources.read_text(
+                "devcontainer", calkit_resources.DEVCONTAINER_FNAME
+            )
+        )
     if not no_commit:
         repo = calkit.git.get_repo(wdir)
         rel_path = os.path.join(".devcontainer", "devcontainer.json")
@@ -209,7 +209,7 @@ def update_release(
                 release_body += doi_md + "\n\n"
             if release_description is not None:
                 release_body += release_description
-            resp = calkit.cloud.post(
+            resp = calkit.hub.post(
                 f"/projects/{project_name}/github-releases",
                 json=dict(
                     tag_name=name,
@@ -346,27 +346,19 @@ def update_vscode_config(
         ),
     ] = False,
 ):
-    """Update a project's VS Code config to match the latest Calkit
+    """Update a project's VS Code config to match this version of Calkit's
     recommendations.
     """
-    import requests
+    from calkit import resources as calkit_resources
 
     out_dir = os.path.join(wdir or ".", ".vscode")
     os.makedirs(out_dir, exist_ok=True)
     repo = calkit.git.get_repo(wdir)
-    for fname in ["settings.json", "extensions.json"]:
-        url = (
-            f"https://raw.githubusercontent.com/calkit/vscode-config/"
-            f"refs/heads/main/{fname}"
-        )
-        typer.echo(f"Downloading {url}")
-        resp = requests.get(url)
-        out_dir = os.path.join(wdir or ".", ".vscode")
-        os.makedirs(out_dir, exist_ok=True)
+    for fname in calkit_resources.VSCODE_FNAMES:
         out_fpath = os.path.join(out_dir, fname)
         typer.echo(f"Writing to {out_fpath}")
-        with open(out_fpath, "w") as f:
-            f.write(resp.text)
+        with open(out_fpath, "w", encoding="utf-8") as f:
+            f.write(calkit_resources.read_text("vscode", fname))
         repo.git.add(os.path.join(".vscode", fname))
     if not no_commit and repo.git.diff(["--staged", "--", ".vscode"]):
         repo.git.commit([".vscode", "-m", "Update VS Code config"])
@@ -392,33 +384,43 @@ def update_github_actions(
         ),
     ] = False,
 ):
-    """Update a project's GitHub Actions to match the latest Calkit
+    """Update a project's GitHub Actions to match this version of Calkit's
     recommendations.
-    """
-    import requests
 
-    # First look for any existing workflows that run Calkit to use as the
-    # output file name
+    An existing workflow that runs the Calkit action is updated in place,
+    pinning the action to this version of Calkit, so this is safe to rerun
+    after upgrading.
+    """
+    from calkit import resources as calkit_resources
+
+    # First look for an existing workflow that runs the Calkit action, so
+    # rerunning this updates a project's workflow instead of writing a
+    # second one beside it
     fname_out = "run-calkit.yml"
+    txt_out = None
     out_dir = os.path.join(wdir or ".", ".github", "workflows")
     os.makedirs(out_dir, exist_ok=True)
-    for fname in os.listdir(out_dir):
+    for fname in sorted(os.listdir(out_dir)):
         if fname.endswith(".yaml") or fname.endswith(".yml"):
             fpath = os.path.join(out_dir, fname)
-            with open(fpath) as f:
-                if "calkit" in f.read().lower():
-                    fname_out = fname
-                    break
-    url = (
-        "https://raw.githubusercontent.com/calkit/run-action/refs/heads/main"
-        "/example.yml"
-    )
-    typer.echo(f"Downloading {url}")
-    resp = requests.get(url)
+            with open(fpath, encoding="utf-8") as f:
+                txt = f.read()
+            if calkit_resources.uses_run_action(txt):
+                fname_out = fname
+                # A workflow that's still the example gets replaced outright,
+                # picking up any other improvements to it, but one that's been
+                # customized only has its action ref updated
+                if not calkit_resources.is_default_github_actions_workflow(
+                    txt
+                ):
+                    txt_out = calkit_resources.set_action_ref(txt)
+                break
+    if txt_out is None:
+        txt_out = calkit_resources.render_github_actions_workflow()
     out_fpath = os.path.join(out_dir, fname_out)
     typer.echo(f"Writing to {out_fpath}")
-    with open(out_fpath, "w") as f:
-        f.write(resp.text)
+    with open(out_fpath, "w", encoding="utf-8") as f:
+        f.write(txt_out)
     if not no_commit:
         rel_path = os.path.join(".github", "workflows", fname_out)
         repo = calkit.git.get_repo(wdir)
@@ -928,6 +930,16 @@ def update_slurm_env(
             "--set-default-setup", help="Replace default setup list."
         ),
     ] = [],
+    max_concurrent_jobs: Annotated[
+        int | None,
+        typer.Option(
+            "--max-concurrent-jobs",
+            help=(
+                "Maximum number of this project's jobs allowed in the queue "
+                "at once, or 0 to remove the limit."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Update a SLURM environment."""
     ck_info, env = _load_env(env_name)
@@ -959,6 +971,15 @@ def update_slurm_env(
         env["default_setup"] = cmds
     elif "default_setup" in env:
         del env["default_setup"]
+    if max_concurrent_jobs is not None:
+        if max_concurrent_jobs < 0:
+            raise_error("--max-concurrent-jobs cannot be negative")
+        # 0 is the way to clear the limit, since omitting the option means
+        # "leave it alone" rather than "unlimited".
+        if max_concurrent_jobs == 0:
+            env.pop("max_concurrent_jobs", None)
+        else:
+            env["max_concurrent_jobs"] = max_concurrent_jobs
     calkit.save_calkit_info(ck_info)
     typer.echo(f"Updated slurm environment '{env_name}'")
 

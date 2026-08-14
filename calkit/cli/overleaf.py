@@ -48,7 +48,7 @@ def _extract_title_from_tex(tex_file_path: str) -> str | None:
 def _get_overleaf_token() -> str:
     """Get the user's Overleaf token from config.
 
-    If not set, we'll try to get from the cloud. If that fails, we'll prompt
+    If not set, we'll try to get from the hub. If that fails, we'll prompt
     the user to enter it.
 
     TODO: Handle expiration?
@@ -56,16 +56,16 @@ def _get_overleaf_token() -> str:
     calkit_config = calkit.config.read()
     overleaf_token = calkit_config.overleaf_token
     if not overleaf_token:
-        # See if we can get it from the cloud
+        # See if we can get it from the hub
         if calkit_config.token is not None:
             try:
-                typer.echo("Getting Overleaf token from cloud")
-                resp = calkit.cloud.get("/user/overleaf-token")
+                typer.echo("Getting Overleaf token from the hub")
+                resp = calkit.hub.get("/user/overleaf-token")
                 overleaf_token = resp["access_token"]
                 calkit_config.overleaf_token = overleaf_token
                 calkit_config.write()
             except Exception:
-                typer.echo("Failed to get Overleaf token from cloud")
+                typer.echo("Failed to get Overleaf token from the hub")
     if not overleaf_token:
         warn("Overleaf token not set in config", prefix="")
         typer.echo(
@@ -206,7 +206,7 @@ def import_publication(
     if os.path.isfile(dest_dir):
         raise_error("Destination must be a directory, not a file")
     os.makedirs(dest_dir, exist_ok=True)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()

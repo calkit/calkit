@@ -1,0 +1,79 @@
+name: Deploy hub to staging
+
+concurrency: staging
+
+# To deploy something other than main, dispatch manually and pick the
+# branch or tag from the ref selector
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # Named for the deployed domain so the deployments list shows where
+    # this went; the app-level ENVIRONMENT below is a separate concept
+    environment:
+      name: staging.calkit.io
+      url: https://staging.calkit.io
+    runs-on:
+      - self-hosted
+      - staging
+    defaults:
+      run:
+        working-directory: hub
+    env:
+      ENVIRONMENT: staging
+      PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+      DOMAIN: ${{ vars.DOMAIN }}
+      BACKEND_CORS_ORIGINS: "https://${{ vars.DOMAIN }}"
+      STACK_NAME: ${{ vars.STACK_NAME }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY }}
+      FERNET_KEY: "${{ secrets.FERNET_KEY }}"
+      FIRST_SUPERUSER: ${{ vars.FIRST_SUPERUSER }}
+      FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+      FIRST_SUPERUSER_GITHUB_USERNAME: ${{ vars.FIRST_SUPERUSER_GITHUB_USERNAME }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      EMAILS_FROM_EMAIL: ${{ vars.EMAILS_FROM_EMAIL }}
+      POSTGRES_USER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+      DOCKER_IMAGE_BACKEND: "backend-${{ vars.STACK_NAME }}"
+      DOCKER_IMAGE_FRONTEND: "frontend-${{ vars.STACK_NAME }}"
+      GH_CLIENT_ID: ${{ secrets.GH_CLIENT_ID }}
+      GH_CLIENT_SECRET: ${{ secrets.GH_CLIENT_SECRET }}
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      OBJECT_STORAGE_PREFIX: ${{ vars.OBJECT_STORAGE_PREFIX }}
+      OBJECT_STORAGE_ENDPOINT_URL: ${{ vars.OBJECT_STORAGE_ENDPOINT_URL }}
+      OBJECT_STORAGE_KEY: ${{ vars.OBJECT_STORAGE_KEY }}
+      OBJECT_STORAGE_SECRET: ${{ secrets.OBJECT_STORAGE_SECRET }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+      MIXPANEL_TOKEN: ${{ secrets.MIXPANEL_TOKEN }}
+      GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      ZENODO_CLIENT_ID: ${{ secrets.ZENODO_CLIENT_ID }}
+      ZENODO_CLIENT_SECRET: ${{ secrets.ZENODO_CLIENT_SECRET }}
+      GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+      GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+      ZOTERO_CLIENT_KEY: ${{ secrets.ZOTERO_CLIENT_KEY }}
+      ZOTERO_CLIENT_SECRET: ${{ secrets.ZOTERO_CLIENT_SECRET }}
+      GRAFANA_ADMIN_PASSWORD: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # The backend image versions itself with hatch-vcs, which reads
+          # the hub/vX.Y.Z tags out of .git during the build; the default
+          # shallow checkout fetches neither tags nor enough history
+          fetch-depth: 0
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
+      - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans

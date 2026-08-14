@@ -27,9 +27,9 @@ def test_generate() -> None:
     for relpath in calkit.schema.SCHEMA_REPO_PATHS:
         with open(os.path.join(REPO_ROOT, relpath), encoding="utf-8") as f:
             checked_in = f.read()
-        assert (
-            checked_in == calkit.schema.generate_json()
-        ), f"{relpath} is out-of-date; regenerate it with 'make schema'"
+        assert checked_in == calkit.schema.generate_json(), (
+            f"{relpath} is out-of-date; regenerate it with 'make schema'"
+        )
 
 
 @pytest.mark.parametrize("relpath", ["examples/basic/calkit.yaml"])
@@ -77,10 +77,11 @@ def test_validate_bad_projects() -> None:
             }
         }
     )
+    # An environment using the removed _include key
+    assert errors({"environments": {"e": {"_include": "env.yaml"}}})
     # Valid documents, including ones using the features above correctly
     assert not errors({})
     assert not errors({"$schema": calkit.schema.SCHEMA_URL})
-    assert not errors({"environments": {"e": {"_include": "env.yaml"}}})
     assert not errors(
         {
             "environments": {"py": {"kind": "uv-venv", "path": "reqs.txt"}},

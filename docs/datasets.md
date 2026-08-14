@@ -27,5 +27,5 @@ calkit import dataset {owner_name}/{project_name}/{path} {local_path}
 
 If this dataset is tracked with DVC,
 a new DVC remote will be created to pull it into your project.
-For datasets in the Calkit Cloud,
+For datasets on the Calkit hub,
 this means the data will not be duplicated there.

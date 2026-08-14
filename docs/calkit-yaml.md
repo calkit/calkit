@@ -25,7 +25,7 @@ and reduce redundant storage.
 ## Showcase
 
 The project showcase is a list of elements that best represent the project,
-shown on the project homepage on the Calkit Cloud web app.
+shown on the project homepage on the hub.
 For example:
 
 ```yaml

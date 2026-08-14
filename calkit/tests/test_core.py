@@ -61,9 +61,6 @@ def test_save_calkit_info_preserves_unicode(tmp_dir):
 def test_load_calkit_info(tmp_dir, monkeypatch):
     subpath = "some/project"
     os.makedirs(subpath)
-    os.makedirs(subpath + "/.calkit/environments")
-    with open(subpath + "/.calkit/environments/env2.yaml", "w") as f:
-        calkit.ryaml.dump({"kind": "docker", "image": "openfoam"}, f)
     with open(subpath + "/calkit.yaml", "w") as f:
         calkit.ryaml.dump(
             {
@@ -71,23 +68,23 @@ def test_load_calkit_info(tmp_dir, monkeypatch):
                 "owner": "someone",
                 "environments": {
                     "env1": {"kind": "docker", "image": "ubuntu"},
-                    "env2": {"_include": ".calkit/environments/env2.yaml"},
+                    "env2": {"kind": "docker", "image": "openfoam"},
                 },
             },
             f,
         )
     ck_info = calkit.load_calkit_info(wdir=subpath)
-    assert ck_info["environments"]["env1"]["image"] == "ubuntu"
-    assert ck_info["environments"]["env2"] == {
-        "_include": ".calkit/environments/env2.yaml"
-    }
-    ck_info = calkit.load_calkit_info(wdir=subpath, process_includes=True)
+    assert ck_info["name"] == "some-project"
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"
+    # The working directory is used when no wdir is passed
     monkeypatch.chdir(subpath)
-    ck_info = calkit.load_calkit_info(process_includes=True)
+    ck_info = calkit.load_calkit_info()
     assert ck_info["environments"]["env1"]["image"] == "ubuntu"
     assert ck_info["environments"]["env2"]["image"] == "openfoam"
+    # A project with no calkit.yaml loads as an empty dict
+    os.remove("calkit.yaml")
+    assert calkit.load_calkit_info() == {}
 
 
 def test_get_env_var_dep_names():

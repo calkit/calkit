@@ -15,6 +15,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import uuid
 import warnings
 from os import PathLike
@@ -29,7 +30,7 @@ except ImportError:
     UTC = _timezone.utc
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from calkit.models import ProjectInfo, ProjectStatus
@@ -39,10 +40,65 @@ import ruamel.yaml
 logger = logging.getLogger(__package__)
 logger.setLevel(logging.INFO)
 
-ryaml = ruamel.yaml.YAML()
-ryaml.indent(mapping=2, sequence=4, offset=2)
-ryaml.preserve_quotes = True
-ryaml.width = 70
+
+class _ThreadLocalYAML(threading.local):
+    """Holds one configured ruamel ``YAML`` per thread.
+
+    A ``YAML`` instance carries scanner, parser and composer state for the
+    duration of a load, so two threads sharing one interleave their parses
+    and corrupt each other. The symptom is not a clean failure: a perfectly
+    valid file comes back as a ``ParserError`` or ``ComposerError`` pointing
+    at a random line, an ``IndexError`` from the scanner, or an internal
+    ``AttributeError`` that escapes the usual YAML error handling entirely.
+
+    The CLI is single-threaded and never hit this, but the hub calls into
+    ``calkit`` from a request threadpool, where concurrent reads of the same
+    calkit.yaml made project pages intermittently 500 or report a project as
+    having no metadata at all.
+    """
+
+    def __init__(self) -> None:
+        self.yaml = ruamel.yaml.YAML()
+        self.yaml.indent(mapping=2, sequence=4, offset=2)
+        self.yaml.preserve_quotes = True
+        self.yaml.width = 70
+
+
+_yaml_local = _ThreadLocalYAML()
+
+
+class _ThreadLocalYAMLProxy:
+    """Forwards to the calling thread's ``YAML``.
+
+    Keeps ``ryaml`` usable as the module-level object it has always been,
+    so no call site has to know about any of this.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_yaml_local.yaml, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(_yaml_local.yaml, name, value)
+
+
+ryaml = _ThreadLocalYAMLProxy()
+
+try:
+    # libyaml-backed loader, many times faster than the pure-Python one.
+    # PyYAML ships prebuilt wheels with libyaml on every platform we target,
+    # so this is the normal path; the fallback keeps a source install or an
+    # exotic build working, just slower.
+    from yaml import CSafeLoader as _YamlLoader
+except ImportError:  # pragma: no cover - depends on the libyaml build
+    from yaml import SafeLoader as _YamlLoader
+
+
+def _load_yaml_readonly(stream: Any) -> Any:
+    """Parse YAML with the C loader, for data we never write back."""
+    import yaml
+
+    return yaml.load(stream, Loader=_YamlLoader)
+
 
 # Constants for version control auto-ignore
 AUTO_IGNORE_SUFFIXES = [
@@ -125,7 +181,7 @@ def find_project_dirs(relative=False, max_depth=3) -> list[str]:
 
 def load_calkit_info(
     wdir: str | PathLike | None = None,
-    process_includes: bool | str | list[str] = False,
+    read_only: bool = False,
 ) -> dict:
     """Load Calkit project information as a dictionary.
 
@@ -133,13 +189,15 @@ def load_calkit_info(
     ----------
     wdir : str
         Working directory. Defaults to current working directory.
-    process_includes: bool, string or list of strings
-        Whether or not to process any '_include' keys for a given kind of
-        object. If a string is passed, only process includes for that kind.
-        Similarly, if a list of strings is passed, only process those kinds.
-        If True, process all default kinds.
+    read_only: bool
+        Parse with the C-backed loader instead of ruamel's round-trip
+        parser, which is roughly 15x faster (~5 ms versus ~78 ms on a 42 KB
+        calkit.yaml). Key order is preserved either way, since the loader
+        builds plain dicts and those keep insertion order. What is lost is
+        everything a faithful rewrite needs: comments, quoting style and
+        anchors. Only pass True when the result will not be written back.
     """
-    info = {}
+    info: dict = {}
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
@@ -147,30 +205,9 @@ def load_calkit_info(
         # Always read as UTF-8; on Windows the default open() encoding is
         # cp1252, which mangles non-ASCII content (e.g., Greek letters).
         with open(fpath, encoding="utf-8") as f:
-            info = ryaml.load(f)
+            info = _load_yaml_readonly(f) if read_only else ryaml.load(f)
     if info is None:
         info = {}
-    # Check for any includes, i.e., entities with an _include key, for which
-    # we should merge in another file
-    default_includes_enabled = ["environments", "procedures"]
-    if process_includes:
-        if isinstance(process_includes, bool):
-            includes_enabled = default_includes_enabled
-        elif isinstance(process_includes, str):
-            includes_enabled = [process_includes]
-        elif isinstance(process_includes, list):
-            includes_enabled = process_includes
-        for kind in includes_enabled:
-            if kind in info:
-                for obj_name, obj in info[kind].items():
-                    if "_include" in obj:
-                        include_fpath = obj.pop("_include")
-                        if wdir is not None:
-                            include_fpath = os.path.join(wdir, include_fpath)
-                        if os.path.isfile(include_fpath):
-                            with open(include_fpath, encoding="utf-8") as f:
-                                include_data = ryaml.load(f)
-                            info[kind][obj_name] |= include_data
     return info
 
 
@@ -188,16 +225,11 @@ def save_calkit_info(
         ryaml.dump(info, f)
 
 
-def load_calkit_info_object(
-    wdir: str | None = None,
-    process_includes: bool | str | list[str] = False,
-) -> ProjectInfo:
+def load_calkit_info_object(wdir: str | None = None) -> ProjectInfo:
     """Load Calkit project information as a ``ProjectInfo`` object."""
     from calkit.models import ProjectInfo
 
-    return ProjectInfo.model_validate(
-        load_calkit_info(wdir=wdir, process_includes=process_includes)
-    )
+    return ProjectInfo.model_validate(load_calkit_info(wdir=wdir))
 
 
 def utcnow(remove_tz=True) -> datetime:
@@ -603,11 +635,11 @@ def read_file(path: str, as_bytes: bool | None = None) -> str | bytes:
             ".docx",
         ]
     if project is not None:
-        import calkit.cloud
+        import calkit.hub
 
         if len(project.split("/")) != 2:
             raise ValueError("Invalid project identifier (too many slashes)")
-        resp = calkit.cloud.get(f"/projects/{project}/contents/{path}")
+        resp = calkit.hub.get(f"/projects/{project}/contents/{path}")
         # If the response has a content key, that is a base64 encoded string
         if (content := resp.get("content")) is not None:
             # Load the content appropriately

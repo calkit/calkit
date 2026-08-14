@@ -1,0 +1,103 @@
+[project]
+name = "app"
+dynamic = ["version"]
+description = ""
+requires-python = ">=3.10,<4.0"
+authors = [{ name = "Pete Bachant", email = "petebachant@gmail.com" }]
+dependencies = [
+  "fastapi[standard]>=0.114.2,<1.0.0",
+  "python-multipart<1.0.0,>=0.0.7",
+  "email-validator<3.0.0.0,>=2.1.0.post1",
+  "passlib[bcrypt]<2.0.0,>=1.7.4",
+  "tenacity<9.0.0,>=8.2.3",
+  "pydantic>2.0",
+  "emails<1.0,>=0.6",
+  "jinja2<4.0.0,>=3.1.4",
+  "alembic<2.0.0,>=1.12.1",
+  "httpx<1.0.0,>=0.25.1",
+  "psycopg[binary]<4.0.0,>=3.1.13",
+  "sqlmodel<1.0.0,>=0.0.21",
+  # Pin bcrypt until passlib supports the latest
+  "bcrypt==4.0.1",
+  "pydantic-settings<3.0.0,>=2.2.1",
+  "sentry-sdk[fastapi]<2.0.0,>=1.40.6",
+  "pyjwt<3.0.0,>=2.8.0",
+  # Beyond template dependencies
+  "s3fs==2026.4.0",
+  "python-slugify==8.0.4",
+  "cryptography==43.0.0",
+  "gitpython>=3.1.47",
+  "ruamel-yaml==0.18.6",
+  "bibtexparser==1.4.1",
+  "filelock==3.16.0",
+  "stripe==10.11.0",
+  "mixpanel==4.10.1",
+  "gcsfs==2026.4.0",
+  "texsoup>=0.3.1",
+  "calkit-python",
+  "boto3>=1.40.70",
+  "cachetools>=5.3.3",
+  "prometheus-fastapi-instrumentator>=7.0.0",
+  "python-json-logger>=2.0.0",
+  # For signing Zotero's OAuth 1.0a requests
+  "requests-oauthlib>=2.0.0",
+  # Reading the text out of a PDF to diff two builds of a document; pure
+  # Python, so the image needs no system packages for it
+  "pypdf>=6.1.1",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=7.4.3",
+  "mypy<2.0.0,>=1.8.0",
+  "ruff<1.0.0,>=0.2.2",
+  "pre-commit<4.0.0,>=3.6.2",
+  "pytest-test-utils", # For tmp_dir fixture
+  "types-passlib<2.0.0.0,>=1.7.7.20240106",
+  # So mypy sees cachetools the way Pylance already does
+  "types-cachetools>=5.3",
+  "coverage<8.0.0,>=7.4.3",
+]
+
+[tool.uv.sources]
+calkit-python = { workspace = true }
+
+# This package's version is dynamic: hatch-vcs derives it from the Git tags
+# below. uv's build cache keys on the source tree alone, so without this a
+# rebuild at the same sources reuses the wheel it built before the release
+# tag existed, and the image ships the previous version's number. Releases
+# tag a commit that is usually already built (staging deploys every push to
+# main), so `commit` alone would not catch it; `tags` is the one that does.
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# The hub is released from this monorepo as hub/vX.Y.Z, alongside the
+# Python package's own vX.Y.Z tags, so the pattern has to be anchored on
+# the prefix or the hub would report the CLI's version.
+[tool.hatch.version]
+source = "vcs"
+tag-pattern = "^hub/v(?P<version>.+)$"
+
+[tool.hatch.version.raw-options]
+# The repository root, two levels up from this package
+root = "../.."
+# No --dirty: it makes Git compare against the working tree, which runs any
+# clean filters configured in .git/config. Those point at host paths that
+# don't exist inside the image build, and a required filter that can't run
+# is a hard error.
+git_describe_command = [
+  "git", "describe", "--tags", "--long", "--match", "hub/v[0-9]*",
+]
+
+[tool.pytest.ini_options]
+# Anchor pytest's rootdir/config here; without this section pytest ascends
+# to the workspace root pyproject, whose addopts assume the calkit dev
+# environment (xdist, pytest-jupyter)
+testpaths = ["app/tests"]
+
+# ruff and mypy configuration lives in the workspace root pyproject.toml,
+# which checks this package strict and targets its Python version

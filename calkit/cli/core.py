@@ -8,7 +8,7 @@ import subprocess
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
-from typer.core import TyperGroup
+from typer.core import TyperCommand, TyperGroup
 
 if TYPE_CHECKING:
     import click
@@ -29,6 +29,39 @@ class AliasGroup(TyperGroup):
             if name and default_name in self._CMD_SPLIT_P.split(name):
                 return name
         return default_name
+
+
+class OptionalValueCommand(TyperCommand):
+    """TyperCommand allowing certain options to be passed without a value.
+
+    Click no longer supports options with optional values (a bare
+    ``--opt`` either errors or, worse, swallows the next token), so
+    subclasses declare ``optional_value_options`` mapping option names to
+    the value to assume when the option appears bare, i.e., followed by
+    another option or by nothing. Everything after a ``--`` separator is
+    left untouched.
+    """
+
+    optional_value_options: dict[str, str] = {}
+
+    def parse_args(self, ctx: "click.Context", args: list[str]) -> list[str]:
+        new_args = []
+        i = 0
+        while i < len(args):
+            arg = args[i]
+            if arg == "--":
+                new_args += args[i:]
+                break
+            if arg in self.optional_value_options:
+                nxt = args[i + 1] if i + 1 < len(args) else None
+                if nxt is None or nxt.startswith("-"):
+                    value = self.optional_value_options[arg]
+                    new_args.append(f"{arg}={value}")
+                    i += 1
+                    continue
+            new_args.append(arg)
+            i += 1
+        return super().parse_args(ctx, new_args)
 
 
 def complete_stage_names(

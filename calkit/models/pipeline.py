@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import shlex
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -22,6 +23,7 @@ from pydantic import (
 )
 from typing_extensions import Annotated
 
+import calkit.latex
 from calkit.models.io import InputsFromStageOutputs, PathOutput
 from calkit.models.iteration import (
     ExpandedParametersType,
@@ -273,6 +275,15 @@ class Stage(BaseModel):
         data["scheduler"] = data.pop("slurm")
         return data
 
+    def to_ck_dict(self) -> dict:
+        """Dump the stage for calkit.yaml, omitting fields left at their
+        defaults so we don't write a bunch of nulls and empty lists.
+
+        ``kind`` is kept even though subclasses define it with a default,
+        since it's the discriminator needed to load the stage back.
+        """
+        return {"kind": self.kind} | self.model_dump(exclude_defaults=True)
+
     @property
     def outer_environment(self) -> str:
         """The outer environment of the stage, in case it is nested."""
@@ -497,6 +508,20 @@ class Stage(BaseModel):
             stage["frozen"] = True
         return stage
 
+    def extra_dvc_stages(
+        self, resolve_ref: Callable[[str], str] | None = None
+    ) -> dict[str, dict]:
+        """Additional DVC stages this one compiles into, keyed by name.
+
+        Most stages are one for one. A stage produces more than one when
+        the work has genuinely different inputs, so that a change to one
+        part doesn't force the rest to run again.
+
+        ``resolve_ref`` turns a Git revision into a commit, for stages
+        whose inputs are revisions rather than files.
+        """
+        return {}
+
 
 class PythonScriptStage(Stage):
     kind: Literal["python-script"] = "python-script"
@@ -647,6 +672,15 @@ class LatexStage(Stage):
     pdf_storage: Literal["git", "dvc"] | None = Field(
         default="dvc", description="Where to store the resulting PDF."
     )
+    diffs: list[str | list[str]] = Field(
+        default=[],
+        description="Comparisons to keep for this document, each a pair of "
+        "revisions. A bare string is shorthand for comparing that revision "
+        "against the working tree.",
+    )
+    diff_pdf_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the resulting diff PDFs."
+    )
     verbose: bool = Field(
         default=False, description="Show full latexmk output."
     )
@@ -663,6 +697,116 @@ class LatexStage(Stage):
         description="Extra arguments passed straight through to latexmk, for "
         "control Calkit does not model.",
     )
+
+    @property
+    def diff_pairs(self) -> list[tuple[str, str]]:
+        """The revisions to compare, oldest side first.
+
+        A bare revision compares it against ``HEAD``. Every comparison
+        here is between two commits: one against the working tree can't be
+        reproduced, so it belongs to whoever is doing the work rather than
+        to the project.
+        """
+        pairs: list[tuple[str, str]] = []
+        for entry in self.diffs:
+            if isinstance(entry, str):
+                pairs.append((entry, "HEAD"))
+            else:
+                pairs.append((entry[0], entry[1]))
+        return pairs
+
+    @property
+    def diff_paths(self) -> list[str]:
+        return [
+            calkit.latex.get_diff_path(self.target_path, from_ref, to_ref)
+            for from_ref, to_ref in self.diff_pairs
+        ]
+
+    def extra_dvc_stages(
+        self, resolve_ref: Callable[[str], str] | None = None
+    ) -> dict[str, dict]:
+        """One stage per diff, separate from building the document.
+
+        A diff has different inputs from the document it describes, and
+        some of those inputs aren't files at all, so folding them together
+        would rebuild the paper whenever a comparison was added and would
+        chain commands with ``&&``, which not every shell understands.
+
+        A revision that can move is resolved into the command, so the
+        command changes when it moves and DVC re-runs the stage. Without
+        that the only honest option is to run every time, which is what
+        happens when no resolver is given.
+        """
+        stages = {}
+        for (from_ref, to_ref), path in zip(self.diff_pairs, self.diff_paths):
+            name = (
+                f"{self.name}-diff-"
+                f"{calkit.latex.diff_stage_suffix(from_ref, to_ref)}"
+            )
+            out: str | dict = path
+            if self.diff_pdf_storage != "dvc":
+                out = {path: {"cache": False}}
+            # Revisions are resolved to the commit that last changed this
+            # document, not to the tip. The two describe the same document
+            # -- nothing since has touched it -- but the tip moves with
+            # every commit to anything, which would rewrite this command
+            # constantly, and saving that rewrite is itself a commit.
+            from_arg = resolve_ref(from_ref) if resolve_ref else from_ref
+            to_arg = resolve_ref(to_ref) if resolve_ref else to_ref
+            cmd = (
+                f"calkit latex diff -e {shlex.quote(self.environment)}"
+                f" --no-check --from {shlex.quote(from_arg)}"
+                f" --to {shlex.quote(to_arg)}"
+            )
+            # Named from the pair as written, so the output path is the
+            # same on every branch even when the command holds commits
+            cmd += (
+                " --output-dir "
+                f"{shlex.quote(calkit.latex.get_diff_dir(from_ref, to_ref))}"
+            )
+            cmd += f" {shlex.quote(self.target_path)}"
+            # The command already names the exact commits being compared,
+            # so nothing in the working tree is an input. A DVC-tracked
+            # figure is the exception: its content isn't in Git, so only
+            # the dependency catches a change to it.
+            moving = calkit.latex.MOVING_REFS.intersection({from_ref, to_ref})
+            stage: dict = {
+                "cmd": cmd,
+                "deps": self.dvc_deps if moving else [],
+                "outs": [out],
+                "desc": (
+                    f"Automatically generated from the '{self.name}' stage "
+                    "in calkit.yaml. Changes made here will be overwritten."
+                ),
+            }
+            if self.wdir is not None:
+                stage["wdir"] = self.wdir
+            # Without a resolver the command holds a name rather than a
+            # commit, so there's nothing for DVC to notice moving
+            if moving and resolve_ref is None:
+                stage["always_changed"] = True
+            stages[name] = stage
+        return stages
+
+    @field_validator("diffs")
+    @classmethod
+    def _check_diffs(cls, v: list) -> list:
+        for entry in v:
+            if isinstance(entry, str):
+                if not entry:
+                    raise ValueError("A diff revision cannot be empty")
+                continue
+            if len(entry) != 2 or not all(entry):
+                raise ValueError(
+                    "A diff must be a pair of revisions like [v1, v2], or "
+                    "a single revision to compare against the working tree"
+                )
+            if entry[0] == entry[1]:
+                raise ValueError(
+                    f"Diff [{entry[0]}, {entry[1]}] compares a revision "
+                    "with itself"
+                )
+        return v
 
     @model_validator(mode="after")
     def _check_args_dont_set_managed_dirs(self) -> "LatexStage":
@@ -758,13 +902,11 @@ class LatexStage(Stage):
                 out_paths.append(out)
             elif isinstance(out, dict):
                 out_paths.append(list(out.keys())[0])
-        if out_path in out_paths:
-            return outs
-        if self.pdf_storage != "dvc":
-            out_dict = {out_path: {"cache": False}}
-            outs.append(out_dict)
-        else:
-            outs.append(out_path)
+        if out_path not in out_paths:
+            if self.pdf_storage != "dvc":
+                outs.append({out_path: {"cache": False}})
+            else:
+                outs.append(out_path)
         return outs
 
 

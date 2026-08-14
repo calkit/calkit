@@ -102,12 +102,12 @@ def import_dataset(
     if filter_paths is not None:
         params = {"filter_paths": filter_paths}
     try:
-        resp = calkit.cloud.get(
+        resp = calkit.hub.get(
             f"/projects/{owner_name}/{project_name}/datasets/{path}",
             params=params,
         )
     except Exception as e:
-        raise_error(f"Failed to fetch dataset info from cloud: {e}")
+        raise_error(f"Failed to fetch dataset info from the hub: {e}")
     dvc_import, git_import = resp["dvc_import"], resp["git_import"]
     if dest_path is not None:
         typer.echo(f"Importing to destination path: {dest_path}")
@@ -166,7 +166,7 @@ def import_dataset(
             os.makedirs(dest_path, exist_ok=True)
         for f in tqdm(files):
             # Fetch content from API
-            resp_i = calkit.cloud.get(
+            resp_i = calkit.hub.get(
                 f"/projects/{owner_name}/{project_name}/contents/{f}"
             )
             content = resp_i.get("content")
@@ -193,7 +193,7 @@ def import_dataset(
                         f.write(chunk)
             repo.git.add(out_path)
     else:
-        raise_error("Could not fetch import info from Calkit Cloud")
+        raise_error("Could not fetch import info from the hub")
     # Add to datasets in calkit.yaml
     typer.echo("Adding dataset to calkit.yaml")
     new_ds = calkit.models.ImportedDataset(
@@ -233,7 +233,7 @@ def import_environment(
             help=(
                 "Environment location and name, e.g., "
                 "someone/some-project:env-name. If not present, the Calkit "
-                "Cloud will be queried."
+                "API will be queried."
             )
         ),
     ],
@@ -271,9 +271,7 @@ def import_environment(
         raise_error("Invalid source environment specification")
     if os.path.isdir(project):
         typer.echo(f"Importing from local project directory: {project}")
-        src_ck_info = dict(
-            calkit.load_calkit_info(wdir=project, process_includes=True)
-        )
+        src_ck_info = dict(calkit.load_calkit_info(wdir=project))
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")
@@ -285,13 +283,13 @@ def import_environment(
         except Exception as e:
             raise_error(f"Could not detect source project name: {e}")
     else:
-        typer.echo("Importing from Cloud project")
+        typer.echo("Importing from hub project")
         try:
-            resp = calkit.cloud.get(  # noqa: F841 TODO: Use this variable
+            resp = calkit.hub.get(  # noqa: F841 TODO: Use this variable
                 f"/projects/{project}/environments/{env_name}"
             )
         except Exception as e:
-            raise_error(f"Failed to fetch environment info from cloud: {e}")
+            raise_error(f"Failed to fetch environment info from the hub: {e}")
         src_project_name = project
         # TODO: Parse information we need from the response
     # Write environment into current Calkit info

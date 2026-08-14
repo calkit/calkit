@@ -66,6 +66,38 @@ def test_check_venv(tmp_dir):
     )
 
 
+def test_check_venv_moved(tmp_dir):
+    with open("reqs.txt", "w") as f:
+        f.write("requests")
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    # Simulate the project having been renamed, which leaves the old absolute
+    # path baked into the activate script
+    if sys.platform == "win32":
+        activate_fpath = os.path.join(".venv", "Scripts", "activate.bat")
+    else:
+        activate_fpath = os.path.join(".venv", "bin", "activate")
+    with open(activate_fpath) as f:
+        activate_txt = f.read()
+    prefix = os.path.abspath(".venv")
+    assert prefix in activate_txt
+    with open(activate_fpath, "w") as f:
+        f.write(activate_txt.replace(prefix, os.path.abspath("old-name")))
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    with open(activate_fpath) as f:
+        assert os.path.normcase(prefix) in os.path.normcase(f.read())
+    # Activating should now resolve to the env's own Python, which is what
+    # breaks when the path is stale
+    if sys.platform == "win32":
+        cmd = f'call "{activate_fpath}" && python -c "import requests"'
+    else:
+        cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
+    subprocess.check_call(cmd, shell=True)
+
+
 def test_check_env_vars(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {
@@ -101,12 +133,24 @@ def test_check_julia_env_caches_second_run(tmp_dir):
     """Second run of ``calkit check julia-env`` should skip Pkg.instantiate."""
     with open("Project.toml", "w") as f:
         f.write('[deps]\n\n[compat]\njulia = "1"\n')
+    # The cache includes a signature of the Julia depot, so another test
+    # installing packages into the shared depot while this one runs would
+    # invalidate it. Write to our own depot, keeping the shared one on the
+    # path so packages and registries in it can still be read.
+    depot = os.path.join(os.getcwd(), "julia-depot")
+    os.makedirs(depot, exist_ok=True)
+    env = os.environ.copy() | {
+        "JULIA_DEPOT_PATH": os.pathsep.join(
+            [depot, os.path.join(os.path.expanduser("~"), ".julia")]
+        )
+    }
     # First run — should actually call Pkg.instantiate
     result1 = subprocess.run(
         ["calkit", "check", "julia-env", "Project.toml", "--verbose"],
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     assert "skipping Pkg.instantiate" not in result1.stdout
     # Second run — nothing has changed, so instantiate should be skipped
@@ -115,6 +159,7 @@ def test_check_julia_env_caches_second_run(tmp_dir):
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     assert "skipping Pkg.instantiate" in result2.stdout
     # Modify Project.toml — cache should be invalidated
@@ -125,6 +170,7 @@ def test_check_julia_env_caches_second_run(tmp_dir):
         capture_output=True,
         text=True,
         check=True,
+        env=env,
     )
     assert "skipping Pkg.instantiate" not in result3.stdout
 

@@ -634,24 +634,22 @@ Environment definitions belong in the `environments` section of `calkit.yaml`.
 
 Model class: `CondaEnvironment`
 
-| Parameter   | Type             | Required | Description                                                                       |
-| ----------- | ---------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['conda'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str              | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| path        | str              | yes      | Path to the Conda environment YAML file.                                          |
-| prefix      | str              | no       | Path at which to create the environment.                                          |
-| description | str              | no       | A description of the environment.                                                 |
+| Parameter   | Type             | Required | Description                              |
+| ----------- | ---------------- | -------- | ---------------------------------------- |
+| kind        | Literal['conda'] | yes      | What kind of environment this is.        |
+| path        | str              | yes      | Path to the Conda environment YAML file. |
+| prefix      | str              | no       | Path at which to create the environment. |
+| description | str              | no       | A description of the environment.        |
 
 #### `uv`
 
 Model class: `UvEnvironment`
 
-| Parameter   | Type          | Required | Description                                                                       |
-| ----------- | ------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['uv'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str           | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| path        | str           | yes      | Path to the uv project's pyproject.toml.                                          |
-| description | str           | no       | A description of the environment.                                                 |
+| Parameter   | Type          | Required | Description                              |
+| ----------- | ------------- | -------- | ---------------------------------------- |
+| kind        | Literal['uv'] | yes      | What kind of environment this is.        |
+| path        | str           | yes      | Path to the uv project's pyproject.toml. |
+| description | str           | no       | A description of the environment.        |
 
 #### `venv`
 
@@ -660,7 +658,6 @@ Model class: `VenvEnvironment`
 | Parameter   | Type            | Required | Description                                                                                                                                                                     |
 | ----------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| \_include   | str             | no       | Path to a YAML file whose contents are merged into this environment's definition.                                                                                               |
 | path        | str             | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
 | prefix      | str             | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
 | python      | str             | no       | Python version to use when creating the environment.                                                                                                                            |
@@ -673,7 +670,6 @@ Model class: `UvVenvEnvironment`
 | Parameter   | Type               | Required | Description                                                                                                                                                                     |
 | ----------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['uv-venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| \_include   | str                | no       | Path to a YAML file whose contents are merged into this environment's definition.                                                                                               |
 | path        | str                | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
 | prefix      | str                | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
 | python      | str                | no       | Python version to use when creating the environment.                                                                                                                            |
@@ -683,13 +679,12 @@ Model class: `UvVenvEnvironment`
 
 Model class: `PixiEnvironment`
 
-| Parameter   | Type            | Required | Description                                                                       |
-| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['pixi'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str             | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| path        | str             | yes      | Path to the Pixi manifest file.                                                   |
-| name        | str             | no       | Name of the environment within the Pixi manifest.                                 |
-| description | str             | no       | A description of the environment.                                                 |
+| Parameter   | Type            | Required | Description                                       |
+| ----------- | --------------- | -------- | ------------------------------------------------- |
+| kind        | Literal['pixi'] | yes      | What kind of environment this is.                 |
+| path        | str             | yes      | Path to the Pixi manifest file.                   |
+| name        | str             | no       | Name of the environment within the Pixi manifest. |
+| description | str             | no       | A description of the environment.                 |
 
 #### `docker`
 
@@ -698,7 +693,6 @@ Model class: `DockerEnvironment`
 | Parameter      | Type                           | Required | Description                                                                                                                                       |
 | -------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                 |
-| \_include      | str                            | no       | Path to a YAML file whose contents are merged into this environment's definition.                                                                 |
 | path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                    |
 | image          | str                            | yes      | Name of the Docker image.                                                                                                                         |
 | layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                             |
@@ -719,25 +713,23 @@ Model class: `DockerEnvironment`
 
 Model class: `JuliaEnvironment`
 
-| Parameter   | Type             | Required | Description                                                                       |
-| ----------- | ---------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['julia'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str              | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| path        | str              | yes      | Path to the Julia project's Project.toml.                                         |
-| julia       | str              | yes      | Julia version to use.                                                             |
-| description | str              | no       | A description of the environment.                                                 |
+| Parameter   | Type             | Required | Description                               |
+| ----------- | ---------------- | -------- | ----------------------------------------- |
+| kind        | Literal['julia'] | yes      | What kind of environment this is.         |
+| path        | str              | yes      | Path to the Julia project's Project.toml. |
+| julia       | str              | yes      | Julia version to use.                     |
+| description | str              | no       | A description of the environment.         |
 
 #### `matlab`
 
 Model class: `MatlabEnvironment`
 
-| Parameter   | Type              | Required | Description                                                                       |
-| ----------- | ----------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['matlab'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str               | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| version     | str               | no       | MATLAB version to use.                                                            |
-| products    | list[str]         | no       | MATLAB products (toolboxes) required.                                             |
-| description | str               | no       | A description of the environment.                                                 |
+| Parameter   | Type              | Required | Description                           |
+| ----------- | ----------------- | -------- | ------------------------------------- |
+| kind        | Literal['matlab'] | yes      | What kind of environment this is.     |
+| version     | str               | no       | MATLAB version to use.                |
+| products    | list[str]         | no       | MATLAB products (toolboxes) required. |
+| description | str               | no       | A description of the environment.     |
 
 #### `nix`
 
@@ -746,7 +738,6 @@ Model class: `NixEnvironment`
 | Parameter   | Type           | Required | Description                                                                                                                          |
 | ----------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | kind        | Literal['nix'] | yes      | What kind of environment this is.                                                                                                    |
-| \_include   | str            | no       | Path to a YAML file whose contents are merged into this environment's definition.                                                    |
 | path        | str            | yes      | Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency. |
 | shell       | str            | no       | Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.                      |
 | description | str            | no       | A description of the environment.                                                                                                    |
@@ -755,41 +746,39 @@ Model class: `NixEnvironment`
 
 Model class: `SlurmEnvironment`
 
-| Parameter       | Type             | Required | Description                                                                       |
-| --------------- | ---------------- | -------- | --------------------------------------------------------------------------------- |
-| kind            | Literal['slurm'] | yes      | What kind of environment this is.                                                 |
-| \_include       | str              | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| host            | str              | no       | Host on which to submit jobs, over SSH if not localhost.                          |
-| default_options | list[str]        | no       | Options passed to sbatch by default.                                              |
-| default_setup   | list[str]        | no       | Commands run at the start of every job script.                                    |
-| description     | str              | no       | A description of the environment.                                                 |
+| Parameter           | Type             | Required | Description                                                                                                                                                                                                                                                     |
+| ------------------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind                | Literal['slurm'] | yes      | What kind of environment this is.                                                                                                                                                                                                                               |
+| host                | str              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                        |
+| default_options     | list[str]        | no       | Options passed to sbatch by default.                                                                                                                                                                                                                            |
+| default_setup       | list[str]        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
+| max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
+| description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
 
 #### `renv`
 
 Model class: `REnvironment`
 
-| Parameter   | Type            | Required | Description                                                                       |
-| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str             | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| path        | str             | yes      | Path to the renv lock file.                                                       |
-| prefix      | str             | yes      | Path at which to create the environment.                                          |
-| description | str             | no       | A description of the environment.                                                 |
+| Parameter   | Type            | Required | Description                              |
+| ----------- | --------------- | -------- | ---------------------------------------- |
+| kind        | Literal['renv'] | yes      | What kind of environment this is.        |
+| path        | str             | yes      | Path to the renv lock file.              |
+| prefix      | str             | yes      | Path at which to create the environment. |
+| description | str             | no       | A description of the environment.        |
 
 #### `ssh`
 
 Model class: `SSHEnvironment`
 
-| Parameter   | Type           | Required | Description                                                                       |
-| ----------- | -------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['ssh'] | yes      | What kind of environment this is.                                                 |
-| \_include   | str            | no       | Path to a YAML file whose contents are merged into this environment's definition. |
-| host        | str            | yes      | Host to connect to.                                                               |
-| user        | str            | yes      | User to connect as.                                                               |
-| wdir        | str            | yes      | Working directory on the remote host.                                             |
-| key         | str            | no       | Path to the SSH private key to use.                                               |
-| send_paths  | list[str]      | no       | Paths sent to the remote host.                                                    |
-| get_paths   | list[str]      | no       | Paths fetched back from the remote host.                                          |
-| description | str            | no       | A description of the environment.                                                 |
+| Parameter   | Type           | Required | Description                              |
+| ----------- | -------------- | -------- | ---------------------------------------- |
+| kind        | Literal['ssh'] | yes      | What kind of environment this is.        |
+| host        | str            | yes      | Host to connect to.                      |
+| user        | str            | yes      | User to connect as.                      |
+| wdir        | str            | yes      | Working directory on the remote host.    |
+| key         | str            | no       | Path to the SSH private key to use.      |
+| send_paths  | list[str]      | no       | Paths sent to the remote host.           |
+| get_paths   | list[str]      | no       | Paths fetched back from the remote host. |
+| description | str            | no       | A description of the environment.        |
 
 <!-- AUTO-GENERATED: ENV-KINDS:END -->

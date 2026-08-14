@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import posixpath
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -32,7 +33,13 @@ from calkit.models.iteration import (
 )
 
 
-def _check_path_relative_and_child_of_cwd(s: str) -> str:
+def check_path_relative_and_child_of_cwd(s: str) -> str:
+    # An empty or blank path is Path('.'), which passes every check below and
+    # silently means the project root. Callers act on what they're given, so
+    # for something like a map-paths destination that would target the whole
+    # project rather than erroring.
+    if not s.strip():
+        raise ValueError("Path must not be empty")
     p = Path(s)
     # Enforce that the path is relative
     if p.is_absolute():
@@ -50,11 +57,14 @@ def _check_path_relative_and_child_of_cwd(s: str) -> str:
         raise ValueError(
             f"Path is not a child of the current working directory: {p}"
         )
-    return p.as_posix()
+    # Collapse any '..' lexically, so a path that walks back out and in again
+    # can't reach a caller still spelled the original way. 'sub/..' passes the
+    # containment check above, but left as-is it would be acted on verbatim.
+    return posixpath.normpath(p.as_posix())
 
 
 RelativeChildPathString = Annotated[
-    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+    str, AfterValidator(check_path_relative_and_child_of_cwd)
 ]
 
 
@@ -186,7 +196,12 @@ class Stage(BaseModel):
         "map-paths",
     ]
     environment: str
-    wdir: str | None = None
+    # Constrained like other stage path fields (e.g. MatlabScriptStage's
+    # matlab_path): this becomes the DVC stage's working directory and is
+    # joined with the stage's other paths, where an absolute value would
+    # silently win, so an unchecked one lets a project's pipeline run
+    # against paths outside itself.
+    wdir: RelativeChildPathString | None = None
     # TODO: Support other input types
     inputs: list[str | InputsFromStageOutputs] = []
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs
@@ -487,8 +502,8 @@ class PythonScriptStage(Stage):
 class MapPathsStage(Stage):
     class CopyFileToFile(BaseModel):
         kind: Literal["file-to-file"] = "file-to-file"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -500,8 +515,8 @@ class MapPathsStage(Stage):
 
     class CopyFileToDir(BaseModel):
         kind: Literal["file-to-dir"] = "file-to-dir"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -513,8 +528,8 @@ class MapPathsStage(Stage):
 
     class DirToDirMerge(BaseModel):
         kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -526,8 +541,25 @@ class MapPathsStage(Stage):
 
     class DirToDirReplace(BaseModel):
         kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
+
+        @field_validator("dest")
+        @classmethod
+        def check_dest_is_not_project_root(cls, v: str) -> str:
+            """Refuse to replace the project itself.
+
+            This kind deletes its destination before copying, so a dest of
+            '.' (which '' and 'sub/..' also reduce to) would remove the whole
+            project. The other kinds only copy into their destination, so the
+            project root is a fine target for them.
+            """
+            if v == ".":
+                raise ValueError(
+                    "Destination must not be the project root, since "
+                    "dir-to-dir-replace deletes it before copying"
+                )
+            return v
 
         @property
         def arg(self) -> str:

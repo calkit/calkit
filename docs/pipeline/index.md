@@ -277,17 +277,17 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter      | Type                                | Required | Default |
-| -------------- | ----------------------------------- | -------- | ------- |
-| `environment`  | str                                 | yes      |         |
-| `wdir`         | str \| None                         | no       | null    |
-| `inputs`       | list[str \| InputsFromStageOutputs] | no       |         |
-| `outputs`      | list[str \| PathOutput]             | no       |         |
-| `always_run`   | bool                                | no       | False   |
-| `iterate_over` | list[StageIteration] \| None        | no       | null    |
-| `description`  | str \| None                         | no       | null    |
-| `frozen`       | bool                                | no       | False   |
-| `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
+| Parameter      | Type                                                                                         | Required | Default |
+| -------------- | -------------------------------------------------------------------------------------------- | -------- | ------- |
+| `environment`  | str                                                                                          | yes      |         |
+| `wdir`         | Annotated[str, AfterValidator(func=<function check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+| `inputs`       | list[str \| InputsFromStageOutputs]                                                          | no       |         |
+| `outputs`      | list[str \| PathOutput]                                                                      | no       |         |
+| `always_run`   | bool                                                                                         | no       | False   |
+| `iterate_over` | list[StageIteration] \| None                                                                 | no       | null    |
+| `description`  | str \| None                                                                                  | no       | null    |
+| `frozen`       | bool                                                                                         | no       | False   |
+| `scheduler`    | StageSchedulerOptions \| None                                                                | no       | null    |
 
 ### `command`
 
@@ -390,10 +390,10 @@ Model class: `MatlabCommandStage`
 
 Model class: `MatlabScriptStage`
 
-| Kind-specific parameter | Type                                                                                          | Required | Default |
-| ----------------------- | --------------------------------------------------------------------------------------------- | -------- | ------- |
-| `script_path`           | str                                                                                           | yes      |         |
-| `matlab_path`           | Annotated[str, AfterValidator(func=<function _check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+| Kind-specific parameter | Type                                                                                         | Required | Default |
+| ----------------------- | -------------------------------------------------------------------------------------------- | -------- | ------- |
+| `script_path`           | str                                                                                          | yes      |         |
+| `matlab_path`           | Annotated[str, AfterValidator(func=<function check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
 
 ### `python-script`
 

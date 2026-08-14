@@ -34,7 +34,7 @@ export interface ProjectNavItem {
 // The project's navigable sections, shared with the Cmd+K command palette.
 export const projectNavItems: ProjectNavItem[] = [
   { icon: FiHome, title: "Project home", path: "" },
-  { icon: MdOutlineDashboard, title: "App", path: "/app" },
+  { icon: MdOutlineDashboard, title: "Apps", path: "/apps" },
   { icon: TiFlowMerge, title: "Pipeline", path: "/pipeline" },
   { icon: FaCubes, title: "Environments", path: "/environments" },
   { icon: FiDatabase, title: "Datasets", path: "/datasets" },

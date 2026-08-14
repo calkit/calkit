@@ -1559,6 +1559,8 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            elif stage.kind == "marimo":
+                outputs += stage.app_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)

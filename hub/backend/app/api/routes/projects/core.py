@@ -5,6 +5,7 @@ import concurrent.futures
 import io
 import json
 import logging
+import mimetypes
 import os
 import posixpath
 import re
@@ -36,7 +37,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from git.exc import GitCommandError
 from pydantic import BaseModel, ValidationError
 from sqlmodel import Session, and_, col, func, not_, or_, select
@@ -7940,10 +7941,96 @@ def put_project_dev_container(
 
 
 class ProjectApp(BaseModel):
+    # Key in the project's ``apps`` mapping, which is also the URL segment
+    # this app is served under. Always set, since an app is only reachable
+    # by its key.
+    name: str
+    kind: str = "static-html"
     path: str | None = None
+    # The path under our own API that serves this app's entrypoint, so the
+    # frontend doesn't have to build it. Always ours: we don't embed an app
+    # hosted anywhere else.
     url: str | None = None
     title: str | None = None
     description: str | None = None
+    stage: str | None = None
+
+
+def _app_serve_url(owner_name: str, project_name: str, name: str) -> str:
+    return (
+        f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+        f"/apps/{name}/serve/"
+    )
+
+
+def _project_apps_from_ck_info(
+    ck_info: dict, owner_name: str, project_name: str
+) -> list[ProjectApp]:
+    """Read the project's apps.
+
+    Only apps we serve ourselves are returned. The old singular ``app`` key
+    named a URL hosted elsewhere for us to embed, which is no longer
+    supported, so projects still using it come back with no apps.
+    """
+    apps_info = ck_info.get("apps")
+    if not isinstance(apps_info, dict):
+        return []
+    apps = []
+    for name, info in apps_info.items():
+        if not isinstance(info, dict):
+            continue
+        # Skip kinds we don't serve rather than failing the whole listing,
+        # so one unrecognized app doesn't hide the rest
+        if info.get("kind", "static-html") != "static-html":
+            continue
+        project_app = ProjectApp.model_validate(info | dict(name=name))
+        # The URL is derived, never read from calkit.yaml, so it can't go
+        # stale when the project moves or is renamed, and a project can't
+        # point it at something we don't host
+        project_app.url = _app_serve_url(
+            owner_name=owner_name,
+            project_name=project_name,
+            name=name,
+        )
+        apps.append(project_app)
+    return apps
+
+
+@router.get("/projects/{owner_name}/{project_name}/apps")
+def get_project_apps(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> list[ProjectApp]:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    # get_ck_info reads the working tree, which is whatever branch the
+    # cached clone sits on, so it would ignore ref and hide apps declared on
+    # any other branch. Read the tree at the requested ref instead, as the
+    # showcase endpoint does.
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+        read_only=True,
+    )
+    return _project_apps_from_ck_info(
+        ck_info, owner_name=owner_name, project_name=project_name
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/app")
@@ -7954,6 +8041,50 @@ def get_project_app(
     session: SessionDep,
     ref: str | None = None,
 ) -> ProjectApp | None:
+    """Return the project's first app.
+
+    Superseded by the ``apps`` endpoint; kept so existing clients keep
+    working.
+    """
+    apps = get_project_apps(
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        session=session,
+        ref=ref,
+    )
+    return apps[0] if apps else None
+
+
+@router.get("/projects/{owner_name}/{project_name}/apps/{app_name}/serve")
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path:path}"
+)
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}"
+    "/{git_sha}/serve/{path:path}"
+)
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve"
+)
+def serve_project_app_file(
+    owner_name: str,
+    project_name: str,
+    app_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str = "",
+    ref: str | None = None,
+    git_sha: str | None = None,
+) -> Response:
+    """Serve one file from a static-html app.
+
+    The app's declared path names its entrypoint, and the directory holding
+    it is the serving root, so sibling assets resolve against it. Bytes are
+    proxied rather than redirected to a presigned URL because the browser
+    refuses an ES module whose content type isn't exactly right, and a
+    WASM app is almost entirely module imports.
+    """
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7961,17 +8092,82 @@ def get_project_app(
         current_user=current_user,
         min_access_level="read",
     )
-    ck_info = get_ck_info(
+    repo = get_repo(
         project=project,
         user=current_user,
         session=session,
         ttl=DEFAULT_REPO_TTL,
-        ref=ref,
+        ref=ref or git_sha,
     )
-    project_app = ck_info.get("app")
-    if project_app is None:
-        return
-    return ProjectApp.model_validate(project_app)
+    # A relative URL inside the app drops the query string, so every asset
+    # would come back here without the ref and resolve against the default
+    # branch. Redirect the entrypoint to a URL carrying the commit in its
+    # path, which the app's own relative paths then inherit. A SHA, not the
+    # ref name, since branch names can contain slashes.
+    if ref is not None and git_sha is None:
+        # Resolves the same way tree reads do, including the origin/<ref>
+        # fallback and a fetch for a ref pushed since the last clone update
+        resolved = resolve_commit_sha(repo, ref)
+        if resolved is None:
+            raise HTTPException(404, "Ref not found")
+        base = (
+            f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+            f"/apps/{app_name}/{resolved}/serve/"
+        )
+        return RedirectResponse(base + path.strip("/"), status_code=302)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=git_sha, read_only=True
+    )
+    apps = _project_apps_from_ck_info(
+        ck_info, owner_name=owner_name, project_name=project_name
+    )
+    matches = [a for a in apps if a.name == app_name]
+    if not matches:
+        raise HTTPException(404, "App not found")
+    project_app = matches[0]
+    if project_app.kind != "static-html" or not project_app.path:
+        raise HTTPException(404, "App is not served from this project")
+    serve_dir = posixpath.dirname(project_app.path)
+    entrypoint = posixpath.basename(project_app.path)
+    rel_path = path.strip("/") or entrypoint
+    # Reject traversal outside the app's directory
+    full_path = posixpath.normpath(posixpath.join(serve_dir, rel_path))
+    if serve_dir and not (
+        full_path == serve_dir or full_path.startswith(serve_dir + "/")
+    ):
+        raise HTTPException(404)
+    content = app.projects.read_app_file(
+        project=project,
+        repo=repo,
+        dir_path=serve_dir,
+        rel_path=rel_path,
+        ref=git_sha,
+    )
+    if content is None:
+        raise HTTPException(404)
+    media_type, _ = mimetypes.guess_type(rel_path)
+    if rel_path.endswith(".wasm"):
+        # Browsers refuse to stream-compile WebAssembly served as anything
+        # else, and mimetypes doesn't know it on older Pythons
+        media_type = "application/wasm"
+    # A SHA-scoped URL can never change what it returns, so it's cacheable
+    # forever; that's what makes returning to an app cheap. The unpinned
+    # path tracks the default branch, so it has to stay short.
+    cache_control = (
+        "public, max-age=31536000, immutable"
+        if git_sha
+        else "public, max-age=300"
+    )
+    return Response(
+        content=content,
+        media_type=media_type or "application/octet-stream",
+        headers={
+            "Cache-Control": cache_control,
+            # These bytes are project-supplied, so don't let a browser
+            # second-guess the type we set and render, say, an image as HTML
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/showcase")

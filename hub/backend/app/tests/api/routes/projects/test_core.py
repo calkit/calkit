@@ -2933,3 +2933,87 @@ def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
         with pytest.raises(HTTPException) as exc_info:
             _normalize_artifact_file_path(path)
         assert exc_info.value.status_code == 400, path
+
+
+def test_get_project_apps(client: TestClient) -> None:
+    fake_project = SimpleNamespace()
+    ck_info = {
+        "apps": {
+            "naca0012": {
+                "kind": "static-html",
+                "path": "app/index.html",
+                "title": "NACA 0012 explorer",
+                "stage": "build-app",
+            },
+            # A kind we don't serve shouldn't hide the ones we do
+            "other": {"kind": "something-else", "path": "x/index.html"},
+        }
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    apps = {a["name"]: a for a in response.json()}
+    assert list(apps) == ["naca0012"]
+    # The URL is ours and derived, never read from calkit.yaml
+    assert apps["naca0012"]["url"] == (
+        f"{settings.API_V1_STR}/projects/test-owner/test-project"
+        "/apps/naca0012/serve/"
+    )
+    assert apps["naca0012"]["path"] == "app/index.html"
+    assert apps["naca0012"]["stage"] == "build-app"
+    # The old singular key named a URL hosted elsewhere for us to embed,
+    # which we no longer do, so it yields nothing
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={"app": {"url": "https://old.hf.space"}},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    assert response.json() == []
+    # A project with no apps returns an empty list rather than erroring
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    assert response.json() == []

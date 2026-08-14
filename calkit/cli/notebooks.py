@@ -710,3 +710,242 @@ def execute_notebook(
             p = subprocess.run(cmd)
             if p.returncode != 0:
                 raise_error(f"nbconvert failed for format '{to_fmt}'")
+
+
+@notebooks_app.command(
+    name="export-marimo",
+    help="Export a marimo notebook to static files that can be served.",
+)
+# This wraps `marimo export` rather than letting a stage call it through
+# `calkit xenv` for two reasons.
+#
+# First, marimo's export is not self-contained. It requires the data an app
+# reads to already sit in a `public` directory beside the notebook, and
+# copies only that directory into the output. Nothing in marimo puts the
+# files there, so without this step either the export ships an app whose
+# data 404s, or the project keeps a generated `public` directory next to its
+# source. We assemble a build directory instead, so nothing is generated in
+# the project tree and the notebook's location doesn't matter.
+#
+# Second, a stage's command is recorded in dvc.lock, so it has to stay
+# stable. Spelling out marimo's flags in the stage means every stage in
+# every project goes stale when those flags change; keeping them here means
+# one wrapper absorbs it.
+def export_notebook(
+    path: Annotated[str, typer.Argument(help="Notebook path.")],
+    output_path: Annotated[
+        str,
+        typer.Option("-o", "--output", help="Output path for the app."),
+    ],
+    env_name: Annotated[
+        str | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            help=(
+                "Name or path to the spec of the environment in which to "
+                "export the notebook; must include marimo."
+            ),
+        ),
+    ] = None,
+    to: Annotated[
+        str,
+        typer.Option(
+            "--to",
+            help=(
+                "Export format. 'html-wasm' runs in the browser and stays "
+                "interactive; 'html' executes the notebook now and bakes in "
+                "the results as a single static file."
+            ),
+        ),
+    ] = "html-wasm",
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode", help="Whether the app is read-only ('run') or editable."
+        ),
+    ] = "run",
+    show_code: Annotated[
+        bool,
+        typer.Option("--show-code", help="Show notebook code in the app."),
+    ] = False,
+    layout_path: Annotated[
+        str | None,
+        typer.Option(
+            "--layout",
+            help=(
+                "Path to the layout file named in the notebook's "
+                "marimo.App(layout_file=...) call."
+            ),
+        ),
+    ] = None,
+    include_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--include",
+            help=(
+                "Path to publish with the app, copied beneath 'public' at "
+                "its project-relative path. May be a glob, and may be "
+                "repeated."
+            ),
+        ),
+    ] = [],
+    no_validate: Annotated[
+        bool,
+        typer.Option(
+            "--no-validate",
+            help=(
+                "Skip executing the notebook to check it works before "
+                "exporting."
+            ),
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check", help="Do not check environment before exporting."
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+) -> None:
+    import glob
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from calkit.cli.main import run_in_env
+
+    # The notebook kind is detected from the file rather than named in a
+    # command per kind, so adding Jupyter export later is additive and
+    # doesn't rename this one out from under anybody.
+    if not os.path.isfile(path):
+        raise_error(f"Notebook does not exist: {path}")
+    if to not in ("html-wasm", "html"):
+        raise_error(f"Invalid export format '{to}'; use html-wasm or html")
+    with open(path) as f:
+        head = f.read(4096)
+    # Named for the engine rather than for what it produces, so a future
+    # export-jupyterlite sits beside it without either pretending to be a
+    # generic 'export' whose options are actually engine-specific.
+    if path.endswith(".ipynb") or "marimo" not in head:
+        raise_error(
+            f"{path} is not a marimo notebook; to render a Jupyter "
+            "notebook to HTML use 'calkit nb execute --to html'"
+        )
+    if mode not in ("run", "edit"):
+        raise_error(f"Invalid mode '{mode}'; use run or edit")
+    if to == "html" and mode != "run":
+        raise_error("The 'mode' option only applies to html-wasm exports")
+    # marimo copies the 'public' directory that sits next to the notebook, so
+    # exporting in place would generate files in the project root. Assemble a
+    # build directory instead, under .calkit/local, which carries its own
+    # '*' .gitignore so this never needs an entry in the project's.
+    build_dir = (
+        Path(calkit.ensure_local_dir()) / "marimo" / "build" / Path(path).stem
+    )
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True)
+    build_notebook_path = build_dir / Path(path).name
+    shutil.copy2(path, build_notebook_path)
+    # marimo resolves layout_file relative to the notebook, not the project,
+    # so the copy has to keep that same relative position. These differ for
+    # any notebook that doesn't sit at the project root.
+    if layout_path is not None:
+        if not os.path.isfile(layout_path):
+            raise_error(f"Layout file does not exist: {layout_path}")
+        notebook_dir = os.path.dirname(path)
+        rel_layout = (
+            os.path.relpath(layout_path, notebook_dir)
+            if notebook_dir
+            else layout_path
+        )
+        if rel_layout.startswith(".."):
+            raise_error(
+                f"Layout file {layout_path} is outside the notebook's "
+                f"directory ({notebook_dir}); marimo can only reference a "
+                "layout beneath it"
+            )
+        build_layout_path = build_dir / rel_layout
+        build_layout_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(layout_path, build_layout_path)
+    # Copy included paths beneath public/, preserving project-relative paths
+    # so notebook code reads the same locally and in the browser
+    public_dir = build_dir / "public"
+    n_included = 0
+    for pattern in include_paths:
+        matches = sorted(glob.glob(pattern, recursive=True))
+        if not matches:
+            raise_error(f"No files match included path: {pattern}")
+        for match in matches:
+            dest = public_dir / match
+            if os.path.isdir(match):
+                shutil.copytree(match, dest, dirs_exist_ok=True)
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(match, dest)
+            n_included += 1
+    if include_paths:
+        typer.echo(f"Copied {n_included} included path(s) into public")
+    # We don't ship marimo, so it has to be in the project environment. Probe
+    # for it up front, since otherwise a missing marimo surfaces as the
+    # notebook failing to execute, which sends people looking in the wrong
+    # place.
+    try:
+        run_in_env(
+            ["marimo", "--version"],
+            env_name=env_name,
+            no_check=no_check,
+            verbose=False,
+            relaxed_check=True,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        raise_error(
+            "marimo is not available in environment "
+            f"'{env_name or 'default'}'; add it to that environment's "
+            "dependencies. Calkit doesn't ship marimo."
+        )
+    # A WASM export never executes the notebook, and exits zero even if every
+    # cell is broken, so without this a totally broken app ships green. An
+    # 'html' export does execute, and fails properly. It only works after
+    # assembly, since mo.notebook_location() then resolves to the build
+    # directory, where public/ exists.
+    if to == "html-wasm" and not no_validate:
+        typer.echo("Checking the notebook executes")
+        validate_path = build_dir / "_validate.html"
+        try:
+            run_in_env(
+                ["marimo", "export", "html", str(build_notebook_path)]
+                + ["-o", str(validate_path)],
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
+        except subprocess.CalledProcessError:
+            raise_error(
+                "Notebook failed to execute; fix it or pass --no-validate. "
+                "Note this runs in the project environment, not the "
+                "browser's, so it can't catch every failure."
+            )
+        validate_path.unlink(missing_ok=True)
+    cmd = ["marimo", "export", to, str(build_notebook_path)]
+    cmd += ["-o", output_path]
+    if to == "html-wasm":
+        cmd += ["--mode", mode]
+        if show_code:
+            cmd.append("--show-code")
+    typer.echo(f"Exporting {path} to {output_path}")
+    run_in_env(
+        cmd,
+        env_name=env_name,
+        no_check=no_check,
+        verbose=verbose,
+        relaxed_check=True,
+    )
+    if not Path(output_path).exists():
+        raise_error(f"Export did not produce {output_path}")
+    typer.echo(f"Exported app to {output_path}")

@@ -4096,6 +4096,15 @@ export const PresignedUrlAccessSchema = {
 
 export const ProjectAppSchema = {
   properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+      default: "static-html",
+    },
     path: {
       anyOf: [
         {
@@ -4140,8 +4149,20 @@ export const ProjectAppSchema = {
       ],
       title: "Description",
     },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
   },
   type: "object",
+  required: ["name"],
   title: "ProjectApp",
 } as const
 

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import threading
 import time
 from collections import OrderedDict
@@ -305,6 +306,68 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
         )
         outs.setdefault(path, out)
     return outs
+
+
+def read_app_file(
+    project: Project,
+    repo: git.Repo,
+    dir_path: str,
+    rel_path: str,
+    ref: str | None = None,
+) -> bytes | None:
+    """Read one file from inside a DVC-tracked directory, by its path
+    relative to that directory.
+
+    A WASM app is a directory of several hundred small files, all fetched
+    while the page loads, so this resolves a single file rather than
+    listing the whole tree. Returns None if the directory isn't tracked,
+    the file isn't in it, or its object was never pushed.
+
+    Falls back to the working tree for a directory tracked with Git, since
+    a small static app needn't be in DVC at all.
+    """
+    tree = get_repo_tree_for_ref(repo, ref)
+    full_path = posixpath.join(dir_path, rel_path) if dir_path else rel_path
+    if tree.is_file(full_path):
+        return tree.read_bytes(full_path)
+    outs = dvc_outputs_from_tree(project=project, tree=tree)
+    out = outs.get(dir_path)
+    if out is None:
+        return None
+    md5 = out.get("md5", "")
+    if not md5.endswith(".dir"):
+        return None
+    owner_name = project.owner_account_name
+    project_name = project.name
+    fs = get_object_fs()
+    dir_fpath = get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=md5,
+        fs=fs,
+    )
+    if dir_fpath is None:
+        return None
+    # The .dir object is a JSON list of {"md5": ..., "relpath": ...}, which
+    # is how we map a request path onto the object holding its bytes
+    with fs.open(dir_fpath, "rb") as f:
+        entries = json.loads(f.read())
+    md5_by_relpath = {
+        e.get("relpath"): e.get("md5") for e in entries if isinstance(e, dict)
+    }
+    file_md5 = md5_by_relpath.get(rel_path)
+    if not file_md5:
+        return None
+    file_fpath = get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=file_md5,
+        fs=fs,
+    )
+    if file_fpath is None:
+        return None
+    with fs.open(file_fpath, "rb") as f:
+        return f.read()
 
 
 def get_contents_from_repo(

@@ -32,7 +32,7 @@ from calkit.models.iteration import (
 )
 
 
-def _check_path_relative_and_child_of_cwd(s: str) -> str:
+def check_path_relative_and_child_of_cwd(s: str) -> str:
     p = Path(s)
     # Enforce that the path is relative
     if p.is_absolute():
@@ -54,8 +54,23 @@ def _check_path_relative_and_child_of_cwd(s: str) -> str:
 
 
 RelativeChildPathString = Annotated[
-    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+    str, AfterValidator(check_path_relative_and_child_of_cwd)
 ]
+
+
+def _non_glob_prefix(path: str) -> str:
+    """Return the longest leading portion of a path containing no glob
+    characters, so a pattern can be reduced to something usable as a DVC
+    dependency, e.g. ``figures/*-umag.png`` becomes ``figures``.
+
+    A path with no glob characters is returned unchanged.
+    """
+    kept = []
+    for part in Path(path).as_posix().split("/"):
+        if any(c in part for c in "*?["):
+            break
+        kept.append(part)
+    return "/".join(kept)
 
 
 class StageIteration(BaseModel):
@@ -184,6 +199,7 @@ class Stage(BaseModel):
         "julia-command",
         "word-to-pdf",
         "map-paths",
+        "marimo",
     ]
     environment: str
     wdir: str | None = None
@@ -487,8 +503,8 @@ class PythonScriptStage(Stage):
 class MapPathsStage(Stage):
     class CopyFileToFile(BaseModel):
         kind: Literal["file-to-file"] = "file-to-file"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -500,8 +516,8 @@ class MapPathsStage(Stage):
 
     class CopyFileToDir(BaseModel):
         kind: Literal["file-to-dir"] = "file-to-dir"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -513,8 +529,8 @@ class MapPathsStage(Stage):
 
     class DirToDirMerge(BaseModel):
         kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -526,8 +542,8 @@ class MapPathsStage(Stage):
 
     class DirToDirReplace(BaseModel):
         kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
-        src: str
-        dest: str
+        src: RelativeChildPathString
+        dest: RelativeChildPathString
 
         @property
         def arg(self) -> str:
@@ -1286,6 +1302,115 @@ class WordToPdfStage(Stage):
         )
 
 
+class MarimoStage(Stage):
+    """A stage that exports a marimo notebook to a shareable app.
+
+    With ``to="html-wasm"`` the app runs entirely in the browser via
+    WebAssembly, so it can be served as static files with no backend. With
+    ``to="html"`` the notebook is executed at build time and its rendered
+    output is baked into a single self-contained HTML file, which is not
+    interactive but is much smaller and doesn't resolve any packages at
+    load time.
+
+    marimo's own export is not self-contained: it requires the data an app
+    reads to already sit in a ``public`` directory next to the notebook, and
+    copies only that directory into the output. Assembling that is this
+    stage's main job, and it happens in a build directory rather than in
+    place, so nothing is generated in the project tree. Paths in ``include_paths`` are
+    copied beneath ``public`` at their project-relative paths, so notebook
+    code that reads ``mo.notebook_location() / "public" / "data.csv"`` works
+    the same locally as it does in the browser.
+
+    ``include_paths`` is deliberately separate from ``inputs`` because these
+    files are published to the web, which should be opt-in per path rather
+    than inferred from the dependency graph. They are dependencies too.
+    """
+
+    kind: Literal["marimo"] = "marimo"
+    notebook_path: str
+    # The layout file is named inside the notebook source
+    # (``marimo.App(layout_file=...)``), so we can't detect it without
+    # parsing Python, and a grid app silently degrades to a linear notebook
+    # if it goes missing.
+    layout_path: str | None = None
+    to: Literal["html-wasm", "html"] = "html-wasm"
+    mode: Literal["run", "edit"] = "run"
+    show_code: bool = False
+    include_paths: list[str] = []
+    output_path: str
+    app_storage: Literal["git", "dvc"] | None = "dvc"
+
+    @model_validator(mode="after")
+    def check_export_options(self) -> MarimoStage:
+        """Reject options that don't apply to the chosen export format."""
+        if self.to == "html":
+            if "mode" in self.model_fields_set:
+                raise ValueError(
+                    "Stage option 'mode' only applies to 'to: html-wasm'"
+                )
+            if "show_code" in self.model_fields_set:
+                raise ValueError(
+                    "Stage option 'show_code' only applies to 'to: html-wasm'"
+                )
+        elif self.mode == "edit" and self.show_code:
+            raise ValueError(
+                "Stage option 'show_code' is redundant with 'mode: edit', "
+                "where code is always visible"
+            )
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = [self.notebook_path]
+        if self.layout_path is not None:
+            deps.append(self.layout_path)
+        # A glob can't be a DVC dep, and expanding one at compile time would
+        # yield no deps at all before the producing stage has ever run,
+        # letting DVC order this stage first. Depend on the longest non-glob
+        # parent instead: conservative, but stable and correctly ordered.
+        for path in self.include_paths:
+            dep = _non_glob_prefix(path)
+            if dep and dep not in deps:
+                deps.append(dep)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        if self.app_storage:
+            outs.append(
+                {self.output_path: {"cache": self.app_storage == "dvc"}}
+            )
+        return outs
+
+    @property
+    def app_outputs(self) -> list[PathOutput]:
+        """Return the exported app so its storage can be respected."""
+        return [PathOutput(path=self.output_path, storage=self.app_storage)]
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            "calkit nb export-marimo --environment "
+            f"{self.inner_environment} --no-check"
+        )
+        if self.to != "html-wasm":
+            cmd += f" --to {self.to}"
+        if self.mode != "run":
+            cmd += f" --mode {self.mode}"
+        if self.show_code:
+            cmd += " --show-code"
+        if self.layout_path is not None:
+            cmd += f" --layout {shlex.quote(self.layout_path)}"
+        for path in self.include_paths:
+            cmd += f" --include {shlex.quote(path)}"
+        cmd += f" -o {shlex.quote(self.output_path)}"
+        cmd += f" {shlex.quote(self.notebook_path)}"
+        if self.scheduler is not None:
+            cmd = self.scheduler_cmd + " --command -- " + cmd
+        return cmd
+
+
 class Pipeline(BaseModel):
     stages: dict[
         str,
@@ -1308,6 +1433,7 @@ class Pipeline(BaseModel):
                 | JuliaCommandStage
                 | SBatchStage
                 | MapPathsStage
+                | MarimoStage
             ),
             Discriminator("kind"),
         ],

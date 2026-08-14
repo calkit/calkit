@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from calkit.models.iteration import Metric, ParametersType
 from calkit.models.pipeline import Pipeline
@@ -321,12 +322,48 @@ class Release(BaseModel):
     stored_path: str | None = None
 
 
+class StaticHtmlApp(BaseModel):
+    """An app served as static files, with no backend.
+
+    ``path`` points at the HTML file itself rather than its directory, since
+    the kind names a file type. The containing directory is the serving root,
+    so sibling assets are served alongside it, and ``index.html`` is implied
+    when a directory is served.
+
+    There is no ``url`` field: for apps a hub serves, the URL is derived from
+    the project and the app's key, and a value written here could only go
+    stale.
+    """
+
+    kind: Literal["static-html"] = "static-html"
+    path: str
+    title: str | None = None
+    description: str | None = None
+    # The stage that produces this app, mirroring how figures and datasets
+    # record their provenance.
+    stage: str | None = None
+    # Catch typos, and reject a hand-written ``url`` rather than silently
+    # ignoring it
+    model_config = ConfigDict(extra="forbid")
+
+    @property
+    def serve_dir(self) -> str:
+        """The directory to serve, i.e., the app's root."""
+        return PurePosixPath(self.path).parent.as_posix()
+
+
 class ShowcaseFigure(BaseModel):
     figure: str
 
 
 class ShowcaseText(BaseModel):
     text: str
+
+
+class ShowcaseApp(BaseModel):
+    """Show an app in the project's showcase, by its key in ``apps``."""
+
+    app: str
 
 
 class DerivedFromProject(BaseModel):
@@ -481,4 +518,8 @@ class ProjectInfo(BaseModel):
     notebooks: list[Notebook] = []
     procedures: dict[str, Procedure] = {}
     releases: dict[str, Release] = {}
-    showcase: list[ShowcaseFigure | ShowcaseText] | None = None
+    showcase: list[ShowcaseFigure | ShowcaseText | ShowcaseApp] | None = None
+    # Keyed by slug rather than a list, since the key becomes a public URL
+    # segment and must stay stable if the app's path is renamed. Keying also
+    # makes a duplicate slug a parse error rather than a validation pass.
+    apps: dict[str, StaticHtmlApp] = {}

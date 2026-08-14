@@ -11,6 +11,7 @@ from calkit.models.pipeline import (
     JupyterNotebookStage,
     LatexStage,
     MapPathsStage,
+    MarimoStage,
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
@@ -624,3 +625,104 @@ def test_latex_stage_diffs():
                 target_path="pubs/paper-1/main.tex",
                 diffs=bad,
             )
+
+
+def test_marimostage():
+    s = MarimoStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        layout_path="layouts/notebook.grid.json",
+        show_code=True,
+        include_paths=[
+            "processed/all-simulated.csv",
+            "figures/naca0012-aoa-*-umag.png",
+        ],
+        output_path="app",
+    )
+    sd = s.to_dvc()
+    # We dispatch into the environment ourselves rather than wrapping in
+    # xenv, since the assembly step runs outside it
+    assert sd["cmd"] == (
+        "calkit nb export-marimo --environment py --no-check --show-code "
+        "--layout layouts/notebook.grid.json "
+        "--include processed/all-simulated.csv "
+        "--include 'figures/naca0012-aoa-*-umag.png' -o app notebook.py"
+    )
+    # The notebook and layout are deps, and a glob is reduced to its longest
+    # non-glob parent so ordering holds before the files exist
+    assert "notebook.py" in sd["deps"]
+    assert "layouts/notebook.grid.json" in sd["deps"]
+    assert "processed/all-simulated.csv" in sd["deps"]
+    assert "figures" in sd["deps"]
+    assert "figures/naca0012-aoa-*-umag.png" not in sd["deps"]
+    # The app is DVC-cached by default, since it's far too big for Git
+    assert sd["outs"] == [{"app": {"cache": True}}]
+    assert s.app_outputs == [PathOutput(path="app", storage="dvc")]
+    # Defaults stay off the command line
+    s = MarimoStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_path="app",
+    )
+    assert s.dvc_cmd == (
+        "calkit nb export-marimo --environment py --no-check -o app notebook.py"
+    )
+    assert s.dvc_deps == ["notebook.py"]
+    # A static export executes at build time and needs no browser runtime
+    s = MarimoStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        to="html",
+        output_path="app.html",
+        app_storage="git",
+    )
+    assert s.dvc_cmd.startswith("calkit nb export-marimo --environment py")
+    assert "--to html" in s.dvc_cmd
+    assert "--mode" not in s.dvc_cmd
+    assert s.dvc_outs == [{"app.html": {"cache": False}}]
+    # An editable app always shows its code, so asking for both is a mistake
+    with pytest.raises(ValidationError):
+        MarimoStage(
+            name="build-app",
+            environment="py",
+            notebook_path="notebook.py",
+            mode="edit",
+            show_code=True,
+            output_path="app",
+        )
+    # Options that only apply to WASM are rejected for a static export
+    for bad in [dict(mode="edit"), dict(show_code=True)]:
+        with pytest.raises(ValidationError):
+            MarimoStage(
+                name="build-app",
+                environment="py",
+                notebook_path="notebook.py",
+                to="html",
+                output_path="app.html",
+                **bad,
+            )
+
+
+def test_mappathsstage_rejects_paths_outside_the_project():
+    # A legitimate mapping is unaffected
+    s = MapPathsStage(
+        name="copy-figures",
+        paths=[
+            dict(kind="dir-to-dir-replace", src="figures", dest="paper/figs")
+        ],
+    )
+    assert s.paths[0].src == "figures"
+    # dir-to-dir-replace deletes its destination, and map-paths is the one
+    # stage kind the hub runs itself, so a '../' escape would let a project
+    # delete or read outside its own directory
+    for bad in [
+        dict(kind="dir-to-dir-replace", src="figures", dest="../../victim"),
+        dict(kind="dir-to-dir-merge", src="../../secrets", dest="paper/figs"),
+        dict(kind="file-to-file", src="/etc/passwd", dest="paper/leak.tex"),
+        dict(kind="file-to-dir", src="results.tex", dest="/tmp/exfil"),
+    ]:
+        with pytest.raises(ValidationError):
+            MapPathsStage(name="copy-figures", paths=[bad])

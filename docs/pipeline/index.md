@@ -378,6 +378,43 @@ Model class: `MapPathsStage`
 | `environment`           | str                                                                                                                                                                                                                                                                                                                                                         | no       | '\_system' |
 | `paths`                 | list[Annotated[calkit.models.pipeline.MapPathsStage.CopyFileToFile \| calkit.models.pipeline.MapPathsStage.CopyFileToDir \| calkit.models.pipeline.MapPathsStage.DirToDirMerge \| calkit.models.pipeline.MapPathsStage.DirToDirReplace, Discriminator(discriminator='kind', custom_error_type=None, custom_error_message=None, custom_error_context=None)]] | yes      |            |
 
+### `marimo`
+
+Model class: `MarimoStage`
+
+A stage that exports a marimo notebook to a shareable app.
+
+With `to="html-wasm"` the app runs entirely in the browser via
+WebAssembly, so it can be served as static files with no backend. With
+`to="html"` the notebook is executed at build time and its rendered
+output is baked into a single self-contained HTML file, which is not
+interactive but is much smaller and doesn't resolve any packages at
+load time.
+
+marimo's own export is not self-contained: it requires the data an app
+reads to already sit in a `public` directory next to the notebook, and
+copies only that directory into the output. Assembling that is this
+stage's main job, and it happens in a build directory rather than in
+place, so nothing is generated in the project tree. Paths in `include_paths` are
+copied beneath `public` at their project-relative paths, so notebook
+code that reads `mo.notebook_location() / "public" / "data.csv"` works
+the same locally as it does in the browser.
+
+`include_paths` is deliberately separate from `inputs` because these
+files are published to the web, which should be opt-in per path rather
+than inferred from the dependency graph. They are dependencies too.
+
+| Kind-specific parameter | Type                          | Required | Default     |
+| ----------------------- | ----------------------------- | -------- | ----------- |
+| `notebook_path`         | str                           | yes      |             |
+| `layout_path`           | str \| None                   | no       | null        |
+| `to`                    | Literal['html-wasm', 'html']  | no       | 'html-wasm' |
+| `mode`                  | Literal['run', 'edit']        | no       | 'run'       |
+| `show_code`             | bool                          | no       | False       |
+| `include_paths`         | list[str]                     | no       |             |
+| `output_path`           | str                           | yes      |             |
+| `app_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'       |
+
 ### `matlab-command`
 
 Model class: `MatlabCommandStage`
@@ -390,10 +427,10 @@ Model class: `MatlabCommandStage`
 
 Model class: `MatlabScriptStage`
 
-| Kind-specific parameter | Type                                                                                          | Required | Default |
-| ----------------------- | --------------------------------------------------------------------------------------------- | -------- | ------- |
-| `script_path`           | str                                                                                           | yes      |         |
-| `matlab_path`           | Annotated[str, AfterValidator(func=<function _check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+| Kind-specific parameter | Type                                                                                         | Required | Default |
+| ----------------------- | -------------------------------------------------------------------------------------------- | -------- | ------- |
+| `script_path`           | str                                                                                          | yes      |         |
+| `matlab_path`           | Annotated[str, AfterValidator(func=<function check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
 
 ### `python-script`
 

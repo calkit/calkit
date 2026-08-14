@@ -2473,6 +2473,14 @@ export type PresignedUrlAccess = {
  */
 export type ProjectApp = {
   /**
+   * Name
+   */
+  name: string
+  /**
+   * Kind
+   */
+  kind?: string
+  /**
    * Path
    */
   path?: string | null
@@ -2488,6 +2496,10 @@ export type ProjectApp = {
    * Description
    */
   description?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
 }
 
 /**
@@ -10522,6 +10534,49 @@ export type PutProjectDevContainerResponses = {
 export type PutProjectDevContainerResponse =
   PutProjectDevContainerResponses[keyof PutProjectDevContainerResponses]
 
+export type GetProjectAppsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps"
+}
+
+export type GetProjectAppsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectAppsError =
+  GetProjectAppsErrors[keyof GetProjectAppsErrors]
+
+export type GetProjectAppsResponses = {
+  /**
+   * Response Projects-Get Project Apps
+   *
+   * Successful Response
+   */
+  200: Array<ProjectApp>
+}
+
+export type GetProjectAppsResponse =
+  GetProjectAppsResponses[keyof GetProjectAppsResponses]
+
 export type GetProjectAppData = {
   body?: never
   path: {
@@ -10563,6 +10618,206 @@ export type GetProjectAppResponses = {
 
 export type GetProjectAppResponse =
   GetProjectAppResponses[keyof GetProjectAppResponses]
+
+export type ServeProjectAppFileData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * App Name
+     */
+    app_name: string
+    /**
+     * Git Sha
+     */
+    git_sha: string | null
+  }
+  query?: {
+    /**
+     * Path
+     */
+    path?: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve"
+}
+
+export type ServeProjectAppFileErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type ServeProjectAppFileError =
+  ServeProjectAppFileErrors[keyof ServeProjectAppFileErrors]
+
+export type ServeProjectAppFileResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type ServeProjectAppFile2Data = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * App Name
+     */
+    app_name: string
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Git Sha
+     */
+    git_sha: string | null
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve/{path}"
+}
+
+export type ServeProjectAppFile2Errors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type ServeProjectAppFile2Error =
+  ServeProjectAppFile2Errors[keyof ServeProjectAppFile2Errors]
+
+export type ServeProjectAppFile2Responses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type ServeProjectAppFile3Data = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * App Name
+     */
+    app_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Git Sha
+     */
+    git_sha?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path}"
+}
+
+export type ServeProjectAppFile3Errors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type ServeProjectAppFile3Error =
+  ServeProjectAppFile3Errors[keyof ServeProjectAppFile3Errors]
+
+export type ServeProjectAppFile3Responses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
+
+export type ServeProjectAppFile4Data = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * App Name
+     */
+    app_name: string
+  }
+  query?: {
+    /**
+     * Path
+     */
+    path?: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Git Sha
+     */
+    git_sha?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve"
+}
+
+export type ServeProjectAppFile4Errors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type ServeProjectAppFile4Error =
+  ServeProjectAppFile4Errors[keyof ServeProjectAppFile4Errors]
+
+export type ServeProjectAppFile4Responses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
 
 export type GetProjectShowcaseData = {
   body?: never

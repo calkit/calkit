@@ -620,25 +620,41 @@ def new_figure(
 
 
 def _new_simple_artifact(
-    kind: Literal["presentations"],
+    kind: Literal["results", "presentations"],
     path: str,
-    title: str,
+    title: str | None,
     description: str | None,
     stage_name: str | None,
     no_commit: bool,
     overwrite: bool,
     obj_kind: str | None = None,
+    key: str | None = None,
+    name: str | None = None,
 ) -> None:
     """Declare a simple artifact (path/title/description/stage) in calkit.yaml."""
     singular = kind.rstrip("s")
     ck_info = calkit.load_calkit_info()
     objects = ck_info.get(kind, [])
-    paths = [o.get("path") for o in objects]
-    if not overwrite and path in paths:
-        raise_error(f"{singular.capitalize()} at path {path} already exists")
-    if overwrite and path in paths:
-        objects = [o for o in objects if o.get("path") != path]
-    obj = dict(path=path, title=title)
+    # Results are identified by path and key together, since several can read
+    # different values out of one file; everything else is just its path
+    existing = [(o.get("path"), o.get("key")) for o in objects]
+    if (path, key) in existing:
+        if not overwrite:
+            at_key = f" with key {key}" if key is not None else ""
+            raise_error(
+                f"{singular.capitalize()} at path {path}{at_key} "
+                "already exists"
+            )
+        objects = [
+            o for o in objects if (o.get("path"), o.get("key")) != (path, key)
+        ]
+    obj = dict(path=path)
+    if name is not None:
+        obj["name"] = name
+    if key is not None:
+        obj["key"] = key
+    if title is not None:
+        obj["title"] = title
     if obj_kind is not None:
         obj["kind"] = obj_kind
     if description is not None:
@@ -664,8 +680,8 @@ def new_result(
         typer.Option(
             "--name",
             help=(
-                "Name to key this result by. Defaults to the file's stem, "
-                "or the key if one is given."
+                "Short handle for referring to this result, which stays "
+                "stable if the file is renamed."
             ),
         ),
     ] = None,
@@ -699,39 +715,17 @@ def new_result(
     ] = False,
 ):
     """Declare a new result."""
-    # Results are keyed by name, so derive one when it isn't given. The key
-    # is the better default when there is one, since multiple results can
-    # share a file and the stem alone wouldn't tell them apart.
-    if name is None:
-        name = key if key is not None else pathlib.PurePosixPath(path).stem
-        name = calkit.to_kebab_case(name.replace(".", "-"))
-    ck_info = calkit.load_calkit_info()
-    results = ck_info.get("results", {})
-    if not isinstance(results, dict):
-        raise_error(
-            "Results must be a mapping of name to result; this project's "
-            "calkit.yaml still has a list"
-        )
-    if not overwrite and name in results:
-        raise_error(f"Result named {name} already exists")
-    obj: dict = dict(path=path)
-    if key is not None:
-        obj["key"] = key
-    if title is not None:
-        obj["title"] = title
-    if description is not None:
-        obj["description"] = description
-    if stage_name is not None:
-        obj["stage"] = stage_name
-    results[name] = obj
-    ck_info["results"] = results
-    with open("calkit.yaml", "w") as f:
-        ryaml.dump(ck_info, f)
-    if not no_commit:
-        repo = calkit.git.get_repo()
-        repo.git.add("calkit.yaml")
-        if repo.git.diff("--staged"):
-            repo.git.commit(["-m", f"Add result {name}"])
+    _new_simple_artifact(
+        "results",
+        path,
+        title,
+        description,
+        stage_name,
+        no_commit,
+        overwrite,
+        key=key,
+        name=name,
+    )
 
 
 @new_app.command(name="presentation|pres")

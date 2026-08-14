@@ -32,7 +32,9 @@
     "onStartupFinished"
   ],
   "extensionDependencies": [
-    "ms-toolsai.jupyter",
+    "ms-toolsai.jupyter"
+  ],
+  "extensionPack": [
     "redhat.vscode-yaml"
   ],
   "main": "./out/extension.js",

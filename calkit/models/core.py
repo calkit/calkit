@@ -5,7 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Discriminator, Field
+from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
 from calkit.models.iteration import ParametersType
@@ -54,11 +55,12 @@ class Figure(_CalkitObject):
 class Result(_CalkitObject):
     """A finding the project produced: a value, a table, a map, or a file.
 
-    Results are keyed by name in ``calkit.yaml``, so several can point at the
-    same file, e.g., a mean and a standard deviation both read out of one
-    summary file. Which part of a file a result refers to is left open on
-    purpose: ``key`` addresses a value in an object-like file, and other
-    forms of addressing may be added without reshaping what a result is.
+    Like the other artifacts, a result is identified by its path, but unlike
+    them several results can share one file, e.g., a mean and a standard
+    deviation both read out of one summary file. ``key`` is what tells those
+    apart, so the identity is really the ``(path, key)`` pair. Which part of
+    a file a result refers to is left open on purpose: other forms of
+    addressing can be added without reshaping what a result is.
     """
 
     key: str | None = Field(
@@ -66,6 +68,30 @@ class Result(_CalkitObject):
         description="Which value within the file this result refers to, "
         "e.g., 'metrics.mean'. Omit it when the result is the whole file.",
     )
+    name: str | None = Field(
+        default=None,
+        description="A short handle for referring to this result, which "
+        "stays stable if the file is renamed. Optional, since the path and "
+        "key already identify it.",
+    )
+
+
+class Table(_CalkitObject):
+    """Tabular data, whether it's the finding itself or how one is shown.
+
+    Identified by path, like the other artifacts, and cited that way.
+
+    Declaring one is optional: evidence says what it points at inline via
+    ``kind``, so an entry here is only needed when the table is worth a title
+    and a description of its own.
+
+    Deliberately nothing beyond the shared artifact fields yet. A ``name``,
+    for referring to a table symbolically, and ``columns`` both want to exist
+    eventually, but neither has anything reading it today, and columns need
+    per-column types and units that belong with symbol metadata rather than
+    being invented separately here. Both are free to add later; a field
+    shipped early is not free to remove.
+    """
 
 
 class Presentation(_CalkitObject):
@@ -126,6 +152,7 @@ class Environment(BaseModel):
         "pbs",
         "slurm",
         "ssh",
+        "system",
         "uv",
         "pixi",
         "venv",
@@ -350,6 +377,9 @@ class PBSEnvironment(Environment):
 
 
 class SSHEnvironment(Environment):
+    # Expected to fold into ``system``, since SSH is how you reach a machine
+    # rather than a kind of environment in its own right: a system env with a
+    # non-localhost ``host`` says the same thing.
     kind: Literal["ssh"] = "ssh"
     host: str = Field(description="Host to connect to.")
     user: str = Field(description="User to connect as.")
@@ -362,6 +392,62 @@ class SSHEnvironment(Environment):
     )
     get_paths: list[str] = Field(
         default=["*"], description="Paths fetched back from the remote host."
+    )
+
+
+# Properties of a machine that a ``system`` environment can pin. A closed set
+# rather than any key from ``calkit describe system``, so editors can offer
+# them and a typo is reported instead of silently locking nothing. Kebab-case
+# like the rest of calkit.yaml; ``calkit.environments`` maps these onto the
+# snake_case keys ``get_system_info`` returns.
+SystemLockProperty = Literal[
+    "os",
+    "os-version",
+    "platform",
+    "machine",
+    "processor",
+    "hostname",
+    "cpu-count",
+    "memory-gb",
+    "python-version",
+    "python-implementation",
+    "git-version",
+    "docker-version",
+    "conda-version",
+    "mamba-version",
+    "uv-version",
+    "pixi-version",
+    "julia-version",
+    "juliaup-version",
+    "rscript-version",
+    "brew-version",
+]
+
+
+class SystemEnvironment(Environment):
+    """The machine as it is, with nothing built, installed, or isolated.
+
+    An escape hatch for software Calkit doesn't manage, e.g., a site-wide
+    module system or a hand-built toolchain. Nothing is pinned by default,
+    since opting out of isolation is the whole point of this kind, so
+    ``lock`` is how a project says which properties of the machine its
+    results actually depend on.
+
+    Locked properties are written to the environment's lock file, which
+    stages depend on, so moving to a machine where one of them differs
+    invalidates the cached result rather than silently reusing it.
+    """
+
+    kind: Literal["system"] = "system"
+    host: str = Field(
+        default="localhost",
+        description="Host on which to run, over SSH if not localhost.",
+    )
+    lock: list[SystemLockProperty] = Field(
+        default=[],
+        description="Properties of the machine this environment's results "
+        "depend on. Stages rerun when a locked property changes. Empty means "
+        "nothing about the machine is pinned.",
     )
 
 
@@ -558,6 +644,14 @@ class ResultsEvidence(BaseModel):
     explanation: str | None = None
 
 
+class TableEvidence(BaseModel):
+    """Evidence in the form of a table."""
+
+    kind: Literal["table"] = "table"
+    path: str
+    explanation: str | None = None
+
+
 class PublicationEvidence(BaseModel):
     """Evidence in the form of a publication."""
 
@@ -567,13 +661,25 @@ class PublicationEvidence(BaseModel):
 
 
 class Question(BaseModel):
-    """A question the project hopes to answer."""
+    """A question the project hopes to answer.
+
+    Each piece of evidence defines what it points at inline, discriminated by
+    ``kind``, so citing something doesn't require declaring it at the top
+    level first. The top-level collections are for the things worth naming or
+    annotating, not a registry that evidence has to be registered in.
+    """
 
     question: str
     hypothesis: str | None = None
     answer: str | None = None
     evidence: (
-        list[FigureEvidence | ResultsEvidence | PublicationEvidence] | None
+        list[
+            FigureEvidence
+            | ResultsEvidence
+            | TableEvidence
+            | PublicationEvidence
+        ]
+        | None
     ) = None
 
 
@@ -701,10 +807,10 @@ class ProjectInfo(BaseModel):
     figures: list[Figure] = Field(
         default=[], description="The project's figures."
     )
-    results: dict[str, Result] = Field(
-        default={},
-        description="The project's findings, keyed by name. Each refers to "
-        "a file, or to part of one.",
+    results: list[Result] = Field(
+        default=[],
+        description="The project's findings, each referring to a file, or to "
+        "part of one.",
     )
     publications: list[Publication] = Field(
         default=[],
@@ -713,27 +819,41 @@ class ProjectInfo(BaseModel):
     presentations: list[Presentation] = Field(
         default=[], description="The project's slides and posters."
     )
+    tables: list[Table] = Field(
+        default=[],
+        description="The project's tables. Only needed for tables worth a "
+        "title of their own; evidence can point at one inline.",
+    )
     references: list[ReferenceCollection] = Field(
         default=[], description="The project's bibliographies."
     )
     environments: dict[
         str,
-        # Note the union is closed, i.e., there is no catch-all variant, so an
-        # environment that matches no kind-specific class is reported as an
-        # error instead of silently validating with its fields dropped.
-        CondaEnvironment
-        | DockerEnvironment
-        | JuliaEnvironment
-        | MatlabEnvironment
-        | PixiEnvironment
-        | REnvironment
-        | SlurmEnvironment
-        | PBSEnvironment
-        | VenvEnvironment
-        | UvEnvironment
-        | UvVenvEnvironment
-        | NixEnvironment
-        | SSHEnvironment,
+        # Discriminated on ``kind``, like pipeline stages, for two reasons.
+        # The union is closed, so an environment matching no kind-specific
+        # class is reported rather than silently validating with its fields
+        # dropped; without the discriminator that only holds when ``kind`` is
+        # present, since a kind-less environment would fall through to
+        # whichever class happens to fit. It also decides what to report
+        # against, so a uv-venv missing ``path`` is told exactly that instead
+        # of "is not valid under any of the given schemas".
+        Annotated[
+            CondaEnvironment
+            | DockerEnvironment
+            | JuliaEnvironment
+            | MatlabEnvironment
+            | PixiEnvironment
+            | REnvironment
+            | SlurmEnvironment
+            | PBSEnvironment
+            | VenvEnvironment
+            | UvEnvironment
+            | UvVenvEnvironment
+            | NixEnvironment
+            | SSHEnvironment
+            | SystemEnvironment,
+            Discriminator("kind"),
+        ],
     ] = Field(
         default={},
         description="Environments in which pipeline stages are run, keyed by "

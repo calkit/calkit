@@ -1782,6 +1782,7 @@ def _build_question_evidence(
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
             "result",
+            "table",
             "publication",
         ):
             continue
@@ -1796,7 +1797,7 @@ def _build_question_evidence(
             item.figure = figures_by_path.get(path)
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
-        else:
+        elif item.kind in ("result", "table"):
             item.result = results_by_path.get(
                 (path, item.key)
             ) or results_by_path.get((path, None))
@@ -2413,18 +2414,16 @@ def _build_results(
         repo=repo,
         ref=ref,
     )
-    # Results are keyed by name in calkit.yaml; the name is the better title
-    # fallback than the path, since several results can share one file
-    declared = ck_info.get("results") or {}
     results = []
-    if isinstance(declared, dict):
-        for name, res in declared.items():
-            if not isinstance(res, dict) or not res.get("path"):
-                continue
-            res = dict(res)
-            if not res.get("title"):
-                res["title"] = name
-            results.append(res)
+    for res in ck_info.get("results") or []:
+        if not isinstance(res, dict) or not res.get("path"):
+            continue
+        res = dict(res)
+        if not res.get("title"):
+            # A result's name is a better title than its path, since several
+            # results can share one file and only the name tells them apart
+            res["title"] = res.get("name") or _title_from_path(res["path"])
+        results.append(res)
     declared_paths = {res["path"] for res in results}
 
     def _is_result_path(path: str) -> bool:

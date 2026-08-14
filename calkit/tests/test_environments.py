@@ -5,9 +5,11 @@ import os
 import shutil
 import subprocess
 from datetime import timedelta
+from unittest import mock
 
 import pytest
 
+import calkit
 import calkit.environments
 
 
@@ -1147,3 +1149,50 @@ def test_add_packages_to_nix_flake(tmp_dir):
         calkit.environments.add_packages_to_nix_flake(
             "hand-rolled.nix", ["python3"]
         )
+
+
+def test_system_env_lock(tmp_dir):
+    from typing import get_args
+
+    import calkit.environments as envs
+    from calkit.models.core import SystemLockProperty
+
+    # The literals offered in the schema and the table that resolves them
+    # must not drift apart, and every one must name a key the system info
+    # can actually produce
+    assert set(get_args(SystemLockProperty)) == set(
+        envs.SYSTEM_LOCK_PROPERTIES
+    )
+    system_info = calkit.get_system_info()
+    for key in envs.SYSTEM_LOCK_PROPERTIES.values():
+        assert key in system_info, f"{key} is not in get_system_info()"
+    # Locking nothing means no lock file, so nothing to depend on
+    bare = {"kind": "system"}
+    assert envs.get_env_lock_fpath(env=bare, env_name="sys") is None
+    assert envs.write_system_env_lock(env_name="sys", env=bare) is None
+    # Locking something writes it, and the file is what stages depend on
+    env = {"kind": "system", "lock": ["os", "python-version"]}
+    lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)
+    assert lock_fpath == envs.get_env_lock_fpath(env=env, env_name="sys")
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert set(data) == {"os", "python-version"}
+    assert data["os"] == system_info["os"]
+    # Rewriting identical content leaves the file alone, so an unchanged
+    # machine doesn't invalidate cached stage results
+    mtime = os.path.getmtime(lock_fpath)
+    envs.write_system_env_lock(env_name="sys", env=env)
+    assert os.path.getmtime(lock_fpath) == mtime
+    # Locking more changes the file, which is what triggers a rerun
+    envs.write_system_env_lock(
+        env_name="sys", env={"kind": "system", "lock": ["os", "machine"]}
+    )
+    with open(lock_fpath) as f:
+        assert set(json.load(f)) == {"os", "machine"}
+    # A property that doesn't exist, and one this machine can't supply,
+    # both raise rather than quietly recording nothing
+    with pytest.raises(ValueError, match="Unknown system property"):
+        envs.get_system_lock_data(["not-a-thing"])
+    with mock.patch.object(calkit, "get_system_info", return_value={}):
+        with pytest.raises(ValueError, match="not available on this machine"):
+            envs.get_system_lock_data(["os"])

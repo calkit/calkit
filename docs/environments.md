@@ -624,6 +624,41 @@ Title: Auto-generated R environment
 Imports: tidyverse
 ```
 
+## System environments
+
+A `system` environment runs things on the machine as it is, with nothing
+built, installed, or isolated.
+It's the escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain.
+
+Nothing about the machine is pinned by default, since opting out of
+isolation is the point of this kind.
+`lock` is how a project says which properties its results actually depend
+on:
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: gpu-node-1.example.edu
+    lock:
+      - os
+      - julia-version
+```
+
+Locked properties are written to the environment's lock file, which stages
+depend on, so running on a machine where one of them differs invalidates
+the cached result instead of silently reusing it.
+Locking a property the machine can't supply, e.g., a tool that isn't
+installed, is an error rather than a recorded null---a stage that claims to
+be pinned to something it isn't is worse than one that pins nothing.
+
+<!-- prettier-ignore -->
+!!! note
+    The properties available to `lock` are a fixed set, so editors can offer
+    them and a typo is reported rather than silently locking nothing. See
+    the `system` entry in the reference below for the full list.
+
 <!-- AUTO-GENERATED: ENV-KINDS:START -->
 
 ### Environment kind reference
@@ -780,5 +815,28 @@ Model class: `SSHEnvironment`
 | send_paths  | list[str]      | no       | Paths sent to the remote host.           |
 | get_paths   | list[str]      | no       | Paths fetched back from the remote host. |
 | description | str            | no       | A description of the environment.        |
+
+#### `system`
+
+Model class: `SystemEnvironment`
+
+The machine as it is, with nothing built, installed, or isolated.
+
+An escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain. Nothing is pinned by default,
+since opting out of isolation is the whole point of this kind, so
+`lock` is how a project says which properties of the machine its
+results actually depend on.
+
+Locked properties are written to the environment's lock file, which
+stages depend on, so moving to a machine where one of them differs
+invalidates the cached result rather than silently reusing it.
+
+| Parameter   | Type                                                                                                                                                                                                                                                                                                                           | Required | Description                                                                                                                                                   |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['system']                                                                                                                                                                                                                                                                                                              | yes      | What kind of environment this is.                                                                                                                             |
+| host        | str                                                                                                                                                                                                                                                                                                                            | no       | Host on which to run, over SSH if not localhost.                                                                                                              |
+| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned. |
+| description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                             |
 
 <!-- AUTO-GENERATED: ENV-KINDS:END -->

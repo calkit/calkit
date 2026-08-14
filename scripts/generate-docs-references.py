@@ -6,8 +6,9 @@ from __future__ import annotations
 import inspect
 import re
 import types
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import Any, Union, cast, get_args, get_origin
 
 import click
 import typer
@@ -26,6 +27,7 @@ from calkit.models.core import (
     REnvironment,
     SlurmEnvironment,
     SSHEnvironment,
+    SystemEnvironment,
     UvEnvironment,
     UvVenvEnvironment,
     VenvEnvironment,
@@ -415,7 +417,7 @@ def _annotation_to_text(annotation: Any) -> str:
         if annotation is type(None):
             return "None"
         if hasattr(annotation, "__name__"):
-            return annotation.__name__
+            return str(annotation.__name__)
         return str(annotation).replace("typing.", "")
     args = get_args(annotation)
     if origin is list:
@@ -537,7 +539,7 @@ def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
         if base is BaseModel:
             break
         if all(issubclass(t, base) for t in types_):
-            return base
+            return cast(type[BaseModel], base)
     return None
 
 
@@ -589,7 +591,7 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
     ]
     meta = [name for name in _ENV_META_FIELDS if name in fields]
     ordered = (["kind"] if "kind" in fields else []) + kind_specific + meta
-    rows = []
+    rows: list[tuple[str, ...]] = []
     for name in ordered:
         field = fields[name]
         # ``kind`` carries a default for convenience but is always required in
@@ -627,6 +629,7 @@ def generate_environment_kinds_markdown() -> str:
         SlurmEnvironment,
         REnvironment,
         SSHEnvironment,
+        SystemEnvironment,
     ]
     env_classes_by_kind = {
         _kind_for_model_class(cls): cls
@@ -682,12 +685,15 @@ def _models_in_annotation(annotation: Any) -> list[type[BaseModel]]:
 
 
 def _collect_nested_models(
-    classes: list[type[BaseModel]],
+    classes: Sequence[type[BaseModel]],
+    exclude: Sequence[type[BaseModel]] = (),
 ) -> list[type[BaseModel]]:
     """Walk out from some models to every model reachable from their fields.
 
     Breadth-first, so the models named directly in the parameter tables come
-    before the ones only reachable through them.
+    before the ones only reachable through them. Excluding a model also stops
+    the walk there, which is how a key documented on its own page keeps its
+    whole subtree off this table.
     """
     queue = [
         model
@@ -696,7 +702,7 @@ def _collect_nested_models(
         for model in _models_in_annotation(field.annotation)
     ]
     ordered: list[type[BaseModel]] = []
-    seen = set(classes)
+    seen = set(classes) | set(exclude)
     while queue:
         cls = queue.pop(0)
         if cls in seen:
@@ -708,20 +714,27 @@ def _collect_nested_models(
     return ordered
 
 
-def _nested_type_markdown(classes: list[type[BaseModel]]) -> list[str]:
-    """Document the models that stage parameters are built out of.
+def _nested_type_markdown(
+    classes: Sequence[type[BaseModel]],
+    title: str = "Nested parameter types",
+    intro: str = (
+        "Some parameters above take objects rather than plain values. The "
+        "properties of each are described below."
+    ),
+    exclude: Sequence[type[BaseModel]] = (),
+) -> list[str]:
+    """Document the models that the tables above are built out of.
 
-    The parameter tables can only name a type like ``PathOutput``; this is
-    where a reader finds out what actually goes inside one.
+    Those tables can only name a type like ``PathOutput``; this is where a
+    reader finds out what actually goes inside one.
     """
     lines = [
-        "### Nested parameter types",
+        f"### {title}",
         "",
-        "Some parameters above take objects rather than plain values. The "
-        "properties of each are described below.",
+        intro,
         "",
     ]
-    for cls in _collect_nested_models(classes):
+    for cls in _collect_nested_models(classes, exclude=exclude):
         lines.append(f"#### `{cls.__name__}`")
         lines.append("")
         docstring = _docstring_text(cls)
@@ -863,7 +876,7 @@ def generate_top_level_keys_markdown() -> str:
     """Document the top-level keys of calkit.yaml, from ``ProjectInfo``."""
     from calkit.models.core import ProjectInfo
 
-    rows = []
+    rows: list[tuple[str, ...]] = []
     for name, field in ProjectInfo.model_fields.items():
         key = field.alias or name
         page = _KEY_DOC_PAGES.get(name)
@@ -875,10 +888,30 @@ def generate_top_level_keys_markdown() -> str:
                 _description_to_text(field),
             )
         )
-    return (
-        make_table(rows, ["Key", "Type", "Required", "Description"]).rstrip()
-        + "\n"
+    lines = [
+        make_table(rows, ["Key", "Type", "Required", "Description"]).rstrip(),
+        "",
+    ]
+    # A key with its own page is described there, so neither it nor anything
+    # underneath it belongs in the table below
+    documented_elsewhere = [
+        model
+        for name, field in ProjectInfo.model_fields.items()
+        if name in _KEY_DOC_PAGES
+        for model in _models_in_annotation(field.annotation)
+    ]
+    lines.extend(
+        _nested_type_markdown(
+            [ProjectInfo],
+            title="Nested types",
+            intro=(
+                "Keys above whose type is a named object, like `Figure`, "
+                "hold the properties described below."
+            ),
+            exclude=documented_elsewhere,
+        )
     )
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _replace_marked_block(

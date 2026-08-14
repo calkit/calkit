@@ -912,7 +912,7 @@ Options:
 
 | Option              | Type    | Required | Default | Description                                                                                    |
 | ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--name`            | text    | no       |         | Name to key this result by. Defaults to the file's stem, or the key if one is given.           |
+| `--name`            | text    | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
 | `--title`           | text    | no       |         |                                                                                                |
 | `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
 | `--description`     | text    | no       |         |                                                                                                |

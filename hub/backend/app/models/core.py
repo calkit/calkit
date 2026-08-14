@@ -1203,7 +1203,7 @@ class Publication(BaseModel):
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1217,7 +1217,7 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None

@@ -60,6 +60,11 @@ def test_validate_bad_projects() -> None:
     # An environment with an unknown kind, since the kinds are a closed set
     # even though their properties are not
     assert errors({"environments": {"e": {"kind": "not-a-kind"}}})
+    # An environment with no kind at all, or whose 'kind' key is misspelled.
+    # The union is discriminated on kind, so these are reported rather than
+    # resolving to whichever kind happens to fit the remaining keys
+    assert errors({"environments": {"e": {"image": "ubuntu"}}})
+    assert errors({"environments": {"e": {"knid": "docker", "image": "u"}}})
     # A stage with an unknown kind, and one with a misspelled field
     assert errors({"pipeline": {"stages": {"s": {"kind": "nope"}}}})
     assert errors(
@@ -75,16 +80,16 @@ def test_validate_bad_projects() -> None:
             }
         }
     )
-    # Results as a list, which is the pre-name-keyed shape
-    assert errors({"results": [{"path": "r.csv", "title": "Summary"}]})
+    # An environment using the removed _include key, which no longer names a
+    # kind and so can't be resolved
+    assert errors({"environments": {"e": {"_include": "env.yaml"}}})
     # Outside the pipeline, unknown keys are tolerated rather than rejected:
     # a misspelled top-level key, an unknown environment property, and the
-    # removed _include and metrics keys all still validate
+    # removed metrics key all still validate
     assert not errors({"descrption": "Oops"})
     assert not errors(
         {"environments": {"e": {"kind": "uv-venv", "path": "r.txt", "x": 1}}}
     )
-    assert not errors({"environments": {"e": {"_include": "env.yaml"}}})
     assert not errors({"metrics": {"mean": {"value": 3.14}}})
     # Valid documents, including ones using the features above correctly
     assert not errors({})
@@ -115,16 +120,45 @@ def test_validate_bad_projects() -> None:
     assert not errors(
         {"publications": [{"path": "paper.pdf", "title": "The paper"}]}
     )
-    # Results are keyed by name; two can share a file with different keys,
-    # and the title is optional since the name identifies it
+    # Results are a list like the other artifacts, identified by path, but
+    # two can share a file when each names a different key inside it. Both
+    # title and name are optional
     assert not errors(
         {
-            "results": {
-                "summary": {"path": "r.csv", "title": "Summary"},
-                "mean": {"path": "s.json", "key": "metrics.mean"},
-                "std": {"path": "s.json", "key": "metrics.std"},
-            }
+            "results": [
+                {"path": "r.csv", "title": "Summary"},
+                {"path": "s.json", "key": "metrics.mean", "name": "mean"},
+                {"path": "s.json", "key": "metrics.std"},
+            ]
         }
+    )
+    # A system environment, which has nothing to build or verify
+    assert not errors({"environments": {"sassy": {"kind": "system"}}})
+    # Evidence defines what it points at inline, discriminated by kind, so
+    # none of these need a matching top-level declaration
+    assert not errors(
+        {
+            "questions": [
+                {
+                    "question": "Did it get faster?",
+                    "evidence": [
+                        {"kind": "figure", "path": "figures/f.png"},
+                        {"kind": "result", "path": "r.json", "key": "pct"},
+                        {"kind": "table", "path": "t.csv", "explanation": "x"},
+                        {"kind": "publication", "path": "p.pdf"},
+                    ],
+                }
+            ]
+        }
+    )
+    # An unknown evidence kind is still reported, since kind is the
+    # discriminator that says how to read the rest of the entry
+    assert errors(
+        {"questions": [{"question": "q?", "evidence": [{"kind": "nope"}]}]}
+    )
+    # Tables are a list identified by path, like the other artifacts
+    assert not errors(
+        {"tables": [{"path": "results/top-kernels.csv", "title": "Top"}]}
     )
     assert not errors(
         {

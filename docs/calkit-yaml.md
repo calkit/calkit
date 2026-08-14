@@ -12,6 +12,7 @@ for the project's important metadata, which includes its:
 - Figures
 - Publications (journal articles, conference papers, and theses)
 - Presentations (slides and posters)
+- Tables (tabular data worth referring to by name)
 - [Procedures](tutorials/procedures.md)
 - [References](references.md)
 - Subprojects (smaller projects executed as part of the main project)
@@ -77,27 +78,28 @@ Results are the project's findings: the things you'd point at to back up an
 answer, or to summarize what the project found.
 A result can be a single value, a table, a map, or any other shape a file
 takes.
-They're keyed by name:
 
 ```yaml
 results:
-  drag-vs-speed:
-    path: results/drag.csv
+  - path: results/drag.csv
     title: Drag versus speed
-  mean-drag:
-    path: results/summary.json
+  - path: results/summary.json
     key: metrics.mean
     title: Mean drag coefficient
-  std-drag:
-    path: results/summary.json
+    name: mean-drag
+  - path: results/summary.json
     key: metrics.std
 ```
 
-`key` is optional, and addresses one value within an object-like file,
-which is what lets several results share a file the way `mean-drag` and
-`std-drag` do above.
-Omit it when the result is the whole file.
-`title` is optional too, since the name already identifies the result.
+Like the other artifacts, a result is identified by its path.
+Unlike them, several results can share one file: `key` addresses a single
+value within an object-like file, which is what tells the last two entries
+above apart.
+Omit `key` when the result is the whole file.
+
+`name` is optional, and gives the result a short handle to refer to it by,
+which stays the same if the file is later renamed.
+`title` is optional too, and is only what gets displayed.
 
 <!-- prettier-ignore -->
 !!! note
@@ -111,6 +113,44 @@ To declare one from the command line:
 ```sh
 calkit new result results/summary.json --key metrics.mean --name mean-drag
 ```
+
+## Tables
+
+A table can be cited as evidence inline, just like a result:
+
+```yaml
+evidence:
+  - kind: table
+    path: results/top-kernels.csv
+    explanation: Top 20 GPU kernels by baseline cost.
+```
+
+Nothing has to be declared for that to work.
+Declare one under `tables:` when it's worth a title and description of its
+own, the same way you would a figure:
+
+```yaml
+tables:
+  - path: results/top-kernels.csv
+    title: Top 20 GPU kernels, baseline vs. mod
+    description: Per-kernel Nsight Systems aggregates for the top 20 kernels.
+```
+
+Like the other artifacts, a table is identified by its path.
+
+Columns aren't described yet, and neither is a symbolic name for a table.
+Both are expected to arrive alongside symbol metadata, which is where
+per-column types and units belong.
+
+<!-- prettier-ignore -->
+!!! tip
+    Which collections are keyed by name and which are lists comes down to
+    one question: does anything else in the file have to *name* it?
+    Environments are named by stages, stages by `from_stage_outputs`,
+    procedures and calculations by the commands that run them---so those are
+    maps. Nothing names a figure, dataset, publication, presentation, result,
+    table, or question; they're referred to by path, or not at all, so those
+    are lists.
 
 ## Schema, validation, and autocompletion
 
@@ -135,8 +175,9 @@ Calkit preserves it when it updates the file.
 !!! note
     In VS Code this requires the
     [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml),
-    which is installed automatically along with the
-    [Calkit extension](https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode).
+    which is installed alongside the
+    [Calkit extension](https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode)
+    and can be removed if you'd rather not have it.
     The Calkit extension also bundles a copy of the schema and applies it to
     every `calkit.yaml`, so the comment above is not strictly necessary if
     you're working in VS Code. The comment takes precedence when present,
@@ -177,9 +218,10 @@ the properties that go inside pipeline stages are covered under
 | [`pipeline`](pipeline/index.md)         | Pipeline                                                                                                                                        | no       | The project's reproducible pipeline.                                                                                                                                                                                                                                                                                                                                       |
 | [`datasets`](datasets.md)               | list[Dataset]                                                                                                                                   | no       | The project's datasets.                                                                                                                                                                                                                                                                                                                                                    |
 | `figures`                               | list[Figure]                                                                                                                                    | no       | The project's figures.                                                                                                                                                                                                                                                                                                                                                     |
-| `results`                               | dict[str, Result]                                                                                                                               | no       | The project's findings, keyed by name. Each refers to a file, or to part of one.                                                                                                                                                                                                                                                                                           |
+| `results`                               | list[Result]                                                                                                                                    | no       | The project's findings, each referring to a file, or to part of one.                                                                                                                                                                                                                                                                                                       |
 | `publications`                          | list[Publication]                                                                                                                               | no       | The project's papers, reports, and proposals.                                                                                                                                                                                                                                                                                                                              |
 | `presentations`                         | list[Presentation]                                                                                                                              | no       | The project's slides and posters.                                                                                                                                                                                                                                                                                                                                          |
+| `tables`                                | list[Table]                                                                                                                                     | no       | The project's tables. Only needed for tables worth a title of their own; evidence can point at one inline.                                                                                                                                                                                                                                                                 |
 | [`references`](references.md)           | list[ReferenceCollection]                                                                                                                       | no       | The project's bibliographies.                                                                                                                                                                                                                                                                                                                                              |
 | [`environments`](environments.md)       | dict[str, Environment]                                                                                                                          | no       | Environments in which pipeline stages are run, keyed by name.                                                                                                                                                                                                                                                                                                              |
 | `software`                              | list[Software]                                                                                                                                  | no       | Software created as part of the project.                                                                                                                                                                                                                                                                                                                                   |
@@ -191,5 +233,269 @@ the properties that go inside pipeline stages are covered under
 | `calculations`                          | dict[str, Formula \| Linear \| LookupTable]                                                                                                     | no       | Calculations that can be run with 'calkit calc run'.                                                                                                                                                                                                                                                                                                                       |
 | `env_vars`                              | dict[str, str]                                                                                                                                  | no       | Environmental variables set when running project commands.                                                                                                                                                                                                                                                                                                                 |
 | `overleaf_sync`                         | dict[str, OverleafSync]                                                                                                                         | no       | Overleaf sync configuration, keyed by the path of the synced directory.                                                                                                                                                                                                                                                                                                    |
+
+### Nested types
+
+Keys above whose type is a named object, like `Figure`, hold the properties described below.
+
+#### `DerivedFromProject`
+
+| Parameter      | Type | Required | Default | Description |
+| -------------- | ---- | -------- | ------- | ----------- |
+| `project`      | str  | yes      |         |             |
+| `git_repo_url` | str  | yes      |         |             |
+| `git_rev`      | str  | yes      |         |             |
+
+#### `RangeIteration`
+
+| Parameter | Type                 | Required | Default | Description                                |
+| --------- | -------------------- | -------- | ------- | ------------------------------------------ |
+| `range`   | RangeIterationParams | yes      |         | Bounds of the range over which to iterate. |
+
+#### `Figure`
+
+| Parameter     | Type        | Required | Default | Description                                     |
+| ------------- | ----------- | -------- | ------- | ----------------------------------------------- |
+| `path`        | str         | yes      |         | Path to the file, relative to the project root. |
+| `title`       | str \| None | no       | null    | A human-readable title.                         |
+| `description` | str \| None | no       | null    | A longer description.                           |
+| `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+
+#### `Result`
+
+A finding the project produced: a value, a table, a map, or a file.
+
+Like the other artifacts, a result is identified by its path, but unlike
+them several results can share one file, e.g., a mean and a standard
+deviation both read out of one summary file. `key` is what tells those
+apart, so the identity is really the `(path, key)` pair. Which part of
+a file a result refers to is left open on purpose: other forms of
+addressing can be added without reshaping what a result is.
+
+| Parameter     | Type        | Required | Default | Description                                                                                                                                   |
+| ------------- | ----------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`        | str         | yes      |         | Path to the file, relative to the project root.                                                                                               |
+| `title`       | str \| None | no       | null    | A human-readable title.                                                                                                                       |
+| `description` | str \| None | no       | null    | A longer description.                                                                                                                         |
+| `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.                                                                                                |
+| `key`         | str \| None | no       | null    | Which value within the file this result refers to, e.g., 'metrics.mean'. Omit it when the result is the whole file.                           |
+| `name`        | str \| None | no       | null    | A short handle for referring to this result, which stays stable if the file is renamed. Optional, since the path and key already identify it. |
+
+#### `Publication`
+
+| Parameter      | Type                                                                                                                 | Required | Default | Description                                     |
+| -------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------- |
+| `path`         | str                                                                                                                  | yes      |         | Path to the file, relative to the project root. |
+| `title`        | str \| None                                                                                                          | no       | null    | A human-readable title.                         |
+| `description`  | str \| None                                                                                                          | no       | null    | A longer description.                           |
+| `stage`        | str \| None                                                                                                          | no       | null    | Name of the pipeline stage that produces this.  |
+| `kind`         | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                 |
+| `is_published` | bool                                                                                                                 | no       | False   |                                                 |
+| `doi`          | str \| None                                                                                                          | no       | null    |                                                 |
+
+#### `Presentation`
+
+| Parameter     | Type                                | Required | Default | Description                                     |
+| ------------- | ----------------------------------- | -------- | ------- | ----------------------------------------------- |
+| `path`        | str                                 | yes      |         | Path to the file, relative to the project root. |
+| `title`       | str \| None                         | no       | null    | A human-readable title.                         |
+| `description` | str \| None                         | no       | null    | A longer description.                           |
+| `stage`       | str \| None                         | no       | null    | Name of the pipeline stage that produces this.  |
+| `kind`        | Literal['slides', 'poster'] \| None | no       | null    | What kind of presentation this is.              |
+
+#### `Table`
+
+Tabular data, whether it's the finding itself or how one is shown.
+
+Identified by path, like the other artifacts, and cited that way.
+
+Declaring one is optional: evidence says what it points at inline via
+`kind`, so an entry here is only needed when the table is worth a title
+and a description of its own.
+
+Deliberately nothing beyond the shared artifact fields yet. A `name`,
+for referring to a table symbolically, and `columns` both want to exist
+eventually, but neither has anything reading it today, and columns need
+per-column types and units that belong with symbol metadata rather than
+being invented separately here. Both are free to add later; a field
+shipped early is not free to remove.
+
+| Parameter     | Type        | Required | Default | Description                                     |
+| ------------- | ----------- | -------- | ------- | ----------------------------------------------- |
+| `path`        | str         | yes      |         | Path to the file, relative to the project root. |
+| `title`       | str \| None | no       | null    | A human-readable title.                         |
+| `description` | str \| None | no       | null    | A longer description.                           |
+| `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+
+#### `Software`
+
+| Parameter     | Type | Required | Default | Description |
+| ------------- | ---- | -------- | ------- | ----------- |
+| `title`       | str  | yes      |         |             |
+| `path`        | str  | yes      |         |             |
+| `description` | str  | yes      |         |             |
+
+#### `Notebook`
+
+A Jupyter notebook.
+
+Unlike the other objects, a notebook entry can be created just to record
+which environment it runs in (by `calkit update notebook-env`), so
+`title` is optional here.
+
+| Parameter     | Type        | Required | Default | Description                                                                               |
+| ------------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `path`        | str         | yes      |         |                                                                                           |
+| `title`       | str \| None | no       | null    |                                                                                           |
+| `description` | str \| None | no       | null    |                                                                                           |
+| `stage`       | str \| None | no       | null    |                                                                                           |
+| `environment` | str \| None | no       | null    | Name of the environment in which to run this notebook, if it is not part of the pipeline. |
+
+#### `ShowcaseFigure`
+
+| Parameter | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `figure`  | str  | yes      |         |             |
+
+#### `ShowcaseText`
+
+| Parameter | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `text`    | str  | yes      |         |             |
+
+#### `ShowcaseMarkdown`
+
+| Parameter  | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `markdown` | str  | yes      |         |             |
+
+#### `ShowcaseMarkdownFile`
+
+| Parameter       | Type | Required | Default | Description |
+| --------------- | ---- | -------- | ------- | ----------- |
+| `markdown_file` | str  | yes      |         |             |
+
+#### `ShowcaseYamlFile`
+
+| Parameter     | Type        | Required | Default | Description |
+| ------------- | ----------- | -------- | ------- | ----------- |
+| `yaml_file`   | str         | yes      |         |             |
+| `object_name` | str \| None | no       | null    |             |
+
+#### `ShowcaseNotebook`
+
+| Parameter  | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `notebook` | str  | yes      |         |             |
+
+#### `ShowcasePublication`
+
+| Parameter     | Type | Required | Default | Description |
+| ------------- | ---- | -------- | ------- | ----------- |
+| `publication` | str  | yes      |         |             |
+
+#### `Subproject`
+
+A smaller project executed as part of this one.
+
+| Parameter     | Type        | Required | Default | Description                                                        |
+| ------------- | ----------- | -------- | ------- | ------------------------------------------------------------------ |
+| `path`        | str         | yes      |         | Path to the subproject directory, relative to this project's root. |
+| `description` | str \| None | no       | null    |                                                                    |
+
+#### `Formula`
+
+| Parameter     | Type                     | Required | Default   | Description |
+| ------------- | ------------------------ | -------- | --------- | ----------- |
+| `kind`        | Literal['formula']       | no       | 'formula' |             |
+| `params`      | FormulaParams            | yes      |           |             |
+| `name`        | str \| None              | no       | null      |             |
+| `description` | str \| None              | no       | null      |             |
+| `inputs`      | list[Input] \| list[str] | yes      |           |             |
+| `output`      | Output \| str            | yes      |           |             |
+
+#### `Linear`
+
+Calculation for a simple linear relationship.
+
+| Parameter     | Type                     | Required | Default  | Description |
+| ------------- | ------------------------ | -------- | -------- | ----------- |
+| `kind`        | Literal['linear']        | no       | 'linear' |             |
+| `params`      | LinearParams             | yes      |          |             |
+| `name`        | str \| None              | no       | null     |             |
+| `description` | str \| None              | no       | null     |             |
+| `inputs`      | list[Input] \| list[str] | yes      |          |             |
+| `output`      | Output \| str            | yes      |          |             |
+
+#### `LookupTable`
+
+A 1-D lookup table.
+
+| Parameter     | Type                     | Required | Default        | Description |
+| ------------- | ------------------------ | -------- | -------------- | ----------- |
+| `kind`        | Literal['lookup-table']  | no       | 'lookup-table' |             |
+| `params`      | LookupTableParams        | yes      |                |             |
+| `name`        | str \| None              | no       | null           |             |
+| `description` | str \| None              | no       | null           |             |
+| `inputs`      | list[Input] \| list[str] | yes      |                |             |
+| `output`      | Output \| str            | yes      |                |             |
+
+#### `OverleafSync`
+
+Configuration for syncing a directory with an Overleaf project.
+
+| Parameter    | Type              | Required | Default | Description                                       |
+| ------------ | ----------------- | -------- | ------- | ------------------------------------------------- |
+| `url`        | str \| None       | no       | null    | URL of the Overleaf project.                      |
+| `sync_paths` | list[str] \| None | no       | null    | Paths synced in both directions with Overleaf.    |
+| `push_paths` | list[str] \| None | no       | null    | Paths only pushed to Overleaf, never pulled back. |
+
+#### `RangeIterationParams`
+
+| Parameter | Type         | Required | Default | Description                                    |
+| --------- | ------------ | -------- | ------- | ---------------------------------------------- |
+| `start`   | int \| float | yes      |         | First value in the range, which is included.   |
+| `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
+| `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
+
+#### `FormulaParams`
+
+| Parameter | Type | Required | Default | Description |
+| --------- | ---- | -------- | ------- | ----------- |
+| `formula` | str  | yes      |         |             |
+
+#### `Input`
+
+| Parameter     | Type                           | Required | Default | Description |
+| ------------- | ------------------------------ | -------- | ------- | ----------- |
+| `name`        | str                            | yes      |         |             |
+| `description` | str \| None                    | no       | null    |             |
+| `dtype`       | Literal['int', 'float', 'str'] | no       | 'float' |             |
+| `min`         | int \| float \| None           | no       | null    |             |
+| `max`         | int \| float \| None           | no       | null    |             |
+
+#### `Output`
+
+| Parameter     | Type                           | Required | Default | Description |
+| ------------- | ------------------------------ | -------- | ------- | ----------- |
+| `name`        | str                            | yes      |         |             |
+| `description` | str \| None                    | no       | null    |             |
+| `dtype`       | Literal['int', 'float', 'str'] | no       | 'float' |             |
+| `template`    | str \| None                    | no       | null    |             |
+
+#### `LinearParams`
+
+| Parameter | Type             | Required | Default | Description |
+| --------- | ---------------- | -------- | ------- | ----------- |
+| `coeffs`  | dict[str, float] | yes      |         |             |
+| `offset`  | float            | no       | 0.0     |             |
+
+#### `LookupTableParams`
+
+| Parameter  | Type                                             | Required | Default       | Description |
+| ---------- | ------------------------------------------------ | -------- | ------------- | ----------- |
+| `x_values` | list[float]                                      | yes      |               |             |
+| `y_values` | list[float]                                      | yes      |               |             |
+| `method`   | Literal['floor', 'ceil', 'round', 'interpolate'] | no       | 'interpolate' |             |
 
 <!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->

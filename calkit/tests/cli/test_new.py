@@ -9,6 +9,7 @@ import git
 import pytest
 
 import calkit
+import calkit.schema
 from calkit.environments import get_env_lock_fpath
 
 
@@ -147,9 +148,12 @@ def test_new_result(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    # The name defaults to the file's stem
-    assert ck_info["results"]["metrics"]["path"] == "results/metrics.json"
-    assert ck_info["results"]["metrics"]["title"] == "Key metrics"
+    # Calkit init writes the schema modeline into an otherwise empty file,
+    # and declaring something must not wipe it out
+    with open("calkit.yaml") as f:
+        assert f.read().startswith(calkit.schema.MODELINE)
+    assert ck_info["results"][0]["path"] == "results/metrics.json"
+    assert ck_info["results"][0]["title"] == "Key metrics"
     # Won't overwrite without -f
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(
@@ -162,16 +166,22 @@ def test_new_result(tmp_dir):
                 "Key metrics",
             ]
         )
-    # Several results can share a file, each naming a value inside it
+    # Several results can share a file, each naming a value inside it, since
+    # a result is identified by its path and key together
     for key in ["mean", "std"]:
         subprocess.check_call(
             ["calkit", "new", "result", "results/metrics.json", "--key", key]
         )
     ck_info = calkit.load_calkit_info()
-    assert ck_info["results"]["mean"]["key"] == "mean"
-    assert ck_info["results"]["std"]["key"] == "std"
-    assert ck_info["results"]["mean"]["path"] == "results/metrics.json"
-    # An explicit name wins over the derived one
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["mean"]["path"] == "results/metrics.json"
+    assert by_key["std"]["path"] == "results/metrics.json"
+    # Re-declaring the same path and key is what counts as a duplicate
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", "std"]
+        )
+    # A name can be attached for referring to the result later
     subprocess.check_call(
         [
             "calkit",
@@ -185,7 +195,8 @@ def test_new_result(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert ck_info["results"]["error"]["key"] == "metrics.rmse"
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["metrics.rmse"]["name"] == "error"
 
 
 def test_new_presentation(tmp_dir):

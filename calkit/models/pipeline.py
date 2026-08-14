@@ -291,23 +291,30 @@ class Stage(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_slurm_field(cls, data: Any) -> Any:
-        """Auto-migrate the old ``slurm:`` field to ``scheduler:``."""
+    def normalize_legacy_keys(cls, data: Any) -> Any:
+        """Accept older and looser spellings of a stage's keys.
+
+        Migrates the old ``slurm:`` field to ``scheduler:``, and treats an
+        empty ``inputs:``/``outputs:`` key, which parses as None, the same as
+        omitting it rather than failing to load the stage.
+
+        Works on a copy, so validating a stage doesn't rewrite the caller's
+        parsed ``calkit.yaml`` underneath it.
+        """
         if not isinstance(data, dict):
             return data
-        # An empty ``inputs:``/``outputs:`` key parses as None; treat it the
-        # same as omitting it rather than failing to load the stage
-        for key in ("inputs", "outputs"):
-            if key in data and data[key] is None:
-                data = {k: v for k, v in data.items() if k != key}
-        if "slurm" not in data:
-            return data
-        if data.get("scheduler") is not None:
+        if "slurm" in data and data.get("scheduler") is not None:
             raise ValueError(
                 "Stage has both 'slurm' and 'scheduler' options set; "
                 "remove 'slurm' (use 'scheduler' only)"
             )
-        data["scheduler"] = data.pop("slurm")
+        data = {
+            k: v
+            for k, v in data.items()
+            if not (k in ("inputs", "outputs") and v is None)
+        }
+        if "slurm" in data:
+            data["scheduler"] = data.pop("slurm")
         return data
 
     def to_ck_dict(self) -> dict:
@@ -355,8 +362,10 @@ class Stage(BaseModel):
     def dvc_deps(self) -> list[str]:
         deps = []
         for i in self.inputs:
-            path = i if isinstance(i, str) else getattr(i, "path", None)
-            if path is not None and path not in deps:
+            if isinstance(i, InputsFromStageOutputs):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in deps:
                 deps.append(path)
         return deps
 
@@ -504,8 +513,10 @@ class Stage(BaseModel):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            path = i if isinstance(i, str) else getattr(i, "path", None)
-            if path is not None and path not in deps:
+            if isinstance(i, InputsFromStageOutputs):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in deps:
                 deps.append(path)
         outs = self.dvc_outs
         log_out = self.scheduler_log_output

@@ -4354,7 +4354,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -4378,6 +4378,9 @@
                   },
                   {
                     "$ref": "#/$defs/ResultsEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/TableEvidence"
                   },
                   {
                     "$ref": "#/$defs/PublicationEvidence"
@@ -4889,7 +4892,7 @@
       "type": "object"
     },
     "Result": {
-      "description": "A finding the project produced: a value, a table, a map, or a file.\n\nResults are keyed by name in ``calkit.yaml``, so several can point at the\nsame file, e.g., a mean and a standard deviation both read out of one\nsummary file. Which part of a file a result refers to is left open on\npurpose: ``key`` addresses a value in an object-like file, and other\nforms of addressing may be added without reshaping what a result is.",
+      "description": "A finding the project produced: a value, a table, a map, or a file.\n\nLike the other artifacts, a result is identified by its path, but unlike\nthem several results can share one file, e.g., a mean and a standard\ndeviation both read out of one summary file. ``key`` is what tells those\napart, so the identity is really the ``(path, key)`` pair. Which part of\na file a result refers to is left open on purpose: other forms of\naddressing can be added without reshaping what a result is.",
       "properties": {
         "description": {
           "anyOf": [
@@ -4916,6 +4919,19 @@
           "default": null,
           "description": "Which value within the file this result refers to, e.g., 'metrics.mean'. Omit it when the result is the whole file.",
           "title": "Key"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A short handle for referring to this result, which stays stable if the file is renamed. Optional, since the path and key already identify it.",
+          "title": "Name"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -6049,6 +6065,155 @@
       "title": "Subproject",
       "type": "object"
     },
+    "SystemEnvironment": {
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of the environment.",
+          "title": "Description"
+        },
+        "host": {
+          "default": "localhost",
+          "description": "Host on which to run, over SSH if not localhost.",
+          "title": "Host",
+          "type": "string"
+        },
+        "kind": {
+          "const": "system",
+          "default": "system",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lock": {
+          "default": [],
+          "description": "Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.",
+          "items": {
+            "enum": [
+              "os",
+              "os-version",
+              "platform",
+              "machine",
+              "processor",
+              "hostname",
+              "cpu-count",
+              "memory-gb",
+              "python-version",
+              "python-implementation",
+              "git-version",
+              "docker-version",
+              "conda-version",
+              "mamba-version",
+              "uv-version",
+              "pixi-version",
+              "julia-version",
+              "juliaup-version",
+              "rscript-version",
+              "brew-version"
+            ],
+            "type": "string"
+          },
+          "title": "Lock",
+          "type": "array"
+        }
+      },
+      "title": "SystemEnvironment",
+      "type": "object"
+    },
+    "Table": {
+      "description": "Tabular data, whether it's the finding itself or how one is shown.\n\nIdentified by path, like the other artifacts, and cited that way.\n\nDeclaring one is optional: evidence says what it points at inline via\n``kind``, so an entry here is only needed when the table is worth a title\nand a description of its own.\n\nDeliberately nothing beyond the shared artifact fields yet. A ``name``,\nfor referring to a table symbolically, and ``columns`` both want to exist\neventually, but neither has anything reading it today, and columns need\nper-column types and units that belong with symbol metadata rather than\nbeing invented separately here. Both are free to add later; a field\nshipped early is not free to remove.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A human-readable title.",
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "Table",
+      "type": "object"
+    },
+    "TableEvidence": {
+      "description": "Evidence in the form of a table.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "kind": {
+          "const": "table",
+          "default": "table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "TableEvidence",
+      "type": "object"
+    },
     "UvEnvironment": {
       "properties": {
         "description": {
@@ -6479,7 +6644,26 @@
     },
     "environments": {
       "additionalProperties": {
-        "anyOf": [
+        "discriminator": {
+          "mapping": {
+            "conda": "#/$defs/CondaEnvironment",
+            "docker": "#/$defs/DockerEnvironment",
+            "julia": "#/$defs/JuliaEnvironment",
+            "matlab": "#/$defs/MatlabEnvironment",
+            "nix": "#/$defs/NixEnvironment",
+            "pbs": "#/$defs/PBSEnvironment",
+            "pixi": "#/$defs/PixiEnvironment",
+            "renv": "#/$defs/REnvironment",
+            "slurm": "#/$defs/SlurmEnvironment",
+            "ssh": "#/$defs/SSHEnvironment",
+            "system": "#/$defs/SystemEnvironment",
+            "uv": "#/$defs/UvEnvironment",
+            "uv-venv": "#/$defs/UvVenvEnvironment",
+            "venv": "#/$defs/VenvEnvironment"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
           {
             "$ref": "#/$defs/CondaEnvironment"
           },
@@ -6518,6 +6702,9 @@
           },
           {
             "$ref": "#/$defs/SSHEnvironment"
+          },
+          {
+            "$ref": "#/$defs/SystemEnvironment"
           }
         ]
       },
@@ -6724,13 +6911,13 @@
       "type": "object"
     },
     "results": {
-      "additionalProperties": {
+      "default": [],
+      "description": "The project's findings, each referring to a file, or to part of one.",
+      "items": {
         "$ref": "#/$defs/Result"
       },
-      "default": {},
-      "description": "The project's findings, keyed by name. Each refers to a file, or to part of one.",
       "title": "Results",
-      "type": "object"
+      "type": "array"
     },
     "showcase": {
       "anyOf": [
@@ -6786,6 +6973,15 @@
         "$ref": "#/$defs/Subproject"
       },
       "title": "Subprojects",
+      "type": "array"
+    },
+    "tables": {
+      "default": [],
+      "description": "The project's tables. Only needed for tables worth a title of their own; evidence can point at one inline.",
+      "items": {
+        "$ref": "#/$defs/Table"
+      },
+      "title": "Tables",
       "type": "array"
     },
     "title": {

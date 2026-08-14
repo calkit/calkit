@@ -197,7 +197,10 @@ def load_calkit_info(
         everything a faithful rewrite needs: comments, quoting style and
         anchors. Only pass True when the result will not be written back.
     """
+    from ruamel.yaml.comments import CommentedMap
+
     info: dict = {}
+    txt = ""
     fpath = "calkit.yaml"
     if wdir is not None:
         fpath = os.path.join(wdir, fpath)
@@ -205,9 +208,21 @@ def load_calkit_info(
         # Always read as UTF-8; on Windows the default open() encoding is
         # cp1252, which mangles non-ASCII content (e.g., Greek letters).
         with open(fpath, encoding="utf-8") as f:
-            info = _load_yaml_readonly(f) if read_only else ryaml.load(f)
+            txt = f.read()
+        info = _load_yaml_readonly(txt) if read_only else ryaml.load(txt)
     if info is None:
-        info = {}
+        # A file holding nothing but comments parses as None, and returning a
+        # plain dict here would drop them the next time it's written back.
+        # That's the file ``calkit init`` creates: only the schema modeline,
+        # which would then vanish on the project's first ``calkit new``.
+        info = CommentedMap()
+        comment = "\n".join(
+            line.lstrip().removeprefix("#").strip()
+            for line in txt.splitlines()
+            if line.lstrip().startswith("#")
+        )
+        if comment and not read_only:
+            info.yaml_set_start_comment(comment)
     return info
 
 

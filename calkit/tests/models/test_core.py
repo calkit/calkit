@@ -21,16 +21,15 @@ def test_publication_kind_no_longer_allows_presentation():
 def test_project_info_has_results_and_presentations():
     info = ProjectInfo.model_validate(
         {
-            "results": {
-                "metrics": {"path": "results/metrics.json", "key": "mean"}
-            },
+            "results": [{"path": "results/metrics.json", "key": "mean"}],
             "presentations": [{"path": "slides/talk.pdf", "title": "Talk"}],
         }
     )
-    assert info.results["metrics"].path == "results/metrics.json"
-    assert info.results["metrics"].key == "mean"
-    # The title is optional, since the name identifies the result
-    assert info.results["metrics"].title is None
+    assert info.results[0].path == "results/metrics.json"
+    assert info.results[0].key == "mean"
+    # Both title and name are optional, since the path and key identify it
+    assert info.results[0].title is None
+    assert info.results[0].name is None
     assert info.presentations[0].path == "slides/talk.pdf"
 
 

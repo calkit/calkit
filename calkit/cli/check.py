@@ -324,6 +324,7 @@ def check_environment(
         get_default_venv_prefix,
         get_env_lock_fpath,
         write_scheduler_env_lock,
+        write_system_env_lock,
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
@@ -473,6 +474,11 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == "system":
+        # Nothing is installed or built for a system env; checking it means
+        # reading the machine properties it declared it depends on and
+        # recording them, so stages depending on the env see them change.
+        write_system_env_lock(env_name=env_name, env=env)
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
     else:

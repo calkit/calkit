@@ -81,6 +81,7 @@ def test_check_venv_moved(tmp_dir):
     with open(activate_fpath) as f:
         activate_txt = f.read()
     prefix = os.path.abspath(".venv")
+    assert prefix in activate_txt
     with open(activate_fpath, "w") as f:
         f.write(activate_txt.replace(prefix, os.path.abspath("old-name")))
     subprocess.check_call(
@@ -91,9 +92,9 @@ def test_check_venv_moved(tmp_dir):
     # Activating should now resolve to the env's own Python, which is what
     # breaks when the path is stale
     if sys.platform == "win32":
-        cmd = f'{activate_fpath} && python -c "import requests"'
+        cmd = f'call "{activate_fpath}" && python -c "import requests"'
     else:
-        cmd = f". {activate_fpath} && python -c 'import requests'"
+        cmd = f". \"{activate_fpath}\" && python -c 'import requests'"
     subprocess.check_call(cmd, shell=True)
 
 

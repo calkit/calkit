@@ -1114,6 +1114,9 @@ def check_venv(
         pip_install_args += f" --python {python}"
     # Ensure prefix is natively formatted for the OS
     prefix = os.path.normpath(prefix)
+    prefix_full_path = (
+        prefix if os.path.isabs(prefix) else os.path.join(wdir or ".", prefix)
+    )
 
     def create_venv() -> None:
         if verbose:
@@ -1123,7 +1126,7 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
         if not os.path.isfile(gitignore_fpath):
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
@@ -1137,26 +1140,33 @@ def check_venv(
         is outside the environment.
         """
         if _platform.system() == "Windows":
-            activate_fpath = os.path.join(prefix, "Scripts", "activate.bat")
+            activate_fpath = os.path.join(
+                prefix_full_path, "Scripts", "activate.bat"
+            )
         else:
-            activate_fpath = os.path.join(prefix, "bin", "activate")
-        activate_fpath = os.path.join(wdir or ".", activate_fpath)
+            activate_fpath = os.path.join(prefix_full_path, "bin", "activate")
         if not os.path.isfile(activate_fpath):
             return True
         with open(activate_fpath) as f:
             content = f.read()
-        this_prefix = os.path.abspath(os.path.join(wdir or ".", prefix))
+        this_prefix = os.path.abspath(prefix_full_path)
         return os.path.normcase(this_prefix) not in os.path.normcase(content)
 
-    if not os.path.isdir(prefix):
+    if not os.path.isdir(prefix_full_path):
         create_venv()
     elif venv_was_moved():
         if not quiet:
             typer.echo(f"Recreating {kind} at {prefix} since it was moved")
         # uv refuses to create over an existing env, and packages are
         # reinstalled from the lock file below
-        shutil.rmtree(os.path.join(wdir or ".", prefix))
-        create_venv()
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            # Removal can fail if the environment is in use, e.g., on Windows,
+            # where files can't be removed while open, in which case we keep
+            # it and let the install below attempt a rebuild
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -1224,11 +1234,6 @@ def check_venv(
                 typer.echo(
                     f"Removing existing {kind} at {prefix} and rebuilding"
                 )
-            prefix_full_path = (
-                prefix
-                if os.path.isabs(prefix)
-                else os.path.join(wdir or ".", prefix)
-            )
             if os.path.isdir(prefix_full_path):
                 # This can fail if the environment is in use, e.g., on
                 # Windows, where files can't be removed while open, in which

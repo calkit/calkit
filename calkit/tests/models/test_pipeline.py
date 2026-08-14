@@ -646,3 +646,33 @@ def test_mappathsstage_rejects_paths_outside_the_project():
     ]:
         with pytest.raises(ValidationError):
             MapPathsStage(name="copy-figures", paths=[bad])
+
+
+def test_stage_rejects_wdir_outside_the_project():
+    # A subdirectory of the project is the point of the field
+    s = PythonScriptStage(
+        name="run",
+        environment="py",
+        script_path="run.py",
+        wdir="sub",
+    )
+    assert s.wdir == "sub"
+    assert s.to_dvc()["wdir"] == "sub"
+    # Unset stays unset rather than defaulting to something
+    assert (
+        PythonScriptStage(
+            name="run", environment="py", script_path="run.py"
+        ).wdir
+        is None
+    )
+    # wdir becomes the DVC stage's working directory and is joined with the
+    # stage's other paths, so an absolute or escaping value would run the
+    # pipeline outside the project
+    for bad in ["/etc", "../..", "../sibling", "sub/../../.."]:
+        with pytest.raises(ValidationError):
+            PythonScriptStage(
+                name="run",
+                environment="py",
+                script_path="run.py",
+                wdir=bad,
+            )

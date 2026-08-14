@@ -186,7 +186,12 @@ class Stage(BaseModel):
         "map-paths",
     ]
     environment: str
-    wdir: str | None = None
+    # Constrained like other stage path fields (e.g. MatlabScriptStage's
+    # matlab_path): this becomes the DVC stage's working directory and is
+    # joined with the stage's other paths, where an absolute value would
+    # silently win, so an unchecked one lets a project's pipeline run
+    # against paths outside itself.
+    wdir: RelativeChildPathString | None = None
     # TODO: Support other input types
     inputs: list[str | InputsFromStageOutputs] = []
     outputs: list[str | PathOutput] = []  # TODO: Support database outputs

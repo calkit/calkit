@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import posixpath
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from calkit.models.iteration import Metric, ParametersType
 from calkit.models.pipeline import Pipeline
@@ -345,6 +346,30 @@ class StaticHtmlApp(BaseModel):
     # Catch typos, and reject a hand-written ``url`` rather than silently
     # ignoring it
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("path")
+    @classmethod
+    def check_path_is_a_file_in_the_project(cls, v: str) -> str:
+        """The path names the app's HTML entrypoint, not its directory.
+
+        Its parent is what gets served, so a path that isn't a file leaves
+        nothing to serve and no root to serve it from.
+        """
+        if not v.strip():
+            raise ValueError("Path must not be empty")
+        p = PurePosixPath(v)
+        if p.is_absolute():
+            raise ValueError(f"Path must be relative: {v}")
+        norm = posixpath.normpath(v)
+        if norm == "." or norm.startswith(".."):
+            raise ValueError(
+                f"Path must be a file within the project, not '{v}'"
+            )
+        if not norm.endswith((".html", ".htm")):
+            raise ValueError(
+                f"Path must name an HTML file for a static-html app, got '{v}'"
+            )
+        return norm
 
     @property
     def serve_dir(self) -> str:

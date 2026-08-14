@@ -8130,10 +8130,12 @@ def serve_project_app_file(
     serve_dir = posixpath.dirname(project_app.path)
     entrypoint = posixpath.basename(project_app.path)
     rel_path = path.strip("/") or entrypoint
-    # Reject traversal outside the app's directory
-    full_path = posixpath.normpath(posixpath.join(serve_dir, rel_path))
-    if serve_dir and not (
-        full_path == serve_dir or full_path.startswith(serve_dir + "/")
+    # Reject traversal outside the app's directory. Checked on the relative
+    # path itself rather than on the joined one, since an app whose
+    # entrypoint sits at the repo root has an empty serve_dir, and a
+    # serve_dir-based guard silently does nothing in that case.
+    if posixpath.isabs(rel_path) or posixpath.normpath(rel_path).startswith(
+        ".."
     ):
         raise HTTPException(404)
     content = app.projects.read_app_file(
@@ -8166,6 +8168,12 @@ def serve_project_app_file(
             # These bytes are project-supplied, so don't let a browser
             # second-guess the type we set and render, say, an image as HTML
             "X-Content-Type-Options": "nosniff",
+            # The app is embedded in a sandboxed iframe, which gives it a
+            # null origin, so its own asset requests are cross-origin.
+            # Access is still gated by the read check above, and auth is a
+            # bearer header rather than a cookie, so this grants a
+            # cross-origin page nothing it couldn't already fetch.
+            "Access-Control-Allow-Origin": "*",
         },
     )
 

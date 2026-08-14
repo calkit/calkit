@@ -1347,8 +1347,8 @@ class MarimoStage(Stage):
     marimo's own export is not self-contained: it requires the data an app
     reads to already sit in a ``public`` directory next to the notebook, and
     copies only that directory into the output. Assembling that is this
-    stage's main job, and it happens in a build directory rather than in
-    place, so nothing is generated in the project tree. Paths in ``include_paths`` are
+    stage's main job, and it happens in a build directory rather than
+    in place, so nothing is generated in the project tree. Paths in ``include_paths`` are
     copied beneath ``public`` at their project-relative paths, so notebook
     code that reads ``mo.notebook_location() / "public" / "data.csv"`` works
     the same locally as it does in the browser.
@@ -1371,6 +1371,24 @@ class MarimoStage(Stage):
     include_paths: list[str] = []
     output_path: str
     app_storage: Literal["git", "dvc"] | None = "dvc"
+
+    @model_validator(mode="after")
+    def check_include_paths_have_a_stable_dep(self) -> MarimoStage:
+        """Reject an include pattern whose first segment is a glob.
+
+        Dependencies are the pattern's longest non-glob parent, so a
+        top-level pattern like ``*.csv`` leaves nothing to depend on, and
+        silently dropping it would let DVC order this stage before whatever
+        produces those files.
+        """
+        for path in self.include_paths:
+            if not _non_glob_prefix(path):
+                raise ValueError(
+                    f"Included path '{path}' begins with a glob, leaving no "
+                    "directory to depend on; put it under one, e.g. "
+                    f"'data/{path}'"
+                )
+        return self
 
     @model_validator(mode="after")
     def check_export_options(self) -> MarimoStage:
@@ -1402,7 +1420,7 @@ class MarimoStage(Stage):
         # parent instead: conservative, but stable and correctly ordered.
         for path in self.include_paths:
             dep = _non_glob_prefix(path)
-            if dep and dep not in deps:
+            if dep not in deps:
                 deps.append(dep)
         return deps + super().dvc_deps
 

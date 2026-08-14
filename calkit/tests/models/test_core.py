@@ -85,6 +85,11 @@ def test_apps():
     assert app.stage == "build-app"
     # An app at the repo root serves from there rather than blowing up
     assert StaticHtmlApp(path="index.html").serve_dir == "."
+    # The path names the entrypoint file, so anything that isn't one leaves
+    # nothing to serve and no root to serve it from
+    for bad in [".", "", "app", "app/", "/tmp/x.html", "../x.html"]:
+        with pytest.raises(ValidationError):
+            StaticHtmlApp(path=bad)
     # Apps can be showcased by key, alongside the existing entry kinds
     assert info.showcase is not None
     assert isinstance(info.showcase[0], ShowcaseApp)

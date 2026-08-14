@@ -394,8 +394,8 @@ load time.
 marimo's own export is not self-contained: it requires the data an app
 reads to already sit in a `public` directory next to the notebook, and
 copies only that directory into the output. Assembling that is this
-stage's main job, and it happens in a build directory rather than in
-place, so nothing is generated in the project tree. Paths in `include_paths` are
+stage's main job, and it happens in a build directory rather than
+in place, so nothing is generated in the project tree. Paths in `include_paths` are
 copied beneath `public` at their project-relative paths, so notebook
 code that reads `mo.notebook_location() / "public" / "data.csv"` works
 the same locally as it does in the browser.

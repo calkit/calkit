@@ -26,6 +26,9 @@ function AppFrame({ app, gitRef }: { app: ProjectApp; gitRef?: string }) {
         src={src}
         width="100%"
         height="100%"
+        // Project-supplied HTML/JS, so deny it the top-level page and a
+        // same-origin context, matching the other embeds in this codebase
+        sandbox="allow-scripts allow-popups"
         style={{ borderRadius: "10px" }}
       />
     </Box>

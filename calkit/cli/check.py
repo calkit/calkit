@@ -1128,7 +1128,34 @@ def check_venv(
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
 
+    def venv_was_moved() -> bool:
+        """Check if the venv's activate script points somewhere else.
+
+        Renaming or moving a project leaves the absolute path baked into the
+        activate script pointing at the old location, so activating prepends a
+        nonexistent directory to PATH and commands silently resolve to whatever
+        is outside the environment.
+        """
+        if _platform.system() == "Windows":
+            activate_fpath = os.path.join(prefix, "Scripts", "activate.bat")
+        else:
+            activate_fpath = os.path.join(prefix, "bin", "activate")
+        activate_fpath = os.path.join(wdir or ".", activate_fpath)
+        if not os.path.isfile(activate_fpath):
+            return True
+        with open(activate_fpath) as f:
+            content = f.read()
+        this_prefix = os.path.abspath(os.path.join(wdir or ".", prefix))
+        return os.path.normcase(this_prefix) not in os.path.normcase(content)
+
     if not os.path.isdir(prefix):
+        create_venv()
+    elif venv_was_moved():
+        if not quiet:
+            typer.echo(f"Recreating {kind} at {prefix} since it was moved")
+        # uv refuses to create over an existing env, and packages are
+        # reinstalled from the lock file below
+        shutil.rmtree(os.path.join(wdir or ".", prefix))
         create_venv()
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)

@@ -66,6 +66,37 @@ def test_check_venv(tmp_dir):
     )
 
 
+def test_check_venv_moved(tmp_dir):
+    with open("reqs.txt", "w") as f:
+        f.write("requests")
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    # Simulate the project having been renamed, which leaves the old absolute
+    # path baked into the activate script
+    if sys.platform == "win32":
+        activate_fpath = os.path.join(".venv", "Scripts", "activate.bat")
+    else:
+        activate_fpath = os.path.join(".venv", "bin", "activate")
+    with open(activate_fpath) as f:
+        activate_txt = f.read()
+    prefix = os.path.abspath(".venv")
+    with open(activate_fpath, "w") as f:
+        f.write(activate_txt.replace(prefix, os.path.abspath("old-name")))
+    subprocess.check_call(
+        ["calkit", "check", "venv", "reqs.txt", "-o", "lock.txt"]
+    )
+    with open(activate_fpath) as f:
+        assert os.path.normcase(prefix) in os.path.normcase(f.read())
+    # Activating should now resolve to the env's own Python, which is what
+    # breaks when the path is stale
+    if sys.platform == "win32":
+        cmd = f'{activate_fpath} && python -c "import requests"'
+    else:
+        cmd = f". {activate_fpath} && python -c 'import requests'"
+    subprocess.check_call(cmd, shell=True)
+
+
 def test_check_env_vars(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     ck_info = {

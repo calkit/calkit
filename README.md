@@ -37,7 +37,7 @@ without the cognitive overhead.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
-![pipeline](docs/img/pipeline.png)
+![pipeline](https://docs.calkit.org/img/pipeline.png)
 
 ## Features
 

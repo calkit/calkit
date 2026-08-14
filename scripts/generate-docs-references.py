@@ -38,6 +38,8 @@ STAGE_START = "<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:START -->"
 STAGE_END = "<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:END -->"
 LEGACY_START = "<!-- AUTO-GENERATED: ENV-AND-STAGE-KINDS:START -->"
 LEGACY_END = "<!-- AUTO-GENERATED: ENV-AND-STAGE-KINDS:END -->"
+KEYS_START = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:START -->"
+KEYS_END = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->"
 
 
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
@@ -403,6 +405,11 @@ def generate_cli_markdown() -> str:
 
 
 def _annotation_to_text(annotation: Any) -> str:
+    # Unwrap Annotated first, else pydantic's metadata (e.g. the repr of a
+    # Discriminator) leaks into the table. Checked via __metadata__ rather
+    # than the origin, which stringifies as "<class 'typing.Annotated'>".
+    if hasattr(annotation, "__metadata__"):
+        return _annotation_to_text(annotation.__origin__)
     origin = get_origin(annotation)
     if origin is None:
         if annotation is type(None):
@@ -410,9 +417,6 @@ def _annotation_to_text(annotation: Any) -> str:
         if hasattr(annotation, "__name__"):
             return annotation.__name__
         return str(annotation).replace("typing.", "")
-    if str(origin).endswith("Annotated"):
-        args = get_args(annotation)
-        return _annotation_to_text(args[0]) if args else "Any"
     args = get_args(annotation)
     if origin is list:
         return f"list[{_annotation_to_text(args[0]) if args else 'Any'}]"
@@ -511,17 +515,51 @@ def _class_doc_lines(cls: type[Any] | None) -> list[str]:
     return lines
 
 
+# A union of more than this many model types is summarized by the base class
+# they share, if any. Spelling out all thirteen environment kinds makes a
+# table column unreadable and says less than the name of the concept does.
+_MAX_UNION_MEMBERS = 4
+
+
+def _shared_model_base(types_: list[Any]) -> type[BaseModel] | None:
+    """Return the model base every one of ``types_`` derives from, if any.
+
+    ``BaseModel`` itself doesn't count: it's shared by everything, so it
+    would summarize a union as nothing at all.
+    """
+    if not all(
+        isinstance(t, type) and issubclass(t, BaseModel) for t in types_
+    ):
+        return None
+    # Walk the first member's bases from most to least specific, so the
+    # narrowest shared base wins
+    for base in types_[0].__mro__[1:]:
+        if base is BaseModel:
+            break
+        if all(issubclass(t, base) for t in types_):
+            return base
+    return None
+
+
 def _render_field_type(ann: Any) -> str:
     """Render a Pydantic field annotation as it should appear in the docs.
 
     Optionality is conveyed by the separate "Required" column, so ``X | None``
     is rendered as ``X``.
     """
+    # Unwrap Annotated, else pydantic's metadata (e.g. Discriminator(...))
+    # leaks into the docs as the repr of an internal object
+    if hasattr(ann, "__metadata__"):
+        return _render_field_type(ann.__origin__)
     origin = get_origin(ann)
     if origin is Union or isinstance(ann, types.UnionType):
         non_none = [a for a in get_args(ann) if a is not type(None)]
         if len(non_none) == 1:
             return _render_field_type(non_none[0])
+        if len(non_none) > _MAX_UNION_MEMBERS:
+            shared = _shared_model_base(non_none)
+            if shared is not None:
+                return shared.__name__
         return " | ".join(_render_field_type(a) for a in non_none)
     if origin is not None and str(origin).endswith("Literal"):
         return "Literal[" + "|".join(repr(v) for v in get_args(ann)) + "]"
@@ -807,6 +845,42 @@ def generate_stage_kinds_markdown() -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+# Keys whose contents are big enough to have earned their own page, which
+# says far more than a type name in a table can
+_KEY_DOC_PAGES = {
+    "dependencies": "dependencies.md",
+    "environments": "environments.md",
+    "pipeline": "pipeline/index.md",
+    "questions": "questions.md",
+    "datasets": "datasets.md",
+    "references": "references.md",
+    "procedures": "tutorials/procedures.md",
+    "releases": "releases.md",
+}
+
+
+def generate_top_level_keys_markdown() -> str:
+    """Document the top-level keys of calkit.yaml, from ``ProjectInfo``."""
+    from calkit.models.core import ProjectInfo
+
+    rows = []
+    for name, field in ProjectInfo.model_fields.items():
+        key = field.alias or name
+        page = _KEY_DOC_PAGES.get(name)
+        rows.append(
+            (
+                f"[`{key}`]({page})" if page else f"`{key}`",
+                _render_field_type(field.annotation),
+                "yes" if _is_required(field) else "no",
+                _description_to_text(field),
+            )
+        )
+    return (
+        make_table(rows, ["Key", "Type", "Required", "Description"]).rstrip()
+        + "\n"
+    )
+
+
 def _replace_marked_block(
     content: str,
     start_marker: str,
@@ -855,6 +929,15 @@ def main() -> None:
         generate_stage_kinds_markdown(),
     )
     pipeline_doc.write_text(pipeline_content, encoding="utf-8")
+
+    keys_doc = repo_root / "docs" / "calkit-yaml.md"
+    keys_content = _replace_marked_block(
+        keys_doc.read_text(encoding="utf-8"),
+        KEYS_START,
+        KEYS_END,
+        generate_top_level_keys_markdown(),
+    )
+    keys_doc.write_text(keys_content, encoding="utf-8")
 
 
 if __name__ == "__main__":

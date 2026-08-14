@@ -66,6 +66,57 @@ pipeline:
         - references.bib
 ```
 
+## Inputs and outputs
+
+Every stage can declare the paths it reads with `inputs`
+and the paths it writes with `outputs`.
+Together these are what let Calkit decide whether a stage is up-to-date:
+a stage reruns when one of its inputs changes,
+and its outputs are what get cached, stored, and handed to downstream stages.
+
+Both accept either a plain path,
+which is the common case,
+or an object when you need to say more about it:
+
+```yaml
+outputs:
+  - data/processed.csv # Plain path, stored with DVC
+  - path: data/meta.json
+    storage: git
+    delete_before_run: false
+```
+
+### Where outputs are stored
+
+An output's `storage` decides which system tracks it:
+
+| Value     | Meaning                                                                                                                                                                                  |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `dvc`     | Track with DVC. The default, and the right choice for most data and figures.                                                                                                             |
+| `git`     | Track with Git, for small text files worth reading in a diff.                                                                                                                            |
+| `dvc-zip` | Zip the directory and track the archive with DVC, for directories of many small files. See [large folders of many small files](../version-control.md#large-folders-of-many-small-files). |
+| null      | Leave the path untracked, i.e., produced but neither committed nor cached.                                                                                                               |
+
+By default an output is removed before the stage runs,
+so each run starts from a clean slate
+rather than building on the previous run's file.
+Set `delete_before_run: false` for an output the stage appends to
+or updates in place;
+this maps to DVC's `persist`.
+
+### Depending on another stage's outputs
+
+Instead of repeating paths, an input can name a stage
+and pick up whatever that stage produces:
+
+```yaml
+inputs:
+  - from_stage_outputs: collect-data
+```
+
+The full set of properties for each of these objects is listed under
+[nested parameter types](#nested-parameter-types).
+
 ## Stage types and unique attributes
 
 All stage declarations require a `kind` and an `environment`,
@@ -375,10 +426,10 @@ Model class: `LatexStage`
 
 Model class: `MapPathsStage`
 
-| Kind-specific parameter | Type                                                                                                                                                                                                                                                                                                                                                        | Required | Default    | Description                                         |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str                                                                                                                                                                                                                                                                                                                                                         | no       | '\_system' | Name of the environment in which to run this stage. |
-| `paths`                 | list[Annotated[calkit.models.pipeline.MapPathsStage.CopyFileToFile \| calkit.models.pipeline.MapPathsStage.CopyFileToDir \| calkit.models.pipeline.MapPathsStage.DirToDirMerge \| calkit.models.pipeline.MapPathsStage.DirToDirReplace, Discriminator(discriminator='kind', custom_error_type=None, custom_error_message=None, custom_error_context=None)]] | yes      |            | Copy operations to perform.                         |
+| Kind-specific parameter | Type                                                                      | Required | Default    | Description                                         |
+| ----------------------- | ------------------------------------------------------------------------- | -------- | ---------- | --------------------------------------------------- |
+| `environment`           | str                                                                       | no       | '\_system' | Name of the environment in which to run this stage. |
+| `paths`                 | list[CopyFileToFile \| CopyFileToDir \| DirToDirMerge \| DirToDirReplace] | yes      |            | Copy operations to perform.                         |
 
 ### `matlab-command`
 
@@ -392,10 +443,10 @@ Model class: `MatlabCommandStage`
 
 Model class: `MatlabScriptStage`
 
-| Kind-specific parameter | Type                                                                                          | Required | Default | Description                                      |
-| ----------------------- | --------------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------ |
-| `script_path`           | str                                                                                           | yes      |         | Path to the MATLAB script to run.                |
-| `matlab_path`           | Annotated[str, AfterValidator(func=<function _check_path_relative_and_child_of_cwd>)] \| None | no       | null    | Directory added to the MATLAB path, recursively. |
+| Kind-specific parameter | Type        | Required | Default | Description                                      |
+| ----------------------- | ----------- | -------- | ------- | ------------------------------------------------ |
+| `script_path`           | str         | yes      |         | Path to the MATLAB script to run.                |
+| `matlab_path`           | str \| None | no       | null    | Directory added to the MATLAB path, recursively. |
 
 ### `python-script`
 

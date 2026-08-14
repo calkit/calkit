@@ -22,6 +22,10 @@ jobs:
         working-directory: vscode-ext
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The changelog is derived from the vscode-ext/v* tags, which a
+          # shallow checkout doesn't fetch
+          fetch-depth: 0
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -47,6 +51,11 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
       - name: Run extension tests
         run: npm test
+      - name: Generate changelog
+        # Like the version above, the changelog mirrors the release tags
+        # rather than being maintained by hand, so it can't go stale. The tag
+        # for this release already exists, so it lands at the top.
+        run: npm run changelog
       - name: Package extension
         run: |
           mkdir -p dist

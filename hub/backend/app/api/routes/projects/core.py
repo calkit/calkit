@@ -67,6 +67,7 @@ from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
     load_yaml_fast,
+    normalize_artifact_path,
     params_from_url,
     ryaml,
     utcnow,
@@ -2573,6 +2574,9 @@ def post_project_figure(
     stage: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Figure:
+    # A path declared as "./figures/plot.png" would never match its
+    # "figures/plot.png" DVC out, so clean it up before it reaches calkit.yaml
+    path = normalize_artifact_path(path)
     file_data: bytes | None = None
     full_fig_path: str | None = None
     if file is not None:
@@ -4055,6 +4059,9 @@ def post_project_publication(
     environment: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Publication:
+    # A path declared as "./paper/main.pdf" would never match its
+    # "paper/main.pdf" DVC out, so clean it up before it reaches calkit.yaml
+    path = normalize_artifact_path(path)
     if file is not None:
         logger.info(
             f"Received publication file {path} with content type: "

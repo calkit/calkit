@@ -22,7 +22,7 @@ jobs:
       # Only the runner's platform is built here; the multi-platform build
       # happens on release, where it's worth the QEMU emulation time
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: calkit/resources/devcontainer
           load: true

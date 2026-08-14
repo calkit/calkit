@@ -1174,6 +1174,13 @@ def test_system_env_lock(tmp_dir):
     env = {"kind": "system", "lock": ["os", "python-version"]}
     lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)
     assert lock_fpath == envs.get_env_lock_fpath(env=env, env_name="sys")
+    # There is exactly one lock file, so a stage depends on the file rather
+    # than its directory, unlike the envs with per-platform lock files
+    assert lock_fpath.endswith("info.json")
+    assert (
+        envs.get_env_lock_fpath(env=env, env_name="sys", for_dvc=True)
+        == lock_fpath
+    )
     with open(lock_fpath) as f:
         data = json.load(f)
     assert set(data) == {"os", "python-version"}

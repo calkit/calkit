@@ -436,9 +436,11 @@ def get_env_lock_fpath(
         # no lock file and no DVC dep.
         if not env.get("lock"):
             return None
+        # Written by ``write_system_env_lock`` during environment checks, and
+        # referenced as a DVC dep by stage compilation. Note this is the file
+        # itself even when ``for_dvc``: there's exactly one of them, so
+        # there's no reason to make a stage depend on the whole directory.
         lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
-        if for_dvc:
-            lock_fpath = os.path.dirname(lock_fpath)
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is

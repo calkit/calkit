@@ -277,17 +277,17 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter      | Type                                | Required | Default |
-| -------------- | ----------------------------------- | -------- | ------- |
-| `environment`  | str                                 | yes      |         |
-| `wdir`         | str \| None                         | no       | null    |
-| `inputs`       | list[str \| InputsFromStageOutputs] | no       |         |
-| `outputs`      | list[str \| PathOutput]             | no       |         |
-| `always_run`   | bool                                | no       | False   |
-| `iterate_over` | list[StageIteration] \| None        | no       | null    |
-| `description`  | str \| None                         | no       | null    |
-| `frozen`       | bool                                | no       | False   |
-| `scheduler`    | StageSchedulerOptions \| None       | no       | null    |
+| Parameter      | Type                                                                                         | Required | Default |
+| -------------- | -------------------------------------------------------------------------------------------- | -------- | ------- |
+| `environment`  | str                                                                                          | yes      |         |
+| `wdir`         | Annotated[str, AfterValidator(func=<function check_path_relative_and_child_of_cwd>)] \| None | no       | null    |
+| `inputs`       | list[str \| InputsFromStageOutputs]                                                          | no       |         |
+| `outputs`      | list[str \| PathOutput]                                                                      | no       |         |
+| `always_run`   | bool                                                                                         | no       | False   |
+| `iterate_over` | list[StageIteration] \| None                                                                 | no       | null    |
+| `description`  | str \| None                                                                                  | no       | null    |
+| `frozen`       | bool                                                                                         | no       | False   |
+| `scheduler`    | StageSchedulerOptions \| None                                                                | no       | null    |
 
 ### `command`
 

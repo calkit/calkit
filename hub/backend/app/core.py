@@ -3,6 +3,7 @@
 import csv
 import logging
 import os
+import posixpath
 import threading
 from datetime import UTC, datetime
 from typing import Any
@@ -74,6 +75,24 @@ def load_yaml_fast(data: str | bytes) -> Any:
     ~3.2s, which is the difference between a page load and a page wait.
     """
     return yaml.load(data, Loader=_YamlLoader)
+
+
+def normalize_artifact_path(path: str) -> str:
+    """Normalize an artifact path to the form Git and DVC key on.
+
+    Paths in ``calkit.yaml`` are hand-written or come straight off the
+    command line, so they can carry a leading ``./`` or a trailing slash,
+    while the Git tree, ``dvc.lock`` outs and object storage all key on
+    clean relative POSIX paths. Without this, a publication declared as
+    ``./paper/main.pdf`` never matches its ``paper/main.pdf`` DVC out and
+    the hub reports it as having no content.
+
+    Returns an empty string for a path that resolves to the repo root.
+    """
+    if not path:
+        return path
+    normalized = posixpath.normpath(path)
+    return "" if normalized == "." else normalized
 
 
 CATEGORIES_SINGULAR_TO_PLURAL = {

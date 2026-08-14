@@ -110,18 +110,18 @@ jobs:
           echo "calkit-python ${{ steps.version.outputs.version }} never appeared on PyPI"
           exit 1
       - name: Log in to the container registry
-        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        uses: docker/login-action@af63523ba5f55733d817da0fdb813e660152c72c
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build and push image
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: calkit/resources/devcontainer
           push: true
@@ -133,7 +133,7 @@ jobs:
       # An unforgeable statement about where and how the image was built,
       # which increases supply chain security for anyone who consumes it
       - name: Generate artifact attestation
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.push.outputs.digest }}

@@ -39,7 +39,11 @@ from app.core import (
     ryaml,
     utcnow,
 )
-from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
+from app.dvc import (
+    expand_dvc_lock_outs,
+    get_data_fpath_for_md5,
+    read_dvc_dir_cached,
+)
 from app.git import (
     RepoTree,
     get_ck_info_from_repo,
@@ -326,38 +330,80 @@ def read_app_file(
     Falls back to the working tree for a directory tracked with Git, since
     a small static app needn't be in DVC at all.
     """
+
+    def contained(path: str) -> str | None:
+        """Normalize a path, or None if it isn't inside the repo."""
+        if not path:
+            return ""
+        if posixpath.isabs(path):
+            return None
+        norm = posixpath.normpath(path)
+        if norm == ".." or norm.startswith("../"):
+            return None
+        return "" if norm == "." else norm
+
+    # Both paths reach the filesystem directly when ref is None, since a
+    # WorkingTree joins onto the checkout root without bounding the result.
+    # dir_path comes from the project's own calkit.yaml and rel_path from
+    # the request, so neither may escape the repo. Normalizing here also
+    # means a request for 'a/../b.js' resolves rather than missing.
+    checked_dir = contained(dir_path)
+    checked_rel = contained(rel_path)
+    if checked_dir is None or checked_rel is None or not checked_rel:
+        return None
+    dir_path, rel_path = checked_dir, checked_rel
     tree = get_repo_tree_for_ref(repo, ref)
     full_path = posixpath.join(dir_path, rel_path) if dir_path else rel_path
     if tree.is_file(full_path):
+        # A symlink pointing out of the tree reads whatever it targets on
+        # the server, so reject it the way get_contents_from_tree does
+        if tree.is_symlink(full_path) and not tree.is_safe_symlink(full_path):
+            logger.warning(
+                f"Unsafe symlink detected in {project.owner_account_name}/"
+                f"{project.name} at {full_path}"
+            )
+            return None
         return tree.read_bytes(full_path)
-    outs = dvc_outputs_from_tree(project=project, tree=tree)
-    out = outs.get(dir_path)
-    if out is None:
-        return None
-    md5 = out.get("md5", "")
-    if not md5.endswith(".dir"):
-        return None
     owner_name = project.owner_account_name
     project_name = project.name
+    # dvc.lock outs are expanded per file and cached on the bytes of
+    # dvc.lock, so the whole app resolves out of one cached mapping. Only a
+    # directory tracked with `dvc add` needs the pointer-file scan below,
+    # which walks the entire tree and so mustn't run per asset request.
+    dvc_lock_outs = get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    ).dvc_lock_outs
+    out = dvc_lock_outs.get(full_path)
+    if out is None and dir_path not in dvc_lock_outs:
+        out = dvc_outputs_from_tree(project=project, tree=tree).get(dir_path)
+        if out is None:
+            return None
+        md5 = out.get("md5", "")
+        if not md5.endswith(".dir"):
+            return None
+        dir_fpath = get_data_fpath_for_md5(
+            owner_name=owner_name,
+            project_name=project_name,
+            md5=md5,
+        )
+        # The .dir object is a JSON list of {"md5": ..., "relpath": ...},
+        # which is how we map a request path onto the object holding its
+        # bytes. Reads of it are cached by object path.
+        entries = (
+            read_dvc_dir_cached(dir_fpath) if dir_fpath is not None else None
+        )
+        md5_by_relpath = {
+            e.get("relpath"): e.get("md5")
+            for e in (entries or [])
+            if isinstance(e, dict)
+        }
+        out = {"md5": md5_by_relpath.get(rel_path)}
+    file_md5 = out.get("md5") if out is not None else None
+    # A request that lands on the directory itself resolves to its .dir
+    # object, which is a listing rather than anything servable
+    if not file_md5 or file_md5.endswith(".dir"):
+        return None
     fs = get_object_fs()
-    dir_fpath = get_data_fpath_for_md5(
-        owner_name=owner_name,
-        project_name=project_name,
-        md5=md5,
-        fs=fs,
-    )
-    if dir_fpath is None:
-        return None
-    # The .dir object is a JSON list of {"md5": ..., "relpath": ...}, which
-    # is how we map a request path onto the object holding its bytes
-    with fs.open(dir_fpath, "rb") as f:
-        entries = json.loads(f.read())
-    md5_by_relpath = {
-        e.get("relpath"): e.get("md5") for e in entries if isinstance(e, dict)
-    }
-    file_md5 = md5_by_relpath.get(rel_path)
-    if not file_md5:
-        return None
     file_fpath = get_data_fpath_for_md5(
         owner_name=owner_name,
         project_name=project_name,

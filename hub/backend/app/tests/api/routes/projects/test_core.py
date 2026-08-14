@@ -3017,3 +3017,104 @@ def test_get_project_apps(client: TestClient) -> None:
         )
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
+    fake_project = SimpleNamespace()
+    ck_info = {
+        "apps": {
+            # The declared path becomes a serving root that file reads join
+            # onto, so one that escapes the project is dropped rather than
+            # served, and doesn't take the valid apps with it
+            "escape": {"path": "../../../etc/passwd.html"},
+            "absolute": {"path": "/etc/passwd.html"},
+            "not-html": {"path": "app/data.csv"},
+            "no-path": {"title": "Nothing to serve"},
+            "good": {"path": "./app/index.html"},
+        }
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    apps = response.json()
+    assert [a["name"] for a in apps] == ["good"]
+    # Declared paths come back normalized, the way they're keyed everywhere
+    assert apps[0]["path"] == "app/index.html"
+
+
+def test_serve_project_app_file(client: TestClient) -> None:
+    ck_info = {"apps": {"myapp": {"path": "app/index.html"}}}
+    base = f"{settings.API_V1_STR}/projects/test-owner/test-project"
+
+    def get(path: str, is_public: bool = True):
+        with (
+            patch(
+                "app.api.routes.projects.core.app.projects.get_project",
+                return_value=SimpleNamespace(is_public=is_public),
+            ),
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_ck_info_for_ref",
+                return_value=ck_info,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects.read_app_file",
+                side_effect=lambda **kwargs: (
+                    f"bytes:{kwargs['rel_path']}".encode()
+                ),
+            ) as mock_read,
+        ):
+            return client.get(path, follow_redirects=False), mock_read
+
+    # No path serves the declared entrypoint, out of its own directory
+    response, mock_read = get(f"{base}/apps/myapp/serve")
+    assert response.status_code == 200
+    assert response.content == b"bytes:index.html"
+    assert mock_read.call_args.kwargs["dir_path"] == "app"
+    assert response.headers["content-type"].startswith("text/html")
+    # Project-supplied bytes, so the browser doesn't get to second-guess the
+    # type, and a public project's app is cacheable by anyone
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "public, max-age=300"
+    # An asset resolves relative to the entrypoint's directory, and WASM has
+    # to be typed exactly or the browser won't stream-compile it
+    response, _ = get(f"{base}/apps/myapp/serve/assets/pyodide.wasm")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/wasm"
+    # Access is gated on a read check, so a shared cache must not hold a
+    # private project's app and hand it to somebody we'd have refused
+    response, _ = get(f"{base}/apps/myapp/serve", is_public=False)
+    assert response.headers["cache-control"] == "private, max-age=300"
+    # A pinned commit can never change what it returns
+    sha = "0" * 40
+    response, _ = get(f"{base}/apps/myapp/{sha}/serve/index.html")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == (
+        "public, max-age=31536000, immutable"
+    )
+    # Nothing may climb out of the app's directory
+    for bad in ["../../../etc/passwd", "assets/../../../etc/passwd"]:
+        response, _ = get(f"{base}/apps/myapp/serve/{bad}")
+        assert response.status_code == 404, bad
+    # An app that isn't declared isn't served
+    response, _ = get(f"{base}/apps/nope/serve")
+    assert response.status_code == 404

@@ -414,6 +414,7 @@ than inferred from the dependency graph. They are dependencies too.
 | `include_paths`         | list[str]                     | no       |             |
 | `output_path`           | str                           | yes      |             |
 | `app_storage`           | Literal['git', 'dvc'] \| None | no       | 'dvc'       |
+| `validate_notebook`     | bool                          | no       | True        |
 
 ### `matlab-command`
 

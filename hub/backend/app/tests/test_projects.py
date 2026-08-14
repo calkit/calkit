@@ -472,3 +472,82 @@ def test_get_notebook_from_repo(
             project=project, repo=repo, path="notebooks/nope.ipynb"
         )
     assert exc_info.value.status_code == 404
+
+
+def test_read_app_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(
+        app.projects, "get_data_fpath_for_md5", lambda **kwargs: None
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "app").mkdir()
+    (repo_dir / "app" / "index.html").write_text("<h1>app</h1>")
+    (repo_dir / "app" / "assets").mkdir()
+    (repo_dir / "app" / "assets" / "main.js").write_text("export default 1")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add app"])
+    # A secret next to the checkout, i.e., what a traversal would reach
+    (tmp_path / "secret.txt").write_text("password")
+    read = app.projects.read_app_file
+    assert (
+        read(project=project, repo=repo, dir_path="app", rel_path="index.html")
+        == b"<h1>app</h1>"
+    )
+    assert (
+        read(
+            project=project,
+            repo=repo,
+            dir_path="app",
+            rel_path="assets/main.js",
+        )
+        == b"export default 1"
+    )
+    # Paths are normalized rather than passed through, so a request that
+    # walks back into the app's own directory still resolves
+    assert (
+        read(
+            project=project,
+            repo=repo,
+            dir_path="app",
+            rel_path="assets/../index.html",
+        )
+        == b"<h1>app</h1>"
+    )
+    # Neither the declared app directory nor the requested path may leave the
+    # repo. dir_path comes from the project's own calkit.yaml, and reads go
+    # through the checkout directly, so an unchecked '..' would hand back any
+    # file on the server.
+    for dir_path, rel_path in [
+        ("app", "../../secret.txt"),
+        ("app", "/etc/passwd"),
+        ("../", "secret.txt"),
+        ("app/../..", "secret.txt"),
+        ("/etc", "passwd"),
+        ("app", ""),
+    ]:
+        assert (
+            read(
+                project=project,
+                repo=repo,
+                dir_path=dir_path,
+                rel_path=rel_path,
+            )
+            is None
+        ), (dir_path, rel_path)
+    # A symlink out of the tree reads whatever it points at, so it's refused
+    # the same way it is when browsing files
+    (repo_dir / "app" / "leak.html").symlink_to(tmp_path / "secret.txt")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add symlink"])
+    assert (
+        read(project=project, repo=repo, dir_path="app", rel_path="leak.html")
+        is None
+    )

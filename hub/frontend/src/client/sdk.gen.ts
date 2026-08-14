@@ -396,12 +396,6 @@ import type {
   ResolveReleaseCommentResponses,
   SearchProjectRefsErrors,
   SearchProjectRefsResponses,
-  ServeProjectAppFile2Errors,
-  ServeProjectAppFile2Responses,
-  ServeProjectAppFile3Errors,
-  ServeProjectAppFile3Responses,
-  ServeProjectAppFile4Errors,
-  ServeProjectAppFile4Responses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
   SubscriptionUpdate,
@@ -6131,9 +6125,9 @@ export class ProjectsService {
       owner_name: string
       project_name: string
       app_name: string
-      git_sha: string | null
       path?: string
       ref?: string | null
+      git_sha?: string | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -6149,9 +6143,9 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "path", key: "app_name" },
-            { in: "path", key: "git_sha" },
             { in: "query", key: "path" },
             { in: "query", key: "ref" },
+            { in: "query", key: "git_sha" },
           ],
         },
       ],
@@ -6159,168 +6153,6 @@ export class ProjectsService {
     return (options?.client ?? client).get<
       ServeProjectAppFileResponses,
       ServeProjectAppFileErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Serve Project App File
-   *
-   * Serve one file from a static-html app.
-   *
-   * The app's declared path names its entrypoint, and the directory holding
-   * it is the serving root, so sibling assets resolve against it. Bytes are
-   * proxied rather than redirected to a presigned URL because the browser
-   * refuses an ES module whose content type isn't exactly right, and a
-   * WASM app is almost entirely module imports.
-   */
-  public static serveProjectAppFile2<ThrowOnError extends boolean = true>(
-    parameters: {
-      owner_name: string
-      project_name: string
-      app_name: string
-      path: string
-      git_sha: string | null
-      ref?: string | null
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    ServeProjectAppFile2Responses,
-    ServeProjectAppFile2Errors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "owner_name" },
-            { in: "path", key: "project_name" },
-            { in: "path", key: "app_name" },
-            { in: "path", key: "path" },
-            { in: "path", key: "git_sha" },
-            { in: "query", key: "ref" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).get<
-      ServeProjectAppFile2Responses,
-      ServeProjectAppFile2Errors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve/{path}",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Serve Project App File
-   *
-   * Serve one file from a static-html app.
-   *
-   * The app's declared path names its entrypoint, and the directory holding
-   * it is the serving root, so sibling assets resolve against it. Bytes are
-   * proxied rather than redirected to a presigned URL because the browser
-   * refuses an ES module whose content type isn't exactly right, and a
-   * WASM app is almost entirely module imports.
-   */
-  public static serveProjectAppFile3<ThrowOnError extends boolean = true>(
-    parameters: {
-      owner_name: string
-      project_name: string
-      app_name: string
-      path: string
-      ref?: string | null
-      git_sha?: string | null
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    ServeProjectAppFile3Responses,
-    ServeProjectAppFile3Errors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "owner_name" },
-            { in: "path", key: "project_name" },
-            { in: "path", key: "app_name" },
-            { in: "path", key: "path" },
-            { in: "query", key: "ref" },
-            { in: "query", key: "git_sha" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).get<
-      ServeProjectAppFile3Responses,
-      ServeProjectAppFile3Errors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path}",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Serve Project App File
-   *
-   * Serve one file from a static-html app.
-   *
-   * The app's declared path names its entrypoint, and the directory holding
-   * it is the serving root, so sibling assets resolve against it. Bytes are
-   * proxied rather than redirected to a presigned URL because the browser
-   * refuses an ES module whose content type isn't exactly right, and a
-   * WASM app is almost entirely module imports.
-   */
-  public static serveProjectAppFile4<ThrowOnError extends boolean = true>(
-    parameters: {
-      owner_name: string
-      project_name: string
-      app_name: string
-      path?: string
-      ref?: string | null
-      git_sha?: string | null
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    ServeProjectAppFile4Responses,
-    ServeProjectAppFile4Errors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "owner_name" },
-            { in: "path", key: "project_name" },
-            { in: "path", key: "app_name" },
-            { in: "query", key: "path" },
-            { in: "query", key: "ref" },
-            { in: "query", key: "git_sha" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).get<
-      ServeProjectAppFile4Responses,
-      ServeProjectAppFile4Errors,
       ThrowOnError
     >({
       responseType: "json",

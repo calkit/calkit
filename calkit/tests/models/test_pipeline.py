@@ -704,6 +704,28 @@ def test_marimostage():
                 output_path="app.html",
                 **bad,
             )
+    # Writing out a default explicitly asks for nothing we can't do, so it's
+    # accepted; this is also what a round trip through model_dump produces
+    s = MarimoStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        to="html",
+        output_path="app.html",
+        mode="run",
+        show_code=False,
+    )
+    assert MarimoStage.model_validate(s.model_dump()).to == "html"
+    # Validation runs the notebook, doubling the stage's runtime, so it can
+    # be turned off for one that's already executed elsewhere
+    s = MarimoStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_path="app",
+        validate_notebook=False,
+    )
+    assert " --no-validate" in s.dvc_cmd
 
 
 def test_mappathsstage_rejects_paths_outside_the_project():

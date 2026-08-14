@@ -1371,6 +1371,12 @@ class MarimoStage(Stage):
     include_paths: list[str] = []
     output_path: str
     app_storage: Literal["git", "dvc"] | None = "dvc"
+    # A WASM export doesn't run the notebook, so we run it once beforehand to
+    # keep a broken app from shipping green. That doubles the stage's runtime,
+    # which isn't worth it for a notebook that takes a while and is already
+    # executed elsewhere in the pipeline. Not named ``validate``, which
+    # shadows a Pydantic attribute on the base model.
+    validate_notebook: bool = True
 
     @model_validator(mode="after")
     def check_include_paths_have_a_stable_dep(self) -> MarimoStage:
@@ -1392,13 +1398,19 @@ class MarimoStage(Stage):
 
     @model_validator(mode="after")
     def check_export_options(self) -> MarimoStage:
-        """Reject options that don't apply to the chosen export format."""
+        """Reject options that don't apply to the chosen export format.
+
+        Keyed on the value rather than on whether the field was set, since
+        writing out a default explicitly asks for nothing we can't do, and
+        checking ``model_fields_set`` would also make a stage fail to
+        validate after a round trip through ``model_dump``.
+        """
         if self.to == "html":
-            if "mode" in self.model_fields_set:
+            if self.mode != "run":
                 raise ValueError(
                     "Stage option 'mode' only applies to 'to: html-wasm'"
                 )
-            if "show_code" in self.model_fields_set:
+            if self.show_code:
                 raise ValueError(
                     "Stage option 'show_code' only applies to 'to: html-wasm'"
                 )
@@ -1450,6 +1462,8 @@ class MarimoStage(Stage):
             cmd += f" --mode {self.mode}"
         if self.show_code:
             cmd += " --show-code"
+        if not self.validate_notebook:
+            cmd += " --no-validate"
         if self.layout_path is not None:
             cmd += f" --layout {shlex.quote(self.layout_path)}"
         for path in self.include_paths:

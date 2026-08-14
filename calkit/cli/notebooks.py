@@ -842,9 +842,12 @@ def export_notebook(
     # marimo copies the 'public' directory that sits next to the notebook, so
     # exporting in place would generate files in the project root. Assemble a
     # build directory instead, under .calkit/local, which carries its own
-    # '*' .gitignore so this never needs an entry in the project's.
+    # '*' .gitignore so this never needs an entry in the project's. Named for
+    # the notebook's whole path, since two notebooks in different directories
+    # can share a stem and would otherwise wipe out each other's build.
+    build_name = Path(path).with_suffix("").as_posix().replace("/", "_")
     build_dir = (
-        Path(calkit.ensure_local_dir()) / "marimo" / "build" / Path(path).stem
+        Path(calkit.ensure_local_dir()) / "marimo" / "build" / build_name
     )
     if build_dir.exists():
         shutil.rmtree(build_dir)
@@ -893,7 +896,10 @@ def export_notebook(
     # We don't ship marimo, so it has to be in the project environment. Probe
     # for it up front, since otherwise a missing marimo surfaces as the
     # notebook failing to execute, which sends people looking in the wrong
-    # place.
+    # place. run_in_env turns a failed command into raise_error, i.e., a
+    # typer.Exit, rather than letting CalledProcessError out, so that's what
+    # has to be caught to replace its message with a useful one.
+    typer.echo("Checking marimo is available")
     try:
         run_in_env(
             ["marimo", "--version"],
@@ -902,7 +908,7 @@ def export_notebook(
             verbose=False,
             relaxed_check=True,
         )
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except (typer.Exit, subprocess.CalledProcessError, FileNotFoundError):
         raise_error(
             "marimo is not available in environment "
             f"'{env_name or 'default'}'; add it to that environment's "
@@ -925,7 +931,7 @@ def export_notebook(
                 verbose=verbose,
                 relaxed_check=True,
             )
-        except subprocess.CalledProcessError:
+        except (typer.Exit, subprocess.CalledProcessError):
             raise_error(
                 "Notebook failed to execute; fix it or pass --no-validate. "
                 "Note this runs in the project environment, not the "

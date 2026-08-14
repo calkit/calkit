@@ -39,7 +39,7 @@ from fastapi import (
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
 from git.exc import GitCommandError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
@@ -139,6 +139,7 @@ from app.models import (
 from app.models.core import ROLE_IDS, ROLE_NAMES
 from app.models.projects import (
     Showcase,
+    ShowcaseAppInput,
     ShowcaseFigure,
     ShowcaseFigureInput,
     ShowcaseInput,
@@ -7955,6 +7956,30 @@ class ProjectApp(BaseModel):
     description: str | None = None
     stage: str | None = None
 
+    @field_validator("path")
+    @classmethod
+    def check_path(cls, v: str | None) -> str | None:
+        """Enforce the same rule ``StaticHtmlApp`` does in calkit.yaml.
+
+        The directory holding this path becomes the serving root, and file
+        reads join onto the checkout root, so a path escaping the project
+        would read from the server's filesystem. Repeated here rather than
+        trusted from the client because nothing between calkit.yaml and
+        here validates it.
+        """
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("Path must not be empty")
+        if posixpath.isabs(v):
+            raise ValueError(f"Path must be relative: {v}")
+        norm = posixpath.normpath(v)
+        if norm == "." or norm == ".." or norm.startswith("../"):
+            raise ValueError(f"Path must be within the project: {v}")
+        if not norm.endswith((".html", ".htm")):
+            raise ValueError(f"Path must name an HTML file: {v}")
+        return norm
+
 
 def _app_serve_url(owner_name: str, project_name: str, name: str) -> str:
     return (
@@ -7983,7 +8008,18 @@ def _project_apps_from_ck_info(
         # so one unrecognized app doesn't hide the rest
         if info.get("kind", "static-html") != "static-html":
             continue
-        project_app = ProjectApp.model_validate(info | dict(name=name))
+        # Likewise, an entry we can't make sense of drops out on its own
+        # rather than failing the request
+        try:
+            project_app = ProjectApp.model_validate(info | dict(name=name))
+        except ValidationError as e:
+            logger.warning(
+                f"Skipping invalid app '{name}' in "
+                f"{owner_name}/{project_name}: {e}"
+            )
+            continue
+        if not project_app.path:
+            continue
         # The URL is derived, never read from calkit.yaml, so it can't go
         # stale when the project moves or is renamed, and a project can't
         # point it at something we don't host
@@ -8056,16 +8092,23 @@ def get_project_app(
     return apps[0] if apps else None
 
 
+# Only the entrypoint route is in the schema. The other three are the same
+# operation reached with an asset path and/or a pinned commit, and a browser
+# resolves those itself from a relative URL; leaving them in generates three
+# more near-identical methods in every client we generate.
 @router.get("/projects/{owner_name}/{project_name}/apps/{app_name}/serve")
 @router.get(
-    "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path:path}"
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path:path}",
+    include_in_schema=False,
 )
 @router.get(
     "/projects/{owner_name}/{project_name}/apps/{app_name}"
-    "/{git_sha}/serve/{path:path}"
+    "/{git_sha}/serve/{path:path}",
+    include_in_schema=False,
 )
 @router.get(
-    "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve"
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve",
+    include_in_schema=False,
 )
 def serve_project_app_file(
     owner_name: str,
@@ -8133,10 +8176,10 @@ def serve_project_app_file(
     # Reject traversal outside the app's directory. Checked on the relative
     # path itself rather than on the joined one, since an app whose
     # entrypoint sits at the repo root has an empty serve_dir, and a
-    # serve_dir-based guard silently does nothing in that case.
-    if posixpath.isabs(rel_path) or posixpath.normpath(rel_path).startswith(
-        ".."
-    ):
+    # serve_dir-based guard silently does nothing in that case. read_app_file
+    # checks both paths again, since it reads the filesystem directly.
+    norm_rel_path = posixpath.normpath(rel_path)
+    if norm_rel_path == ".." or norm_rel_path.startswith("../"):
         raise HTTPException(404)
     content = app.projects.read_app_file(
         project=project,
@@ -8154,11 +8197,15 @@ def serve_project_app_file(
         media_type = "application/wasm"
     # A SHA-scoped URL can never change what it returns, so it's cacheable
     # forever; that's what makes returning to an app cheap. The unpinned
-    # path tracks the default branch, so it has to stay short.
+    # path tracks the default branch, so it has to stay short. Private
+    # unless the project is public: this response is gated on the read check
+    # above, so a shared cache holding it would serve those bytes to
+    # somebody we'd have refused.
+    visibility = "public" if project.is_public else "private"
     cache_control = (
-        "public, max-age=31536000, immutable"
+        f"{visibility}, max-age=31536000, immutable"
         if git_sha
-        else "public, max-age=300"
+        else f"{visibility}, max-age=300"
     )
     return Response(
         content=content,
@@ -8359,6 +8406,15 @@ def get_project_showcase(
                         f"Notebook for path '{element_in.notebook}' not found"
                     )
                 )
+        elif isinstance(element_in, ShowcaseAppInput):
+            # Accepted so an app entry doesn't fail validation and take the
+            # whole showcase down with it, but embedding an app here isn't
+            # implemented yet, so it renders as nothing
+            logger.info(
+                f"Skipping showcase app '{element_in.app}' in "
+                f"{owner_name}/{project_name}: not implemented"
+            )
+            continue
         else:
             element_out = element_in
         elements_out.append(element_out)

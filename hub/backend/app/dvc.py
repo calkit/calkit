@@ -47,7 +47,7 @@ def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
 
 
 @lru_cache(maxsize=512)
-def _read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
+def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
     """Cache DVC .dir file contents by path.
 
     Returns None if file doesn't exist.
@@ -252,7 +252,7 @@ def expand_dvc_lock_outs(
 
     def _try_read(path: str) -> list[dict] | None:
         try:
-            return _read_dvc_dir_cached(path)
+            return read_dvc_dir_cached(path)
         except Exception as e:
             logger.warning(f"Failed to read {path}: {e}")
             return None

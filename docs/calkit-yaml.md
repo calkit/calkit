@@ -76,5 +76,5 @@ To generate a copy of the schema matching your installed version of Calkit,
 e.g., to check the file in CI or point an editor at it directly, run:
 
 ```sh
-calkit schema -o calkit-schema.json
+calkit describe schema -o calkit-schema.json
 ```

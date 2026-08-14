@@ -1381,32 +1381,6 @@ def ignore(
             repo.git.commit(["-m", f"Ignore {path}"])
 
 
-@app.command(name="schema")
-def print_schema(
-    output: Annotated[
-        str | None,
-        typer.Option(
-            "--output",
-            "-o",
-            help="Path at which to write the schema instead of printing it.",
-        ),
-    ] = None,
-) -> None:
-    """Print the JSON schema for calkit.yaml.
-
-    Editors can use this to validate and autocomplete the file. See
-    https://docs.calkit.org/calkit-yaml for how to set that up.
-    """
-    txt = calkit.schema.generate_json()
-    if output is None:
-        typer.echo(txt, nl=False)
-        return
-    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
-    with open(output, "w", encoding="utf-8") as f:
-        f.write(txt)
-    typer.echo(f"Wrote schema to {output}")
-
-
 @app.command(name="local-server")
 def run_local_server():
     """Run the local server to interact over HTTP."""

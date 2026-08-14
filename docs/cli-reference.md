@@ -19,7 +19,6 @@
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
-| [`schema`](#top-command-schema)                  | Print the JSON schema for calkit.yaml.                                                                       |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
@@ -302,26 +301,6 @@ Options:
 | Option        | Type    | Required | Default | Description                          |
 | ------------- | ------- | -------- | ------- | ------------------------------------ |
 | `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
-
-<a id="top-command-schema"></a>
-
-### `calkit schema`
-
-Print the JSON schema for calkit.yaml.
-
-Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
-
-Usage:
-
-```text
-calkit schema [OPTIONS]
-```
-
-Options:
-
-| Option           | Type | Required | Default | Description                                               |
-| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="top-command-local-server"></a>
 
@@ -2118,6 +2097,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2173,6 +2153,26 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-schema"></a>
+
+#### `calkit describe|desc schema`
+
+Print the JSON schema for calkit.yaml.
+
+Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+
+Usage:
+
+```text
+calkit describe|desc schema [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                               |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="command-group-import"></a>
 

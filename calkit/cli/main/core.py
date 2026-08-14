@@ -1984,6 +1984,7 @@ def run(
     import dvc.log
     import dvc.repo
     import dvc.repo.reproduce
+    import dvc.stage.run
     import dvc.ui
     from git.exc import InvalidGitRepositoryError
 
@@ -2343,8 +2344,6 @@ def run(
     # otherwise it skips jobs it sees as already done.
     if force:
         os.environ["CALKIT_FORCE"] = "1"
-    import dvc.stage.run
-
     # DVC logs only its own output, so tee each stage process's stdout and
     # stderr into the run log as well as the terminal. DVC's repro is serial,
     # so stages can't interleave here.
@@ -2386,7 +2385,6 @@ def run(
                 log_f.write(STAGE_OUTPUT_END + "\n")
 
     dvc.stage.run._run = _patched_run
-
     try:
         # Wait generously for the repo lock instead of failing after DVC's 3s
         # default. Brief contention is common and benign: a background

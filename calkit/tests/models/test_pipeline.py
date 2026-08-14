@@ -676,3 +676,43 @@ def test_stage_rejects_wdir_outside_the_project():
                 script_path="run.py",
                 wdir=bad,
             )
+
+
+def test_stage_paths_reject_empty_and_project_root():
+    # An empty or blank path is Path('.'), which would otherwise pass every
+    # check and silently mean the project root
+    for bad in ["", "   "]:
+        with pytest.raises(ValidationError):
+            PythonScriptStage(name="run", environment="py", script_path=bad)
+        with pytest.raises(ValidationError):
+            PythonScriptStage(
+                name="run", environment="py", script_path="run.py", wdir=bad
+            )
+    # A path that walks back out and in again is collapsed, so it can't
+    # reach a caller still spelled the way it was written
+    s = PythonScriptStage(
+        name="run",
+        environment="py",
+        script_path="sub/../run.py",
+        wdir="sub/nested/..",
+    )
+    assert s.script_path == "run.py"
+    assert s.wdir == "sub"
+    # dir-to-dir-replace deletes its destination before copying, so the
+    # project root is never a valid target, however it's spelled
+    for bad in ["", ".", "sub/..", "a/../b/.."]:
+        with pytest.raises(ValidationError):
+            MapPathsStage(
+                name="copy",
+                paths=[dict(kind="dir-to-dir-replace", src="figs", dest=bad)],
+            )
+    # The other kinds only copy into their destination, so the project root
+    # is a fine target for them
+    s = MapPathsStage(
+        name="copy",
+        paths=[
+            dict(kind="file-to-dir", src="sub/README.md", dest="."),
+            dict(kind="dir-to-dir-merge", src="figs", dest="."),
+        ],
+    )
+    assert [p.dest for p in s.paths] == [".", "."]

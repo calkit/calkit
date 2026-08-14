@@ -3636,12 +3636,15 @@ def map_paths(
         # destination. Anywhere this runs against a repo whose contents
         # aren't fully trusted, an unchecked '../' would read, overwrite, or
         # delete outside the project.
+        checked = []
         for path in (src, dest):
             try:
-                check_path_relative_and_child_of_cwd(path)
+                # Use the checked value, which has any '..' collapsed; the
+                # path as written would otherwise be acted on verbatim
+                checked.append(check_path_relative_and_child_of_cwd(path))
             except ValueError as e:
                 raise_error(f"Invalid path mapping '{mapping}': {e}")
-        return src, dest
+        return checked[0], checked[1]
 
     for copy_file in file_to_file:
         src_path, dest_path = validate_and_split(copy_file)
@@ -3663,6 +3666,13 @@ def map_paths(
         calkit.git.ensure_path_is_ignored(repo, path=dest_path)
     for replace_dir_with_dir in dir_to_dir_replace:
         src_dir, dest_dir = validate_and_split(replace_dir_with_dir)
+        # This deletes the destination before copying, so the project root
+        # is never a valid target
+        if dest_dir == ".":
+            raise_error(
+                f"Invalid path mapping '{replace_dir_with_dir}': destination "
+                "must not be the project root"
+            )
         if os.path.isfile(dest_dir):
             raise_error(f"Destination path '{dest_dir}' is a file")
         if os.path.isfile(src_dir):

@@ -26,9 +26,13 @@ function AppFrame({ app, gitRef }: { app: ProjectApp; gitRef?: string }) {
         src={src}
         width="100%"
         height="100%"
-        // Project-supplied HTML/JS, so deny it the top-level page and a
-        // same-origin context, matching the other embeds in this codebase
-        sandbox="allow-scripts allow-popups"
+        // Project-supplied HTML/JS, so deny it the top-level page, forms
+        // and modals. allow-same-origin is required: the app runs Python in
+        // a web worker, and a worker script must be same-origin, which an
+        // opaque origin can never satisfy. It grants the app the API's
+        // origin, not the frontend's, and auth here is a bearer header
+        // rather than a cookie.
+        sandbox="allow-scripts allow-same-origin allow-popups"
         style={{ borderRadius: "10px" }}
       />
     </Box>

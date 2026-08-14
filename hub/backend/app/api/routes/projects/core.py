@@ -8168,12 +8168,6 @@ def serve_project_app_file(
             # These bytes are project-supplied, so don't let a browser
             # second-guess the type we set and render, say, an image as HTML
             "X-Content-Type-Options": "nosniff",
-            # The app is embedded in a sandboxed iframe, which gives it a
-            # null origin, so its own asset requests are cross-origin.
-            # Access is still gated by the read check above, and auth is a
-            # bearer header rather than a cookie, so this grants a
-            # cross-origin page nothing it couldn't already fetch.
-            "Access-Control-Allow-Origin": "*",
         },
     )
 

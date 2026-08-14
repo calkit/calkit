@@ -1,6 +1,8 @@
 """Tests for app.git."""
 
+import concurrent.futures
 import json
+import random
 from pathlib import Path
 
 import git
@@ -236,3 +238,47 @@ def test_get_ck_info_from_repo_malformed_yaml(tmp_path):
         "owner: someone\n---\nname: proj\n"
     )
     assert app.git.get_ck_info_from_repo(repo) == {}
+
+
+def test_git_tree_is_thread_safe(tmp_path):
+    """Concurrent reads through one GitTree return uncorrupted content.
+
+    GitPython funnels every object read through a single persistent
+    `git cat-file --batch` subprocess and documents `stream_object_data` as
+    not thread-safe. Without serialization, fanning figure resolution across
+    a thread pool interleaves readers on that one pipe: reads come back as
+    another blob's bytes, raise "SHA ... could not be resolved", or hang.
+    """
+    repo_dir = tmp_path / "repo"
+    repo, _ = _init_repo(repo_dir)
+    # Incompressible content, so the blobs stay large on disk and each read
+    # spans several pipe buffers -- that's what gives concurrent readers the
+    # chance to interleave. Repetitive filler would zlib down to a few bytes
+    # per object and read atomically, hiding the bug. Nested directories make
+    # each lookup walk intermediate tree objects too.
+    rand = random.Random(0)
+    expected = {}
+    for d in ("a", "b", "c"):
+        (repo_dir / "figures" / d).mkdir(parents=True, exist_ok=True)
+        for i in range(8):
+            path = f"figures/{d}/f{i}.bin"
+            content = rand.randbytes(200_000)
+            (repo_dir / path).write_bytes(content)
+            expected[path] = content
+    repo.git.add(["figures"])
+    repo.git.commit(["-m", "Add figures"])
+
+    tree = app.git.GitTree(repo, repo.head.commit.hexsha)
+
+    def read(path: str) -> tuple[str, bytes]:
+        # Mirrors how get_contents_from_tree touches the tree per figure.
+        tree.is_symlink(path)
+        tree.is_file(path + ".dvc")
+        return path, tree.read_bytes(path)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(read, list(expected)))
+
+    assert len(results) == len(expected)
+    for path, content in results:
+        assert content == expected[path], f"{path} came back corrupted"

@@ -3256,12 +3256,24 @@ export class ProjectsService {
 
   /**
    * Get Project Figures
+   *
+   * Get a page of the project's figures.
+   *
+   * Figure content is downloaded from object storage and inlined, so this is
+   * paginated: a project with hundreds of figures would otherwise take
+   * minutes and return a payload measured in hundreds of megabytes. Callers
+   * that only need paths and titles should pass ``include_content=false``,
+   * which skips that download entirely.
    */
   public static getProjectFigures<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
       ref?: string | null
+      limit?: number
+      offset?: number
+      q?: string | null
+      include_content?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3277,6 +3289,10 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "query", key: "ref" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+            { in: "query", key: "q" },
+            { in: "query", key: "include_content" },
           ],
         },
       ],
@@ -3382,6 +3398,13 @@ export class ProjectsService {
 
   /**
    * Get Project Figure
+   *
+   * Get a single figure, declared or auto-detected.
+   *
+   * Discovery runs the same way it does for the listing, so this resolves
+   * every figure the listing would show -- not just the ones declared in
+   * calkit.yaml -- and returns them with the same comment counts and stage
+   * status attached.
    */
   public static getProjectFigure<ThrowOnError extends boolean = true>(
     parameters: {

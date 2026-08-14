@@ -392,6 +392,7 @@ class Settings(BaseSettings):
     refresh_token: KeyringOptionalSecret | None = None
     dvc_token: KeyringOptionalSecret | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
+    run_history_length: int = 10
     github_token: KeyringOptionalSecret | None = None
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None

@@ -330,6 +330,84 @@ def test_get_contents_dvc_pointer_dir_shown(
     assert data_entry.size == 99999
 
 
+def test_declared_paths_with_leading_dot_slash(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path declared as "./paper/main.pdf" in calkit.yaml still matches its
+    "paper/main.pdf" DVC out.
+    """
+    monkeypatch.setattr(
+        app.projects,
+        "expand_dvc_lock_outs",
+        lambda *a, **k: {
+            "paper/main.pdf": {
+                "path": "paper/main.pdf",
+                "md5": "604e8206a831104ebcbafc886d81337f",
+                "size": 274278,
+                "type": "file",
+                "dirname": "paper",
+                "stage": "build-paper",
+            }
+        },
+    )
+    monkeypatch.setattr(
+        app.projects, "get_data_fpath_for_md5", lambda **kwargs: None
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "calkit.yaml").write_text(
+        "publications:\n"
+        "  - path: ./paper/main.pdf\n"
+        "    title: A paper\n"
+        "    stage: build-paper\n"
+        "figures:\n"
+        "  - path: ./figures/plot.png\n"
+        "    title: A figure\n"
+        "showcase:\n"
+        "  - figure: ./figures/plot.png\n"
+    )
+    (repo_dir / "dvc.lock").write_text(
+        "schema: '2.0'\n"
+        "stages:\n"
+        "  build-paper:\n"
+        "    cmd: calkit latex build paper/main.tex\n"
+        "    outs:\n"
+        "    - path: paper/main.pdf\n"
+        "      md5: 604e8206a831104ebcbafc886d81337f\n"
+        "      size: 274278\n"
+    )
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add metadata"])
+    # The publication resolves to its DVC out whether it's requested by the
+    # path as declared or by the normalized one
+    for path in ["./paper/main.pdf", "paper/main.pdf"]:
+        item = app.projects.get_contents_from_repo(
+            project=project, repo=repo, path=path
+        )
+        assert item.path == "paper/main.pdf"
+        assert item.storage == "dvc"
+        assert item.size == 274278
+        assert item.stage == "build-paper"
+        assert item.calkit_object is not None
+        assert item.calkit_object["title"] == "A paper"
+    # Declared metadata comes back with normalized paths, so everything
+    # downstream keys artifacts the same way DVC and Git do
+    ck_info = app.projects.get_ck_info_for_ref(project=project, repo=repo)
+    assert ck_info["publications"][0]["path"] == "paper/main.pdf"
+    assert ck_info["figures"][0]["path"] == "figures/plot.png"
+    assert ck_info["showcase"][0]["figure"] == "figures/plot.png"
+    # Lookups by the normalized path find the declared publication
+    pub = app.projects.get_publication_from_repo(
+        project=project, repo=repo, path="paper/main.pdf"
+    )
+    assert pub.path == "paper/main.pdf"
+    assert pub.storage == "dvc"
+    assert pub.stage == "build-paper"
+
+
 def test_get_notebook_from_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

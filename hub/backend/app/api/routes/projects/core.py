@@ -1,10 +1,12 @@
 """Main routes for projects."""
 
 import base64
+import concurrent.futures
 import io
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -15,7 +17,7 @@ from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, Literal, Optional, cast
+from typing import Annotated, Any, Literal, NamedTuple, Optional, cast
 from urllib.parse import quote, urlparse
 
 import bibtexparser
@@ -37,13 +39,14 @@ from fastapi import (
 from fastapi.responses import StreamingResponse
 from git.exc import GitCommandError
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session, and_, func, not_, or_, select
+from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
 import app.projects
 import calkit
 import calkit.detect
 import calkit.latex
+import calkit.resources
 from app import (
     arxiv,
     github,
@@ -64,6 +67,8 @@ from app.config import settings
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     CATEGORIES_SINGULAR_TO_PLURAL,
+    load_yaml_fast,
+    normalize_artifact_path,
     params_from_url,
     ryaml,
     utcnow,
@@ -76,6 +81,7 @@ from app.dvc import (
     run_dvc_command,
 )
 from app.git import (
+    RepoTree,
     get_ck_info,
     get_ck_info_from_repo,
     get_commit_history,
@@ -198,6 +204,28 @@ def _title_from_path(path: str) -> str:
     # Repo paths are always Posix, so parse them as such regardless of host OS.
     stem = PurePosixPath(path).stem
     return stem.replace("_", " ").replace("-", " ").capitalize()
+
+
+def _normalize_artifact_file_path(path: str) -> str:
+    """Normalize a client-declared artifact file path, checking it's in-repo.
+
+    For artifacts that name a file inside the repo, e.g. a figure or a
+    publication. Callers join the result onto ``repo.working_dir`` to write
+    that file, so an absolute or traversing path would land outside the
+    project, and one that normalizes to the repo root, e.g. "./", names a
+    directory rather than a file. Not for project-scoped paths like a
+    release's, where "." legitimately means the project itself.
+    """
+    # A path declared as "./paper/main.pdf" would never match its
+    # "paper/main.pdf" DVC out, so clean it up before it reaches calkit.yaml
+    path = normalize_artifact_path(path)
+    if not path:
+        raise HTTPException(400, "Path must name a file in the project")
+    if posixpath.isabs(path):
+        raise HTTPException(400, "Absolute paths are not allowed")
+    if ".." in path.split("/"):
+        raise HTTPException(400, "Path traversal is not allowed")
+    return path
 
 
 PRESENTATION_EXTS = {".pdf", ".pptx", ".ppt", ".key", ".odp"}
@@ -610,28 +638,18 @@ def post_project(
                 ryaml.dump(ck_info, f)
             repo.git.add("calkit.yaml")
             if project_in.template is None:
-                # Create devcontainer spec
-                dc_url = (
-                    "https://raw.githubusercontent.com/calkit/devcontainer/"
-                    "refs/heads/main/devcontainer.json"
-                )
-                # A dev container spec is a nice-to-have, and can be added
-                # later with the dev container endpoint, so don't fail project
-                # creation if GitHub is slow or the file has moved. Writing a
-                # non-200 body would put an error page in devcontainer.json.
-                try:
-                    dc_resp = requests.get(dc_url, timeout=15)
-                    dc_resp.raise_for_status()
-                except requests.RequestException as e:
-                    logger.warning(f"Failed to fetch dev container spec: {e}")
-                    dc_resp = None
-                if dc_resp is not None:
-                    dc_dir = os.path.join(repo.working_dir, ".devcontainer")
-                    os.makedirs(dc_dir, exist_ok=True)
-                    dc_fpath = os.path.join(dc_dir, "devcontainer.json")
-                    with open(dc_fpath, "w") as f:
-                        f.write(dc_resp.text)
-                    repo.git.add(".devcontainer")
+                # Create devcontainer spec from the one bundled with Calkit
+                dc_dir = os.path.join(repo.working_dir, ".devcontainer")
+                os.makedirs(dc_dir, exist_ok=True)
+                dc_fpath = os.path.join(dc_dir, "devcontainer.json")
+                with open(dc_fpath, "w", encoding="utf-8") as f:
+                    f.write(
+                        calkit.resources.read_text(
+                            "devcontainer",
+                            calkit.resources.DEVCONTAINER_FNAME,
+                        )
+                    )
+                repo.git.add(".devcontainer")
             # Create the README
             logger.info("Creating README.md")
             with open(os.path.join(repo.working_dir, "README.md"), "w") as f:
@@ -1840,10 +1858,26 @@ def _build_questions_public(
     }
     figures_by_path: dict[str, Figure] = {}
     if "figure" in kinds:
+        # Only the figures actually cited as evidence need their content
+        # resolved; resolving every figure in the project would make this
+        # scale with the project rather than with the questions.
+        evidence_fig_paths = {
+            ev.get("path")
+            for q in questions_ck
+            for ev in _evidence_of(q)
+            if isinstance(ev, dict) and ev.get("kind") == "figure"
+        }
+        fig_ctx = _discover_figures(project=project, repo=repo, ref=ref)
+        cited = [f for f in fig_ctx.figures if f["path"] in evidence_fig_paths]
         figures_by_path = {
             fig.path: fig
-            for fig in _build_figures(
-                project=project, repo=repo, session=session, ref=ref
+            for fig in _resolve_figures(
+                project=project,
+                repo=repo,
+                session=session,
+                ref=ref,
+                ctx=fig_ctx,
+                figures=cited,
             )
         }
     results_by_path: dict[str, Result] = {}
@@ -1914,7 +1948,12 @@ def get_project_questions(
         ref=ref,
     )
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=ref
+        project=project,
+        repo=repo,
+        ref=ref,
+        # This route only reads; the POST/PUT handlers below load their own
+        # copy through ruamel so their rewrites keep comments intact.
+        read_only=True,
     )
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
@@ -2059,19 +2098,42 @@ def put_project_question(
     )[idx]
 
 
-def _build_figures(
+class _FigureContext(NamedTuple):
+    """Everything needed to resolve figure content, computed once per request.
+
+    ``figures`` holds every discovered figure entry (declared and
+    auto-detected) with only the cheap tree-derived fields filled in. The
+    expensive per-figure work happens in ``_resolve_figures``.
+    """
+
+    figures: list[dict[str, Any]]
+    tree: RepoTree
+    ck_info_full: dict[str, Any]
+    dvc_lock_outs: dict[str, Any]
+    zip_path_map: dict[str, Any]
+    dvc_lock: dict[str, Any]
+
+
+def _discover_figures(
     project: Project,
     repo: git.Repo,
-    session: Session,
     ref: str | None,
-) -> list[Figure]:
-    """Build the list of project figures, declared and auto-detected, with
-    content resolved for each.
+) -> _FigureContext:
+    """Find every project figure, declared and auto-detected, without
+    resolving any content.
+
+    Split out from content resolution so callers that only need a subset (a
+    page of the listing, or the few figures a question cites as evidence)
+    don't pay to download and base64-encode every figure in the project.
     """
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
         repo=repo,
         ref=ref,
+        # Discovery only reads this metadata, so skip ruamel's round-trip
+        # parser; on a 42 KB calkit.yaml that is ~5 ms instead of ~78 ms,
+        # paid on every page of the listing.
+        read_only=True,
     )
     figures = ck_info.get("figures", [])
     # Declared figures (from calkit.yaml) may omit a title; fill one in so
@@ -2147,9 +2209,59 @@ def _build_figures(
         if dvc_out.get("type") == "dir":
             continue
         _maybe_add_figure(dvc_path)
+    dvc_lock: dict[str, Any] = {}
+    if figures:
+        try:
+            if tree.is_file("dvc.lock"):
+                # Read-only: parsed for stage lookups, never written back.
+                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        except Exception as e:
+            logger.warning(f"Failed to read dvc.lock for figures: {e}")
+    return _FigureContext(
+        figures=figures,
+        tree=tree,
+        ck_info_full=ck_info_full,
+        dvc_lock_outs=dvc_lock_outs,
+        zip_path_map=zip_path_map,
+        dvc_lock=dvc_lock,
+    )
+
+
+def _resolve_figures(
+    project: Project,
+    repo: git.Repo,
+    session: Session,
+    ref: str | None,
+    ctx: _FigureContext,
+    figures: list[dict[str, Any]],
+    resolve_content: bool = True,
+) -> list[Figure]:
+    """Resolve content, comment counts and stage status for ``figures``.
+
+    ``figures`` is normally a slice of ``ctx.figures``. Content resolution
+    hits object storage once per figure, so the figures are resolved
+    concurrently rather than one at a time.
+
+    ``resolve_content=False`` skips the object-storage work entirely and
+    returns metadata only, for callers that just need to list or pick figures
+    by path and never render them.
+    """
     if not figures:
         return []
-    # Build comment count map from DB
+    tree = ctx.tree
+    dvc_lock = ctx.dvc_lock
+    # Warm every lazy-loading attribute the content resolution below reads,
+    # here on the calling thread. Each of these is backed by a relationship
+    # whose first access emits a query, and the Session behind them is not
+    # safe to hit from the several threads that run `_resolve` -- so they
+    # have to be loaded before the pool starts, not inside it.
+    # `owner_account_name` is a computed field over `owner_account`;
+    # `file_locks` is iterated by `get_contents_from_tree` for every path.
+    _ = project.owner_account_name
+    _ = len(project.file_locks)
+    # Build comment count map from DB, restricted to the figures we're
+    # actually returning.
+    paths = [fig["path"] for fig in figures]
     comment_counts = dict(
         session.exec(
             select(ProjectComment.artifact_path, func.count())
@@ -2158,20 +2270,17 @@ def _build_figures(
                 ProjectComment.artifact_type == "figure",
                 ProjectComment.parent_id == None,  # noqa: E711
                 ProjectComment.resolved == None,  # noqa: E711
+                col(ProjectComment.artifact_path).in_(paths),
             )
             .group_by(ProjectComment.artifact_path)
         ).all()
     )
-    # Get the figure content and base64 encode it.
     # Staleness is best-effort: never let it block the figure listing.
-    dvc_lock: dict = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
-        dvc_yaml: dict = {}
+        dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
-            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_yaml,
             dvc_lock=dvc_lock,
@@ -2183,26 +2292,58 @@ def _build_figures(
         )
     except Exception as e:
         logger.warning(f"Failed to compute pipeline status for figures: {e}")
-    for fig in figures:
-        item = app.projects.get_contents_from_tree(
-            project=project,
-            tree=tree,
-            path=fig["path"],
-            ck_info=ck_info_full,
-            dvc_lock_outs=dvc_lock_outs,
-            zip_path_map=zip_path_map,
-        )
-        fig["content"] = item.content
-        fig["url"] = item.url
+
+    def _annotate(fig: dict[str, Any]) -> dict[str, Any]:
+        """Attach the metadata that costs no I/O beyond what's already read."""
         fig["comment_count"] = comment_counts.get(fig["path"], 0)
         if not fig.get("stage"):
-            auto_stage = find_stage_for_path(fig["path"], dvc_lock)
+            auto_stage = find_stage_for_path(
+                fig["path"], dvc_lock, valid_stages=set(stage_statuses)
+            )
             if auto_stage is not None:
                 fig["stage"] = auto_stage
         if fig.get("stage") and fig["stage"] in stage_statuses:
             fig["stage_status"] = stage_statuses[fig["stage"]].model_dump()
+        return fig
+
+    def _resolve(fig: dict[str, Any]) -> dict[str, Any]:
+        item = app.projects.get_contents_from_tree(
+            project=project,
+            tree=tree,
+            path=fig["path"],
+            ck_info=ctx.ck_info_full,
+            dvc_lock_outs=ctx.dvc_lock_outs,
+            zip_path_map=ctx.zip_path_map,
+        )
+        fig["content"] = item.content
+        fig["url"] = item.url
         fig["storage"] = item.storage
-    return [Figure.model_validate(fig) for fig in figures]
+        return _annotate(fig)
+
+    if not resolve_content:
+        resolved = [_annotate(fig) for fig in figures]
+    elif len(figures) > 1:
+        # Each figure's content is an independent object-storage download, so
+        # fan them out. The cap keeps a single request from monopolizing
+        # object-storage connections. Git reads inside `get_contents_from_tree`
+        # are serialized by the tree itself (see `GitTree`/`odb_lock`); it's
+        # the storage round trips that actually overlap here.
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(figures))
+        ) as pool:
+            resolved = list(pool.map(_resolve, figures))
+    else:
+        resolved = [_resolve(figures[0])]
+    return [Figure.model_validate(fig) for fig in resolved]
+
+
+class FiguresPage(BaseModel):
+    """A page of project figures, with the total available for paging."""
+
+    items: list[Figure]
+    total: int
+    limit: int
+    offset: int
 
 
 @router.get("/projects/{owner_name}/{project_name}/figures")
@@ -2212,7 +2353,33 @@ def get_project_figures(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-) -> list[Figure]:
+    limit: int = Query(
+        20, ge=1, le=100, description="Max number of figures to return"
+    ),
+    offset: int = Query(0, ge=0, description="Number of figures to skip"),
+    q: str | None = Query(
+        None,
+        description=(
+            "Filter figures by path, title or description. Applied across "
+            "the whole project, before paging."
+        ),
+    ),
+    include_content: bool = Query(
+        True,
+        description=(
+            "Inline each figure's content. Set false for a metadata-only "
+            "listing that skips object storage entirely."
+        ),
+    ),
+) -> FiguresPage:
+    """Get a page of the project's figures.
+
+    Figure content is downloaded from object storage and inlined, so this is
+    paginated: a project with hundreds of figures would otherwise take
+    minutes and return a payload measured in hundreds of megabytes. Callers
+    that only need paths and titles should pass ``include_content=false``,
+    which skips that download entirely.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2227,7 +2394,35 @@ def get_project_figures(
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
     )
-    return _build_figures(project=project, repo=repo, session=session, ref=ref)
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    # Filter before paging, so search covers every figure in the project
+    # rather than whichever page the client happens to be on, and `total`
+    # describes the match count being paged through.
+    needle = (q or "").strip().lower()
+    matched = [
+        fig
+        for fig in ctx.figures
+        if not needle
+        or needle in fig["path"].lower()
+        or needle in (fig.get("title") or "").lower()
+        or needle in (fig.get("description") or "").lower()
+    ]
+    page = matched[offset : offset + limit]
+    items = _resolve_figures(
+        project=project,
+        repo=repo,
+        session=session,
+        ref=ref,
+        ctx=ctx,
+        figures=page,
+        resolve_content=include_content,
+    )
+    return FiguresPage(
+        items=items,
+        total=len(matched),
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _build_results(
@@ -2342,7 +2537,10 @@ def get_project_results(
     return _build_results(project=project, repo=repo, ref=ref)
 
 
-@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path}")
+# ``figure_path`` takes the path convertor because figures live in nested
+# directories ("figures/sub/plot.png"); without it the route only matches
+# single-segment names, whether or not the client percent-encodes slashes.
+@router.get("/projects/{owner_name}/{project_name}/figures/{figure_path:path}")
 def get_project_figure(
     owner_name: str,
     project_name: str,
@@ -2352,6 +2550,13 @@ def get_project_figure(
     ttl: int | None = DEFAULT_REPO_TTL,
     ref: str | None = None,
 ) -> Figure:
+    """Get a single figure, declared or auto-detected.
+
+    Discovery runs the same way it does for the listing, so this resolves
+    every figure the listing would show -- not just the ones declared in
+    calkit.yaml -- and returns them with the same comment counts and stage
+    status attached.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -2366,12 +2571,18 @@ def get_project_figure(
         ttl=ttl,
         ref=ref,
     )
-    return app.projects.get_figure_from_repo(
+    ctx = _discover_figures(project=project, repo=repo, ref=ref)
+    matched = [fig for fig in ctx.figures if fig["path"] == figure_path]
+    if not matched:
+        raise HTTPException(404, "Figure not found")
+    return _resolve_figures(
         project=project,
         repo=repo,
-        path=figure_path,
+        session=session,
         ref=ref,
-    )
+        ctx=ctx,
+        figures=matched[:1],
+    )[0]
 
 
 @router.post("/projects/{owner_name}/{project_name}/figures")
@@ -2386,6 +2597,7 @@ def post_project_figure(
     stage: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Figure:
+    path = _normalize_artifact_file_path(path)
     file_data: bytes | None = None
     full_fig_path: str | None = None
     if file is not None:
@@ -3868,6 +4080,7 @@ def post_project_publication(
     environment: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
 ) -> Publication:
+    path = _normalize_artifact_file_path(path)
     if file is not None:
         logger.info(
             f"Received publication file {path} with content type: "
@@ -4331,17 +4544,12 @@ async def post_project_overleaf_publication(
                 has_calkit_workflow = True
                 break
         if not has_calkit_workflow:
-            download_url = (
-                "https://raw.githubusercontent.com/calkit/"
-                "run-action/refs/heads/main/example.yml"
-            )
-            download_resp = requests.get(download_url)
             workflow_rel_path = os.path.join(
                 ".github", "workflows", "run-calkit.yml"
             )
             workflow_fpath = os.path.join(repo.working_dir, workflow_rel_path)
-            with open(workflow_fpath, "w") as f:
-                f.write(download_resp.text)
+            with open(workflow_fpath, "w", encoding="utf-8") as f:
+                f.write(calkit.resources.render_github_actions_workflow())
             repo.git.add(workflow_rel_path)
     commit_msg = (
         f"Import Overleaf project ID {overleaf_project_id} to '{path}'"
@@ -4849,11 +5057,25 @@ def get_project_pipeline(
         params = ryaml.load(tree.read_text("params.yaml"))
     else:
         params = None
-    # Generate Mermaid diagram
-    mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
-    logger.info(
-        f"Created Mermaid diagram for {owner_name}/{project_name}:\n{mermaid}"
-    )
+    # Generate Mermaid diagram. A dvc.yaml can be invalid in ways only DVC
+    # finds when it builds the graph -- two stages writing overlapping
+    # outputs, a dependency cycle -- and that's the user's pipeline to fix,
+    # not a server fault. Report it and carry on: the stages and their
+    # statuses below are still worth showing.
+    mermaid = ""
+    pipeline_error: str | None = None
+    try:
+        mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
+        logger.info(
+            f"Created Mermaid diagram for {owner_name}/{project_name}:\n"
+            f"{mermaid}"
+        )
+    except Exception as e:
+        pipeline_error = str(e).strip() or type(e).__name__
+        logger.info(
+            f"Invalid pipeline for {owner_name}/{project_name}: "
+            f"{type(e).__name__}: {e}"
+        )
     # Compute per-stage staleness against the committed dvc.lock
     stage_statuses: dict = {}
     overall_status = "unknown"
@@ -4876,6 +5098,7 @@ def get_project_pipeline(
     return Pipeline(
         dvc_stages=dvc_pipeline["stages"],
         mermaid=mermaid,
+        error=pipeline_error,
         dvc_yaml=dvc_content,
         calkit_yaml=calkit_content,
         ck_stages=list((ck_info.get("pipeline") or {}).get("stages") or {}),

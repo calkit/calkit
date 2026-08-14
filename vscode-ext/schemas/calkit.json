@@ -39,20 +39,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -90,20 +100,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -116,6 +133,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -139,7 +169,6 @@
       "type": "object"
     },
     "CondaEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -275,14 +304,21 @@
           "title": "Stage"
         },
         "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "A human-readable title.",
-          "title": "Title",
-          "type": "string"
+          "title": "Title"
         }
       },
       "required": [
-        "path",
-        "title"
+        "path"
       ],
       "title": "Dataset",
       "type": "object"
@@ -346,7 +382,8 @@
           "enum": [
             "app",
             "env-var",
-            "setup"
+            "setup",
+            "calkit-config"
           ],
           "title": "Kind",
           "type": "string"
@@ -372,6 +409,111 @@
         "name"
       ],
       "title": "Dependency",
+      "type": "object"
+    },
+    "DependencyAttrs": {
+      "description": "A dependency's properties, as written under ``{name: {...}}``.\n\n``Dependency`` is this plus the name; the mapping form supplies the name\nas its key instead.",
+      "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "default": "app",
+          "enum": [
+            "app",
+            "env-var",
+            "setup",
+            "calkit-config"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Spec"
+        }
+      },
+      "title": "DependencyAttrs",
       "type": "object"
     },
     "DerivedFromProject": {
@@ -492,20 +634,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -542,20 +694,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -568,6 +727,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -592,7 +764,6 @@
       "type": "object"
     },
     "DockerEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "args": {
           "anyOf": [
@@ -837,14 +1008,21 @@
           "title": "Stage"
         },
         "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "A human-readable title.",
-          "title": "Title",
-          "type": "string"
+          "title": "Title"
         }
       },
       "required": [
-        "path",
-        "title"
+        "path"
       ],
       "title": "Figure",
       "type": "object"
@@ -1108,20 +1286,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -1159,20 +1347,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -1185,6 +1380,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -1242,20 +1450,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -1293,20 +1511,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -1319,6 +1544,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -1342,7 +1580,6 @@
       "type": "object"
     },
     "JuliaEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -1424,20 +1661,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -1475,20 +1722,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -1506,6 +1760,19 @@
           "description": "Path to the Julia script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -1614,20 +1881,30 @@
           "title": "Html Storage"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -1688,20 +1965,27 @@
           "type": "string"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "parameters": {
           "additionalProperties": true,
@@ -1721,6 +2005,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -1832,20 +2129,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -1918,20 +2225,27 @@
           "title": "Output Dir"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "pdf_storage": {
           "anyOf": [
@@ -1961,6 +2275,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "synctex": {
           "default": true,
@@ -2236,20 +2563,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -2287,20 +2624,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "paths": {
           "description": "Copy operations to perform.",
@@ -2343,6 +2687,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -2403,20 +2760,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -2454,20 +2821,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -2480,6 +2854,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -2503,7 +2890,6 @@
       "type": "object"
     },
     "MatlabEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -2591,20 +2977,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -2654,20 +3050,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -2685,6 +3088,19 @@
           "description": "Path to the MATLAB script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -2708,54 +3124,7 @@
       "title": "MatlabScriptStage",
       "type": "object"
     },
-    "Metric": {
-      "properties": {
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
-        },
-        "read_from": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ValueInFile"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "value": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "title": "Value"
-        }
-      },
-      "required": [
-        "value"
-      ],
-      "title": "Metric",
-      "type": "object"
-    },
     "NixEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -2964,7 +3333,6 @@
       "type": "object"
     },
     "PBSEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "default_options": {
           "anyOf": [
@@ -3053,6 +3421,21 @@
         "parameter"
       ],
       "title": "ParameterIteration",
+      "type": "object"
+    },
+    "PathInput": {
+      "description": "An input written as an object carrying a path.\n\nPrefer a plain path string. This exists so a stage keeps working when an\noutput is copied verbatim into another stage's ``inputs``, which is how\nentries like ``{path: ..., storage: ...}`` show up in the wild. Only\n``path`` is used: an input is a dependency wherever it happens to be\nstored, so the other keys are carried along and ignored.\n\nExtra keys are allowed deliberately, both to tolerate whatever came along\nwith a copied output and to leave room for object inputs that aren't\npaths at all, e.g., a database table.",
+      "properties": {
+        "path": {
+          "description": "Path to the input file or directory.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PathInput",
       "type": "object"
     },
     "PathOutput": {
@@ -3187,7 +3570,6 @@
       "type": "object"
     },
     "PixiEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -3284,14 +3666,21 @@
           "title": "Stage"
         },
         "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "A human-readable title.",
-          "title": "Title",
-          "type": "string"
+          "title": "Title"
         }
       },
       "required": [
-        "path",
-        "title"
+        "path"
       ],
       "title": "Presentation",
       "type": "object"
@@ -3512,7 +3901,10 @@
                 "conference-paper",
                 "proposal",
                 "report",
-                "blog"
+                "blog",
+                "book",
+                "thesis",
+                "phd-thesis"
               ],
               "type": "string"
             },
@@ -3542,14 +3934,21 @@
           "title": "Stage"
         },
         "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "A human-readable title.",
-          "title": "Title",
-          "type": "string"
+          "title": "Title"
         }
       },
       "required": [
-        "path",
-        "title"
+        "path"
       ],
       "title": "Publication",
       "type": "object"
@@ -3629,20 +4028,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -3680,20 +4089,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -3711,6 +4127,19 @@
           "description": "Path to the Python script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -3777,20 +4206,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -3828,20 +4267,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -3854,6 +4300,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "target_path": {
           "description": "Path to the Quarto document to render.",
@@ -3958,7 +4417,6 @@
       "type": "object"
     },
     "REnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -3985,14 +4443,21 @@
           "type": "string"
         },
         "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "Path at which to create the environment.",
-          "title": "Prefix",
-          "type": "string"
+          "title": "Prefix"
         }
       },
       "required": [
-        "path",
-        "prefix"
+        "path"
       ],
       "title": "REnvironment",
       "type": "object"
@@ -4040,20 +4505,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -4090,20 +4565,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -4121,6 +4603,19 @@
           "description": "Path to the R script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -4394,6 +4889,7 @@
       "type": "object"
     },
     "Result": {
+      "description": "A finding the project produced: a value, a table, a map, or a file.\n\nResults are keyed by name in ``calkit.yaml``, so several can point at the\nsame file, e.g., a mean and a standard deviation both read out of one\nsummary file. Which part of a file a result refers to is left open on\npurpose: ``key`` addresses a value in an object-like file, and other\nforms of addressing may be added without reshaping what a result is.",
       "properties": {
         "description": {
           "anyOf": [
@@ -4407,6 +4903,19 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Which value within the file this result refers to, e.g., 'metrics.mean'. Omit it when the result is the whole file.",
+          "title": "Key"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -4427,14 +4936,21 @@
           "title": "Stage"
         },
         "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
           "description": "A human-readable title.",
-          "title": "Title",
-          "type": "string"
+          "title": "Title"
         }
       },
       "required": [
-        "path",
-        "title"
+        "path"
       ],
       "title": "Result",
       "type": "object"
@@ -4526,20 +5042,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -4607,20 +5133,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "sbatch_options": {
           "default": [],
@@ -4648,6 +5181,19 @@
           "title": "Script Path",
           "type": "string"
         },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
         "wdir": {
           "anyOf": [
             {
@@ -4670,7 +5216,6 @@
       "type": "object"
     },
     "SSHEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -4789,20 +5334,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -4839,20 +5394,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -4876,6 +5438,19 @@
           ],
           "title": "Shell",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -4942,20 +5517,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -4992,20 +5577,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -5034,6 +5626,19 @@
           ],
           "title": "Shell",
           "type": "string"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -5083,6 +5688,32 @@
       "title": "ShowcaseMarkdown",
       "type": "object"
     },
+    "ShowcaseMarkdownFile": {
+      "properties": {
+        "markdown_file": {
+          "title": "Markdown File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "markdown_file"
+      ],
+      "title": "ShowcaseMarkdownFile",
+      "type": "object"
+    },
+    "ShowcaseNotebook": {
+      "properties": {
+        "notebook": {
+          "title": "Notebook",
+          "type": "string"
+        }
+      },
+      "required": [
+        "notebook"
+      ],
+      "title": "ShowcaseNotebook",
+      "type": "object"
+    },
     "ShowcasePublication": {
       "properties": {
         "publication": {
@@ -5109,8 +5740,32 @@
       "title": "ShowcaseText",
       "type": "object"
     },
+    "ShowcaseYamlFile": {
+      "properties": {
+        "object_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Object Name"
+        },
+        "yaml_file": {
+          "title": "Yaml File",
+          "type": "string"
+        }
+      },
+      "required": [
+        "yaml_file"
+      ],
+      "title": "ShowcaseYamlFile",
+      "type": "object"
+    },
     "SlurmEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "default_options": {
           "anyOf": [
@@ -5395,7 +6050,6 @@
       "type": "object"
     },
     "UvEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -5429,7 +6083,6 @@
       "type": "object"
     },
     "UvVenvEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -5488,34 +6141,7 @@
       "title": "UvVenvEnvironment",
       "type": "object"
     },
-    "ValueInFile": {
-      "description": "A value in a file.\n\nIf ``key`` is None, we assume the value is all that's written in the file.",
-      "properties": {
-        "key": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Key"
-        },
-        "path": {
-          "title": "Path",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "title": "ValueInFile",
-      "type": "object"
-    },
     "VenvEnvironment": {
-      "additionalProperties": false,
       "properties": {
         "description": {
           "anyOf": [
@@ -5608,20 +6234,30 @@
           "type": "boolean"
         },
         "inputs": {
-          "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
               },
-              {
-                "$ref": "#/$defs/InputsFromStageOutputs"
-              }
-            ]
-          },
-          "title": "Inputs",
-          "type": "array"
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
         },
         "iterate_over": {
           "anyOf": [
@@ -5659,20 +6295,27 @@
           "title": "Name"
         },
         "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "default": [],
           "description": "Paths this stage produces.",
-          "items": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "$ref": "#/$defs/PathOutput"
-              }
-            ]
-          },
-          "title": "Outputs",
-          "type": "array"
+          "title": "Outputs"
         },
         "scheduler": {
           "anyOf": [
@@ -5685,6 +6328,19 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "wdir": {
           "anyOf": [
@@ -5714,7 +6370,6 @@
   },
   "$id": "https://docs.calkit.org/schemas/calkit.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
   "description": "Metadata for a Calkit project, describing its environments, pipeline, and artifacts. See https://docs.calkit.org/calkit-yaml",
   "properties": {
     "$schema": {
@@ -5775,13 +6430,13 @@
             "type": "string"
           },
           {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object"
+            "$ref": "#/$defs/Dependency"
           },
           {
-            "$ref": "#/$defs/Dependency"
+            "additionalProperties": {
+              "$ref": "#/$defs/DependencyAttrs"
+            },
+            "type": "object"
           }
         ]
       },
@@ -5905,22 +6560,6 @@
       "default": null,
       "description": "Base URL of the Calkit Hub on which the project is shared, backed up, and collaborated on, e.g., 'calkit.io'. The scheme can be omitted, in which case https is inferred, or http for a local host. Each project belongs to at most one hub, which makes 'ck://' paths resolvable against a known instance. Projects with no hub set are assumed to belong to 'calkit.io'.",
       "title": "Hub"
-    },
-    "metrics": {
-      "anyOf": [
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/Metric"
-          },
-          "type": "object"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "default": null,
-      "description": "Metrics the project tracks.",
-      "title": "Metrics"
     },
     "name": {
       "anyOf": [
@@ -6085,13 +6724,13 @@
       "type": "object"
     },
     "results": {
-      "default": [],
-      "description": "Files holding the project's important values.",
-      "items": {
+      "additionalProperties": {
         "$ref": "#/$defs/Result"
       },
+      "default": {},
+      "description": "The project's findings, keyed by name. Each refers to a file, or to part of one.",
       "title": "Results",
-      "type": "array"
+      "type": "object"
     },
     "showcase": {
       "anyOf": [
@@ -6106,6 +6745,15 @@
               },
               {
                 "$ref": "#/$defs/ShowcaseMarkdown"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseMarkdownFile"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseYamlFile"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseNotebook"
               },
               {
                 "$ref": "#/$defs/ShowcasePublication"

@@ -328,17 +328,18 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter      | Type                                | Required | Default | Description                                                                                                                   |
-| -------------- | ----------------------------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `environment`  | str                                 | yes      |         | Name of the environment in which to run this stage.                                                                           |
-| `wdir`         | str \| None                         | no       | null    | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this. |
-| `inputs`       | list[str \| InputsFromStageOutputs] | no       |         | Paths this stage depends on, which trigger a rerun when they change.                                                          |
-| `outputs`      | list[str \| PathOutput]             | no       |         | Paths this stage produces.                                                                                                    |
-| `always_run`   | bool                                | no       | False   | Run this stage every time the pipeline is run, even if nothing has changed.                                                   |
-| `iterate_over` | list[StageIteration] \| None        | no       | null    | Arguments over which to run this stage multiple times.                                                                        |
-| `description`  | str \| None                         | no       | null    | A description of what this stage does.                                                                                        |
-| `frozen`       | bool                                | no       | False   | Never rerun this stage, treating its outputs as up-to-date.                                                                   |
-| `scheduler`    | StageSchedulerOptions \| None       | no       | null    | Options for running this stage on a job scheduler (SLURM or PBS).                                                             |
+| Parameter      | Type                                             | Required | Default | Description                                                                                                                                     |
+| -------------- | ------------------------------------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`  | str                                              | yes      |         | Name of the environment in which to run this stage.                                                                                             |
+| `wdir`         | str \| None                                      | no       | null    | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                   |
+| `inputs`       | list[str \| PathInput \| InputsFromStageOutputs] | no       |         | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted. |
+| `outputs`      | list[str \| PathOutput]                          | no       |         | Paths this stage produces.                                                                                                                      |
+| `always_run`   | bool                                             | no       | False   | Run this stage every time the pipeline is run, even if nothing has changed.                                                                     |
+| `iterate_over` | list[StageIteration] \| None                     | no       | null    | Arguments over which to run this stage multiple times.                                                                                          |
+| `description`  | str \| None                                      | no       | null    | A description of what this stage does.                                                                                                          |
+| `frozen`       | bool                                             | no       | False   | Never rerun this stage, treating its outputs as up-to-date.                                                                                     |
+| `scheduler`    | StageSchedulerOptions \| None                    | no       | null    | Options for running this stage on a job scheduler (SLURM or PBS).                                                                               |
+| `slurm`        | StageSchedulerOptions \| None                    | no       | null    | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                       |
 
 Parameters whose type is a named object, like `PathOutput`, are described under [nested parameter types](#nested-parameter-types).
 
@@ -533,6 +534,24 @@ Model class: `WordToPdfStage`
 ### Nested parameter types
 
 Some parameters above take objects rather than plain values. The properties of each are described below.
+
+#### `PathInput`
+
+An input written as an object carrying a path.
+
+Prefer a plain path string. This exists so a stage keeps working when an
+output is copied verbatim into another stage's `inputs`, which is how
+entries like `{path: ..., storage: ...}` show up in the wild. Only
+`path` is used: an input is a dependency wherever it happens to be
+stored, so the other keys are carried along and ignored.
+
+Extra keys are allowed deliberately, both to tolerate whatever came along
+with a copied output and to leave room for object inputs that aren't
+paths at all, e.g., a database table.
+
+| Parameter | Type | Required | Default | Description                          |
+| --------- | ---- | -------- | ------- | ------------------------------------ |
+| `path`    | str  | yes      |         | Path to the input file or directory. |
 
 #### `InputsFromStageOutputs`
 

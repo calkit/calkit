@@ -24,7 +24,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 import calkit.latex
-from calkit.models.io import InputsFromStageOutputs, PathOutput
+from calkit.models.io import InputsFromStageOutputs, PathInput, PathOutput
 from calkit.models.iteration import (
     ExpandedParametersType,
     ParameterIteration,
@@ -186,6 +186,20 @@ class StageSchedulerOptions(BaseModel):
     )
 
 
+def _allow_null(schema: dict[str, Any]) -> None:
+    """Let a list field's published schema accept null as well as an array.
+
+    An empty ``inputs:`` key parses as null, which ``Stage`` normalizes to an
+    empty list. Without this the generated schema would reject a stage that
+    loads and runs fine, which is the one thing the schema must never do.
+    """
+    annotations = {"title", "description", "default", "deprecated"}
+    inner = {k: v for k, v in schema.items() if k not in annotations}
+    for key in inner:
+        schema.pop(key)
+    schema["anyOf"] = [inner, {"type": "null"}]
+
+
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
@@ -220,14 +234,18 @@ class Stage(BaseModel):
         "to this.",
     )
     # TODO: Support other input types
-    inputs: list[str | InputsFromStageOutputs] = Field(
+    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
         default=[],
         description="Paths this stage depends on, which trigger a rerun when "
-        "they change.",
+        "they change. Normally plain path strings; an object carrying a "
+        "'path' is also accepted.",
+        json_schema_extra=_allow_null,
     )
     # TODO: Support database outputs
     outputs: list[str | PathOutput] = Field(
-        default=[], description="Paths this stage produces."
+        default=[],
+        description="Paths this stage produces.",
+        json_schema_extra=_allow_null,
     )
     always_run: bool = Field(
         default=False,
@@ -261,11 +279,28 @@ class Stage(BaseModel):
     # log file can be tracked as a DVC output.
     _scheduler_kind: str | None = PrivateAttr(default=None)
 
+    # Declared so the published schema accepts what the validator below
+    # already migrates; without it an editor flags a ``slurm:`` stage that
+    # runs fine.
+    slurm: StageSchedulerOptions | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated name for 'scheduler'; set 'scheduler' "
+        "instead.",
+    )
+
     @model_validator(mode="before")
     @classmethod
     def migrate_slurm_field(cls, data: Any) -> Any:
         """Auto-migrate the old ``slurm:`` field to ``scheduler:``."""
-        if not isinstance(data, dict) or "slurm" not in data:
+        if not isinstance(data, dict):
+            return data
+        # An empty ``inputs:``/``outputs:`` key parses as None; treat it the
+        # same as omitting it rather than failing to load the stage
+        for key in ("inputs", "outputs"):
+            if key in data and data[key] is None:
+                data = {k: v for k, v in data.items() if k != key}
+        if "slurm" not in data:
             return data
         if data.get("scheduler") is not None:
             raise ValueError(
@@ -320,8 +355,9 @@ class Stage(BaseModel):
     def dvc_deps(self) -> list[str]:
         deps = []
         for i in self.inputs:
-            if isinstance(i, str) and i not in deps:
-                deps.append(i)
+            path = i if isinstance(i, str) else getattr(i, "path", None)
+            if path is not None and path not in deps:
+                deps.append(path)
         return deps
 
     @property
@@ -468,8 +504,9 @@ class Stage(BaseModel):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, str) and i not in deps:
-                deps.append(i)
+            path = i if isinstance(i, str) else getattr(i, "path", None)
+            if path is not None and path not in deps:
+                deps.append(path)
         outs = self.dvc_outs
         log_out = self.scheduler_log_output
         if log_out is not None:

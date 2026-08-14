@@ -71,8 +71,18 @@ def _list_artifacts(
     declared and auto-detected artifacts apart.
     """
     ck_info = calkit.load_calkit_info()
-    declared = ck_info.get(kind, []) or []
-    declared_paths = {o.get("path") for o in declared if isinstance(o, dict)}
+    declared_raw = ck_info.get(kind) or []
+    # Results are keyed by name; carry the name into each entry so it shows up
+    # alongside the rest of the object's properties
+    if isinstance(declared_raw, dict):
+        declared = [
+            {"name": name, **obj}
+            for name, obj in declared_raw.items()
+            if isinstance(obj, dict)
+        ]
+    else:
+        declared = [o for o in declared_raw if isinstance(o, dict)]
+    declared_paths = {o.get("path") for o in declared}
     detected: list[dict] = []
     if not declared_only:
         found = calkit.detect.detect_project_artifacts(ck_info=ck_info)

@@ -910,13 +910,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                            |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--title`           | text    | yes      |         |                                                        |
-| `--description`     | text    | no       |         |                                                        |
-| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result. |
-| `--no-commit`       | boolean | no       | False   |                                                        |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.               |
+| Option              | Type    | Required | Default | Description                                                                                    |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--name`            | text    | no       |         | Name to key this result by. Defaults to the file's stem, or the key if one is given.           |
+| `--title`           | text    | no       |         |                                                                                                |
+| `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
+| `--description`     | text    | no       |         |                                                                                                |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result.                                         |
+| `--no-commit`       | boolean | no       | False   |                                                                                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.                                                       |
 
 <a id="subcommand-new-create-presentation-pres"></a>
 

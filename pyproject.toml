@@ -236,7 +236,16 @@ members = ["hub/backend"]
 cache-keys = [{ git = { commit = true, tags = true } }]
 
 [tool.pytest.ini_options]
-env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
+env = [
+  "CALKIT_ENV=test",
+  "CALKIT_TEST_OVERLEAF_TOKEN=none",
+  # Keep tests off the real system keyring. Without this, macOS prompts to
+  # unlock the 'calkit-test' Keychain item on every run (and again whenever
+  # the venv is recreated, since that changes the binary's code signature).
+  # The fail backend raises NoKeyringError, so supports_keyring() is False
+  # and the config falls back to its YAML file, which is what tests want.
+  "PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring",
+]
 # The hub backend's tests need the compose stack and its own environment;
 # they run via test-hub.yml, not from the workspace root
 addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"

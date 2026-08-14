@@ -8,7 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from calkit.calc import CalculationType
-from calkit.models.iteration import Metric, ParametersType
+from calkit.models.iteration import ParametersType
 from calkit.models.pipeline import Pipeline
 
 
@@ -27,7 +27,9 @@ class _CalkitObject(BaseModel):
     path: str = Field(
         description="Path to the file, relative to the project root."
     )
-    title: str = Field(description="A human-readable title.")
+    title: str | None = Field(
+        default=None, description="A human-readable title."
+    )
     description: str | None = Field(
         default=None, description="A longer description."
     )
@@ -50,7 +52,20 @@ class Figure(_CalkitObject):
 
 
 class Result(_CalkitObject):
-    pass
+    """A finding the project produced: a value, a table, a map, or a file.
+
+    Results are keyed by name in ``calkit.yaml``, so several can point at the
+    same file, e.g., a mean and a standard deviation both read out of one
+    summary file. Which part of a file a result refers to is left open on
+    purpose: ``key`` addresses a value in an object-like file, and other
+    forms of addressing may be added without reshaping what a result is.
+    """
+
+    key: str | None = Field(
+        default=None,
+        description="Which value within the file this result refers to, "
+        "e.g., 'metrics.mean'. Omit it when the result is the whole file.",
+    )
 
 
 class Presentation(_CalkitObject):
@@ -71,6 +86,9 @@ class Publication(_CalkitObject):
             "proposal",
             "report",
             "blog",
+            "book",
+            "thesis",
+            "phd-thesis",
         ]
         | None
     ) = None
@@ -95,9 +113,10 @@ class Environment(BaseModel):
     this only holds the fields they all share.
     """
 
-    # Extra keys are forbidden so typo'd field names are reported instead of
-    # silently ignored, both at runtime and by editors using the JSON schema.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # Extra keys are allowed for the same reason as on ProjectInfo: the set
+    # of per-kind options is still growing. ``kind`` is still closed, so an
+    # unknown kind is reported rather than silently accepted.
+    model_config = ConfigDict(populate_by_name=True)
     kind: Literal[
         "conda",
         "docker",
@@ -265,7 +284,9 @@ class DockerEnvironment(Environment):
 class REnvironment(Environment):
     kind: Literal["renv"] = "renv"
     path: str = Field(description="Path to the renv lock file.")
-    prefix: str = Field(description="Path at which to create the environment.")
+    prefix: str | None = Field(
+        default=None, description="Path at which to create the environment."
+    )
 
 
 class JuliaEnvironment(Environment):
@@ -469,6 +490,19 @@ class ShowcasePublication(BaseModel):
     publication: str
 
 
+class ShowcaseMarkdownFile(BaseModel):
+    markdown_file: str
+
+
+class ShowcaseYamlFile(BaseModel):
+    yaml_file: str
+    object_name: str | None = None
+
+
+class ShowcaseNotebook(BaseModel):
+    notebook: str
+
+
 class Subproject(BaseModel):
     """A smaller project executed as part of this one."""
 
@@ -543,6 +577,23 @@ class Question(BaseModel):
     ) = None
 
 
+class DependencyAttrs(BaseModel):
+    """A dependency's properties, as written under ``{name: {...}}``.
+
+    ``Dependency`` is this plus the name; the mapping form supplies the name
+    as its key instead.
+    """
+
+    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
+    check_command: str | None = None
+    setup_command: str | None = None
+    cache_ttl: str | int | None = None
+    description: str | None = None
+    default: str | None = None
+    version_spec: str | None = None
+    notes: str | None = None
+
+
 class Dependency(BaseModel):
     """A system-level dependency.
 
@@ -561,7 +612,7 @@ class Dependency(BaseModel):
       field can extend this to skip re-probing for slow checks.
     """
 
-    kind: Literal["app", "env-var", "setup"] = "app"
+    kind: Literal["app", "env-var", "setup", "calkit-config"] = "app"
     name: str
     # ``setup``-kind fields; ignored for other kinds.
     check_command: str | None = None
@@ -581,13 +632,16 @@ class ProjectInfo(BaseModel):
     ``calkit.yaml`` file.
 
     This model is the source of truth for the published JSON schema, so every
-    key that can validly appear in ``calkit.yaml`` must be declared here.
-    Extra keys are rejected, which is what lets editors flag typos.
+    key that can validly appear in ``calkit.yaml`` should be declared here.
+    Unknown keys are tolerated rather than rejected while the schema evolves;
+    the pipeline is where typos are caught.
     """
 
-    # Extra keys are forbidden so a misspelled top-level key is reported
-    # rather than silently ignored.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # Extra keys are allowed while the schema is still evolving, so a
+    # project using a newer or experimental feature (e.g. ``app``, ``ops``)
+    # isn't reported as invalid. The pipeline stays strict, since that's
+    # where a typo'd key silently changes what runs.
+    model_config = ConfigDict(populate_by_name=True)
     schema_: str | None = Field(
         default=None,
         alias="$schema",
@@ -626,7 +680,7 @@ class ProjectInfo(BaseModel):
     questions: list[str | Question] = Field(
         default=[], description="Questions the project seeks to answer."
     )
-    dependencies: list[str | dict[str, str] | Dependency] = Field(
+    dependencies: list[str | Dependency | dict[str, DependencyAttrs]] = Field(
         default=[],
         description=(
             "System-level dependencies: applications that must be on PATH, "
@@ -638,9 +692,6 @@ class ProjectInfo(BaseModel):
         description="Project-level parameters, which can be referenced from "
         "pipeline stages.",
     )
-    metrics: dict[str, Metric] | None = Field(
-        default=None, description="Metrics the project tracks."
-    )
     pipeline: Pipeline | None = Field(
         default=None, description="The project's reproducible pipeline."
     )
@@ -650,9 +701,10 @@ class ProjectInfo(BaseModel):
     figures: list[Figure] = Field(
         default=[], description="The project's figures."
     )
-    results: list[Result] = Field(
-        default=[],
-        description="Files holding the project's important values.",
+    results: dict[str, Result] = Field(
+        default={},
+        description="The project's findings, keyed by name. Each refers to "
+        "a file, or to part of one.",
     )
     publications: list[Publication] = Field(
         default=[],
@@ -707,6 +759,9 @@ class ProjectInfo(BaseModel):
             ShowcaseFigure
             | ShowcaseText
             | ShowcaseMarkdown
+            | ShowcaseMarkdownFile
+            | ShowcaseYamlFile
+            | ShowcaseNotebook
             | ShowcasePublication
         ]
         | None

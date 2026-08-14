@@ -1337,7 +1337,7 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
             ref=None,
             evidence_ck=evidence_ck,
             figures_by_path={fig.path: fig},
-            results_by_path={res.path: res},
+            results_by_path={(res.path, res.key): res},
             publications_by_path={pub.path: pub},
             result_value_cache={},
         )

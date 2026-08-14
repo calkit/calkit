@@ -147,7 +147,9 @@ def test_new_result(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert "results/metrics.json" in [r["path"] for r in ck_info["results"]]
+    # The name defaults to the file's stem
+    assert ck_info["results"]["metrics"]["path"] == "results/metrics.json"
+    assert ck_info["results"]["metrics"]["title"] == "Key metrics"
     # Won't overwrite without -f
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(
@@ -160,6 +162,30 @@ def test_new_result(tmp_dir):
                 "Key metrics",
             ]
         )
+    # Several results can share a file, each naming a value inside it
+    for key in ["mean", "std"]:
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", key]
+        )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["results"]["mean"]["key"] == "mean"
+    assert ck_info["results"]["std"]["key"] == "std"
+    assert ck_info["results"]["mean"]["path"] == "results/metrics.json"
+    # An explicit name wins over the derived one
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--key",
+            "metrics.rmse",
+            "--name",
+            "error",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["results"]["error"]["key"] == "metrics.rmse"
 
 
 def test_new_presentation(tmp_dir):

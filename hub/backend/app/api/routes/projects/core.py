@@ -1772,7 +1772,7 @@ def _build_question_evidence(
     ref: str | None,
     evidence_ck: list,
     figures_by_path: dict[str, Figure],
-    results_by_path: dict[str, Result],
+    results_by_path: dict[tuple[str, str | None], Result],
     publications_by_path: dict[str, Publication],
     result_value_cache: dict[str, dict | None],
 ) -> list[QuestionEvidence]:
@@ -1797,7 +1797,9 @@ def _build_question_evidence(
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
         else:
-            item.result = results_by_path.get(path)
+            item.result = results_by_path.get(
+                (path, item.key)
+            ) or results_by_path.get((path, None))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
@@ -1856,12 +1858,13 @@ def _build_questions_public(
                 figures=cited,
             )
         }
-    results_by_path: dict[str, Result] = {}
+    results_by_path: dict[tuple[str, str | None], Result] = {}
     if "result" in kinds:
-        results_by_path = {
-            res.path: res
-            for res in _build_results(project=project, repo=repo, ref=ref)
-        }
+        # Keyed by (path, key), since several results can point at one file;
+        # a path-only entry lets keyless evidence still resolve
+        for res in _build_results(project=project, repo=repo, ref=ref):
+            results_by_path[(res.path, res.key)] = res
+            results_by_path.setdefault((res.path, None), res)
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {
@@ -2410,10 +2413,18 @@ def _build_results(
         repo=repo,
         ref=ref,
     )
-    results = ck_info.get("results", [])
-    for res in results:
-        if not res.get("title"):
-            res["title"] = _title_from_path(res["path"])
+    # Results are keyed by name in calkit.yaml; the name is the better title
+    # fallback than the path, since several results can share one file
+    declared = ck_info.get("results") or {}
+    results = []
+    if isinstance(declared, dict):
+        for name, res in declared.items():
+            if not isinstance(res, dict) or not res.get("path"):
+                continue
+            res = dict(res)
+            if not res.get("title"):
+                res["title"] = name
+            results.append(res)
     declared_paths = {res["path"] for res in results}
 
     def _is_result_path(path: str) -> bool:

@@ -763,7 +763,7 @@ Model class: `REnvironment`
 | ----------- | --------------- | -------- | ---------------------------------------- |
 | kind        | Literal['renv'] | yes      | What kind of environment this is.        |
 | path        | str             | yes      | Path to the renv lock file.              |
-| prefix      | str             | yes      | Path at which to create the environment. |
+| prefix      | str             | no       | Path at which to create the environment. |
 | description | str             | no       | A description of the environment.        |
 
 #### `ssh`

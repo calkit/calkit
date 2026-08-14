@@ -620,7 +620,7 @@ def new_figure(
 
 
 def _new_simple_artifact(
-    kind: Literal["results", "presentations"],
+    kind: Literal["presentations"],
     path: str,
     title: str,
     description: str | None,
@@ -659,7 +659,27 @@ def _new_simple_artifact(
 @new_app.command(name="result")
 def new_result(
     path: str,
-    title: Annotated[str, typer.Option("--title")],
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help=(
+                "Name to key this result by. Defaults to the file's stem, "
+                "or the key if one is given."
+            ),
+        ),
+    ] = None,
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    key: Annotated[
+        str | None,
+        typer.Option(
+            "--key",
+            help=(
+                "Path to the value within the file, e.g., 'metrics.mean'. "
+                "Omit if the whole file is the result."
+            ),
+        ),
+    ] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
     stage_name: Annotated[
         str | None,
@@ -679,9 +699,39 @@ def new_result(
     ] = False,
 ):
     """Declare a new result."""
-    _new_simple_artifact(
-        "results", path, title, description, stage_name, no_commit, overwrite
-    )
+    # Results are keyed by name, so derive one when it isn't given. The key
+    # is the better default when there is one, since multiple results can
+    # share a file and the stem alone wouldn't tell them apart.
+    if name is None:
+        name = key if key is not None else pathlib.PurePosixPath(path).stem
+        name = calkit.to_kebab_case(name.replace(".", "-"))
+    ck_info = calkit.load_calkit_info()
+    results = ck_info.get("results", {})
+    if not isinstance(results, dict):
+        raise_error(
+            "Results must be a mapping of name to result; this project's "
+            "calkit.yaml still has a list"
+        )
+    if not overwrite and name in results:
+        raise_error(f"Result named {name} already exists")
+    obj: dict = dict(path=path)
+    if key is not None:
+        obj["key"] = key
+    if title is not None:
+        obj["title"] = title
+    if description is not None:
+        obj["description"] = description
+    if stage_name is not None:
+        obj["stage"] = stage_name
+    results[name] = obj
+    ck_info["results"] = results
+    with open("calkit.yaml", "w") as f:
+        ryaml.dump(ck_info, f)
+    if not no_commit:
+        repo = calkit.git.get_repo()
+        repo.git.add("calkit.yaml")
+        if repo.git.diff("--staged"):
+            repo.git.commit(["-m", f"Add result {name}"])
 
 
 @new_app.command(name="presentation|pres")

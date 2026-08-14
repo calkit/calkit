@@ -11,13 +11,25 @@ class InputsFromStageOutputs(BaseModel):
     )
 
 
+class PathInput(BaseModel):
+    """An input written as an object carrying a path.
+
+    Prefer a plain path string. This exists so a stage keeps working when an
+    output is copied verbatim into another stage's ``inputs``, which is how
+    entries like ``{path: ..., storage: ...}`` show up in the wild. Only
+    ``path`` is used: an input is a dependency wherever it happens to be
+    stored, so the other keys are carried along and ignored.
+
+    Extra keys are allowed deliberately, both to tolerate whatever came along
+    with a copied output and to leave room for object inputs that aren't
+    paths at all, e.g., a database table.
+    """
+
+    path: str = Field(description="Path to the input file or directory.")
+
+
 class Input(BaseModel):
     kind: Literal["path", "python-object", "file-segment", "database-table"]
-
-
-class PathInput(Input):
-    kind: Literal["path"]
-    path: str
 
 
 class PythonObjectInput(Input):

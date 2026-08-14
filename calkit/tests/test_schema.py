@@ -17,11 +17,14 @@ def test_generate() -> None:
     schema = calkit.schema.generate()
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == calkit.schema.SCHEMA_URL
-    # Unknown top-level keys must be an error, else typos go unnoticed
-    assert schema["additionalProperties"] is False
-    # The modeline is a comment, but an inline $schema key is also valid, so
-    # it must not trip the check above
+    # The top level tolerates unknown keys while the schema evolves, so a
+    # project using a newer or experimental feature isn't flagged as invalid
+    assert schema.get("additionalProperties") is not False
     assert "$schema" in schema["properties"]
+    # Pipeline stages stay strict, since a typo'd key there silently changes
+    # what runs
+    stage = schema["$defs"]["PythonScriptStage"]
+    assert stage["additionalProperties"] is False
     # Check the checked-in copies are up-to-date, since they're what get
     # published and bundled into the VS Code extension
     for relpath in calkit.schema.SCHEMA_REPO_PATHS:
@@ -52,15 +55,10 @@ def test_validate_bad_projects() -> None:
     def errors(data: dict) -> list[str]:
         return [e.message for e in validator.iter_errors(data)]
 
-    # A misspelled top-level key
-    assert errors({"descrption": "Oops"})
     # An environment missing a required field for its kind
     assert errors({"environments": {"e": {"kind": "docker"}}})
-    # An environment with a misspelled field
-    assert errors(
-        {"environments": {"e": {"kind": "uv-venv", "pathh": "reqs.txt"}}}
-    )
-    # An environment with an unknown kind
+    # An environment with an unknown kind, since the kinds are a closed set
+    # even though their properties are not
     assert errors({"environments": {"e": {"kind": "not-a-kind"}}})
     # A stage with an unknown kind, and one with a misspelled field
     assert errors({"pipeline": {"stages": {"s": {"kind": "nope"}}}})
@@ -77,8 +75,17 @@ def test_validate_bad_projects() -> None:
             }
         }
     )
-    # An environment using the removed _include key
-    assert errors({"environments": {"e": {"_include": "env.yaml"}}})
+    # Results as a list, which is the pre-name-keyed shape
+    assert errors({"results": [{"path": "r.csv", "title": "Summary"}]})
+    # Outside the pipeline, unknown keys are tolerated rather than rejected:
+    # a misspelled top-level key, an unknown environment property, and the
+    # removed _include and metrics keys all still validate
+    assert not errors({"descrption": "Oops"})
+    assert not errors(
+        {"environments": {"e": {"kind": "uv-venv", "path": "r.txt", "x": 1}}}
+    )
+    assert not errors({"environments": {"e": {"_include": "env.yaml"}}})
+    assert not errors({"metrics": {"mean": {"value": 3.14}}})
     # Valid documents, including ones using the features above correctly
     assert not errors({})
     assert not errors({"$schema": calkit.schema.SCHEMA_URL})
@@ -107,6 +114,17 @@ def test_validate_bad_projects() -> None:
     )
     assert not errors(
         {"publications": [{"path": "paper.pdf", "title": "The paper"}]}
+    )
+    # Results are keyed by name; two can share a file with different keys,
+    # and the title is optional since the name identifies it
+    assert not errors(
+        {
+            "results": {
+                "summary": {"path": "r.csv", "title": "Summary"},
+                "mean": {"path": "s.json", "key": "metrics.mean"},
+                "std": {"path": "s.json", "key": "metrics.std"},
+            }
+        }
     )
     assert not errors(
         {

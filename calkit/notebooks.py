@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from calkit.models.io import InputsFromStageOutputs, PathOutput
+    from calkit.models.io import (
+        InputsFromStageOutputs,
+        PathInput,
+        PathOutput,
+    )
 
 
 def get_executed_notebook_path(
@@ -142,7 +146,7 @@ def declare_notebook(
     path: str,
     stage_name: str,
     environment_name: str,
-    inputs: list[str | InputsFromStageOutputs] = [],
+    inputs: list[str | PathInput | InputsFromStageOutputs] = [],
     outputs: list[str | PathOutput] = [],
     always_run: bool = False,
     title: str | None = None,

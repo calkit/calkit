@@ -891,6 +891,9 @@ class Result(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
+    # Which value inside the file this result is; null means the whole file.
+    # Several results can share a path with different keys.
+    key: str | None = None
 
 
 class CommentHighlight(BaseModel):

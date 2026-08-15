@@ -690,3 +690,47 @@ def test_notebooks_from_ck_info() -> None:
         )
         == []
     )
+
+
+def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "top.ipynb").write_text("{}")
+    (repo_dir / "notebooks").mkdir()
+    (repo_dir / "notebooks" / "nested.ipynb").write_text("{}")
+    (repo_dir / "notebooks" / "notes.md").write_text("hi")
+    # Hidden directories hold cleaned/executed copies and virtualenvs, none
+    # of which are the project's own notebooks
+    (repo_dir / ".ipynb_checkpoints").mkdir()
+    (repo_dir / ".ipynb_checkpoints" / "top-checkpoint.ipynb").write_text("{}")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add notebooks"])
+    main_sha = repo.head.commit.hexsha
+    tree = app.projects.get_repo_tree_for_ref(repo, None)
+    assert app.projects.find_notebook_paths_in_tree(tree) == [
+        "notebooks/nested.ipynb",
+        "top.ipynb",
+    ]
+    # A notebook added on another branch belongs to that ref only, and the
+    # working tree is whatever branch the cached clone sits on
+    repo.git.checkout(["-b", "other"])
+    (repo_dir / "later.ipynb").write_text("{}")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add later notebook"])
+    other_sha = repo.head.commit.hexsha
+    assert app.projects.find_notebook_paths_in_tree(
+        app.projects.get_repo_tree_for_ref(repo, other_sha)
+    ) == ["later.ipynb", "notebooks/nested.ipynb", "top.ipynb"]
+    # The earlier ref doesn't see it, even though the checkout now does
+    assert app.projects.find_notebook_paths_in_tree(
+        app.projects.get_repo_tree_for_ref(repo, main_sha)
+    ) == ["notebooks/nested.ipynb", "top.ipynb"]
+    # A symlinked directory pointing back up the tree doesn't hang the walk
+    (repo_dir / "loop").symlink_to(repo_dir)
+    assert "loop" not in str(
+        app.projects.find_notebook_paths_in_tree(
+            app.projects.get_repo_tree_for_ref(repo, None)
+        )
+    )

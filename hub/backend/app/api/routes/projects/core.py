@@ -7803,20 +7803,15 @@ def get_project_notebooks(
         repo=repo,
         ref=ref,
     )
+    tree = app.projects.get_repo_tree_for_ref(repo, ref)
     notebooks = app.projects.notebooks_from_ck_info(ck_info)
     declared_paths = {nb["path"] for nb in notebooks}
     # Also detect undeclared .ipynb files not under hidden directories
     try:
-        for root, dirs, files in os.walk(repo.working_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for fname in files:
-                if fname.endswith(".ipynb"):
-                    rel = os.path.relpath(
-                        os.path.join(root, fname), repo.working_dir
-                    )
-                    if rel not in declared_paths:
-                        notebooks.append({"path": rel})
-                        declared_paths.add(rel)
+        for rel in app.projects.find_notebook_paths_in_tree(tree):
+            if rel not in declared_paths:
+                notebooks.append({"path": rel})
+                declared_paths.add(rel)
     except Exception as e:
         logger.warning(f"Failed to scan for undeclared notebooks: {e}")
     if not notebooks:
@@ -7826,7 +7821,6 @@ def get_project_notebooks(
     for nb in notebooks:
         app.projects.link_notebook_to_stage_and_app(nb, ck_info)
     # Get the notebook content and base64 encode it
-    tree = app.projects.get_repo_tree_for_ref(repo, ref)
     (
         ck_info_full,
         dvc_lock_outs,

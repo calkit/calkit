@@ -3185,3 +3185,62 @@ def test_get_project_notebooks_finds_marimo_notebook(
     # There's no executed copy of a marimo notebook, so its source is shown
     assert nb["output_format"] == "source"
     assert "marimo.App()" in base64.b64decode(nb["content"]).decode()
+
+
+def test_get_project_notebooks_respects_ref(
+    client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import git
+
+    import app.projects
+
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "calkit.yaml").write_text("questions:\n  - Why?\n")
+    (repo_dir / "first.ipynb").write_text('{"cells": [], "nbformat": 4}')
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "First notebook"])
+    first_sha = repo.head.commit.hexsha
+    # Leave the checkout on a branch that has a second notebook, so the
+    # working tree disagrees with the ref being requested
+    repo.git.checkout(["-b", "other"])
+    (repo_dir / "second.ipynb").write_text('{"cells": [], "nbformat": 4}')
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Second notebook"])
+
+    def get(ref: str | None):
+        with (
+            patch(
+                "app.api.routes.projects.core.app.projects.get_project",
+                return_value=SimpleNamespace(
+                    owner_account_name="test-owner",
+                    name="test-project",
+                    is_public=True,
+                    file_locks=[],
+                ),
+            ),
+            patch("app.api.routes.projects.core.get_repo", return_value=repo),
+        ):
+            url = (
+                f"{settings.API_V1_STR}/projects/test-owner/test-project"
+                "/notebooks"
+            )
+            return client.get(url, params={"ref": ref} if ref else None)
+
+    # Undeclared notebooks are scanned from the requested ref, not from
+    # whatever branch the cached clone happens to be sitting on
+    response = get(first_sha)
+    assert response.status_code == 200
+    assert [nb["path"] for nb in response.json()] == ["first.ipynb"]
+    # With no ref, the checkout is the right thing to read
+    response = get(None)
+    assert response.status_code == 200
+    assert sorted(nb["path"] for nb in response.json()) == [
+        "first.ipynb",
+        "second.ipynb",
+    ]

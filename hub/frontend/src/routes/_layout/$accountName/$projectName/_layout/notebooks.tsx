@@ -71,13 +71,33 @@ function NotebookInfo({
           {notebook.description ?? ""}
         </Text>
       </Text>
+      {/* Path and stage link out the way they do in the other info panels,
+      each carrying the ref being browsed so the file or stage opens at the
+      same commit rather than on the default branch */}
       <Text fontSize="sm" mb={1}>
-        <Text as="span">Path:</Text> <Code fontSize="xs">{notebook.path}</Code>
+        <Text as="span">Path:</Text>{" "}
+        <Link
+          as={RouterLink}
+          to={`/${accountName}/${projectName}/files`}
+          search={{ path: notebook.path, ref: gitRef } as any}
+        >
+          <Code fontSize="xs" cursor="pointer">
+            {notebook.path}
+          </Code>
+        </Link>
       </Text>
       <Text fontSize="sm" mb={1}>
         <Text as="span">Pipeline stage:</Text>{" "}
         {notebook.stage ? (
-          <Code fontSize="xs">{notebook.stage}</Code>
+          <Link
+            as={RouterLink}
+            to={`/${accountName}/${projectName}/pipeline`}
+            search={{ stage: notebook.stage, ref: gitRef } as any}
+          >
+            <Code fontSize="xs" cursor="pointer">
+              {notebook.stage}
+            </Code>
+          </Link>
         ) : (
           <Text as="span" color="red.500">
             Not in pipeline

@@ -1331,6 +1331,35 @@ def notebooks_from_ck_info(ck_info: dict[str, Any]) -> list[dict[str, Any]]:
     return notebooks
 
 
+def find_notebook_paths_in_tree(tree: RepoTree) -> list[str]:
+    """Every ``.ipynb`` file in a tree, outside hidden directories.
+
+    Walks the tree rather than the checkout, so an undeclared notebook is
+    listed for the ref that was asked for. The working directory is
+    whatever branch the cached clone happens to sit on, which is only
+    coincidentally the one being browsed.
+    """
+    found: list[str] = []
+
+    def walk(dirname: str) -> None:
+        for name in sorted(tree.listdir(dirname or None)):
+            # Skips .git, .dvc, .venv and .ipynb_checkpoints in one rule
+            if name.startswith("."):
+                continue
+            path = posixpath.join(dirname, name) if dirname else name
+            # A symlinked directory can point back up the tree, and a walk
+            # that follows one never finishes
+            if tree.is_symlink(path):
+                continue
+            if tree.is_dir(path):
+                walk(path)
+            elif name.endswith(".ipynb"):
+                found.append(path)
+
+    walk("")
+    return found
+
+
 def link_notebook_to_stage_and_app(
     notebook: dict[str, Any], ck_info: dict[str, Any]
 ) -> None:

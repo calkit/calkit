@@ -46,7 +46,11 @@ transfers once and reuses a single ref, rather than leaving ten behind.
 from __future__ import annotations
 
 import os
+import posixpath
+import shlex
+import subprocess
 import tempfile
+from dataclasses import dataclass
 
 import git
 
@@ -62,7 +66,8 @@ SNAPSHOT_REF_NS = "refs/calkit/snapshots"
 # except the tree and parent is fixed. Real identity and timestamps would
 # make an unchanged tree hash differently on every transfer, which is what
 # fills a workspace up with refs.
-_SNAPSHOT_AUTHOR = "Calkit <noreply@calkit.io>"
+_SNAPSHOT_NAME = "Calkit"
+_SNAPSHOT_EMAIL = "noreply@calkit.io"
 _SNAPSHOT_DATE = "1970-01-01T00:00:00+0000"
 _SNAPSHOT_MESSAGE = "Calkit workspace snapshot"
 
@@ -115,11 +120,11 @@ def create_snapshot(repo: git.Repo | None = None) -> str:
         if head_sha is not None:
             args += ["-p", head_sha]
         with repo.git.custom_environment(
-            GIT_AUTHOR_NAME="Calkit",
-            GIT_AUTHOR_EMAIL="noreply@calkit.io",
+            GIT_AUTHOR_NAME=_SNAPSHOT_NAME,
+            GIT_AUTHOR_EMAIL=_SNAPSHOT_EMAIL,
             GIT_AUTHOR_DATE=_SNAPSHOT_DATE,
-            GIT_COMMITTER_NAME="Calkit",
-            GIT_COMMITTER_EMAIL="noreply@calkit.io",
+            GIT_COMMITTER_NAME=_SNAPSHOT_NAME,
+            GIT_COMMITTER_EMAIL=_SNAPSHOT_EMAIL,
             GIT_COMMITTER_DATE=_SNAPSHOT_DATE,
         ):
             return repo.git.commit_tree(*args, "-m", _SNAPSHOT_MESSAGE)
@@ -181,3 +186,205 @@ def prune_snapshots(
         repo.git.update_ref("-d", snapshot_ref(sha))
         pruned.append(sha)
     return pruned
+
+
+@dataclass
+class Workspace:
+    """A project checkout on another machine, reached over SSH.
+
+    Everything here builds commands rather than running them, so what gets
+    executed can be asserted in a test without a second machine to talk to.
+    """
+
+    host: str
+    user: str
+    wdir: str
+    key: str | None = None
+
+    @classmethod
+    def from_env(cls, env: dict, env_name: str) -> Workspace:
+        """Build a workspace from a ``system`` environment definition.
+
+        Raises if it can't be reached, since guessing a user or a directory
+        would run the stage somewhere the project never said to.
+        """
+        host = os.path.expandvars(env.get("host") or "")
+        user = os.path.expandvars(env.get("user") or "")
+        wdir = env.get("wdir") or ""
+        if not host or not user or not wdir:
+            raise ValueError(
+                f"System environment '{env_name}' runs on host "
+                f"'{host or '?'}', which this is not, so it needs a 'user' "
+                "to connect as and a 'wdir' workspace to run in"
+            )
+        key = env.get("key")
+        if key is not None:
+            key = os.path.expanduser(os.path.expandvars(key))
+        return cls(host=host, user=user, wdir=wdir, key=key)
+
+    @property
+    def target(self) -> str:
+        return f"{self.user}@{self.host}"
+
+    @property
+    def git_url(self) -> str:
+        """The workspace as a Git remote.
+
+        Pushing straight to the workspace keeps snapshots off whatever
+        remote the project is hosted on, which matters both because a
+        cluster often can't reach it and because WIP snapshots have no
+        business in a shared history.
+        """
+        return f"ssh://{self.target}/{self.wdir.lstrip('/')}"
+
+    @property
+    def ssh_options(self) -> list[str]:
+        return ["-i", self.key] if self.key else []
+
+    @property
+    def git_ssh_command(self) -> str:
+        """What Git should use as its transport, honoring the env's key."""
+        return " ".join(["ssh"] + [shlex.quote(o) for o in self.ssh_options])
+
+    def ssh_argv(self, remote_command: str) -> list[str]:
+        return ["ssh"] + self.ssh_options + [self.target, remote_command]
+
+    def path(self, *parts: str) -> str:
+        return posixpath.join(self.wdir, *parts)
+
+    def scp_to_argv(self, srcs: list[str], dest: str) -> list[str]:
+        return (
+            ["scp", "-r"] + self.ssh_options + srcs + [f"{self.target}:{dest}"]
+        )
+
+    def scp_from_argv(self, src: str, dest: str) -> list[str]:
+        return (
+            ["scp", "-r"] + self.ssh_options + [f"{self.target}:{src}", dest]
+        )
+
+
+def _run(argv: list[str], verbose: bool = False) -> None:
+    if verbose:
+        print(f"Running: {argv}")
+    subprocess.check_call(argv)
+
+
+def send_snapshot(
+    workspace: Workspace,
+    sha: str,
+    repo: git.Repo | None = None,
+    verbose: bool = False,
+) -> None:
+    """Put the workspace on ``sha``, pushing it there if it's missing.
+
+    The checkout is forced because a workspace is derived state: whatever
+    it holds came from a previous transfer, and the local tree is the only
+    thing that decides what a stage should see. Ignored files, which is
+    where DVC keeps its data and cache, are left alone by this.
+    """
+    if repo is None:
+        repo = calkit.git.get_repo()
+    ref = snapshot_ref(sha)
+    with repo.git.custom_environment(
+        GIT_SSH_COMMAND=workspace.git_ssh_command
+    ):
+        repo.git.push(workspace.git_url, f"{sha}:{ref}")
+    _run(
+        workspace.ssh_argv(
+            f"cd {shlex.quote(workspace.wdir)} && "
+            f"git checkout --force --detach {shlex.quote(sha)}"
+        ),
+        verbose=verbose,
+    )
+
+
+def paths_to_transfer(
+    paths: list[str], repo: git.Repo | None = None
+) -> list[str]:
+    """Which of ``paths`` the snapshot doesn't already carry.
+
+    Git-tracked files ride along in the snapshot, so re-sending them would
+    be wasted transfer. What's left is the ignored ones, which is where
+    DVC-tracked data lives.
+    """
+    if not paths:
+        return []
+    if repo is None:
+        repo = calkit.git.get_repo()
+    existing = [p for p in paths if os.path.exists(p)]
+    if not existing:
+        return []
+    # check-ignore exits 1 when nothing matches, which is not an error here
+    try:
+        out = repo.git.check_ignore(*existing)
+    except git.exc.GitCommandError:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def send_paths(
+    workspace: Workspace,
+    paths: list[str],
+    verbose: bool = False,
+) -> None:
+    """Copy paths into the workspace, keeping their layout."""
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        dest_dir = posixpath.dirname(path.replace(os.sep, "/"))
+        dest = workspace.path(dest_dir) if dest_dir else workspace.wdir
+        _run(
+            workspace.ssh_argv(f"mkdir -p {shlex.quote(dest)}"),
+            verbose=verbose,
+        )
+        _run(workspace.scp_to_argv([path], dest), verbose=verbose)
+
+
+def fetch_paths(
+    workspace: Workspace,
+    paths: list[str],
+    verbose: bool = False,
+) -> None:
+    """Copy paths back out of the workspace, keeping their layout."""
+    for path in paths:
+        local_dir = os.path.dirname(path)
+        if local_dir:
+            os.makedirs(local_dir, exist_ok=True)
+        _run(
+            workspace.scp_from_argv(
+                workspace.path(path.replace(os.sep, "/")),
+                local_dir or ".",
+            ),
+            verbose=verbose,
+        )
+
+
+def prune_command(wdir: str) -> str:
+    """The shell command that forgets a workspace's stale snapshot refs.
+
+    Split out from the SSH call so the shell can be exercised directly,
+    since a quoting mistake here would either delete nothing or delete the
+    ref a running stage is holding.
+    """
+    return (
+        f"cd {shlex.quote(wdir)} && "
+        "head=$(git rev-parse HEAD) && "
+        "git for-each-ref --format='%(refname) %(objectname)' "
+        f"{SNAPSHOT_REF_NS} | "
+        "while read ref obj; do "
+        'if [ "$obj" != "$head" ]; then git update-ref -d "$ref"; fi; '
+        "done"
+    )
+
+
+def prune_remote_snapshots(
+    workspace: Workspace,
+    verbose: bool = False,
+) -> None:
+    """Forget snapshot refs in the workspace, except what it's sitting on.
+
+    Run after a transfer so refs don't pile up. This is why the namespace
+    is reserved: one pattern deletes everything Calkit put there, with no
+    risk of catching a branch someone cares about.
+    """
+    _run(workspace.ssh_argv(prune_command(workspace.wdir)), verbose=verbose)

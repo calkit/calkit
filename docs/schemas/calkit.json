@@ -6386,7 +6386,7 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It is required to reach another machine, since there is\nnowhere to put the project otherwise.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It is required to reach another machine, since there is\nnowhere to put the project otherwise.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
         "description": {
           "anyOf": [
@@ -6400,22 +6400,6 @@
           "default": null,
           "description": "A description of the environment.",
           "title": "Description"
-        },
-        "get_paths": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Paths copied back from the workspace after running. Only used when reaching another host.",
-          "title": "Get Paths"
         },
         "host": {
           "default": "localhost",
@@ -6472,22 +6456,6 @@
           },
           "title": "Lock",
           "type": "array"
-        },
-        "send_paths": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Paths copied to the workspace before running. Globs are supported. Only used when reaching another host.",
-          "title": "Send Paths"
         },
         "user": {
           "anyOf": [

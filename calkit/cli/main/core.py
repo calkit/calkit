@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import csv
-import glob
 import json
 import logging
 import os
 import platform as _platform
 import posixpath
+import shlex
 import shutil
 import signal
 import subprocess
@@ -2633,6 +2633,28 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
+    send: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--send",
+            help=(
+                "Path the command reads, to be made available in the "
+                "workspace. Only used when the environment runs on another "
+                "machine. Normally set by the pipeline."
+            ),
+        ),
+    ] = None,
+    get: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--get",
+            help=(
+                "Path the command writes, to be collected from the "
+                "workspace afterwards. Only used when the environment runs "
+                "on another machine. Normally set by the pipeline."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -2940,37 +2962,28 @@ def run_in_env(
     elif env["kind"] == "system" and not calkit.environments.host_is_local(
         os.path.expandvars(env.get("host") or "localhost")
     ):
-        # A system env on another machine. SSH is how we reach it; the
-        # project needs a workspace there to run in, since the command runs
-        # in that directory rather than in this project tree.
-        host = os.path.expandvars(env["host"])
-        user = env.get("user")
-        remote_wdir = env.get("wdir")
-        if not user or not remote_wdir:
-            raise_error(
-                f"System environment '{env_name}' runs on host '{host}', "
-                "which this is not, so it needs a 'user' to connect as and "
-                "a 'wdir' workspace to run in"
-            )
-        user = os.path.expandvars(user)
-        send_paths = env.get("send_paths")
-        get_paths = env.get("get_paths")
-        key = env.get("key")
-        if key is not None:
-            key = os.path.expanduser(os.path.expandvars(key))
+        # A system env on another machine. The project needs a workspace
+        # there to run in, and that workspace has to hold exactly what the
+        # stage would see here -- including edits that were never committed,
+        # since running something other than what is on screen is the whole
+        # problem this transfer exists to avoid.
+        import calkit.workspace as workspace
+
+        try:
+            ws = workspace.Workspace.from_env(env=env, env_name=env_name)
+        except ValueError as e:
+            raise_error(str(e))
+        repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
         # The stage's own wdir is relative to the workspace, the same way it
         # is relative to the project root locally
-        remote_run_wdir = (
-            posixpath.join(remote_wdir, wdir) if wdir else remote_wdir
-        )
+        remote_run_wdir = ws.path(wdir) if wdir else ws.wdir
         # Run with nohup so we can disconnect
         # TODO: Should we collect output instead of send to /dev/null?
         remote_cmd = (
             f"cd '{remote_run_wdir}' ; nohup {remote_shell_cmd} "
             "> /dev/null 2>&1 & echo $! "
         )
-        key_cmd = ["-i", key] if key is not None else []
         # Check to see if we've already submitted a job with this command
         jobs_fpath = ".calkit/jobs.yaml"
         job_key = f"{env_name}::{remote_shell_cmd}"
@@ -2984,38 +2997,31 @@ def run_in_env(
             jobs = {}
         job = jobs.get(job_key, {})
         remote_pid = job.get("remote_pid")
+        snapshot = job.get("snapshot")
         if remote_pid is None:
-            # First make sure the remote working dir exists
-            typer.echo("Ensuring remote working directory exists")
+            typer.echo("Ensuring workspace directory exists")
             subprocess.check_call(
-                ["ssh"]
-                + key_cmd
-                + [f"{user}@{host}", f"mkdir -p {remote_wdir}"]
+                ws.ssh_argv(f"mkdir -p {shlex.quote(ws.wdir)}")
             )
-            # Now send any necessary files
-            if send_paths:
-                typer.echo("Sending to remote directory")
-                # Accept glob patterns
-                paths = []
-                for p in send_paths:
-                    paths += glob.glob(p)
-                scp_cmd = (
-                    ["scp", "-r"]
-                    + key_cmd
-                    + paths
-                    + [f"{user}@{host}:{remote_wdir}/"]
+            # Put the workspace on exactly this working tree
+            snapshot = workspace.create_snapshot(repo=repo)
+            typer.echo(f"Sending workspace snapshot {snapshot[:8]}")
+            workspace.send_snapshot(
+                workspace=ws, sha=snapshot, repo=repo, verbose=verbose
+            )
+            # Whatever the snapshot doesn't carry is data DVC tracks, which
+            # is ignored by Git and so has to go separately
+            to_send = workspace.paths_to_transfer(list(send or []), repo=repo)
+            if to_send:
+                typer.echo(f"Sending {len(to_send)} data path(s)")
+                workspace.send_paths(
+                    workspace=ws, paths=to_send, verbose=verbose
                 )
-                if verbose:
-                    typer.echo(f"scp cmd: {scp_cmd}")
-                subprocess.check_call(scp_cmd)
-            # Now run the command
             typer.echo(f"Running remote command: {remote_shell_cmd}")
             if verbose:
                 typer.echo(f"Full command: {remote_cmd}")
             remote_pid = (
-                subprocess.check_output(
-                    ["ssh"] + key_cmd + [f"{user}@{host}", remote_cmd]
-                )
+                subprocess.check_output(ws.ssh_argv(remote_cmd))
                 .decode()
                 .strip()
             )
@@ -3024,6 +3030,7 @@ def run_in_env(
             typer.echo("Updating jobs database")
             os.makedirs(".calkit", exist_ok=True)
             job["remote_pid"] = remote_pid
+            job["snapshot"] = snapshot
             job["submitted"] = time.time()
             job["finished"] = None
             jobs[job_key] = job
@@ -3031,7 +3038,7 @@ def run_in_env(
                 calkit.ryaml.dump(jobs, f)
         # Now wait for the job to complete
         typer.echo(f"Waiting for remote PID {remote_pid} to finish")
-        ps_cmd = ["ssh"] + key_cmd + [f"{user}@{host}", "ps", "-p", remote_pid]
+        ps_cmd = ws.ssh_argv(f"ps -p {shlex.quote(str(remote_pid))}")
         finished = False
         while not finished:
             try:
@@ -3041,17 +3048,34 @@ def run_in_env(
             except subprocess.CalledProcessError:
                 finished = True
                 typer.echo("Remote process finished")
-        # Now sync the files back
+        # DVC hashes this stage's dependencies from the local files once we
+        # return. If they moved while the stage ran elsewhere, recording the
+        # result would pair inputs that were never used with outputs they
+        # never produced, and that lock file reads as up to date forever --
+        # worse than the stage staying stale, because it never announces
+        # itself. Refuse instead.
+        if snapshot is not None and not workspace.working_tree_matches(
+            snapshot, repo=repo
+        ):
+            raise_error(
+                "The project changed while this stage was running on "
+                f"'{ws.host}', so its outputs no longer correspond to what "
+                "is here. Nothing was collected; rerun the stage."
+            )
+        # Now collect what the stage produced
         # TODO: Figure out how to do this in one command
         # Getting the syntax right is troublesome since it appears to work
         # differently on different platforms
-        if get_paths:
-            typer.echo("Copying files back from remote directory")
-            for src_path in get_paths:
-                src_path = remote_wdir + "/" + src_path  # type: ignore
-                src = f"{user}@{host}:{src_path}"
-                scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
-                subprocess.check_call(scp_cmd)
+        if get:
+            typer.echo(f"Collecting {len(get)} output path(s)")
+            workspace.fetch_paths(
+                workspace=ws, paths=list(get), verbose=verbose
+            )
+        # Leave the workspace holding only what it is running
+        try:
+            workspace.prune_remote_snapshots(workspace=ws, verbose=verbose)
+        except subprocess.CalledProcessError:
+            warn("Failed to clean up workspace snapshots")
         # Now delete the remote PID from the jobs file
         typer.echo("Updating jobs database")
         os.makedirs(".calkit", exist_ok=True)

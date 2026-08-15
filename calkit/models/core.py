@@ -438,6 +438,11 @@ class SystemEnvironment(Environment):
     ``wdir`` is the project's workspace on that host -- the directory the
     stage runs in. It is required to reach another machine, since there is
     nowhere to put the project otherwise.
+
+    What moves in and out of that workspace is deliberately not declared
+    here. An environment doesn't know which files a stage reads, so a list
+    kept alongside it can fall behind the pipeline and quietly run against
+    stale inputs; the paths are taken from the stage instead.
     """
 
     kind: Literal["system"] = "system"
@@ -458,16 +463,6 @@ class SystemEnvironment(Environment):
         default=None,
         description="The project's workspace on the host, in which stages "
         "run. Required to reach another host.",
-    )
-    send_paths: list[str] | None = Field(
-        default=None,
-        description="Paths copied to the workspace before running. Globs are "
-        "supported. Only used when reaching another host.",
-    )
-    get_paths: list[str] | None = Field(
-        default=None,
-        description="Paths copied back from the workspace after running. "
-        "Only used when reaching another host.",
     )
     lock: list[SystemLockProperty] = Field(
         default=[],

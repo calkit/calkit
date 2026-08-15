@@ -189,3 +189,94 @@ def test_working_tree_matches_catches_edits_during_a_remote_run(tmp_dir):
     with open("script.py", "w") as f:
         f.write("print('what was sent')\n")
     assert ws.working_tree_matches(sent, repo=repo)
+
+
+def test_workspace_from_env_requires_somewhere_to_run():
+    # Guessing a user or a directory would run the stage somewhere the
+    # project never named
+    for env in [
+        {"kind": "system", "host": "box"},
+        {"kind": "system", "host": "box", "user": "me"},
+        {"kind": "system", "host": "box", "wdir": "/w"},
+    ]:
+        with pytest.raises(ValueError, match="'user'.*'wdir'"):
+            ws.Workspace.from_env(env=env, env_name="remote")
+    w = ws.Workspace.from_env(
+        env={
+            "kind": "system",
+            "host": "box.example.org",
+            "user": "me",
+            "wdir": "/home/me/proj",
+            "key": "~/.ssh/id_ed25519",
+        },
+        env_name="remote",
+    )
+    assert w.target == "me@box.example.org"
+    # Pushed straight to the workspace, so snapshots never touch whatever
+    # remote the project is hosted on
+    assert w.git_url == "ssh://me@box.example.org/home/me/proj"
+    assert w.key is not None and w.key.startswith(os.path.expanduser("~"))
+    assert w.ssh_options[0] == "-i"
+    assert w.git_ssh_command.startswith("ssh -i ")
+    assert w.ssh_argv("ls")[:1] == ["ssh"]
+    assert w.ssh_argv("ls")[-2:] == ["me@box.example.org", "ls"]
+    assert w.path("sub") == "/home/me/proj/sub"
+
+
+def test_workspace_without_a_key_omits_ssh_options():
+    w = ws.Workspace(host="box", user="me", wdir="/w")
+    assert w.ssh_options == []
+    assert w.git_ssh_command == "ssh"
+    assert w.scp_to_argv(["a"], "/w") == ["scp", "-r", "a", "me@box:/w"]
+    assert w.scp_from_argv("/w/a", ".") == ["scp", "-r", "me@box:/w/a", "."]
+
+
+def test_paths_to_transfer_skips_what_the_snapshot_carries(tmp_dir):
+    # Git-tracked files ride along in the snapshot; only DVC's ignored data
+    # has to be sent separately
+    repo = _init_repo()
+    with open(".gitignore", "w") as f:
+        f.write("data/\n")
+    repo.git.add(".gitignore")
+    repo.git.commit("-m", "ignore data")
+    os.makedirs("data", exist_ok=True)
+    with open("data/in.csv", "w") as f:
+        f.write("a\n")
+    assert ws.paths_to_transfer(["script.py"], repo=repo) == []
+    assert ws.paths_to_transfer(["data/in.csv"], repo=repo) == ["data/in.csv"]
+    assert ws.paths_to_transfer(["script.py", "data/in.csv"], repo=repo) == [
+        "data/in.csv"
+    ]
+    # A path that doesn't exist locally has nothing to send
+    assert ws.paths_to_transfer(["data/missing.csv"], repo=repo) == []
+    assert ws.paths_to_transfer([], repo=repo) == []
+
+
+def test_prune_command_cleans_a_workspace_without_touching_its_checkout(
+    tmp_dir,
+):
+    # The prune runs as a shell one-liner on the far end, where a quoting
+    # slip would either delete nothing or delete the ref a running stage is
+    # holding. Exercise the shell itself rather than trusting it.
+    repo = _init_repo()
+    workspace_dir = os.path.join(os.getcwd(), "work space")
+    subprocess.check_call(["git", "clone", "-q", os.getcwd(), workspace_dir])
+    workspace = git.Repo(workspace_dir)
+    shas = []
+    for text in ["a", "b", "c"]:
+        with open("script.py", "w") as f:
+            f.write(f"print('{text}')\n")
+        sha = ws.create_snapshot(repo=repo)
+        repo.git.push(workspace_dir, f"{sha}:{ws.snapshot_ref(sha)}")
+        shas.append(sha)
+    workspace.git.checkout("--force", "--detach", shas[1])
+    assert sorted(ws.list_snapshots(repo=workspace)) == sorted(shas)
+    # A branch the workspace cares about must survive the sweep
+    workspace.git.branch("keep-me", shas[0])
+    subprocess.check_call(
+        ["bash", "-c", ws.prune_command(workspace_dir)],
+    )
+    # Only what it's sitting on is left, and the branch is untouched
+    assert ws.list_snapshots(repo=workspace) == [shas[1]]
+    assert "keep-me" in [h.name for h in workspace.heads]
+    assert workspace.head.commit.hexsha == shas[1]

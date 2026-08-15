@@ -404,14 +404,16 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                                      |
-| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
-| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
-| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                |
-| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                       |
-| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
-| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
+| Option             | Type    | Required | Default | Description                                                                                                                                                   |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                              |
+| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                |
+| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                                                             |
+| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                                                                    |
+| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                        |
+| `--send`           | text    | no       |         | Path the command reads, to be made available in the workspace. Only used when the environment runs on another machine. Normally set by the pipeline.          |
+| `--get`            | text    | no       |         | Path the command writes, to be collected from the workspace afterwards. Only used when the environment runs on another machine. Normally set by the pipeline. |
+| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                                                                         |
 
 <a id="top-command-install"></a>
 

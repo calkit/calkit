@@ -481,22 +481,14 @@ environments:
     user: my-user-name
     wdir: /home/my-user-name/calkit/example
     key: ~/.ssh/id_ed25519
-    send_paths:
-      - script.sh
-    get_paths:
-      - results
 ```
 
-Here `wdir` is the project's _workspace_ on that machine---the directory
-stages run in.
+Here `wdir` is the project's _workspace_ on that machine---a clone of the
+project, and the directory stages run in.
 It's required to reach another host, since there's nowhere to put the
 project otherwise.
-`user` is the account to connect as, `key` is the path to an SSH key on
-this machine (so we can connect without a password),
-`send_paths` are copied to the workspace before running,
-and `get_paths` are copied back afterwards.
-Wildcards in paths are supported, so the entire directory could be copied
-by specifying `*`.
+`user` is the account to connect as, and `key` is the path to an SSH key on
+this machine, so we can connect without a password.
 
 To register an SSH key with the host, use `ssh-copy-id`. For example:
 
@@ -517,6 +509,34 @@ pipeline:
       outputs:
         - results
 ```
+
+#### How the workspace is kept in sync
+
+Notice that nothing above says which files to copy back and forth.
+Calkit works that out from the stage, because an environment doesn't know
+what a stage reads, and a list maintained by hand falls behind the pipeline
+sooner or later---at which point the stage quietly runs against stale
+inputs, which is the failure you'd least want here.
+
+Before the command runs, Calkit captures your working tree---including
+edits you haven't committed---as a Git snapshot, pushes it straight to the
+workspace, and checks it out there detached.
+No branch is created on either side, so several people (or several clones)
+can share one workspace without their branch names colliding, and cleaning
+up afterwards is a single reserved namespace rather than a set of names
+someone has to recognize.
+Data that DVC tracks is ignored by Git, so it's sent separately, and only
+the paths the stage actually declares as inputs.
+Afterwards, the stage's declared outputs are copied back.
+
+One consequence worth knowing: if the project changes locally while a stage
+is running elsewhere, Calkit refuses to collect the results rather than
+recording them.
+DVC hashes a stage's dependencies from your local files once the command
+returns, so recording a result in that situation would write a `dvc.lock`
+pairing inputs that were never used with outputs they never produced---and
+unlike a stale stage, which simply reruns, a lock file like that goes on
+looking up to date indefinitely.
 
 Note that `lock` can only be used when the host is the machine you're on.
 Locking the properties of a machine Calkit can't observe would claim the
@@ -885,6 +905,11 @@ with nothing locked.
 stage runs in. It is required to reach another machine, since there is
 nowhere to put the project otherwise.
 
+What moves in and out of that workspace is deliberately not declared
+here. An environment doesn't know which files a stage reads, so a list
+kept alongside it can fall behind the pipeline and quietly run against
+stale inputs; the paths are taken from the stage instead.
+
 | Parameter   | Type                                                                                                                                                                                                                                                                                                                           | Required | Description                                                                                                                                                   |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['system']                                                                                                                                                                                                                                                                                                              | yes      | What kind of environment this is.                                                                                                                             |
@@ -892,8 +917,6 @@ nowhere to put the project otherwise.
 | user        | str                                                                                                                                                                                                                                                                                                                            | no       | User to connect as. Required to reach another host.                                                                                                           |
 | key         | str                                                                                                                                                                                                                                                                                                                            | no       | Path to the SSH private key used to reach another host.                                                                                                       |
 | wdir        | str                                                                                                                                                                                                                                                                                                                            | no       | The project's workspace on the host, in which stages run. Required to reach another host.                                                                     |
-| send_paths  | list[str]                                                                                                                                                                                                                                                                                                                      | no       | Paths copied to the workspace before running. Globs are supported. Only used when reaching another host.                                                      |
-| get_paths   | list[str]                                                                                                                                                                                                                                                                                                                      | no       | Paths copied back from the workspace after running. Only used when reaching another host.                                                                     |
 | lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned. |
 | description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                             |
 

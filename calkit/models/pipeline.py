@@ -310,10 +310,10 @@ class Stage(BaseModel):
     # log file can be tracked as a DVC output.
     _scheduler_kind: str | None = PrivateAttr(default=None)
     # The name of the outer ``system`` env when this stage runs on a
-    # particular machine and its inner env is a separate runtime, so the
-    # compiled command dispatches to that machine before activating the
-    # runtime there. Also resolved by set_stage_scheduler_options.
-    _outer_system_env: str | None = PrivateAttr(default=None)
+    # particular machine, whether or not it also names an inner runtime, so
+    # the compiled command dispatches there first. Also resolved by
+    # set_stage_scheduler_options.
+    _system_env: str | None = PrivateAttr(default=None)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -451,15 +451,49 @@ class Stage(BaseModel):
                 + " --command -- "
                 + f"calkit xenv -n {self.inner_environment} --no-check --"
             )
-        inner_cmd = f"calkit xenv -n {self.inner_environment} --no-check --"
-        if self._outer_system_env is not None:
-            # Dispatch to the machine first; the inner xenv then runs there,
-            # in the workspace, rather than here.
-            return (
-                f"calkit xenv -n {self._outer_system_env} --no-check -- "
-                + inner_cmd
+        if self._system_env is not None:
+            # Dispatch to the machine, telling it what this stage reads and
+            # writes so the transfer follows the pipeline instead of a
+            # hand-maintained list that can drift out of step with it.
+            cmd = (
+                f"calkit xenv -n {self._system_env} --no-check"
+                + self.workspace_transfer_args
             )
-        return inner_cmd
+            if self.inner_environment == self.outer_environment:
+                return cmd + " --"
+            # The inner xenv runs in the workspace rather than here
+            return (
+                cmd
+                + " -- "
+                + f"calkit xenv -n {self.inner_environment} --no-check --"
+            )
+        return f"calkit xenv -n {self.inner_environment} --no-check --"
+
+    @property
+    def dvc_out_paths(self) -> list[str]:
+        """The paths this stage writes, however its outputs are spelled."""
+        paths = []
+        for out in self.dvc_outs:
+            path = out if isinstance(out, str) else next(iter(out))
+            if path not in paths:
+                paths.append(path)
+        return paths
+
+    @property
+    def workspace_transfer_args(self) -> str:
+        """What a workspace has to be given, and what to collect back.
+
+        Derived from the stage rather than declared per environment: an
+        environment doesn't know which files a stage reads, and a list
+        maintained by hand silently runs against stale inputs the moment it
+        falls behind the pipeline.
+        """
+        args = ""
+        for dep in self.dvc_deps:
+            args += f" --send {shlex.quote(dep)}"
+        for out in self.dvc_out_paths:
+            args += f" --get {shlex.quote(out)}"
+        return args
 
     @property
     def scheduler_cmd(self) -> str:
@@ -1821,8 +1855,8 @@ class Pipeline(BaseModel):
             kind = env.get("kind")
             if kind == "system":
                 # A system env names the machine, so it can wrap an inner
-                # runtime the same way a scheduler env does. On its own it
-                # just runs the stage there, which needs no resolution.
+                # runtime the same way a scheduler env does.
+                stage._system_env = stage.outer_environment
                 if stage.inner_environment == stage.outer_environment:
                     continue
                 inner_env = environments.get(stage.inner_environment)
@@ -1841,7 +1875,6 @@ class Pipeline(BaseModel):
                         "must be a runtime, not another machine or a job "
                         "scheduler"
                     )
-                stage._outer_system_env = stage.outer_environment
                 continue
             if kind not in scheduler_kinds:
                 continue

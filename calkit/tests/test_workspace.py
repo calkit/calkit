@@ -2,11 +2,23 @@
 
 import os
 import subprocess
+import sys
 
 import git
 import pytest
 
 import calkit.workspace as ws
+
+# Not a Windows defect to fix later: the workspace shell is only ever
+# executed on the far end of an SSH connection, which is POSIX by
+# construction -- the transfer also leans on mkdir -p, nohup, and ps -p, and
+# a workspace's wdir is always a POSIX path. Handing it a local C:\... path
+# exercises a situation that cannot arise. Everything else in this module,
+# including the push and detached checkout, still runs on Windows.
+skipif_windows_remote_shell = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="The workspace shell only ever runs on the remote POSIX host",
+)
 
 
 def _init_repo() -> git.Repo:
@@ -252,6 +264,7 @@ def test_paths_to_transfer_skips_what_the_snapshot_carries(tmp_dir):
     assert ws.paths_to_transfer([], repo=repo) == []
 
 
+@skipif_windows_remote_shell
 def test_prune_command_cleans_a_workspace_without_touching_its_checkout(
     tmp_dir,
 ):
@@ -280,3 +293,17 @@ def test_prune_command_cleans_a_workspace_without_touching_its_checkout(
     assert ws.list_snapshots(repo=workspace) == [shas[1]]
     assert "keep-me" in [h.name for h in workspace.heads]
     assert workspace.head.commit.hexsha == shas[1]
+
+
+def test_prune_command_is_quoted_and_scoped():
+    # Runs everywhere, including Windows, since the risky parts of the
+    # remote shell are in how it's built rather than in running it
+    cmd = ws.prune_command("/home/me/work space")
+    # A workspace path with a space has to survive as one argument
+    assert "cd '/home/me/work space'" in cmd
+    # Scoped to the reserved namespace, so no branch can be swept up
+    assert ws.SNAPSHOT_REF_NS in cmd
+    assert "refs/heads" not in cmd
+    # And whatever the workspace is sitting on is spared
+    assert "git rev-parse HEAD" in cmd
+    assert '"$obj" != "$head"' in cmd

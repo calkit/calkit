@@ -1,5 +1,6 @@
 """Tests for app.api.routes.projects.core endpoints."""
 
+import base64
 import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
@@ -2933,3 +2934,313 @@ def test_normalize_artifact_file_path_rejects_out_of_repo_paths() -> None:
         with pytest.raises(HTTPException) as exc_info:
             _normalize_artifact_file_path(path)
         assert exc_info.value.status_code == 400, path
+
+
+def test_get_project_apps(client: TestClient) -> None:
+    fake_project = SimpleNamespace()
+    ck_info = {
+        "apps": {
+            "naca0012": {
+                "kind": "static-html",
+                "path": "app/index.html",
+                "title": "NACA 0012 explorer",
+                "stage": "build-app",
+            },
+            # A kind we don't serve shouldn't hide the ones we do
+            "other": {"kind": "something-else", "path": "x/index.html"},
+        }
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    apps = {a["name"]: a for a in response.json()}
+    assert list(apps) == ["naca0012"]
+    # The URL is ours and derived, never read from calkit.yaml
+    assert apps["naca0012"]["url"] == (
+        f"{settings.API_V1_STR}/projects/test-owner/test-project"
+        "/apps/naca0012/serve/"
+    )
+    assert apps["naca0012"]["path"] == "app/index.html"
+    assert apps["naca0012"]["stage"] == "build-app"
+    # The old singular key named a URL hosted elsewhere for us to embed,
+    # which we no longer do, so it yields nothing
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={"app": {"url": "https://old.hf.space"}},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    assert response.json() == []
+    # A project with no apps returns an empty list rather than erroring
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={},
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
+    fake_project = SimpleNamespace()
+    ck_info = {
+        "apps": {
+            # The declared path becomes a serving root that file reads join
+            # onto, so one that escapes the project is dropped rather than
+            # served, and doesn't take the valid apps with it
+            "escape": {"path": "../../../etc/passwd.html"},
+            "absolute": {"path": "/etc/passwd.html"},
+            "not-html": {"path": "app/data.csv"},
+            "no-path": {"title": "Nothing to serve"},
+            "good": {"path": "./app/index.html"},
+        }
+    }
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
+        )
+    assert response.status_code == 200
+    apps = response.json()
+    assert [a["name"] for a in apps] == ["good"]
+    # Declared paths come back normalized, the way they're keyed everywhere
+    assert apps[0]["path"] == "app/index.html"
+
+
+def test_serve_project_app_file(client: TestClient) -> None:
+    ck_info = {"apps": {"myapp": {"path": "app/index.html"}}}
+    base = f"{settings.API_V1_STR}/projects/test-owner/test-project"
+
+    def get(path: str, is_public: bool = True):
+        with (
+            patch(
+                "app.api.routes.projects.core.app.projects.get_project",
+                return_value=SimpleNamespace(is_public=is_public),
+            ),
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_ck_info_for_ref",
+                return_value=ck_info,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects.read_app_file",
+                side_effect=lambda **kwargs: (
+                    f"bytes:{kwargs['rel_path']}".encode()
+                ),
+            ) as mock_read,
+        ):
+            return client.get(path, follow_redirects=False), mock_read
+
+    # No path serves the declared entrypoint, out of its own directory
+    response, mock_read = get(f"{base}/apps/myapp/serve")
+    assert response.status_code == 200
+    assert response.content == b"bytes:index.html"
+    assert mock_read.call_args.kwargs["dir_path"] == "app"
+    assert response.headers["content-type"].startswith("text/html")
+    # Project-supplied bytes, so the browser doesn't get to second-guess the
+    # type, and a public project's app is cacheable by anyone
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["cache-control"] == "public, max-age=300"
+    # An asset resolves relative to the entrypoint's directory, and WASM has
+    # to be typed exactly or the browser won't stream-compile it
+    response, _ = get(f"{base}/apps/myapp/serve/assets/pyodide.wasm")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/wasm"
+    # Access is gated on a read check, so a shared cache must not hold a
+    # private project's app and hand it to somebody we'd have refused
+    response, _ = get(f"{base}/apps/myapp/serve", is_public=False)
+    assert response.headers["cache-control"] == "private, max-age=300"
+    # A pinned commit can never change what it returns
+    sha = "0" * 40
+    response, _ = get(f"{base}/apps/myapp/{sha}/serve/index.html")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == (
+        "public, max-age=31536000, immutable"
+    )
+    # Nothing may climb out of the app's directory
+    for bad in ["../../../etc/passwd", "assets/../../../etc/passwd"]:
+        response, _ = get(f"{base}/apps/myapp/serve/{bad}")
+        assert response.status_code == 404, bad
+    # An app that isn't declared isn't served
+    response, _ = get(f"{base}/apps/nope/serve")
+    assert response.status_code == 404
+
+
+def test_get_project_notebooks_finds_marimo_notebook(
+    client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import git
+
+    import app.projects
+
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    # The shape petebachant/nacafoil-openfoam uses: a marimo notebook named
+    # only by the pipeline, with no `notebooks` section
+    (repo_dir / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    app:\n"
+        "      kind: marimo-html-wasm\n"
+        "      environment: py\n"
+        "      notebook_path: notebook.py\n"
+        "      output_dir: app\n"
+        "apps:\n"
+        "  naca0012:\n"
+        "    kind: static-html\n"
+        "    path: app/index.html\n"
+        "    stage: app\n"
+    )
+    (repo_dir / "notebook.py").write_text(
+        'import marimo\n__generated_with = "0.19.4"\napp = marimo.App()\n'
+    )
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add marimo notebook"])
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=SimpleNamespace(
+                owner_account_name="test-owner",
+                name="test-project",
+                is_public=True,
+                file_locks=[],
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=repo,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/notebooks"
+        )
+    assert response.status_code == 200
+    notebooks = response.json()
+    # A .py notebook can't be found by scanning for the .ipynb extension, so
+    # naming it in a stage has to be enough
+    assert [nb["path"] for nb in notebooks] == ["notebook.py"]
+    nb = notebooks[0]
+    assert nb["stage"] == "app"
+    assert nb["app"] == "naca0012"
+    # There's no executed copy of a marimo notebook, so its source is shown
+    assert nb["output_format"] == "source"
+    assert "marimo.App()" in base64.b64decode(nb["content"]).decode()
+
+
+def test_get_project_notebooks_respects_ref(
+    client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import git
+
+    import app.projects
+
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "calkit.yaml").write_text("questions:\n  - Why?\n")
+    (repo_dir / "first.ipynb").write_text('{"cells": [], "nbformat": 4}')
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "First notebook"])
+    first_sha = repo.head.commit.hexsha
+    # Leave the checkout on a branch that has a second notebook, so the
+    # working tree disagrees with the ref being requested
+    repo.git.checkout(["-b", "other"])
+    (repo_dir / "second.ipynb").write_text('{"cells": [], "nbformat": 4}')
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Second notebook"])
+
+    def get(ref: str | None):
+        with (
+            patch(
+                "app.api.routes.projects.core.app.projects.get_project",
+                return_value=SimpleNamespace(
+                    owner_account_name="test-owner",
+                    name="test-project",
+                    is_public=True,
+                    file_locks=[],
+                ),
+            ),
+            patch("app.api.routes.projects.core.get_repo", return_value=repo),
+        ):
+            url = (
+                f"{settings.API_V1_STR}/projects/test-owner/test-project"
+                "/notebooks"
+            )
+            return client.get(url, params={"ref": ref} if ref else None)
+
+    # Undeclared notebooks are scanned from the requested ref, not from
+    # whatever branch the cached clone happens to be sitting on
+    response = get(first_sha)
+    assert response.status_code == 200
+    assert [nb["path"] for nb in response.json()] == ["first.ipynb"]
+    # With no ref, the checkout is the right thing to read
+    response = get(None)
+    assert response.status_code == 200
+    assert sorted(nb["path"] for nb in response.json()) == [
+        "first.ipynb",
+        "second.ipynb",
+    ]

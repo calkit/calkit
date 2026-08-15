@@ -50,6 +50,10 @@ class ShowcaseNotebook(BaseModel):
     notebook: Notebook
 
 
+class ShowcaseAppInput(BaseModel):
+    app: str
+
+
 class ShowcaseInput(BaseModel):
     elements: list[
         ShowcaseFigureInput
@@ -59,6 +63,7 @@ class ShowcaseInput(BaseModel):
         | ShowcaseMarkdown
         | ShowcaseYamlFileInput
         | ShowcaseNotebookInput
+        | ShowcaseAppInput
     ]
 
 

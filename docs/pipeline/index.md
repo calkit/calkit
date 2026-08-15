@@ -432,6 +432,43 @@ Model class: `MapPathsStage`
 | `environment`           | str                                                                       | no       | '\_system' | Name of the environment in which to run this stage. |
 | `paths`                 | list[CopyFileToFile \| CopyFileToDir \| DirToDirMerge \| DirToDirReplace] | yes      |            | Copy operations to perform.                         |
 
+### `marimo-html-wasm`
+
+Model class: `MarimoHtmlWasmStage`
+
+A stage that exports a marimo notebook to a WebAssembly app.
+
+The app runs entirely in the browser via Pyodide, so it can be served
+as static files with no backend.
+
+marimo's export commands differ enough from each other that each gets
+its own stage kind and CLI command, rather than one kind with a format
+option whose other fields only apply to some of its values.
+
+marimo's own export is not self-contained: it requires the data an app
+reads to already sit in a `public` directory next to the notebook, and
+copies only that directory into the output. Assembling that is this
+stage's main job, and it happens in a build directory rather than
+in place, so nothing is generated in the project tree. Paths in `include_paths` are
+copied beneath `public` at their project-relative paths, so notebook
+code that reads `mo.notebook_location() / "public" / "data.csv"` works
+the same locally as it does in the browser.
+
+`include_paths` is deliberately separate from `inputs` because these
+files are published to the web, which should be opt-in per path rather
+than inferred from the dependency graph. They are dependencies too.
+
+| Kind-specific parameter | Type                          | Required | Default | Description                                                                                                  |
+| ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `notebook_path`         | str                           | yes      |         | Path to the marimo notebook to export.                                                                       |
+| `layout_path`           | str \| None                   | no       | null    | Path to the notebook's layout file, if it has one.                                                           |
+| `mode`                  | Literal['run', 'edit']        | no       | 'run'   | Whether the app runs its cells or opens as an editable notebook.                                             |
+| `show_code`             | bool                          | no       | False   | Show the notebook's code in the app.                                                                         |
+| `include_paths`         | list[str]                     | no       |         | Paths published with the app, readable from the notebook at 'public/<path>'. These are dependencies as well. |
+| `output_dir`            | str                           | yes      |         | Directory into which the app is exported.                                                                    |
+| `output_storage`        | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the exported app.                                                                             |
+| `validate_notebook`     | bool                          | no       | True    | Run the notebook before exporting, to catch one that would fail in the browser.                              |
+
 ### `matlab-command`
 
 Model class: `MatlabCommandStage`

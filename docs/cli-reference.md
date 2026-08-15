@@ -37,7 +37,7 @@
 | [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
 | [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
 | [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                                                                 |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
@@ -1676,14 +1676,15 @@ Arguments:
 
 ### `calkit notebooks|nb`
 
-Work with Jupyter notebooks.
+Work with computational notebooks.
 
-| Command                                                 | Description                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`clean`](#subcommand-notebooks-nb-clean)               | Clean notebook and place a copy in the cleaned notebooks directory. |
-| [`clean-all`](#subcommand-notebooks-nb-clean-all)       | Clean all notebooks in the pipeline.                                |
-| [`check-kernel`](#subcommand-notebooks-nb-check-kernel) | Check that an environment has a registered Jupyter kernel.          |
-| [`execute`](#subcommand-notebooks-nb-execute)           | Execute notebook and place a copy in the relevant directory.        |
+| Command                                                             | Description                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory. |
+| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                |
+| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.          |
+| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.        |
+| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                      |
 
 <a id="subcommand-notebooks-nb-clean"></a>
 
@@ -1785,6 +1786,38 @@ Options:
 | `--language`, `-l`      | text    | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
 | `--no-replace`          | boolean | no       | False    | Do not replace notebook outputs from executed version.                          |
 | `--verbose`, `-v`       | boolean | no       | False    | Print verbose output.                                                           |
+
+<a id="subcommand-notebooks-nb-export-marimo-wasm"></a>
+
+#### `calkit notebooks|nb export-marimo-wasm`
+
+Export a marimo notebook to a WebAssembly app.
+
+Usage:
+
+```text
+calkit notebooks|nb export-marimo-wasm [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | text | yes      |         | Notebook path. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                             |
+| --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output`      | text    | yes      |         | Output path for the app.                                                                                                |
+| `--environment`, `-e` | text    | no       |         | Name or path to the spec of the environment in which to export the notebook; must include marimo.                       |
+| `--mode`              | text    | no       | run     | Whether the app is read-only ('run') or editable.                                                                       |
+| `--show-code`         | boolean | no       | False   | Show notebook code in the app.                                                                                          |
+| `--layout`            | text    | no       |         | Path to the layout file named in the notebook's marimo.App(layout_file=...) call.                                       |
+| `--include`           | text    | no       |         | Path to publish with the app, copied beneath 'public' at its project-relative path. May be a glob, and may be repeated. |
+| `--no-validate`       | boolean | no       | False   | Skip executing the notebook to check it works before exporting.                                                         |
+| `--no-check`          | boolean | no       | False   | Do not check environment before exporting.                                                                              |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                   |
 
 <a id="command-group-list-ls"></a>
 

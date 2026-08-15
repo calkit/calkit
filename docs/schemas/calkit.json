@@ -2721,6 +2721,242 @@
       "title": "MapPathsStage",
       "type": "object"
     },
+    "MarimoHtmlWasmStage": {
+      "additionalProperties": false,
+      "description": "A stage that exports a marimo notebook to a WebAssembly app.\n\nThe app runs entirely in the browser via Pyodide, so it can be served\nas static files with no backend.\n\nmarimo's export commands differ enough from each other that each gets\nits own stage kind and CLI command, rather than one kind with a format\noption whose other fields only apply to some of its values.\n\nmarimo's own export is not self-contained: it requires the data an app\nreads to already sit in a ``public`` directory next to the notebook, and\ncopies only that directory into the output. Assembling that is this\nstage's main job, and it happens in a build directory rather than\nin place, so nothing is generated in the project tree. Paths in ``include_paths`` are\ncopied beneath ``public`` at their project-relative paths, so notebook\ncode that reads ``mo.notebook_location() / \"public\" / \"data.csv\"`` works\nthe same locally as it does in the browser.\n\n``include_paths`` is deliberately separate from ``inputs`` because these\nfiles are published to the web, which should be opt-in per path rather\nthan inferred from the dependency graph. They are dependencies too.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "description": "Name of the environment in which to run this stage.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "include_paths": {
+          "default": [],
+          "description": "Paths published with the app, readable from the notebook at 'public/<path>'. These are dependencies as well.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Paths",
+          "type": "array"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "marimo-html-wasm",
+          "default": "marimo-html-wasm",
+          "title": "Kind",
+          "type": "string"
+        },
+        "layout_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the notebook's layout file, if it has one.",
+          "title": "Layout Path"
+        },
+        "mode": {
+          "default": "run",
+          "description": "Whether the app runs its cells or opens as an editable notebook.",
+          "enum": [
+            "run",
+            "edit"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "notebook_path": {
+          "description": "Path to the marimo notebook to export.",
+          "title": "Notebook Path",
+          "type": "string"
+        },
+        "output_dir": {
+          "description": "Directory into which the app is exported.",
+          "title": "Output Dir",
+          "type": "string"
+        },
+        "output_storage": {
+          "anyOf": [
+            {
+              "enum": [
+                "git",
+                "dvc"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "dvc",
+          "description": "Where to store the exported app.",
+          "title": "Output Storage"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "show_code": {
+          "default": false,
+          "description": "Show the notebook's code in the app.",
+          "title": "Show Code",
+          "type": "boolean"
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "validate_notebook": {
+          "default": true,
+          "description": "Run the notebook before exporting, to catch one that would fail in the browser.",
+          "title": "Validate Notebook",
+          "type": "boolean"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "environment",
+        "notebook_path",
+        "output_dir"
+      ],
+      "title": "MarimoHtmlWasmStage",
+      "type": "object"
+    },
     "MatlabCommandStage": {
       "additionalProperties": false,
       "properties": {
@@ -3493,6 +3729,7 @@
                 "jupyter-notebook": "#/$defs/JupyterNotebookStage",
                 "latex": "#/$defs/LatexStage",
                 "map-paths": "#/$defs/MapPathsStage",
+                "marimo-html-wasm": "#/$defs/MarimoHtmlWasmStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
                 "python-script": "#/$defs/PythonScriptStage",
@@ -3556,6 +3793,9 @@
               },
               {
                 "$ref": "#/$defs/MapPathsStage"
+              },
+              {
+                "$ref": "#/$defs/MarimoHtmlWasmStage"
               }
             ]
           },
@@ -5678,6 +5918,20 @@
       "title": "ShellScriptStage",
       "type": "object"
     },
+    "ShowcaseApp": {
+      "description": "Show an app in the project's showcase, by its key in ``apps``.",
+      "properties": {
+        "app": {
+          "title": "App",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "title": "ShowcaseApp",
+      "type": "object"
+    },
     "ShowcaseFigure": {
       "properties": {
         "figure": {
@@ -6036,6 +6290,63 @@
         }
       },
       "title": "StageSchedulerOptions",
+      "type": "object"
+    },
+    "StaticHtmlApp": {
+      "additionalProperties": false,
+      "description": "An app served as static files, with no backend.\n\n``path`` points at the HTML file itself rather than its directory, since\nthe kind names a file type. The containing directory is the serving root,\nso sibling assets are served alongside it, and ``index.html`` is implied\nwhen a directory is served.\n\nThere is no ``url`` field: for apps a hub serves, the URL is derived from\nthe project and the app's key, and a value written here could only go\nstale.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "const": "static-html",
+          "default": "static-html",
+          "title": "Kind",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "StaticHtmlApp",
       "type": "object"
     },
     "Subproject": {
@@ -6550,6 +6861,15 @@
       "description": "URL of the JSON schema describing this file.",
       "title": "$Schema"
     },
+    "apps": {
+      "additionalProperties": {
+        "$ref": "#/$defs/StaticHtmlApp"
+      },
+      "default": {},
+      "description": "The project's apps, keyed by name.",
+      "title": "Apps",
+      "type": "object"
+    },
     "calculations": {
       "additionalProperties": {
         "discriminator": {
@@ -6944,6 +7264,9 @@
               },
               {
                 "$ref": "#/$defs/ShowcasePublication"
+              },
+              {
+                "$ref": "#/$defs/ShowcaseApp"
               }
             ]
           },

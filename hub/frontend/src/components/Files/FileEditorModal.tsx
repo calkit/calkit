@@ -160,7 +160,8 @@ const FileEditorModal = ({
       setCommitMessage("")
       commitModal.onClose()
       showToast("Saved", "Your changes were committed.", "success")
-      refreshProjectContents(ownerName, projectName, queryClient)
+      // Fire-and-forget: the save already succeeded, and this never rejects.
+      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {

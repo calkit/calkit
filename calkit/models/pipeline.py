@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import posixpath
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -33,7 +34,13 @@ from calkit.models.iteration import (
 )
 
 
-def _check_path_relative_and_child_of_cwd(s: str) -> str:
+def check_path_relative_and_child_of_cwd(s: str) -> str:
+    # An empty or blank path is Path('.'), which passes every check below and
+    # silently means the project root. Callers act on what they're given, so
+    # for something like a map-paths destination that would target the whole
+    # project rather than erroring.
+    if not s.strip():
+        raise ValueError("Path must not be empty")
     p = Path(s)
     # Enforce that the path is relative
     if p.is_absolute():
@@ -51,12 +58,30 @@ def _check_path_relative_and_child_of_cwd(s: str) -> str:
         raise ValueError(
             f"Path is not a child of the current working directory: {p}"
         )
-    return p.as_posix()
+    # Collapse any '..' lexically, so a path that walks back out and in again
+    # can't reach a caller still spelled the original way. 'sub/..' passes the
+    # containment check above, but left as-is it would be acted on verbatim.
+    return posixpath.normpath(p.as_posix())
 
 
 RelativeChildPathString = Annotated[
-    str, AfterValidator(_check_path_relative_and_child_of_cwd)
+    str, AfterValidator(check_path_relative_and_child_of_cwd)
 ]
+
+
+def _non_glob_prefix(path: str) -> str:
+    """Return the longest leading portion of a path containing no glob
+    characters, so a pattern can be reduced to something usable as a DVC
+    dependency, e.g. ``figures/*-umag.png`` becomes ``figures``.
+
+    A path with no glob characters is returned unchanged.
+    """
+    kept = []
+    for part in Path(path).as_posix().split("/"):
+        if any(c in part for c in "*?["):
+            break
+        kept.append(part)
+    return "/".join(kept)
 
 
 class StageIteration(BaseModel):
@@ -223,11 +248,17 @@ class Stage(BaseModel):
         "julia-command",
         "word-to-pdf",
         "map-paths",
+        "marimo-html-wasm",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
     )
-    wdir: str | None = Field(
+    # Constrained like other stage path fields (e.g. MatlabScriptStage's
+    # matlab_path): this becomes the DVC stage's working directory and is
+    # joined with the stage's other paths, where an absolute value would
+    # silently win, so an unchecked one lets a project's pipeline run
+    # against paths outside itself.
+    wdir: RelativeChildPathString | None = Field(
         default=None,
         description="Working directory in which to run, relative to the "
         "project root. Note that all other paths in the stage are relative "
@@ -600,8 +631,12 @@ class MapPathsStage(Stage):
             default="file-to-file",
             description="Copy one file to one destination path.",
         )
-        src: str = Field(description="Path to the file to copy.")
-        dest: str = Field(description="Path to which the file is copied.")
+        src: RelativeChildPathString = Field(
+            description="Path to the file to copy."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to which the file is copied."
+        )
 
         @property
         def arg(self) -> str:
@@ -618,8 +653,10 @@ class MapPathsStage(Stage):
             default="file-to-dir",
             description="Copy one file into a destination directory.",
         )
-        src: str = Field(description="Path to the file to copy.")
-        dest: str = Field(
+        src: RelativeChildPathString = Field(
+            description="Path to the file to copy."
+        )
+        dest: RelativeChildPathString = Field(
             description="Path to the directory into which the file is copied."
         )
 
@@ -638,8 +675,12 @@ class MapPathsStage(Stage):
             default="dir-to-dir-merge",
             description="Merge one directory's contents into another.",
         )
-        src: str = Field(description="Path to the directory to copy from.")
-        dest: str = Field(description="Path to the directory to copy into.")
+        src: RelativeChildPathString = Field(
+            description="Path to the directory to copy from."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to the directory to copy into."
+        )
 
         @property
         def arg(self) -> str:
@@ -656,11 +697,30 @@ class MapPathsStage(Stage):
             default="dir-to-dir-replace",
             description="Replace the destination directory entirely.",
         )
-        src: str = Field(description="Path to the directory to copy from.")
-        dest: str = Field(
+        src: RelativeChildPathString = Field(
+            description="Path to the directory to copy from."
+        )
+        dest: RelativeChildPathString = Field(
             description="Path to the directory to replace, which is deleted "
             "first."
         )
+
+        @field_validator("dest")
+        @classmethod
+        def check_dest_is_not_project_root(cls, v: str) -> str:
+            """Refuse to replace the project itself.
+
+            This kind deletes its destination before copying, so a dest of
+            '.' (which '' and 'sub/..' also reduce to) would remove the whole
+            project. The other kinds only copy into their destination, so the
+            project root is a fine target for them.
+            """
+            if v == ".":
+                raise ValueError(
+                    "Destination must not be the project root, since "
+                    "dir-to-dir-replace deletes it before copying"
+                )
+            return v
 
         @property
         def arg(self) -> str:
@@ -1509,6 +1569,152 @@ class WordToPdfStage(Stage):
         )
 
 
+class MarimoHtmlWasmStage(Stage):
+    """A stage that exports a marimo notebook to a WebAssembly app.
+
+    The app runs entirely in the browser via Pyodide, so it can be served
+    as static files with no backend.
+
+    marimo's export commands differ enough from each other that each gets
+    its own stage kind and CLI command, rather than one kind with a format
+    option whose other fields only apply to some of its values.
+
+    marimo's own export is not self-contained: it requires the data an app
+    reads to already sit in a ``public`` directory next to the notebook, and
+    copies only that directory into the output. Assembling that is this
+    stage's main job, and it happens in a build directory rather than
+    in place, so nothing is generated in the project tree. Paths in ``include_paths`` are
+    copied beneath ``public`` at their project-relative paths, so notebook
+    code that reads ``mo.notebook_location() / "public" / "data.csv"`` works
+    the same locally as it does in the browser.
+
+    ``include_paths`` is deliberately separate from ``inputs`` because these
+    files are published to the web, which should be opt-in per path rather
+    than inferred from the dependency graph. They are dependencies too.
+    """
+
+    kind: Literal["marimo-html-wasm"] = "marimo-html-wasm"
+    notebook_path: str = Field(
+        description="Path to the marimo notebook to export."
+    )
+    # The layout file is named inside the notebook source
+    # (``marimo.App(layout_file=...)``), so we can't detect it without
+    # parsing Python, and a grid app silently degrades to a linear notebook
+    # if it goes missing.
+    layout_path: str | None = Field(
+        default=None,
+        description="Path to the notebook's layout file, if it has one.",
+    )
+    mode: Literal["run", "edit"] = Field(
+        default="run",
+        description="Whether the app runs its cells or opens as an editable "
+        "notebook.",
+    )
+    show_code: bool = Field(
+        default=False, description="Show the notebook's code in the app."
+    )
+    include_paths: list[str] = Field(
+        default=[],
+        description="Paths published with the app, readable from the "
+        "notebook at 'public/<path>'. These are dependencies as well.",
+    )
+    output_dir: str = Field(
+        description="Directory into which the app is exported."
+    )
+    output_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the exported app."
+    )
+    # A WASM export doesn't run the notebook, so we run it once beforehand to
+    # keep a broken app from shipping green. That doubles the stage's runtime,
+    # which isn't worth it for a notebook that takes a while and is already
+    # executed elsewhere in the pipeline. Not named ``validate``, which
+    # shadows a Pydantic attribute on the base model.
+    validate_notebook: bool = Field(
+        default=True,
+        description="Run the notebook before exporting, to catch one that "
+        "would fail in the browser.",
+    )
+
+    @model_validator(mode="after")
+    def check_include_paths_have_a_stable_dep(self) -> MarimoHtmlWasmStage:
+        """Reject an include pattern whose first segment is a glob.
+
+        Dependencies are the pattern's longest non-glob parent, so a
+        top-level pattern like ``*.csv`` leaves nothing to depend on, and
+        silently dropping it would let DVC order this stage before whatever
+        produces those files.
+        """
+        for path in self.include_paths:
+            if not _non_glob_prefix(path):
+                raise ValueError(
+                    f"Included path '{path}' begins with a glob, leaving no "
+                    "directory to depend on; put it under one, e.g. "
+                    f"'data/{path}'"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def check_export_options(self) -> MarimoHtmlWasmStage:
+        """Reject options that contradict each other."""
+        if self.mode == "edit" and self.show_code:
+            raise ValueError(
+                "Stage option 'show_code' is redundant with 'mode: edit', "
+                "where code is always visible"
+            )
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = [self.notebook_path]
+        if self.layout_path is not None:
+            deps.append(self.layout_path)
+        # A glob can't be a DVC dep, and expanding one at compile time would
+        # yield no deps at all before the producing stage has ever run,
+        # letting DVC order this stage first. Depend on the longest non-glob
+        # parent instead: conservative, but stable and correctly ordered.
+        for path in self.include_paths:
+            dep = _non_glob_prefix(path)
+            if dep not in deps:
+                deps.append(dep)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        if self.output_storage:
+            outs.append(
+                {self.output_dir: {"cache": self.output_storage == "dvc"}}
+            )
+        return outs
+
+    @property
+    def app_outputs(self) -> list[PathOutput]:
+        """Return the exported app so its storage can be respected."""
+        return [PathOutput(path=self.output_dir, storage=self.output_storage)]
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            "calkit nb export-marimo-wasm --environment "
+            f"{self.inner_environment} --no-check"
+        )
+        if self.mode != "run":
+            cmd += f" --mode {self.mode}"
+        if self.show_code:
+            cmd += " --show-code"
+        if not self.validate_notebook:
+            cmd += " --no-validate"
+        if self.layout_path is not None:
+            cmd += f" --layout {shlex.quote(self.layout_path)}"
+        for path in self.include_paths:
+            cmd += f" --include {shlex.quote(path)}"
+        cmd += f" -o {shlex.quote(self.output_dir)}"
+        cmd += f" {shlex.quote(self.notebook_path)}"
+        if self.scheduler is not None:
+            cmd = self.scheduler_cmd + " --command -- " + cmd
+        return cmd
+
+
 class Pipeline(BaseModel):
     """The project's reproducible pipeline."""
 
@@ -1533,6 +1739,7 @@ class Pipeline(BaseModel):
                 | JuliaCommandStage
                 | SBatchStage
                 | MapPathsStage
+                | MarimoHtmlWasmStage
             ),
             Discriminator("kind"),
         ],

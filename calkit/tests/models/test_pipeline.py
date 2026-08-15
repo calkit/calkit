@@ -11,6 +11,7 @@ from calkit.models.pipeline import (
     JupyterNotebookStage,
     LatexStage,
     MapPathsStage,
+    MarimoHtmlWasmStage,
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
@@ -624,3 +625,180 @@ def test_latex_stage_diffs():
                 target_path="pubs/paper-1/main.tex",
                 diffs=bad,
             )
+
+
+def test_marimohtmlwasmstage():
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        layout_path="layouts/notebook.grid.json",
+        show_code=True,
+        include_paths=[
+            "processed/all-simulated.csv",
+            "figures/naca0012-aoa-*-umag.png",
+        ],
+        output_dir="app",
+    )
+    sd = s.to_dvc()
+    # We dispatch into the environment ourselves rather than wrapping in
+    # xenv, since the assembly step runs outside it
+    assert sd["cmd"] == (
+        "calkit nb export-marimo-wasm --environment py --no-check --show-code "
+        "--layout layouts/notebook.grid.json "
+        "--include processed/all-simulated.csv "
+        "--include 'figures/naca0012-aoa-*-umag.png' -o app notebook.py"
+    )
+    # The notebook and layout are deps, and a glob is reduced to its longest
+    # non-glob parent so ordering holds before the files exist
+    assert "notebook.py" in sd["deps"]
+    assert "layouts/notebook.grid.json" in sd["deps"]
+    assert "processed/all-simulated.csv" in sd["deps"]
+    assert "figures" in sd["deps"]
+    assert "figures/naca0012-aoa-*-umag.png" not in sd["deps"]
+    # The app is DVC-cached by default, since it's far too big for Git
+    assert sd["outs"] == [{"app": {"cache": True}}]
+    assert s.app_outputs == [PathOutput(path="app", storage="dvc")]
+    # Defaults stay off the command line
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+    )
+    assert s.dvc_cmd == (
+        "calkit nb export-marimo-wasm --environment py --no-check -o app notebook.py"
+    )
+    assert s.dvc_deps == ["notebook.py"]
+    # Storage is selectable, since a tiny app may belong in Git
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        output_storage="git",
+    )
+    assert s.dvc_outs == [{"app": {"cache": False}}]
+    # An editable app always shows its code, so asking for both is a mistake
+    with pytest.raises(ValidationError):
+        MarimoHtmlWasmStage(
+            name="build-app",
+            environment="py",
+            notebook_path="notebook.py",
+            mode="edit",
+            show_code=True,
+            output_dir="app",
+        )
+    # Writing out a default explicitly asks for nothing we can't do, so it's
+    # accepted; this is also what a round trip through model_dump produces
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        mode="run",
+        show_code=False,
+    )
+    assert MarimoHtmlWasmStage.model_validate(s.model_dump()).mode == "run"
+    # Validation runs the notebook, doubling the stage's runtime, so it can
+    # be turned off for one that's already executed elsewhere
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        validate_notebook=False,
+    )
+    assert " --no-validate" in s.dvc_cmd
+
+
+def test_mappathsstage_rejects_paths_outside_the_project():
+    # A legitimate mapping is unaffected
+    s = MapPathsStage(
+        name="copy-figures",
+        paths=[
+            dict(kind="dir-to-dir-replace", src="figures", dest="paper/figs")
+        ],
+    )
+    assert s.paths[0].src == "figures"
+    # dir-to-dir-replace deletes its destination, and map-paths is the one
+    # stage kind the hub runs itself, so a '../' escape would let a project
+    # delete or read outside its own directory
+    for bad in [
+        dict(kind="dir-to-dir-replace", src="figures", dest="../../victim"),
+        dict(kind="dir-to-dir-merge", src="../../secrets", dest="paper/figs"),
+        dict(kind="file-to-file", src="/etc/passwd", dest="paper/leak.tex"),
+        dict(kind="file-to-dir", src="results.tex", dest="/tmp/exfil"),
+    ]:
+        with pytest.raises(ValidationError):
+            MapPathsStage(name="copy-figures", paths=[bad])
+
+
+def test_stage_rejects_wdir_outside_the_project():
+    # A subdirectory of the project is the point of the field
+    s = PythonScriptStage(
+        name="run",
+        environment="py",
+        script_path="run.py",
+        wdir="sub",
+    )
+    assert s.wdir == "sub"
+    assert s.to_dvc()["wdir"] == "sub"
+    # Unset stays unset rather than defaulting to something
+    assert (
+        PythonScriptStage(
+            name="run", environment="py", script_path="run.py"
+        ).wdir
+        is None
+    )
+    # wdir becomes the DVC stage's working directory and is joined with the
+    # stage's other paths, so an absolute or escaping value would run the
+    # pipeline outside the project
+    for bad in ["/etc", "../..", "../sibling", "sub/../../.."]:
+        with pytest.raises(ValidationError):
+            PythonScriptStage(
+                name="run",
+                environment="py",
+                script_path="run.py",
+                wdir=bad,
+            )
+
+
+def test_stage_paths_reject_empty_and_project_root():
+    # An empty or blank path is Path('.'), which would otherwise pass every
+    # check and silently mean the project root
+    for bad in ["", "   "]:
+        with pytest.raises(ValidationError):
+            PythonScriptStage(name="run", environment="py", script_path=bad)
+        with pytest.raises(ValidationError):
+            PythonScriptStage(
+                name="run", environment="py", script_path="run.py", wdir=bad
+            )
+    # A path that walks back out and in again is collapsed, so it can't
+    # reach a caller still spelled the way it was written
+    s = PythonScriptStage(
+        name="run",
+        environment="py",
+        script_path="sub/../run.py",
+        wdir="sub/nested/..",
+    )
+    assert s.script_path == "run.py"
+    assert s.wdir == "sub"
+    # dir-to-dir-replace deletes its destination before copying, so the
+    # project root is never a valid target, however it's spelled
+    for bad in ["", ".", "sub/..", "a/../b/.."]:
+        with pytest.raises(ValidationError):
+            MapPathsStage(
+                name="copy",
+                paths=[dict(kind="dir-to-dir-replace", src="figs", dest=bad)],
+            )
+    # The other kinds only copy into their destination, so the project root
+    # is a fine target for them
+    s = MapPathsStage(
+        name="copy",
+        paths=[
+            dict(kind="file-to-dir", src="sub/README.md", dest="."),
+            dict(kind="dir-to-dir-merge", src="figs", dest="."),
+        ],
+    )
+    assert [p.dest for p in s.paths] == [".", "."]

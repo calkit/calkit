@@ -1,4 +1,4 @@
-import { Alert, AlertIcon, Box, Heading, Text } from "@chakra-ui/react"
+import { Alert, AlertIcon, Box, Flex, Heading, Text } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
 
@@ -19,8 +19,10 @@ function AppFrame({ app, gitRef }: { app: ProjectApp; gitRef?: string }) {
   const src =
     `${import.meta.env.VITE_API_URL}${app.url}` +
     (gitRef ? `?ref=${encodeURIComponent(gitRef)}` : "")
+  // Takes whatever the header leaves rather than claiming a height of its
+  // own, so the title and description can't push the app past the viewport
   return (
-    <Box height="80vh" borderRadius="lg" overflow="hidden">
+    <Box flex="1" minH={0} borderRadius="lg" overflow="hidden">
       <iframe
         title={app.title ?? app.name ?? "app"}
         src={src}
@@ -64,17 +66,25 @@ function ProjectApp_() {
       </Alert>
     )
   }
+  // The height budget lives here, on everything shown for the app, so a
+  // long description eats into the frame rather than overflowing the page
   return (
-    <>
-      <Heading size="sm" mb={1}>
+    <Flex direction="column" height="84vh">
+      <Heading size="sm" mb={1} flexShrink={0}>
         {app.title || app.name}
       </Heading>
       {app.description ? (
-        <Text fontSize="sm" color="gray.500" mb={2} noOfLines={2}>
+        <Text
+          fontSize="sm"
+          color="gray.500"
+          mb={2}
+          noOfLines={2}
+          flexShrink={0}
+        >
           {app.description}
         </Text>
       ) : null}
       <AppFrame app={app} gitRef={ref} />
-    </>
+    </Flex>
   )
 }

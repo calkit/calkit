@@ -11,6 +11,7 @@ from calkit.models.pipeline import (
     JupyterNotebookStage,
     LatexStage,
     MapPathsStage,
+    MarimoHtmlWasmStage,
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
@@ -624,6 +625,91 @@ def test_latex_stage_diffs():
                 target_path="pubs/paper-1/main.tex",
                 diffs=bad,
             )
+
+
+def test_marimohtmlwasmstage():
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        layout_path="layouts/notebook.grid.json",
+        show_code=True,
+        include_paths=[
+            "processed/all-simulated.csv",
+            "figures/naca0012-aoa-*-umag.png",
+        ],
+        output_dir="app",
+    )
+    sd = s.to_dvc()
+    # We dispatch into the environment ourselves rather than wrapping in
+    # xenv, since the assembly step runs outside it
+    assert sd["cmd"] == (
+        "calkit nb export-marimo-wasm --environment py --no-check --show-code "
+        "--layout layouts/notebook.grid.json "
+        "--include processed/all-simulated.csv "
+        "--include 'figures/naca0012-aoa-*-umag.png' -o app notebook.py"
+    )
+    # The notebook and layout are deps, and a glob is reduced to its longest
+    # non-glob parent so ordering holds before the files exist
+    assert "notebook.py" in sd["deps"]
+    assert "layouts/notebook.grid.json" in sd["deps"]
+    assert "processed/all-simulated.csv" in sd["deps"]
+    assert "figures" in sd["deps"]
+    assert "figures/naca0012-aoa-*-umag.png" not in sd["deps"]
+    # The app is DVC-cached by default, since it's far too big for Git
+    assert sd["outs"] == [{"app": {"cache": True}}]
+    assert s.app_outputs == [PathOutput(path="app", storage="dvc")]
+    # Defaults stay off the command line
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+    )
+    assert s.dvc_cmd == (
+        "calkit nb export-marimo-wasm --environment py --no-check -o app notebook.py"
+    )
+    assert s.dvc_deps == ["notebook.py"]
+    # Storage is selectable, since a tiny app may belong in Git
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        output_storage="git",
+    )
+    assert s.dvc_outs == [{"app": {"cache": False}}]
+    # An editable app always shows its code, so asking for both is a mistake
+    with pytest.raises(ValidationError):
+        MarimoHtmlWasmStage(
+            name="build-app",
+            environment="py",
+            notebook_path="notebook.py",
+            mode="edit",
+            show_code=True,
+            output_dir="app",
+        )
+    # Writing out a default explicitly asks for nothing we can't do, so it's
+    # accepted; this is also what a round trip through model_dump produces
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        mode="run",
+        show_code=False,
+    )
+    assert MarimoHtmlWasmStage.model_validate(s.model_dump()).mode == "run"
+    # Validation runs the notebook, doubling the stage's runtime, so it can
+    # be turned off for one that's already executed elsewhere
+    s = MarimoHtmlWasmStage(
+        name="build-app",
+        environment="py",
+        notebook_path="notebook.py",
+        output_dir="app",
+        validate_notebook=False,
+    )
+    assert " --no-validate" in s.dvc_cmd
 
 
 def test_mappathsstage_rejects_paths_outside_the_project():

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import threading
 import time
 from collections import OrderedDict
@@ -21,7 +22,11 @@ from sqlmodel import Session, and_, or_, select
 
 import app.users
 from app.config import settings
-from calkit.notebooks import get_executed_notebook_path
+from calkit.notebooks import (
+    MARIMO_DETECT_N_BYTES,
+    get_executed_notebook_path,
+    is_marimo_notebook,
+)
 
 
 # libyaml's C loader is ~10x faster than the pure-Python SafeLoader on
@@ -38,7 +43,11 @@ from app.core import (
     ryaml,
     utcnow,
 )
-from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
+from app.dvc import (
+    expand_dvc_lock_outs,
+    get_data_fpath_for_md5,
+    read_dvc_dir_cached,
+)
 from app.git import (
     RepoTree,
     get_ck_info_from_repo,
@@ -305,6 +314,110 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
         )
         outs.setdefault(path, out)
     return outs
+
+
+def read_app_file(
+    project: Project,
+    repo: git.Repo,
+    dir_path: str,
+    rel_path: str,
+    ref: str | None = None,
+) -> bytes | None:
+    """Read one file from inside a DVC-tracked directory, by its path
+    relative to that directory.
+
+    A WASM app is a directory of several hundred small files, all fetched
+    while the page loads, so this resolves a single file rather than
+    listing the whole tree. Returns None if the directory isn't tracked,
+    the file isn't in it, or its object was never pushed.
+
+    Falls back to the working tree for a directory tracked with Git, since
+    a small static app needn't be in DVC at all.
+    """
+
+    def contained(path: str) -> str | None:
+        """Normalize a path, or None if it isn't inside the repo."""
+        if not path:
+            return ""
+        if posixpath.isabs(path):
+            return None
+        norm = posixpath.normpath(path)
+        if norm == ".." or norm.startswith("../"):
+            return None
+        return "" if norm == "." else norm
+
+    # Both paths reach the filesystem directly when ref is None, since a
+    # WorkingTree joins onto the checkout root without bounding the result.
+    # dir_path comes from the project's own calkit.yaml and rel_path from
+    # the request, so neither may escape the repo. Normalizing here also
+    # means a request for 'a/../b.js' resolves rather than missing.
+    checked_dir = contained(dir_path)
+    checked_rel = contained(rel_path)
+    if checked_dir is None or checked_rel is None or not checked_rel:
+        return None
+    dir_path, rel_path = checked_dir, checked_rel
+    tree = get_repo_tree_for_ref(repo, ref)
+    full_path = posixpath.join(dir_path, rel_path) if dir_path else rel_path
+    if tree.is_file(full_path):
+        # A symlink pointing out of the tree reads whatever it targets on
+        # the server, so reject it the way get_contents_from_tree does
+        if tree.is_symlink(full_path) and not tree.is_safe_symlink(full_path):
+            logger.warning(
+                f"Unsafe symlink detected in {project.owner_account_name}/"
+                f"{project.name} at {full_path}"
+            )
+            return None
+        return tree.read_bytes(full_path)
+    owner_name = project.owner_account_name
+    project_name = project.name
+    # dvc.lock outs are expanded per file and cached on the bytes of
+    # dvc.lock, so the whole app resolves out of one cached mapping. Only a
+    # directory tracked with `dvc add` needs the pointer-file scan below,
+    # which walks the entire tree and so mustn't run per asset request.
+    dvc_lock_outs = get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    ).dvc_lock_outs
+    out = dvc_lock_outs.get(full_path)
+    if out is None and dir_path not in dvc_lock_outs:
+        out = dvc_outputs_from_tree(project=project, tree=tree).get(dir_path)
+        if out is None:
+            return None
+        md5 = out.get("md5", "")
+        if not md5.endswith(".dir"):
+            return None
+        dir_fpath = get_data_fpath_for_md5(
+            owner_name=owner_name,
+            project_name=project_name,
+            md5=md5,
+        )
+        # The .dir object is a JSON list of {"md5": ..., "relpath": ...},
+        # which is how we map a request path onto the object holding its
+        # bytes. Reads of it are cached by object path.
+        entries = (
+            read_dvc_dir_cached(dir_fpath) if dir_fpath is not None else None
+        )
+        md5_by_relpath = {
+            e.get("relpath"): e.get("md5")
+            for e in (entries or [])
+            if isinstance(e, dict)
+        }
+        out = {"md5": md5_by_relpath.get(rel_path)}
+    file_md5 = out.get("md5") if out is not None else None
+    # A request that lands on the directory itself resolves to its .dir
+    # object, which is a listing rather than anything servable
+    if not file_md5 or file_md5.endswith(".dir"):
+        return None
+    fs = get_object_fs()
+    file_fpath = get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=file_md5,
+        fs=fs,
+    )
+    if file_fpath is None:
+        return None
+    with fs.open(file_fpath, "rb") as f:
+        return f.read()
 
 
 def get_contents_from_repo(
@@ -1175,6 +1288,110 @@ def get_publication_from_repo(
     raise HTTPException(404, "Publication not found")
 
 
+def item_is_marimo_notebook(path: str, item: ContentsItem) -> bool:
+    """Whether a fetched notebook's contents are a marimo notebook.
+
+    Decided from bytes we already have rather than by reading anything
+    extra, so this costs nothing for the ``.ipynb`` case and never turns a
+    listing into a scan of the repo.
+    """
+    if not path.endswith(".py") or not item.content:
+        return False
+    try:
+        head = base64.b64decode(item.content)[:MARIMO_DETECT_N_BYTES]
+    except Exception:
+        return False
+    return bool(is_marimo_notebook(head.decode("utf-8", errors="replace")))
+
+
+def notebooks_from_ck_info(ck_info: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every notebook calkit.yaml knows about.
+
+    That's the ``notebooks`` list plus any notebook a pipeline stage runs,
+    which belongs to the project whether or not it was declared separately.
+    The stage half is also the only way a marimo notebook is ever found: it
+    is a ``.py`` file, so scanning for the ``.ipynb`` extension can't turn
+    one up, and making people declare it twice would be a trap.
+    """
+    notebooks = ck_info.get("notebooks") or []
+    if not isinstance(notebooks, list):
+        return []
+    notebooks = [
+        nb for nb in notebooks if isinstance(nb, dict) and nb.get("path")
+    ]
+    known_paths = {nb["path"] for nb in notebooks}
+    stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        nb_path = stage.get("notebook_path")
+        if isinstance(nb_path, str) and nb_path and nb_path not in known_paths:
+            notebooks.append({"path": nb_path})
+            known_paths.add(nb_path)
+    return notebooks
+
+
+def find_notebook_paths_in_tree(tree: RepoTree) -> list[str]:
+    """Every ``.ipynb`` file in a tree, outside hidden directories.
+
+    Walks the tree rather than the checkout, so an undeclared notebook is
+    listed for the ref that was asked for. The working directory is
+    whatever branch the cached clone happens to sit on, which is only
+    coincidentally the one being browsed.
+    """
+    found: list[str] = []
+
+    def walk(dirname: str) -> None:
+        for name in sorted(tree.listdir(dirname or None)):
+            # Skips .git, .dvc, .venv and .ipynb_checkpoints in one rule
+            if name.startswith("."):
+                continue
+            path = posixpath.join(dirname, name) if dirname else name
+            # A symlinked directory can point back up the tree, and a walk
+            # that follows one never finishes
+            if tree.is_symlink(path):
+                continue
+            if tree.is_dir(path):
+                walk(path)
+            elif name.endswith(".ipynb"):
+                found.append(path)
+
+    walk("")
+    return found
+
+
+def link_notebook_to_stage_and_app(
+    notebook: dict[str, Any], ck_info: dict[str, Any]
+) -> None:
+    """Attach to a notebook the stage that runs it, and the app that stage
+    builds, if there is one.
+
+    Any stage kind counts: naming the notebook in ``notebook_path`` is what
+    ties a stage to it, so a marimo stage runs one just as a
+    jupyter-notebook stage does. Shared with the notebooks listing so the
+    two can't disagree about which stage a notebook belongs to.
+    """
+    if not notebook.get("stage"):
+        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+        for stage_name, stage in stages.items():
+            if isinstance(stage, dict) and stage.get(
+                "notebook_path"
+            ) == notebook.get("path"):
+                notebook["stage"] = stage_name
+                break
+    # An app records the stage that builds it, so a notebook whose stage
+    # builds an app can point at it
+    apps_info = ck_info.get("apps")
+    if notebook.get("stage") and isinstance(apps_info, dict):
+        for app_name, app_info in apps_info.items():
+            if (
+                isinstance(app_info, dict)
+                and app_info.get("stage") == notebook["stage"]
+            ):
+                notebook["app"] = app_name
+                break
+
+
 def get_notebook_from_repo(
     project: Project,
     repo: git.Repo,
@@ -1196,36 +1413,34 @@ def get_notebook_from_repo(
     # itself and let fetching its contents below decide whether it exists
     if notebook is None:
         notebook = {"path": path}
-    # Associate with a jupyter-notebook stage if one runs this notebook
-    if not notebook.get("stage"):
-        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
-        for stage_name, stage in stages.items():
-            if (
-                isinstance(stage, dict)
-                and stage.get("kind") == "jupyter-notebook"
-                and stage.get("notebook_path") == path
-            ):
-                notebook["stage"] = stage_name
-                break
+    link_notebook_to_stage_and_app(notebook, ck_info)
     item = get_contents_from_repo(
         project=project,
         repo=repo,
         path=path,
         ref=ref,
     )
-    try:
-        # If the notebook has HTML output, return that
-        html_path = get_executed_notebook_path(notebook_path=path, to="html")
-        html_item = get_contents_from_repo(
-            project=project,
-            repo=repo,
-            path=html_path,
-            ref=ref,
-        )
-        item = html_item
-        notebook["output_format"] = "html"
-    except HTTPException as e:
-        logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+    # A marimo notebook is a Python module, and running it produces an app
+    # rather than an executed copy of itself, so there's no HTML export to
+    # look for and its source is what there is to show
+    if item_is_marimo_notebook(path, item):
+        notebook["output_format"] = "source"
+    else:
+        try:
+            # If the notebook has HTML output, return that
+            html_path = get_executed_notebook_path(
+                notebook_path=path, to="html"
+            )
+            html_item = get_contents_from_repo(
+                project=project,
+                repo=repo,
+                path=html_path,
+                ref=ref,
+            )
+            item = html_item
+            notebook["output_format"] = "html"
+        except HTTPException as e:
+            logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
     notebook["url"] = item.url
     notebook["content"] = item.content
     notebook["storage"] = item.storage

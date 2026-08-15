@@ -75,7 +75,9 @@ app.add_typer(config_app, name="config", help="Configure Calkit.")
 app.add_typer(new_app, name="new|create", help="Create a new Calkit object.")
 app.add_typer(delete_app, name="delete|rm", help="Delete a Calkit object.")
 app.add_typer(
-    notebooks_app, name="notebooks|nb", help="Work with Jupyter notebooks."
+    notebooks_app,
+    name="notebooks|nb",
+    help="Work with computational notebooks.",
 )
 app.add_typer(list_app, name="list|ls", help="List Calkit objects.")
 app.add_typer(describe_app, name="describe|desc", help="Describe things.")

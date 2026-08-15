@@ -209,7 +209,7 @@ class Stage(BaseModel):
         "julia-command",
         "word-to-pdf",
         "map-paths",
-        "marimo",
+        "marimo-html-wasm",
     ]
     environment: str
     # Constrained like other stage path fields (e.g. MatlabScriptStage's
@@ -1334,15 +1334,15 @@ class WordToPdfStage(Stage):
         )
 
 
-class MarimoStage(Stage):
-    """A stage that exports a marimo notebook to a shareable app.
+class MarimoHtmlWasmStage(Stage):
+    """A stage that exports a marimo notebook to a WebAssembly app.
 
-    With ``to="html-wasm"`` the app runs entirely in the browser via
-    WebAssembly, so it can be served as static files with no backend. With
-    ``to="html"`` the notebook is executed at build time and its rendered
-    output is baked into a single self-contained HTML file, which is not
-    interactive but is much smaller and doesn't resolve any packages at
-    load time.
+    The app runs entirely in the browser via Pyodide, so it can be served
+    as static files with no backend.
+
+    marimo's export commands differ enough from each other that each gets
+    its own stage kind and CLI command, rather than one kind with a format
+    option whose other fields only apply to some of its values.
 
     marimo's own export is not self-contained: it requires the data an app
     reads to already sit in a ``public`` directory next to the notebook, and
@@ -1358,19 +1358,18 @@ class MarimoStage(Stage):
     than inferred from the dependency graph. They are dependencies too.
     """
 
-    kind: Literal["marimo"] = "marimo"
+    kind: Literal["marimo-html-wasm"] = "marimo-html-wasm"
     notebook_path: str
     # The layout file is named inside the notebook source
     # (``marimo.App(layout_file=...)``), so we can't detect it without
     # parsing Python, and a grid app silently degrades to a linear notebook
     # if it goes missing.
     layout_path: str | None = None
-    to: Literal["html-wasm", "html"] = "html-wasm"
     mode: Literal["run", "edit"] = "run"
     show_code: bool = False
     include_paths: list[str] = []
-    output_path: str
-    app_storage: Literal["git", "dvc"] | None = "dvc"
+    output_dir: str
+    output_storage: Literal["git", "dvc"] | None = "dvc"
     # A WASM export doesn't run the notebook, so we run it once beforehand to
     # keep a broken app from shipping green. That doubles the stage's runtime,
     # which isn't worth it for a notebook that takes a while and is already
@@ -1379,7 +1378,7 @@ class MarimoStage(Stage):
     validate_notebook: bool = True
 
     @model_validator(mode="after")
-    def check_include_paths_have_a_stable_dep(self) -> MarimoStage:
+    def check_include_paths_have_a_stable_dep(self) -> MarimoHtmlWasmStage:
         """Reject an include pattern whose first segment is a glob.
 
         Dependencies are the pattern's longest non-glob parent, so a
@@ -1397,24 +1396,9 @@ class MarimoStage(Stage):
         return self
 
     @model_validator(mode="after")
-    def check_export_options(self) -> MarimoStage:
-        """Reject options that don't apply to the chosen export format.
-
-        Keyed on the value rather than on whether the field was set, since
-        writing out a default explicitly asks for nothing we can't do, and
-        checking ``model_fields_set`` would also make a stage fail to
-        validate after a round trip through ``model_dump``.
-        """
-        if self.to == "html":
-            if self.mode != "run":
-                raise ValueError(
-                    "Stage option 'mode' only applies to 'to: html-wasm'"
-                )
-            if self.show_code:
-                raise ValueError(
-                    "Stage option 'show_code' only applies to 'to: html-wasm'"
-                )
-        elif self.mode == "edit" and self.show_code:
+    def check_export_options(self) -> MarimoHtmlWasmStage:
+        """Reject options that contradict each other."""
+        if self.mode == "edit" and self.show_code:
             raise ValueError(
                 "Stage option 'show_code' is redundant with 'mode: edit', "
                 "where code is always visible"
@@ -1439,25 +1423,23 @@ class MarimoStage(Stage):
     @property
     def dvc_outs(self) -> list[str | dict]:
         outs = super().dvc_outs
-        if self.app_storage:
+        if self.output_storage:
             outs.append(
-                {self.output_path: {"cache": self.app_storage == "dvc"}}
+                {self.output_dir: {"cache": self.output_storage == "dvc"}}
             )
         return outs
 
     @property
     def app_outputs(self) -> list[PathOutput]:
         """Return the exported app so its storage can be respected."""
-        return [PathOutput(path=self.output_path, storage=self.app_storage)]
+        return [PathOutput(path=self.output_dir, storage=self.output_storage)]
 
     @property
     def dvc_cmd(self) -> str:
         cmd = (
-            "calkit nb export-marimo --environment "
+            "calkit nb export-marimo-wasm --environment "
             f"{self.inner_environment} --no-check"
         )
-        if self.to != "html-wasm":
-            cmd += f" --to {self.to}"
         if self.mode != "run":
             cmd += f" --mode {self.mode}"
         if self.show_code:
@@ -1468,7 +1450,7 @@ class MarimoStage(Stage):
             cmd += f" --layout {shlex.quote(self.layout_path)}"
         for path in self.include_paths:
             cmd += f" --include {shlex.quote(path)}"
-        cmd += f" -o {shlex.quote(self.output_path)}"
+        cmd += f" -o {shlex.quote(self.output_dir)}"
         cmd += f" {shlex.quote(self.notebook_path)}"
         if self.scheduler is not None:
             cmd = self.scheduler_cmd + " --command -- " + cmd
@@ -1497,7 +1479,7 @@ class Pipeline(BaseModel):
                 | JuliaCommandStage
                 | SBatchStage
                 | MapPathsStage
-                | MarimoStage
+                | MarimoHtmlWasmStage
             ),
             Discriminator("kind"),
         ],

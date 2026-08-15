@@ -11,7 +11,7 @@ from calkit.models.pipeline import (
     JupyterNotebookStage,
     LatexStage,
     MapPathsStage,
-    MarimoStage,
+    MarimoHtmlWasmStage,
     MatlabCommandStage,
     MatlabScriptStage,
     PythonScriptStage,
@@ -627,8 +627,8 @@ def test_latex_stage_diffs():
             )
 
 
-def test_marimostage():
-    s = MarimoStage(
+def test_marimohtmlwasmstage():
+    s = MarimoHtmlWasmStage(
         name="build-app",
         environment="py",
         notebook_path="notebook.py",
@@ -638,13 +638,13 @@ def test_marimostage():
             "processed/all-simulated.csv",
             "figures/naca0012-aoa-*-umag.png",
         ],
-        output_path="app",
+        output_dir="app",
     )
     sd = s.to_dvc()
     # We dispatch into the environment ourselves rather than wrapping in
     # xenv, since the assembly step runs outside it
     assert sd["cmd"] == (
-        "calkit nb export-marimo --environment py --no-check --show-code "
+        "calkit nb export-marimo-wasm --environment py --no-check --show-code "
         "--layout layouts/notebook.grid.json "
         "--include processed/all-simulated.csv "
         "--include 'figures/naca0012-aoa-*-umag.png' -o app notebook.py"
@@ -660,69 +660,53 @@ def test_marimostage():
     assert sd["outs"] == [{"app": {"cache": True}}]
     assert s.app_outputs == [PathOutput(path="app", storage="dvc")]
     # Defaults stay off the command line
-    s = MarimoStage(
+    s = MarimoHtmlWasmStage(
         name="build-app",
         environment="py",
         notebook_path="notebook.py",
-        output_path="app",
+        output_dir="app",
     )
     assert s.dvc_cmd == (
-        "calkit nb export-marimo --environment py --no-check -o app notebook.py"
+        "calkit nb export-marimo-wasm --environment py --no-check -o app notebook.py"
     )
     assert s.dvc_deps == ["notebook.py"]
-    # A static export executes at build time and needs no browser runtime
-    s = MarimoStage(
+    # Storage is selectable, since a tiny app may belong in Git
+    s = MarimoHtmlWasmStage(
         name="build-app",
         environment="py",
         notebook_path="notebook.py",
-        to="html",
-        output_path="app.html",
-        app_storage="git",
+        output_dir="app",
+        output_storage="git",
     )
-    assert s.dvc_cmd.startswith("calkit nb export-marimo --environment py")
-    assert "--to html" in s.dvc_cmd
-    assert "--mode" not in s.dvc_cmd
-    assert s.dvc_outs == [{"app.html": {"cache": False}}]
+    assert s.dvc_outs == [{"app": {"cache": False}}]
     # An editable app always shows its code, so asking for both is a mistake
     with pytest.raises(ValidationError):
-        MarimoStage(
+        MarimoHtmlWasmStage(
             name="build-app",
             environment="py",
             notebook_path="notebook.py",
             mode="edit",
             show_code=True,
-            output_path="app",
+            output_dir="app",
         )
-    # Options that only apply to WASM are rejected for a static export
-    for bad in [dict(mode="edit"), dict(show_code=True)]:
-        with pytest.raises(ValidationError):
-            MarimoStage(
-                name="build-app",
-                environment="py",
-                notebook_path="notebook.py",
-                to="html",
-                output_path="app.html",
-                **bad,
-            )
     # Writing out a default explicitly asks for nothing we can't do, so it's
     # accepted; this is also what a round trip through model_dump produces
-    s = MarimoStage(
+    s = MarimoHtmlWasmStage(
         name="build-app",
         environment="py",
         notebook_path="notebook.py",
-        to="html",
-        output_path="app.html",
+        output_dir="app",
         mode="run",
         show_code=False,
     )
-    assert MarimoStage.model_validate(s.model_dump()).to == "html"
+    assert MarimoHtmlWasmStage.model_validate(s.model_dump()).mode == "run"
     # Validation runs the notebook, doubling the stage's runtime, so it can
     # be turned off for one that's already executed elsewhere
-    s = MarimoStage(
+    s = MarimoHtmlWasmStage(
         name="build-app",
         environment="py",
         notebook_path="notebook.py",
-        output_path="app",
+        output_dir="app",
         validate_notebook=False,
     )
     assert " --no-validate" in s.dvc_cmd

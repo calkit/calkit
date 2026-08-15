@@ -713,8 +713,8 @@ def execute_notebook(
 
 
 @notebooks_app.command(
-    name="export-marimo",
-    help="Export a marimo notebook to static files that can be served.",
+    name="export-marimo-wasm",
+    help="Export a marimo notebook to a WebAssembly app.",
 )
 # This wraps `marimo export` rather than letting a stage call it through
 # `calkit xenv` for two reasons.
@@ -748,17 +748,6 @@ def export_notebook(
             ),
         ),
     ] = None,
-    to: Annotated[
-        str,
-        typer.Option(
-            "--to",
-            help=(
-                "Export format. 'html-wasm' runs in the browser and stays "
-                "interactive; 'html' executes the notebook now and bakes in "
-                "the results as a single static file."
-            ),
-        ),
-    ] = "html-wasm",
     mode: Annotated[
         str,
         typer.Option(
@@ -823,8 +812,6 @@ def export_notebook(
     # doesn't rename this one out from under anybody.
     if not os.path.isfile(path):
         raise_error(f"Notebook does not exist: {path}")
-    if to not in ("html-wasm", "html"):
-        raise_error(f"Invalid export format '{to}'; use html-wasm or html")
     with open(path) as f:
         head = f.read(4096)
     # Named for the engine rather than for what it produces, so a future
@@ -837,8 +824,6 @@ def export_notebook(
         )
     if mode not in ("run", "edit"):
         raise_error(f"Invalid mode '{mode}'; use run or edit")
-    if to == "html" and mode != "run":
-        raise_error("The 'mode' option only applies to html-wasm exports")
     # marimo copies the 'public' directory that sits next to the notebook, so
     # exporting in place would generate files in the project root. Assemble a
     # build directory instead, under .calkit/local, which carries its own
@@ -919,7 +904,7 @@ def export_notebook(
     # 'html' export does execute, and fails properly. It only works after
     # assembly, since mo.notebook_location() then resolves to the build
     # directory, where public/ exists.
-    if to == "html-wasm" and not no_validate:
+    if not no_validate:
         typer.echo("Checking the notebook executes")
         validate_path = build_dir / "_validate.html"
         try:
@@ -938,12 +923,10 @@ def export_notebook(
                 "browser's, so it can't catch every failure."
             )
         validate_path.unlink(missing_ok=True)
-    cmd = ["marimo", "export", to, str(build_notebook_path)]
-    cmd += ["-o", output_path]
-    if to == "html-wasm":
-        cmd += ["--mode", mode]
-        if show_code:
-            cmd.append("--show-code")
+    cmd = ["marimo", "export", "html-wasm", str(build_notebook_path)]
+    cmd += ["-o", output_path, "--mode", mode]
+    if show_code:
+        cmd.append("--show-code")
     typer.echo(f"Exporting {path} to {output_path}")
     run_in_env(
         cmd,

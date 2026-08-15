@@ -20,7 +20,7 @@ function AppFrame({ app, gitRef }: { app: ProjectApp; gitRef?: string }) {
     `${import.meta.env.VITE_API_URL}${app.url}` +
     (gitRef ? `?ref=${encodeURIComponent(gitRef)}` : "")
   return (
-    <Box height="82vh" borderRadius="lg" overflow="hidden">
+    <Box height="80vh" borderRadius="lg" overflow="hidden">
       <iframe
         title={app.title ?? app.name ?? "app"}
         src={src}

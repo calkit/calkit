@@ -22,7 +22,11 @@ from sqlmodel import Session, and_, or_, select
 
 import app.users
 from app.config import settings
-from calkit.notebooks import get_executed_notebook_path
+from calkit.notebooks import (
+    MARIMO_DETECT_N_BYTES,
+    get_executed_notebook_path,
+    is_marimo_notebook,
+)
 
 
 # libyaml's C loader is ~10x faster than the pure-Python SafeLoader on
@@ -1284,6 +1288,81 @@ def get_publication_from_repo(
     raise HTTPException(404, "Publication not found")
 
 
+def item_is_marimo_notebook(path: str, item: ContentsItem) -> bool:
+    """Whether a fetched notebook's contents are a marimo notebook.
+
+    Decided from bytes we already have rather than by reading anything
+    extra, so this costs nothing for the ``.ipynb`` case and never turns a
+    listing into a scan of the repo.
+    """
+    if not path.endswith(".py") or not item.content:
+        return False
+    try:
+        head = base64.b64decode(item.content)[:MARIMO_DETECT_N_BYTES]
+    except Exception:
+        return False
+    return bool(is_marimo_notebook(head.decode("utf-8", errors="replace")))
+
+
+def notebooks_from_ck_info(ck_info: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every notebook calkit.yaml knows about.
+
+    That's the ``notebooks`` list plus any notebook a pipeline stage runs,
+    which belongs to the project whether or not it was declared separately.
+    The stage half is also the only way a marimo notebook is ever found: it
+    is a ``.py`` file, so scanning for the ``.ipynb`` extension can't turn
+    one up, and making people declare it twice would be a trap.
+    """
+    notebooks = ck_info.get("notebooks") or []
+    if not isinstance(notebooks, list):
+        return []
+    notebooks = [
+        nb for nb in notebooks if isinstance(nb, dict) and nb.get("path")
+    ]
+    known_paths = {nb["path"] for nb in notebooks}
+    stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        nb_path = stage.get("notebook_path")
+        if isinstance(nb_path, str) and nb_path and nb_path not in known_paths:
+            notebooks.append({"path": nb_path})
+            known_paths.add(nb_path)
+    return notebooks
+
+
+def link_notebook_to_stage_and_app(
+    notebook: dict[str, Any], ck_info: dict[str, Any]
+) -> None:
+    """Attach to a notebook the stage that runs it, and the app that stage
+    builds, if there is one.
+
+    Any stage kind counts: naming the notebook in ``notebook_path`` is what
+    ties a stage to it, so a marimo stage runs one just as a
+    jupyter-notebook stage does. Shared with the notebooks listing so the
+    two can't disagree about which stage a notebook belongs to.
+    """
+    if not notebook.get("stage"):
+        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+        for stage_name, stage in stages.items():
+            if isinstance(stage, dict) and stage.get(
+                "notebook_path"
+            ) == notebook.get("path"):
+                notebook["stage"] = stage_name
+                break
+    # An app records the stage that builds it, so a notebook whose stage
+    # builds an app can point at it
+    apps_info = ck_info.get("apps")
+    if notebook.get("stage") and isinstance(apps_info, dict):
+        for app_name, app_info in apps_info.items():
+            if (
+                isinstance(app_info, dict)
+                and app_info.get("stage") == notebook["stage"]
+            ):
+                notebook["app"] = app_name
+                break
+
+
 def get_notebook_from_repo(
     project: Project,
     repo: git.Repo,
@@ -1305,36 +1384,34 @@ def get_notebook_from_repo(
     # itself and let fetching its contents below decide whether it exists
     if notebook is None:
         notebook = {"path": path}
-    # Associate with a jupyter-notebook stage if one runs this notebook
-    if not notebook.get("stage"):
-        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
-        for stage_name, stage in stages.items():
-            if (
-                isinstance(stage, dict)
-                and stage.get("kind") == "jupyter-notebook"
-                and stage.get("notebook_path") == path
-            ):
-                notebook["stage"] = stage_name
-                break
+    link_notebook_to_stage_and_app(notebook, ck_info)
     item = get_contents_from_repo(
         project=project,
         repo=repo,
         path=path,
         ref=ref,
     )
-    try:
-        # If the notebook has HTML output, return that
-        html_path = get_executed_notebook_path(notebook_path=path, to="html")
-        html_item = get_contents_from_repo(
-            project=project,
-            repo=repo,
-            path=html_path,
-            ref=ref,
-        )
-        item = html_item
-        notebook["output_format"] = "html"
-    except HTTPException as e:
-        logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+    # A marimo notebook is a Python module, and running it produces an app
+    # rather than an executed copy of itself, so there's no HTML export to
+    # look for and its source is what there is to show
+    if item_is_marimo_notebook(path, item):
+        notebook["output_format"] = "source"
+    else:
+        try:
+            # If the notebook has HTML output, return that
+            html_path = get_executed_notebook_path(
+                notebook_path=path, to="html"
+            )
+            html_item = get_contents_from_repo(
+                project=project,
+                repo=repo,
+                path=html_path,
+                ref=ref,
+            )
+            item = html_item
+            notebook["output_format"] = "html"
+        except HTTPException as e:
+            logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
     notebook["url"] = item.url
     notebook["content"] = item.content
     notebook["storage"] = item.storage

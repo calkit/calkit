@@ -551,3 +551,142 @@ def test_read_app_file(
         read(project=project, repo=repo, dir_path="app", rel_path="leak.html")
         is None
     )
+
+
+def test_get_notebook_from_repo_marimo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    build-app:\n"
+        "      kind: marimo\n"
+        "      environment: py\n"
+        "      notebook_path: notebook.py\n"
+        "      output_path: app\n"
+        "apps:\n"
+        "  explorer:\n"
+        "    kind: static-html\n"
+        "    path: app/index.html\n"
+        "    stage: build-app\n"
+    )
+    (repo_dir / "notebook.py").write_text(
+        'import marimo\n__generated_with = "0.19.4"\napp = marimo.App()\n'
+    )
+    # A plain script that mentions marimo is not a notebook to show source for
+    (repo_dir / "helper.py").write_text("# helpers for marimo\nx = 1\n")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add marimo notebook"])
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="notebook.py"
+    )
+    # The stage runs the notebook, so it links even though its kind isn't
+    # jupyter-notebook
+    assert nb.stage == "build-app"
+    # That stage builds an app, so the notebook points at it
+    assert nb.app == "explorer"
+    # There's no executed copy of a marimo notebook to render, so its source
+    # is what gets shown
+    assert nb.output_format == "source"
+    assert nb.content is not None
+    assert "marimo.App()" in base64.b64decode(nb.content).decode()
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="helper.py"
+    )
+    assert nb.output_format != "source"
+    assert nb.stage is None
+    assert nb.app is None
+
+
+def test_link_notebook_to_stage_and_app() -> None:
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "report": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "notebooks/report.ipynb",
+                },
+                "build-app": {
+                    "kind": "marimo",
+                    "notebook_path": "notebook.py",
+                },
+                "simulate": {"kind": "python-script", "script_path": "run.py"},
+            }
+        },
+        "apps": {"explorer": {"path": "app/index.html", "stage": "build-app"}},
+    }
+    # A marimo stage ties to its notebook the same way a jupyter-notebook
+    # stage does, and that stage builds an app
+    nb: dict = {"path": "notebook.py"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "build-app"
+    assert nb["app"] == "explorer"
+    # A stage that produces no app leaves the notebook without one
+    nb = {"path": "notebooks/report.ipynb"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "report"
+    assert "app" not in nb
+    # A notebook no stage runs stays unlinked, and a script isn't a notebook
+    for path in ["notebooks/orphan.ipynb", "run.py"]:
+        nb = {"path": path}
+        app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+        assert nb == {"path": path}
+    # A stage declared in calkit.yaml wins nothing over one already set
+    nb = {"path": "notebook.py", "stage": "hand-written"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "hand-written"
+    # Nothing blows up on a project with no pipeline or apps
+    nb = {"path": "notebook.py"}
+    app.projects.link_notebook_to_stage_and_app(nb, {})
+    assert nb == {"path": "notebook.py"}
+
+
+def test_notebooks_from_ck_info() -> None:
+    # The shape petebachant/nacafoil-openfoam uses: a marimo notebook that
+    # only the pipeline names, with no `notebooks` section at all
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot-clcd": {
+                    "kind": "python-script",
+                    "script_path": "scripts/plot-clcd.py",
+                },
+                "app": {
+                    "kind": "marimo-html-wasm",
+                    "notebook_path": "notebook.py",
+                    "output_dir": "app",
+                },
+            }
+        }
+    }
+    assert app.projects.notebooks_from_ck_info(ck_info) == [
+        {"path": "notebook.py"}
+    ]
+    # A declared notebook keeps its metadata rather than being duplicated by
+    # the stage that runs it
+    ck_info["notebooks"] = [
+        {"path": "notebook.py", "title": "NACA 0012 explorer"},
+        {"path": "notebooks/scratch.ipynb"},
+    ]
+    assert app.projects.notebooks_from_ck_info(ck_info) == [
+        {"path": "notebook.py", "title": "NACA 0012 explorer"},
+        {"path": "notebooks/scratch.ipynb"},
+    ]
+    # A project with nothing to list, and malformed entries, come back empty
+    # rather than raising
+    assert app.projects.notebooks_from_ck_info({}) == []
+    assert app.projects.notebooks_from_ck_info({"notebooks": "nope"}) == []
+    assert (
+        app.projects.notebooks_from_ck_info(
+            {"notebooks": [None, {"title": "No path"}]}
+        )
+        == []
+    )

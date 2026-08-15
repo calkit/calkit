@@ -1,5 +1,6 @@
 """Tests for app.api.routes.projects.core endpoints."""
 
+import base64
 import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, patch
@@ -3118,3 +3119,69 @@ def test_serve_project_app_file(client: TestClient) -> None:
     # An app that isn't declared isn't served
     response, _ = get(f"{base}/apps/nope/serve")
     assert response.status_code == 404
+
+
+def test_get_project_notebooks_finds_marimo_notebook(
+    client: TestClient, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import git
+
+    import app.projects
+
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    # The shape petebachant/nacafoil-openfoam uses: a marimo notebook named
+    # only by the pipeline, with no `notebooks` section
+    (repo_dir / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    app:\n"
+        "      kind: marimo-html-wasm\n"
+        "      environment: py\n"
+        "      notebook_path: notebook.py\n"
+        "      output_dir: app\n"
+        "apps:\n"
+        "  naca0012:\n"
+        "    kind: static-html\n"
+        "    path: app/index.html\n"
+        "    stage: app\n"
+    )
+    (repo_dir / "notebook.py").write_text(
+        'import marimo\n__generated_with = "0.19.4"\napp = marimo.App()\n'
+    )
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add marimo notebook"])
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=SimpleNamespace(
+                owner_account_name="test-owner",
+                name="test-project",
+                is_public=True,
+                file_locks=[],
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=repo,
+        ),
+    ):
+        response = client.get(
+            f"{settings.API_V1_STR}/projects/test-owner/test-project/notebooks"
+        )
+    assert response.status_code == 200
+    notebooks = response.json()
+    # A .py notebook can't be found by scanning for the .ipynb extension, so
+    # naming it in a stage has to be enough
+    assert [nb["path"] for nb in notebooks] == ["notebook.py"]
+    nb = notebooks[0]
+    assert nb["stage"] == "app"
+    assert nb["app"] == "naca0012"
+    # There's no executed copy of a marimo notebook, so its source is shown
+    assert nb["output_format"] == "source"
+    assert "marimo.App()" in base64.b64decode(nb["content"]).decode()

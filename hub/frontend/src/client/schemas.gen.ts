@@ -2960,7 +2960,7 @@ export const NotebookSchema = {
       anyOf: [
         {
           type: "string",
-          enum: ["html", "notebook"],
+          enum: ["html", "notebook", "source"],
         },
         {
           type: "null",
@@ -3001,6 +3001,17 @@ export const NotebookSchema = {
         },
       ],
       title: "Storage",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
     },
   },
   type: "object",

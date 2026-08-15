@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -712,12 +713,57 @@ def execute_notebook(
                 raise_error(f"nbconvert failed for format '{to_fmt}'")
 
 
+def _pyodide_provided_packages() -> set[str]:
+    """Return the packages Pyodide ships, per marimo's lock file.
+
+    These are binary builds pinned by the runtime, so their versions come
+    from Pyodide rather than from the project's environment. Fetched from
+    the same URL marimo's exported apps read at load time.
+
+    A failure here returns an empty set, so nothing gets pinned rather than
+    pinned wrongly -- a missing pin is a lost record, a wrong one is a
+    version that never runs.
+    """
+    import json
+
+    import requests
+
+    import calkit
+
+    cache_path = (
+        pathlib.Path(calkit.ensure_local_dir())
+        / "marimo"
+        / "pyodide-lock.json"
+    )
+    url = "https://wasm.marimo.app/pyodide-lock.json"
+    try:
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(resp.text)
+        lock = resp.json()
+    except Exception as e:
+        # Fall back to a previous fetch so an offline build still splits
+        # pinnable packages from Pyodide's correctly
+        if cache_path.is_file():
+            warn(f"Using cached Pyodide lock ({e})")
+            lock = json.loads(cache_path.read_text())
+        else:
+            warn(
+                f"Could not read Pyodide lock, so nothing will be pinned: {e}"
+            )
+            return set()
+    return {
+        name.lower().replace("_", "-") for name in lock.get("packages", {})
+    }
+
+
 @notebooks_app.command(
     name="export-marimo-wasm",
     help="Export a marimo notebook to a WebAssembly app.",
 )
-# This wraps `marimo export` rather than letting a stage call it through
-# `calkit xenv` for two reasons.
+# This wraps `marimo export html-warm` rather than letting a stage call it
+# through `calkit xenv` for two reasons.
 #
 # First, marimo's export is not self-contained. It requires the data an app
 # reads to already sit in a `public` directory beside the notebook, and
@@ -731,7 +777,7 @@ def execute_notebook(
 # stable. Spelling out marimo's flags in the stage means every stage in
 # every project goes stale when those flags change; keeping them here means
 # one wrapper absorbs it.
-def export_notebook(
+def export_marimo_wasm(
     path: Annotated[str, typer.Argument(help="Notebook path.")],
     output_path: Annotated[
         str,
@@ -799,13 +845,17 @@ def export_notebook(
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
 ) -> None:
+    import ast
     import glob
+    import json
     import os
     import shutil
     import subprocess
+    import sys
     from pathlib import Path
 
     from calkit.cli.main import run_in_env
+    from calkit.notebooks import MARIMO_DETECT_N_BYTES, is_marimo_notebook
 
     # The notebook kind is detected from the file rather than named in a
     # command per kind, so adding Jupyter export later is additive and
@@ -813,11 +863,11 @@ def export_notebook(
     if not os.path.isfile(path):
         raise_error(f"Notebook does not exist: {path}")
     with open(path) as f:
-        head = f.read(4096)
+        head = f.read(MARIMO_DETECT_N_BYTES)
     # Named for the engine rather than for what it produces, so a future
     # export-jupyterlite sits beside it without either pretending to be a
     # generic 'export' whose options are actually engine-specific.
-    if path.endswith(".ipynb") or "marimo" not in head:
+    if path.endswith(".ipynb") or not is_marimo_notebook(head):
         raise_error(
             f"{path} is not a marimo notebook; to render a Jupyter "
             "notebook to HTML use 'calkit nb execute --to html'"
@@ -839,6 +889,79 @@ def export_notebook(
     build_dir.mkdir(parents=True)
     build_notebook_path = build_dir / Path(path).name
     shutil.copy2(path, build_notebook_path)
+    # marimo needs an inline PEP 723 block to know what to install in the
+    # browser, and without one the app dies on its first third-party import.
+    # Rather than make the notebook carry a second dependency spec beside the
+    # project's environment, generate one into the build copy from what the
+    # notebook actually imports. A hand-written block is left alone, so this
+    # can still be overridden.
+    source = build_notebook_path.read_text()
+    if "# /// script" not in source:
+        import_roots: set[str] = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                import_roots.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                # A relative import resolves within the project, not to a
+                # distribution we could install
+                if node.level == 0 and node.module:
+                    import_roots.add(node.module.split(".")[0])
+        import_roots -= sys.stdlib_module_names
+        # Resolve module names to distribution names in the stage's own
+        # environment, since they often differ (sklearn is scikit-learn) and
+        # only that environment knows which distribution provided what.
+        resolver = build_dir / "_resolve_dists.py"
+        dists_path = build_dir / "_dists.json"
+        resolver.write_text(
+            "import json, sys\n"
+            "from importlib.metadata import packages_distributions, version\n"
+            "mods = json.loads(sys.argv[1])\n"
+            "found = packages_distributions()\n"
+            "out = {}\n"
+            "for d in sorted({found.get(m, [m])[0] for m in mods}):\n"
+            "    try:\n"
+            "        out[d] = version(d)\n"
+            "    except Exception:\n"
+            "        out[d] = None\n"
+            "open(sys.argv[2], 'w').write(json.dumps(out))\n"
+        )
+        run_in_env(
+            [
+                "python",
+                str(resolver),
+                json.dumps(sorted(import_roots)),
+                str(dists_path),
+            ],
+            env_name=env_name,
+            no_check=no_check,
+            verbose=False,
+            relaxed_check=True,
+        )
+        versions = json.loads(dists_path.read_text())
+        resolver.unlink()
+        dists_path.unlink()
+        # Only packages micropip installs can meaningfully be pinned.
+        # Anything Pyodide ships is a binary build whose version the runtime
+        # fixes, so a pin there would record a version that never runs and
+        # would actively conflict if pins were ever enforced. Ask marimo's
+        # Pyodide lock which packages those are.
+        provided = _pyodide_provided_packages()
+        deps = ["marimo"]
+        for dist, ver in sorted(versions.items()):
+            if dist == "marimo":
+                continue
+            if ver is None or dist.lower().replace("_", "-") in provided:
+                deps.append(dist)
+            else:
+                deps.append(f"{dist}=={ver}")
+        block = (
+            "# /// script\n"
+            "# dependencies = [\n"
+            + "".join(f'#     "{d}",\n' for d in deps)
+            + "# ]\n# ///\n\n"
+        )
+        build_notebook_path.write_text(block + source)
+        typer.echo(f"Declared dependencies for the browser: {', '.join(deps)}")
     # marimo resolves layout_file relative to the notebook, not the project,
     # so the copy has to keep that same relative position. These differ for
     # any notebook that doesn't sit at the project root.

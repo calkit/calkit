@@ -1760,7 +1760,7 @@ export type Notebook = {
   /**
    * Output Format
    */
-  output_format?: "html" | "notebook" | null
+  output_format?: "html" | "notebook" | "source" | null
   /**
    * Url
    */
@@ -1773,6 +1773,10 @@ export type Notebook = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * App
+   */
+  app?: string | null
 }
 
 /**

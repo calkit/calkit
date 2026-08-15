@@ -1261,10 +1261,16 @@ class Notebook(BaseModel):
     title: str | None = None
     description: str | None = None
     stage: str | None = None
-    output_format: Literal["html", "notebook"] | None = None
+    # 'source' is the notebook's own code, which is what there is to show for
+    # a marimo notebook: it's a Python module, and what running it produces
+    # is an app rather than an executed copy of itself.
+    output_format: Literal["html", "notebook", "source"] | None = None
     url: str | None = None
     content: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Key in the project's ``apps`` mapping, when this notebook's stage is
+    # what builds that app
+    app: str | None = None
 
 
 class FeatureVote(SQLModel, table=True):

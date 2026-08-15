@@ -7803,9 +7803,9 @@ def get_project_notebooks(
         repo=repo,
         ref=ref,
     )
-    notebooks = ck_info.get("notebooks", [])
-    # Also detect undeclared .ipynb files not under hidden directories
+    notebooks = app.projects.notebooks_from_ck_info(ck_info)
     declared_paths = {nb["path"] for nb in notebooks}
+    # Also detect undeclared .ipynb files not under hidden directories
     try:
         for root, dirs, files in os.walk(repo.working_dir):
             dirs[:] = [d for d in dirs if not d.startswith(".")]
@@ -7820,20 +7820,11 @@ def get_project_notebooks(
     except Exception as e:
         logger.warning(f"Failed to scan for undeclared notebooks: {e}")
     if not notebooks:
-        return notebooks
-    # Detect stages from jupyter-notebook ``notebook_path`` items
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
-    nb_path_to_stage_name = {}
-    for stage_name, stage in stages.items():
-        if stage.get("kind") == "jupyter-notebook":
-            nb_path = stage.get("notebook_path")
-            if nb_path:
-                nb_path_to_stage_name[nb_path] = stage_name
+        return []
+    # Attach the stage that runs each notebook, and the app that stage
+    # builds, if any
     for nb in notebooks:
-        nb_path = nb.get("path")
-        if nb_path in nb_path_to_stage_name:
-            nb["stage"] = nb_path_to_stage_name[nb_path]
+        app.projects.link_notebook_to_stage_and_app(nb, ck_info)
     # Get the notebook content and base64 encode it
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     (
@@ -7854,22 +7845,30 @@ def get_project_notebooks(
             )
         except HTTPException:
             continue
-        try:
-            # If the notebook has a pre-built HTML output, prefer that
-            html_path = get_executed_notebook_path(
-                notebook_path=notebook["path"], to="html"
-            )
-            html_item = app.projects.get_contents_from_tree(
-                project=project,
-                tree=tree,
-                path=html_path,
-                ck_info=ck_info_full,
-                dvc_lock_outs=dvc_lock_outs,
-            )
-            item = html_item
-            notebook["output_format"] = "html"
-        except HTTPException as e:
-            logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+        # A marimo notebook is a Python module, and running it produces an
+        # app rather than an executed copy of itself, so there's no HTML
+        # export to look for and its source is what there is to show
+        if app.projects.item_is_marimo_notebook(notebook["path"], item):
+            notebook["output_format"] = "source"
+        else:
+            try:
+                # If the notebook has a pre-built HTML output, prefer that
+                html_path = get_executed_notebook_path(
+                    notebook_path=notebook["path"], to="html"
+                )
+                html_item = app.projects.get_contents_from_tree(
+                    project=project,
+                    tree=tree,
+                    path=html_path,
+                    ck_info=ck_info_full,
+                    dvc_lock_outs=dvc_lock_outs,
+                )
+                item = html_item
+                notebook["output_format"] = "html"
+            except HTTPException as e:
+                logger.info(
+                    f"Notebook HTML does not exist at {html_path}: {e}"
+                )
         notebook["url"] = item.url
         notebook["content"] = item.content
         notebook["storage"] = item.storage

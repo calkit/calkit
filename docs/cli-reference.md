@@ -37,7 +37,7 @@
 | [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
 | [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
 | [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                                                                 |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
@@ -1673,7 +1673,7 @@ Arguments:
 
 ### `calkit notebooks|nb`
 
-Work with Jupyter notebooks.
+Work with computational notebooks.
 
 | Command                                                             | Description                                                         |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------- |

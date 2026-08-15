@@ -3660,7 +3660,8 @@
       "type": "object"
     },
     "PathInput": {
-      "description": "An input written as an object carrying a path.\n\nPrefer a plain path string. This exists so a stage keeps working when an\noutput is copied verbatim into another stage's ``inputs``, which is how\nentries like ``{path: ..., storage: ...}`` show up in the wild. Only\n``path`` is used: an input is a dependency wherever it happens to be\nstored, so the other keys are carried along and ignored.\n\nExtra keys are allowed deliberately, both to tolerate whatever came along\nwith a copied output and to leave room for object inputs that aren't\npaths at all, e.g., a database table.",
+      "additionalProperties": true,
+      "description": "An input written as an object carrying a path.\n\nPrefer a plain path string. This exists so a stage keeps working when an\noutput is copied verbatim into another stage's ``inputs``, which is how\nentries like ``{path: ..., storage: ...}`` show up in the wild. Only\n``path`` is used: an input is a dependency wherever it happens to be\nstored, so the other keys are carried along and ignored.\n\nExtra keys are allowed deliberately, both to tolerate whatever came along\nwith a copied output and to leave room for object inputs that aren't\npaths at all, e.g., a database table. They are kept rather than dropped,\nsince a stage rewritten back to calkit.yaml (see\n``Pipeline.convert_sbatch_stages``) would otherwise silently lose them.",
       "properties": {
         "path": {
           "description": "Path to the input file or directory.",
@@ -4681,7 +4682,7 @@
           "type": "string"
         },
         "path": {
-          "description": "Path to the renv lock file.",
+          "description": "Path to the project's DESCRIPTION file. The renv lock file is created next to it.",
           "title": "Path",
           "type": "string"
         },
@@ -5471,8 +5472,48 @@
       "title": "SBatchStage",
       "type": "object"
     },
-    "SSHEnvironment": {
+    "SetupDependency": {
+      "description": "A ``setup`` dependency, whose ``name`` may be omitted.\n\nA single anonymous setup step is common enough that requiring a name adds\nfriction, so Calkit synthesizes a stable ``setup-<hash>`` one from\n``check_command``. This is a separate model rather than a loosening of\n``Dependency.name`` so the published schema still rejects an ``app`` or\n``env-var`` dependency with no name, where the name is the identity.",
       "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
         "description": {
           "anyOf": [
             {
@@ -5483,26 +5524,15 @@
             }
           ],
           "default": null,
-          "description": "A description of the environment.",
           "title": "Description"
         },
-        "get_paths": {
-          "default": [
-            "*"
-          ],
-          "description": "Paths fetched back from the remote host.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Get Paths",
-          "type": "array"
-        },
-        "host": {
-          "description": "Host to connect to.",
-          "title": "Host",
+        "kind": {
+          "const": "setup",
+          "default": "setup",
+          "title": "Kind",
           "type": "string"
         },
-        "key": {
+        "name": {
           "anyOf": [
             {
               "type": "string"
@@ -5512,43 +5542,22 @@
             }
           ],
           "default": null,
-          "description": "Path to the SSH private key to use.",
-          "title": "Key"
+          "title": "Name"
         },
-        "kind": {
-          "const": "ssh",
-          "default": "ssh",
-          "title": "Kind",
-          "type": "string"
-        },
-        "send_paths": {
-          "default": [
-            "./*"
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "description": "Paths sent to the remote host.",
-          "items": {
-            "type": "string"
-          },
-          "title": "Send Paths",
-          "type": "array"
-        },
-        "user": {
-          "description": "User to connect as.",
-          "title": "User",
-          "type": "string"
-        },
-        "wdir": {
-          "description": "Working directory on the remote host.",
-          "title": "Wdir",
-          "type": "string"
+          "default": null,
+          "title": "Setup Command"
         }
       },
-      "required": [
-        "host",
-        "user",
-        "wdir"
-      ],
-      "title": "SSHEnvironment",
+      "title": "SetupDependency",
       "type": "object"
     },
     "ShellCommandStage": {
@@ -6377,7 +6386,7 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It is required to reach another machine, since there is\nnowhere to put the project otherwise.",
       "properties": {
         "description": {
           "anyOf": [
@@ -6392,11 +6401,40 @@
           "description": "A description of the environment.",
           "title": "Description"
         },
+        "get_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Paths copied back from the workspace after running. Only used when reaching another host.",
+          "title": "Get Paths"
+        },
         "host": {
           "default": "localhost",
-          "description": "Host on which to run, over SSH if not localhost.",
+          "description": "Host on which to run. Reached over SSH unless it names this machine.",
           "title": "Host",
           "type": "string"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the SSH private key used to reach another host.",
+          "title": "Key"
         },
         "kind": {
           "const": "system",
@@ -6434,6 +6472,48 @@
           },
           "title": "Lock",
           "type": "array"
+        },
+        "send_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Paths copied to the workspace before running. Globs are supported. Only used when reaching another host.",
+          "title": "Send Paths"
+        },
+        "user": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "User to connect as. Required to reach another host.",
+          "title": "User"
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The project's workspace on the host, in which stages run. Required to reach another host.",
+          "title": "Wdir"
         }
       },
       "title": "SystemEnvironment",
@@ -6915,11 +6995,21 @@
             "type": "string"
           },
           {
+            "$ref": "#/$defs/SetupDependency"
+          },
+          {
             "$ref": "#/$defs/Dependency"
           },
           {
             "additionalProperties": {
-              "$ref": "#/$defs/DependencyAttrs"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DependencyAttrs"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "type": "object"
           }
@@ -6975,7 +7065,6 @@
             "pixi": "#/$defs/PixiEnvironment",
             "renv": "#/$defs/REnvironment",
             "slurm": "#/$defs/SlurmEnvironment",
-            "ssh": "#/$defs/SSHEnvironment",
             "system": "#/$defs/SystemEnvironment",
             "uv": "#/$defs/UvEnvironment",
             "uv-venv": "#/$defs/UvVenvEnvironment",
@@ -7019,9 +7108,6 @@
           },
           {
             "$ref": "#/$defs/NixEnvironment"
-          },
-          {
-            "$ref": "#/$defs/SSHEnvironment"
           },
           {
             "$ref": "#/$defs/SystemEnvironment"

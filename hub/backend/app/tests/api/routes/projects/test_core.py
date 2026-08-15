@@ -1295,7 +1295,7 @@ def test_question_text_handles_string_and_object() -> None:
     )
     assert _extract_question_text({}) == ""
     # A non-string/non-dict value (e.g. a list) yields empty text, not a repr.
-    assert _extract_question_text(["a", "b"]) == ""
+    assert _extract_question_text(["a", "b"]) == ""  # type: ignore
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:
@@ -1338,7 +1338,7 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
         return_value=fake_item,
     ):
         evidence = _build_question_evidence(
-            project=SimpleNamespace(),
+            project=SimpleNamespace(),  # type: ignore
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
@@ -3244,3 +3244,47 @@ def test_get_project_notebooks_respects_ref(
         "first.ipynb",
         "second.ipynb",
     ]
+
+
+def test_build_question_evidence_keyed_results_and_tables() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # Two results share a file, told apart only by their keys
+    mean = Result(
+        path="results/summary.json", title="Mean", key="metrics.mean"
+    )
+    table = Result(path="tables/t.csv", title="Sample sizes")
+    evidence_ck = [
+        # A key nobody declared: better to resolve nothing than to show this
+        # value under an unrelated result's title
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "key": "metrics.p95",
+        },
+        # Table evidence resolves against the same map, which is why that map
+        # has to be built whenever table evidence is present
+        {"kind": "table", "path": "tables/t.csv"},
+    ]
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            figures_by_path={},
+            results_by_path={
+                (mean.path, mean.key): mean,
+                (table.path, None): table,
+            },
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is None
+    assert evidence[1].kind == "table"
+    assert evidence[1].result is not None
+    assert evidence[1].result.title == "Sample sizes"

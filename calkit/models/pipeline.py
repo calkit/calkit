@@ -309,6 +309,11 @@ class Stage(BaseModel):
     # through a job scheduler; used to derive the default log path so the
     # log file can be tracked as a DVC output.
     _scheduler_kind: str | None = PrivateAttr(default=None)
+    # The name of the outer ``system`` env when this stage runs on a
+    # particular machine and its inner env is a separate runtime, so the
+    # compiled command dispatches to that machine before activating the
+    # runtime there. Also resolved by set_stage_scheduler_options.
+    _outer_system_env: str | None = PrivateAttr(default=None)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -429,6 +434,10 @@ class Stage(BaseModel):
         scheduled command with ``calkit xenv -n <inner-env>``. For a plain
         scheduler env (no inner runtime needed), we skip the inner xenv
         wrap and let the user's command run directly inside the job.
+
+        A ``system`` env says which machine to run on rather than what to
+        run in, so it wraps the same way: ``<system-env>:<inner-env>``
+        dispatches to the machine and activates the runtime once there.
         """
         if self.environment == "_system" and self.scheduler is None:
             return ""
@@ -442,7 +451,15 @@ class Stage(BaseModel):
                 + " --command -- "
                 + f"calkit xenv -n {self.inner_environment} --no-check --"
             )
-        return f"calkit xenv -n {self.inner_environment} --no-check --"
+        inner_cmd = f"calkit xenv -n {self.inner_environment} --no-check --"
+        if self._outer_system_env is not None:
+            # Dispatch to the machine first; the inner xenv then runs there,
+            # in the workspace, rather than here.
+            return (
+                f"calkit xenv -n {self._outer_system_env} --no-check -- "
+                + inner_cmd
+            )
+        return inner_cmd
 
     @property
     def scheduler_cmd(self) -> str:
@@ -1076,7 +1093,9 @@ class JsonToLatexStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        for input_path in self.inputs:
+        # dvc_deps rather than inputs, since an input can be an object
+        # carrying a path, which would otherwise interpolate its repr.
+        for input_path in self.dvc_deps:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):
@@ -1800,6 +1819,30 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            if kind == "system":
+                # A system env names the machine, so it can wrap an inner
+                # runtime the same way a scheduler env does. On its own it
+                # just runs the stage there, which needs no resolution.
+                if stage.inner_environment == stage.outer_environment:
+                    continue
+                inner_env = environments.get(stage.inner_environment)
+                if inner_env is None:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has inner environment "
+                        f"'{stage.inner_environment}' that is not "
+                        "defined in environments"
+                    )
+                if inner_env.get("kind") in set(scheduler_kinds) | {"system"}:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has system outer environment "
+                        f"'{stage.outer_environment}' and inner environment "
+                        f"'{stage.inner_environment}' of kind "
+                        f"'{inner_env.get('kind')}'; the inner environment "
+                        "must be a runtime, not another machine or a job "
+                        "scheduler"
+                    )
+                stage._outer_system_env = stage.outer_environment
+                continue
             if kind not in scheduler_kinds:
                 continue
             cli_alias = scheduler_kinds[kind]

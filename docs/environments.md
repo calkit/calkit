@@ -44,7 +44,7 @@ Calkit supports the following environment types:
 - [MATLAB](https://www.mathworks.com/products/matlab.html)
 - [Nix](https://nixos.org/) (flake-based)
 - [SLURM](https://slurm.schedmd.com/documentation.html)
-- `ssh`
+- `system` (the machine itself, local or reached over SSH)
 
 Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
@@ -429,27 +429,57 @@ environments:
 
 See the [HPC guide](hpc.md) for how to use SLURM (and PBS) environments in pipeline stages.
 
-### SSH
+### System
 
-It's possible to define a remote environment that uses `ssh` to connect
-and run commands,
-and `scp` to copy files back and forth.
-This could be useful, e.g.,
-for running one or more pipeline stages on an HPC cluster,
-or simply offloading some work to a virtual machine in the cloud
-with specialized hardware like a more powerful GPU.
+A `system` environment is the machine as it is,
+with nothing built, installed, or isolated by Calkit.
+It's an escape hatch for software Calkit doesn't manage,
+e.g., a site-wide module system or a hand-built toolchain.
 
-It is assumed that dependencies on the remote machine are managed separately.
+The simplest form is the machine you're on:
 
-An SSH environment defined in `calkit.yaml` looks like:
+```yaml
+environments:
+  local:
+    kind: system
+    lock:
+      - os
+      - python-version
+```
+
+Nothing is pinned by default, since opting out of isolation is the whole
+point of this kind.
+The `lock` property is how a project says which properties of the machine
+its results actually depend on.
+Locked properties are written to the environment's lock file,
+which stages depend on,
+so moving to a machine where one of them differs reruns the stage
+rather than silently reusing a cached result.
+Run `calkit describe system` to see what's available to lock.
+
+The built-in `_system` environment is shorthand for this kind
+on `localhost` with nothing locked.
+
+#### Running on another machine
+
+A `system` environment's `host` names the machine the work belongs on.
+SSH is how a machine is reached, not a kind of environment in its own
+right, so there's no separate `ssh` kind:
+if `host` names the machine you're on, the stage runs right there,
+and otherwise Calkit connects over `ssh` and copies files with `scp`.
+This is useful, e.g., for offloading work to a cluster login node
+or a cloud VM with a more powerful GPU.
+
+It is assumed that dependencies on the other machine are managed
+separately, unless you pair it with an inner environment (see below).
 
 ```yaml
 environments:
   cluster:
-    kind: ssh
+    kind: system
     host: "10.225.22.25"
     user: my-user-name
-    wdir: /home/my-user-name/calkit/example-ssh
+    wdir: /home/my-user-name/calkit/example
     key: ~/.ssh/id_ed25519
     send_paths:
       - script.sh
@@ -457,14 +487,16 @@ environments:
       - results
 ```
 
-In the example above, we define an environment called `cluster`,
-where we specify the host IP address, our username on that machine,
-the working directory, the path to an SSH key on our local machine
-(so we can connect without a password),
-which paths we want to send before executing commands,
-and which we want to copy back after they finish.
+Here `wdir` is the project's _workspace_ on that machine---the directory
+stages run in.
+It's required to reach another host, since there's nowhere to put the
+project otherwise.
+`user` is the account to connect as, `key` is the path to an SSH key on
+this machine (so we can connect without a password),
+`send_paths` are copied to the workspace before running,
+and `get_paths` are copied back afterwards.
 Wildcards in paths are supported, so the entire directory could be copied
-if desired by specifying `*`.
+by specifying `*`.
 
 To register an SSH key with the host, use `ssh-copy-id`. For example:
 
@@ -480,10 +512,35 @@ pipeline:
   stages:
     run-simulation:
       kind: shell-script
+      environment: cluster
       script_path: script.sh
       outputs:
         - results
 ```
+
+Note that `lock` can only be used when the host is the machine you're on.
+Locking the properties of a machine Calkit can't observe would claim the
+stage is pinned to something it isn't, so it's an error rather than a
+silent no-op.
+
+#### Pairing with a runtime
+
+Because a `system` environment says _where_ a stage runs rather than what
+it runs in, it can wrap another environment the same way a SLURM
+environment can, using the composite `<outer>:<inner>` syntax:
+
+```yaml
+pipeline:
+  stages:
+    simulate:
+      kind: python-script
+      environment: cluster:py
+      script_path: simulate.py
+```
+
+Calkit dispatches to `cluster` first, then activates the `py` environment
+once there, so the workspace on that machine needs both Calkit and the
+project.
 
 ### MATLAB
 
@@ -794,27 +851,12 @@ Model class: `SlurmEnvironment`
 
 Model class: `REnvironment`
 
-| Parameter   | Type            | Required | Description                              |
-| ----------- | --------------- | -------- | ---------------------------------------- |
-| kind        | Literal['renv'] | yes      | What kind of environment this is.        |
-| path        | str             | yes      | Path to the renv lock file.              |
-| prefix      | str             | no       | Path at which to create the environment. |
-| description | str             | no       | A description of the environment.        |
-
-#### `ssh`
-
-Model class: `SSHEnvironment`
-
-| Parameter   | Type           | Required | Description                              |
-| ----------- | -------------- | -------- | ---------------------------------------- |
-| kind        | Literal['ssh'] | yes      | What kind of environment this is.        |
-| host        | str            | yes      | Host to connect to.                      |
-| user        | str            | yes      | User to connect as.                      |
-| wdir        | str            | yes      | Working directory on the remote host.    |
-| key         | str            | no       | Path to the SSH private key to use.      |
-| send_paths  | list[str]      | no       | Paths sent to the remote host.           |
-| get_paths   | list[str]      | no       | Paths fetched back from the remote host. |
-| description | str            | no       | A description of the environment.        |
+| Parameter   | Type            | Required | Description                                                                       |
+| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
+| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
+| path        | str             | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it. |
+| prefix      | str             | no       | Path at which to create the environment.                                          |
+| description | str             | no       | A description of the environment.                                                 |
 
 #### `system`
 
@@ -832,10 +874,26 @@ Locked properties are written to the environment's lock file, which
 stages depend on, so moving to a machine where one of them differs
 invalidates the cached result rather than silently reusing it.
 
+`host` names the machine. SSH is how a machine is reached, not a kind
+of environment, so there is no separate `ssh` kind: a system env whose
+host isn't this machine is reached over SSH, and one whose host is this
+machine runs here, the same way a SLURM env does. The built-in
+`_system` environment is shorthand for this kind on `localhost`
+with nothing locked.
+
+`wdir` is the project's workspace on that host -- the directory the
+stage runs in. It is required to reach another machine, since there is
+nowhere to put the project otherwise.
+
 | Parameter   | Type                                                                                                                                                                                                                                                                                                                           | Required | Description                                                                                                                                                   |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind        | Literal['system']                                                                                                                                                                                                                                                                                                              | yes      | What kind of environment this is.                                                                                                                             |
-| host        | str                                                                                                                                                                                                                                                                                                                            | no       | Host on which to run, over SSH if not localhost.                                                                                                              |
+| host        | str                                                                                                                                                                                                                                                                                                                            | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                          |
+| user        | str                                                                                                                                                                                                                                                                                                                            | no       | User to connect as. Required to reach another host.                                                                                                           |
+| key         | str                                                                                                                                                                                                                                                                                                                            | no       | Path to the SSH private key used to reach another host.                                                                                                       |
+| wdir        | str                                                                                                                                                                                                                                                                                                                            | no       | The project's workspace on the host, in which stages run. Required to reach another host.                                                                     |
+| send_paths  | list[str]                                                                                                                                                                                                                                                                                                                      | no       | Paths copied to the workspace before running. Globs are supported. Only used when reaching another host.                                                      |
+| get_paths   | list[str]                                                                                                                                                                                                                                                                                                                      | no       | Paths copied back from the workspace after running. Only used when reaching another host.                                                                     |
 | lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned. |
 | description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                             |
 

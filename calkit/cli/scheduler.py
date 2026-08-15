@@ -896,21 +896,14 @@ def run_batch(
         log_path = os.path.join(LOGS_DIR, f"{name}.out")
     if is_command is None:
         is_command = not os.path.isfile(target)
-    # Host check
+    # Host check: a scheduler env names the cluster its jobs belong to, and
+    # submitting from anywhere else would queue them on the wrong one.
     env_host = env.get("host", "localhost")
-    if env_host != "localhost":
-        current_host = socket.gethostname()
-        current_fqdn = socket.getfqdn()
-        if (
-            env_host != current_host
-            and env_host != current_fqdn
-            and current_host != env_host.split(".")[0]
-            and current_fqdn != env_host
-        ):
-            raise_error(
-                f"Environment '{environment}' is for host '{env_host}', "
-                f"but this is '{current_host}'"
-            )
+    if not calkit.environments.host_is_local(env_host):
+        raise_error(
+            f"Environment '{environment}' is for host '{env_host}', "
+            f"but this is '{socket.gethostname()}'"
+        )
     # Apply env defaults per mode
     env_setup_cmds = env.get("default_setup", []) or []
     if env_default_setup == "merge" and env_setup_cmds:

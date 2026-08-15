@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from datetime import datetime
@@ -538,6 +539,72 @@ def test_run_in_env_detect_default(tmp_dir):
     subprocess.check_call(cmd)
     ck_info_2 = calkit.load_calkit_info()
     assert ck_info == ck_info_2
+
+
+def test_run_in_env_system(tmp_dir):
+    # A named system env runs the command on this machine, like the built-in
+    # '_system' env, but with a lock file recording what it pinned
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n  sys:\n    kind: system\n    lock:\n      - os\n"
+        )
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
+    with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
+        assert set(json.load(f)) == {"os"}
+    # A host naming this machine runs here rather than connecting to it
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  here:\n"
+            "    kind: system\n"
+            f"    host: {socket.gethostname()}\n"
+        )
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "here", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
+    # Reaching another machine needs somewhere to run, so a system env that
+    # names one without a workspace fails loudly rather than guessing
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  remote:\n"
+            "    kind: system\n"
+            "    host: not-this-box.invalid\n"
+        )
+    res = subprocess.run(
+        ["calkit", "xenv", "-n", "remote", "--", "echo", "hi"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    combined = res.stdout + res.stderr
+    assert "'user'" in combined and "'wdir'" in combined
+    # Locking properties of a machine we can't observe is an error, not a
+    # silent no-op
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  remote:\n"
+            "    kind: system\n"
+            "    host: not-this-box.invalid\n"
+            "    user: me\n"
+            "    wdir: /home/me/proj\n"
+            "    lock:\n"
+            "      - os\n"
+        )
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "remote"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not supported yet" in res.stdout + res.stderr
 
 
 def test_to_shell_cmd():

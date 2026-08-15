@@ -22,9 +22,12 @@ class PathInput(BaseModel):
 
     Extra keys are allowed deliberately, both to tolerate whatever came along
     with a copied output and to leave room for object inputs that aren't
-    paths at all, e.g., a database table.
+    paths at all, e.g., a database table. They are kept rather than dropped,
+    since a stage rewritten back to calkit.yaml (see
+    ``Pipeline.convert_sbatch_stages``) would otherwise silently lose them.
     """
 
+    model_config = ConfigDict(extra="allow")
     path: str = Field(description="Path to the input file or directory.")
 
 

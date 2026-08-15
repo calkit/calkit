@@ -6,6 +6,7 @@ import json
 import os
 import platform
 import re
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
@@ -48,7 +49,11 @@ SCHEDULER_DISPATCH_ONLY_KEYS = {"max_concurrent_jobs"}
 # since names starting with an underscore are filtered out of the pipeline's
 # environment list before we get here. ``system`` is not listed: checking one
 # means writing its lock file, so it has to go through ``check_environment``.
-KINDS_NO_CHECK = ["ssh"]
+# No kind is unconditionally uncheckable. A ``system`` env on another host
+# comes close, but that depends on the env's host rather than its kind, and
+# ``check_environment`` handles it: with nothing locked there is nothing to
+# check, and locking a machine we can't observe is an error.
+KINDS_NO_CHECK: list[str] = []
 
 # Maps the kebab-case properties a ``system`` environment can lock onto the
 # keys ``get_system_info`` returns. Not a mechanical transformation, hence
@@ -76,13 +81,54 @@ SYSTEM_LOCK_PROPERTIES = {
     "brew-version": "brew_version",
 }
 
+# Properties only one platform can supply, since ``get_system_info`` collects
+# package manager versions per OS. Locking one from another platform raises
+# in ``get_system_lock_data`` rather than recording nothing, so this table is
+# documentation (and a test hook), not a second gate.
+SYSTEM_LOCK_PROPERTY_PLATFORMS = {"brew-version": "Darwin"}
+
 
 def _as_posix_path(path: str) -> str:
     return Path(path).as_posix()
 
 
 COMPOSITE_ENV_SEP = ":"
-VALID_OUTER_ENV_KINDS = ["slurm", "pbs"]
+# Kinds that say *where* a stage runs rather than what it runs in, so they
+# can wrap an inner runtime env as ``<outer>:<inner>``.
+VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
+
+
+def host_is_local(host: str | None) -> bool:
+    """Whether ``host`` names the machine we're running on.
+
+    Environments that name a host (``system``, ``slurm``, ``pbs``) are
+    declarations of where the work belongs, not instructions to connect:
+    when we're already on that machine there is nothing to reach out to.
+
+    A machine reports itself as a bare name or a fully qualified one
+    depending on how it's configured, and projects write it either way, so
+    the two are matched across that difference. A domain is only dropped
+    from one side at a time, so two different machines that share a short
+    name under different domains stay distinct.
+    """
+    if not host or host == "localhost":
+        return True
+    current_host = socket.gethostname()
+    current_fqdn = socket.getfqdn()
+    if host in (current_host, current_fqdn):
+        return True
+    if "." not in host:
+        # A bare env host matches this machine's short name, however this
+        # machine happens to report itself.
+        return host in (
+            current_host.split(".")[0],
+            current_fqdn.split(".")[0],
+        )
+    if "." not in current_fqdn:
+        # A qualified env host can still name a machine that only knows its
+        # own short name; there is no domain here to contradict it.
+        return host.split(".")[0] in (current_host, current_fqdn)
+    return False
 
 
 def get_julia_packages_dir() -> str:
@@ -483,20 +529,18 @@ def write_scheduler_env_lock(
     Returns
     -------
     str | None
-        The lock file path (relative to ``wdir`` if provided), or ``None``
-        if the env kind has no scheduler lock file.
+        The lock file path, already prefixed with ``wdir`` if provided, or
+        ``None`` if the env kind has no scheduler lock file.
     """
     if env.get("kind") not in ("slurm", "pbs"):
         return None
+    # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
     )
     if lock_fpath is None:
         return None
-    full_path = (
-        os.path.join(wdir, lock_fpath) if wdir is not None else lock_fpath
-    )
-    parent = os.path.dirname(full_path)
+    parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)
     lock_data = {
@@ -510,12 +554,12 @@ def write_scheduler_env_lock(
     if _mock_enabled():
         lock_data["mocked"] = True
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
-    if os.path.isfile(full_path):
-        with open(full_path, "r") as f:
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
             existing = f.read()
         if existing == content:
             return lock_fpath
-    with open(full_path, "w") as f:
+    with open(lock_fpath, "w") as f:
         f.write(content)
     return lock_fpath
 
@@ -559,30 +603,29 @@ def write_system_env_lock(
     on, say, the Julia version should not reuse a cached result from a box
     with a different one.
 
-    Returns the lock file path, or None if the environment locks nothing.
+    Returns the lock file path, already prefixed with ``wdir`` if provided,
+    or None if the environment locks nothing.
     """
     lock = env.get("lock") or []
     if not lock:
         return None
+    # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
     )
     if lock_fpath is None:
         return None
-    full_path = (
-        os.path.join(wdir, lock_fpath) if wdir is not None else lock_fpath
-    )
-    parent = os.path.dirname(full_path)
+    parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)
     content = (
         json.dumps(get_system_lock_data(lock), indent=2, sort_keys=True) + "\n"
     )
-    if os.path.isfile(full_path):
-        with open(full_path, "r") as f:
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
             if f.read() == content:
                 return lock_fpath
-    with open(full_path, "w") as f:
+    with open(lock_fpath, "w") as f:
         f.write(content)
     return lock_fpath
 

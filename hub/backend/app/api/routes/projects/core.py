@@ -1886,12 +1886,14 @@ def _build_questions_public(
             )
         }
     results_by_path: dict[tuple[str, str | None], Result] = {}
-    if "result" in kinds:
-        # Keyed by (path, key), since several results can point at one file;
-        # a path-only entry lets keyless evidence still resolve
+    if kinds & {"result", "table"}:
+        # Keyed by (path, key), since several results can point at one file.
+        # A keyless result lands under (path, None), which is what keyless
+        # evidence resolves against; a keyed one must not stand in for it,
+        # or evidence citing an undeclared key would show that value under
+        # an unrelated result's title.
         for res in _build_results(project=project, repo=repo, ref=ref):
             results_by_path[(res.path, res.key)] = res
-            results_by_path.setdefault((res.path, None), res)
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {

@@ -435,12 +435,6 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             verbose=verbose,
         )
-    elif env["kind"] == "ssh":
-        # TODO: How to check SSH environments?
-        # Maybe just check that we can connect
-        raise_error(
-            "Environment checking not implemented for SSH environments"
-        )
     elif env["kind"] == "renv":
         env_path = env.get("path")
         if env_path is None:
@@ -478,7 +472,16 @@ def check_environment(
         # Nothing is installed or built for a system env; checking it means
         # reading the machine properties it declared it depends on and
         # recording them, so stages depending on the env see them change.
-        write_system_env_lock(env_name=env_name, env=env)
+        if calkit.environments.host_is_local(env.get("host")):
+            write_system_env_lock(env_name=env_name, env=env)
+        elif env.get("lock"):
+            # The properties belong to the other machine, and reading this
+            # one's would pin the stage to something it never ran on.
+            raise_error(
+                f"Environment '{env_name}' locks machine properties but "
+                f"runs on host '{env.get('host')}', which this is not; "
+                "locking another host's properties is not supported yet"
+            )
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
     else:

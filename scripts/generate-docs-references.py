@@ -26,7 +26,6 @@ from calkit.models.core import (
     PixiEnvironment,
     REnvironment,
     SlurmEnvironment,
-    SSHEnvironment,
     SystemEnvironment,
     UvEnvironment,
     UvVenvEnvironment,
@@ -628,7 +627,6 @@ def generate_environment_kinds_markdown() -> str:
         NixEnvironment,
         SlurmEnvironment,
         REnvironment,
-        SSHEnvironment,
         SystemEnvironment,
     ]
     env_classes_by_kind = {

@@ -159,7 +159,6 @@ class Environment(BaseModel):
         "nix",
         "pbs",
         "slurm",
-        "ssh",
         "system",
         "uv",
         "pixi",
@@ -318,7 +317,10 @@ class DockerEnvironment(Environment):
 
 class REnvironment(Environment):
     kind: Literal["renv"] = "renv"
-    path: str = Field(description="Path to the renv lock file.")
+    path: str = Field(
+        description="Path to the project's DESCRIPTION file. The renv lock "
+        "file is created next to it."
+    )
     prefix: str | None = Field(
         default=None, description="Path at which to create the environment."
     )
@@ -384,25 +386,6 @@ class PBSEnvironment(Environment):
     )
 
 
-class SSHEnvironment(Environment):
-    # Expected to fold into ``system``, since SSH is how you reach a machine
-    # rather than a kind of environment in its own right: a system env with a
-    # non-localhost ``host`` says the same thing.
-    kind: Literal["ssh"] = "ssh"
-    host: str = Field(description="Host to connect to.")
-    user: str = Field(description="User to connect as.")
-    wdir: str = Field(description="Working directory on the remote host.")
-    key: str | None = Field(
-        default=None, description="Path to the SSH private key to use."
-    )
-    send_paths: list[str] = Field(
-        default=["./*"], description="Paths sent to the remote host."
-    )
-    get_paths: list[str] = Field(
-        default=["*"], description="Paths fetched back from the remote host."
-    )
-
-
 # Properties of a machine that a ``system`` environment can pin. A closed set
 # rather than any key from ``calkit describe system``, so editors can offer
 # them and a typo is reported instead of silently locking nothing. Kebab-case
@@ -444,12 +427,47 @@ class SystemEnvironment(Environment):
     Locked properties are written to the environment's lock file, which
     stages depend on, so moving to a machine where one of them differs
     invalidates the cached result rather than silently reusing it.
+
+    ``host`` names the machine. SSH is how a machine is reached, not a kind
+    of environment, so there is no separate ``ssh`` kind: a system env whose
+    host isn't this machine is reached over SSH, and one whose host is this
+    machine runs here, the same way a SLURM env does. The built-in
+    ``_system`` environment is shorthand for this kind on ``localhost``
+    with nothing locked.
+
+    ``wdir`` is the project's workspace on that host -- the directory the
+    stage runs in. It is required to reach another machine, since there is
+    nowhere to put the project otherwise.
     """
 
     kind: Literal["system"] = "system"
     host: str = Field(
         default="localhost",
-        description="Host on which to run, over SSH if not localhost.",
+        description="Host on which to run. Reached over SSH unless it names "
+        "this machine.",
+    )
+    user: str | None = Field(
+        default=None,
+        description="User to connect as. Required to reach another host.",
+    )
+    key: str | None = Field(
+        default=None,
+        description="Path to the SSH private key used to reach another host.",
+    )
+    wdir: str | None = Field(
+        default=None,
+        description="The project's workspace on the host, in which stages "
+        "run. Required to reach another host.",
+    )
+    send_paths: list[str] | None = Field(
+        default=None,
+        description="Paths copied to the workspace before running. Globs are "
+        "supported. Only used when reaching another host.",
+    )
+    get_paths: list[str] | None = Field(
+        default=None,
+        description="Paths copied back from the workspace after running. "
+        "Only used when reaching another host.",
     )
     lock: list[SystemLockProperty] = Field(
         default=[],
@@ -801,6 +819,20 @@ class Dependency(BaseModel):
     default: str | None = None
 
 
+class SetupDependency(Dependency):
+    """A ``setup`` dependency, whose ``name`` may be omitted.
+
+    A single anonymous setup step is common enough that requiring a name adds
+    friction, so Calkit synthesizes a stable ``setup-<hash>`` one from
+    ``check_command``. This is a separate model rather than a loosening of
+    ``Dependency.name`` so the published schema still rejects an ``app`` or
+    ``env-var`` dependency with no name, where the name is the identity.
+    """
+
+    kind: Literal["setup"] = "setup"
+    name: str | None = None
+
+
 class ProjectInfo(BaseModel):
     """All of the project's information or metadata, written to the
     ``calkit.yaml`` file.
@@ -854,7 +886,9 @@ class ProjectInfo(BaseModel):
     questions: list[str | Question] = Field(
         default=[], description="Questions the project seeks to answer."
     )
-    dependencies: list[str | Dependency | dict[str, DependencyAttrs]] = Field(
+    dependencies: list[
+        str | SetupDependency | Dependency | dict[str, DependencyAttrs | None]
+    ] = Field(
         default=[],
         description=(
             "System-level dependencies: applications that must be on PATH, "
@@ -918,7 +952,6 @@ class ProjectInfo(BaseModel):
             | UvEnvironment
             | UvVenvEnvironment
             | NixEnvironment
-            | SSHEnvironment
             | SystemEnvironment,
             Discriminator("kind"),
         ],

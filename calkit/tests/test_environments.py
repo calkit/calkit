@@ -2,7 +2,9 @@
 
 import json
 import os
+import platform
 import shutil
+import socket
 import subprocess
 from datetime import timedelta
 from unittest import mock
@@ -1164,7 +1166,15 @@ def test_system_env_lock(tmp_dir):
         envs.SYSTEM_LOCK_PROPERTIES
     )
     system_info = calkit.get_system_info()
-    for key in envs.SYSTEM_LOCK_PROPERTIES.values():
+    for prop, key in envs.SYSTEM_LOCK_PROPERTIES.items():
+        only_on = envs.SYSTEM_LOCK_PROPERTY_PLATFORMS.get(prop)
+        if only_on is not None and platform.system() != only_on:
+            # A package manager version this OS never collects. Absent by
+            # design, and locking it raises rather than recording null.
+            assert key not in system_info
+            with pytest.raises(ValueError, match="not available"):
+                envs.get_system_lock_data([prop])
+            continue
         assert key in system_info, f"{key} is not in get_system_info()"
     # Locking nothing means no lock file, so nothing to depend on
     bare = {"kind": "system"}
@@ -1203,3 +1213,40 @@ def test_system_env_lock(tmp_dir):
     with mock.patch.object(calkit, "get_system_info", return_value={}):
         with pytest.raises(ValueError, match="not available on this machine"):
             envs.get_system_lock_data(["os"])
+
+
+def test_host_is_local():
+    import calkit.environments as envs
+
+    # An env with no host, or localhost, is this machine by definition
+    assert envs.host_is_local(None)
+    assert envs.host_is_local("")
+    assert envs.host_is_local("localhost")
+    # So is one naming this machine, however either side spells it
+    assert envs.host_is_local(socket.gethostname())
+    assert envs.host_is_local(socket.getfqdn())
+    assert envs.host_is_local(socket.gethostname().split(".")[0])
+    assert envs.host_is_local(socket.getfqdn().split(".")[0])
+    # A machine that isn't this one has to be reached
+    assert not envs.host_is_local("not-this-box.invalid")
+
+    def _with_names(hostname, fqdn):
+        return mock.patch.object(
+            socket, "gethostname", return_value=hostname
+        ), mock.patch.object(socket, "getfqdn", return_value=fqdn)
+
+    # A machine that reports itself qualified still answers to its bare name
+    gh, gf = _with_names("macbookpro.local", "macbookpro.local")
+    with gh, gf:
+        assert envs.host_is_local("macbookpro")
+        assert envs.host_is_local("macbookpro.local")
+    # One that only knows its short name answers to a qualified one
+    gh, gf = _with_names("box", "box")
+    with gh, gf:
+        assert envs.host_is_local("box.example.org")
+    # But two machines sharing a short name under different domains are not
+    # the same machine, so the domain has to be believed
+    gh, gf = _with_names("web01.dev.example.com", "web01.dev.example.com")
+    with gh, gf:
+        assert envs.host_is_local("web01.dev.example.com")
+        assert not envs.host_is_local("web01.prod.example.com")

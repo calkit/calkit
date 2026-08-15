@@ -2937,25 +2937,37 @@ def run_in_env(
             )
         except subprocess.CalledProcessError:
             raise_error("Failed to run in julia environment")
-    elif env["kind"] == "ssh":
-        try:
-            host = os.path.expandvars(env["host"])
-            user = os.path.expandvars(env["user"])
-            remote_wdir: str = env["wdir"]
-        except KeyError:
+    elif env["kind"] == "system" and not calkit.environments.host_is_local(
+        os.path.expandvars(env.get("host") or "localhost")
+    ):
+        # A system env on another machine. SSH is how we reach it; the
+        # project needs a workspace there to run in, since the command runs
+        # in that directory rather than in this project tree.
+        host = os.path.expandvars(env["host"])
+        user = env.get("user")
+        remote_wdir = env.get("wdir")
+        if not user or not remote_wdir:
             raise_error(
-                "Host, user, and wdir must be defined for ssh environments"
+                f"System environment '{env_name}' runs on host '{host}', "
+                "which this is not, so it needs a 'user' to connect as and "
+                "a 'wdir' workspace to run in"
             )
+        user = os.path.expandvars(user)
         send_paths = env.get("send_paths")
         get_paths = env.get("get_paths")
         key = env.get("key")
         if key is not None:
             key = os.path.expanduser(os.path.expandvars(key))
         remote_shell_cmd = _to_shell_cmd(cmd)
+        # The stage's own wdir is relative to the workspace, the same way it
+        # is relative to the project root locally
+        remote_run_wdir = (
+            posixpath.join(remote_wdir, wdir) if wdir else remote_wdir
+        )
         # Run with nohup so we can disconnect
         # TODO: Should we collect output instead of send to /dev/null?
         remote_cmd = (
-            f"cd '{remote_wdir}' ; nohup {remote_shell_cmd} "
+            f"cd '{remote_run_wdir}' ; nohup {remote_shell_cmd} "
             "> /dev/null 2>&1 & echo $! "
         )
         key_cmd = ["-i", key] if key is not None else []
@@ -3177,6 +3189,28 @@ def run_in_env(
             subprocess.check_call(docker_cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in MATLAB environment")
+    elif env["kind"] == "system":
+        # A system env whose host is this machine: nothing to activate, so
+        # the command runs right here, like a stage in the built-in
+        # '_system' env. The check still matters, since it records the
+        # machine properties the env locks.
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
+        # The env's workspace is where the project lives on this host, and
+        # the stage's own wdir is relative to it
+        run_wdir = env.get("wdir")
+        if run_wdir is not None:
+            run_wdir = os.path.expanduser(os.path.expandvars(run_wdir))
+        if wdir is not None:
+            run_wdir = os.path.join(run_wdir, wdir) if run_wdir else wdir
+        shell_cmd = _to_shell_cmd(cmd)
+        if verbose:
+            typer.echo(f"Running command: {shell_cmd}")
+        try:
+            subprocess.check_call(shell_cmd, shell=True, cwd=run_wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in system environment")
     else:
         raise_error("Environment kind not supported")
 

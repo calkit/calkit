@@ -607,9 +607,6 @@ def record_overleaf_links(
     return links
 
 
-# Categories in calkit.yaml whose items are keyed by a path. This is
-# CATEGORIES_PLURAL_TO_SINGULAR plus presentations, which aren't a Calkit
-# object kind but are still declared with a path.
 # The artifact collections whose entries declare a path. Several aren't in
 # CATEGORIES_PLURAL_TO_SINGULAR, which only covers the kinds that can be
 # imported between projects, so they're listed explicitly.

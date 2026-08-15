@@ -7,6 +7,7 @@ from calkit.models.core import (
     ProjectInfo,
     Publication,
     Question,
+    SetupDependency,
     ShowcaseApp,
     ShowcaseFigure,
     StaticHtmlApp,
@@ -113,3 +114,35 @@ def test_apps():
         ProjectInfo.model_validate(
             {"apps": {"legacy": {"kind": "external", "url": "https://x.io"}}}
         )
+
+
+def test_dependency_forms_match_what_the_runtime_accepts():
+    # ``calkit.core`` normalizes several spellings; the model must accept
+    # every one of them, or an editor flags a project that loads and runs.
+    info = ProjectInfo.model_validate(
+        {
+            "dependencies": [
+                "git",
+                "calkit>=0.38",
+                {"name": "uv", "kind": "app"},
+                # Mapping form, including one with no body at all
+                {"docker": {"kind": "app"}},
+                {"pixi": None},
+                # A setup dep needs no name: one is synthesized from a hash
+                # of check_command
+                {
+                    "kind": "setup",
+                    "check_command": "gh auth status",
+                    "setup_command": "gh auth login",
+                },
+            ]
+        }
+    )
+    assert len(info.dependencies) == 6
+    setup_dep = info.dependencies[-1]
+    assert isinstance(setup_dep, SetupDependency)
+    assert setup_dep.name is None
+    # Name is the identity for the other kinds, so it stays required there
+    for bad in [{"kind": "app"}, {"kind": "env-var"}]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"dependencies": [bad]})

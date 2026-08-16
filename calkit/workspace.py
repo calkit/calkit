@@ -56,6 +56,7 @@ import socket
 import subprocess
 import tempfile
 import time
+import warnings
 from dataclasses import dataclass, replace
 
 import git
@@ -280,6 +281,8 @@ class Workspace:
     wdir: str
     user: str | None = None
     ssh_key: str | None = None
+    # What the far end has to report as its own ID, if the env declared one
+    machine_id: str | None = None
 
     @classmethod
     def from_env(
@@ -317,7 +320,14 @@ class Workspace:
         ssh_key = env.get("ssh_key")
         if ssh_key is not None:
             ssh_key = os.path.expanduser(os.path.expandvars(ssh_key))
-        return cls(host=host, user=user, wdir=wdir, ssh_key=ssh_key)
+        machine_id = os.path.expandvars(env.get("machine_id") or "") or None
+        return cls(
+            host=host,
+            user=user,
+            wdir=wdir,
+            ssh_key=ssh_key,
+            machine_id=machine_id,
+        )
 
     @property
     def target(self) -> str:
@@ -720,6 +730,52 @@ def remote_system_info(workspace: Workspace) -> dict:
             pass
     raise ValueError(
         f"Got an unreadable system description from '{workspace.host}'"
+    )
+
+
+class MachineMismatch(ConnectionProblem):
+    """The host answered, but it isn't the machine the project named.
+
+    Separate from being unable to connect because the fix is different and
+    the situation is worse: something is reachable and would have run the
+    stage. A name that has come to point somewhere else is the ordinary
+    cause, and re-pointing it is invisible from here -- which is the whole
+    reason an environment can name a machine by ID instead.
+    """
+
+
+def verify_machine_id(workspace: Workspace, system_info: dict) -> None:
+    """Check the far end is the machine the environment named.
+
+    Only meaningful once we've connected, since asking the machine who it
+    is means asking the machine. A host that stops resolving to the box it
+    used to is otherwise silent: SSH connects, the workspace syncs, and the
+    stage runs somewhere the project never named.
+
+    A machine that can't report an ID is not treated as a mismatch. It is
+    the same "unknown is not different" rule as locally, and here it also
+    covers an older Calkit on the far end that doesn't report the field at
+    all -- which is a reason to say nothing can be verified, not a reason
+    to claim the machine is the wrong one.
+    """
+    if not workspace.machine_id:
+        return
+    reported = system_info.get("machine_id")
+    if reported is None:
+        warnings.warn(
+            f"'{workspace.host}' did not report a machine ID, so it could "
+            "not be verified as the machine this environment names. Calkit "
+            "there may predate machine IDs."
+        )
+        return
+    if calkit.machine_ids_match(workspace.machine_id, reported):
+        return
+    raise MachineMismatch(
+        f"'{workspace.host}' is not the machine this environment names. "
+        f"It expects machine ID '{workspace.machine_id}', but that host "
+        f"reports '{reported}'. If the name now points at a different "
+        "machine, correct 'host'; if the machine itself was rebuilt or "
+        "replaced, update 'machine_id' to the new value it reports."
     )
 
 

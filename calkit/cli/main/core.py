@@ -2961,8 +2961,8 @@ def run_in_env(
             )
         except subprocess.CalledProcessError:
             raise_error("Failed to run in julia environment")
-    elif env["kind"] == "system" and not calkit.environments.host_is_local(
-        os.path.expandvars(env.get("host") or "localhost")
+    elif env["kind"] == "system" and not calkit.environments.env_is_local(
+        {"host": "localhost", **env}
     ):
         # A system env on another machine. The project needs a workspace
         # there to run in, and that workspace has to hold exactly what the

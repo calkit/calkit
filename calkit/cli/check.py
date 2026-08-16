@@ -472,8 +472,15 @@ def check_environment(
         # Nothing is installed or built for a system env; checking it means
         # reading the machine properties it declared it depends on and
         # recording them, so stages depending on the env see them change.
-        if calkit.environments.host_is_local(env.get("host")):
-            write_system_env_lock(env_name=env_name, env=env)
+        if calkit.environments.env_is_local(env):
+            try:
+                write_system_env_lock(env_name=env_name, env=env)
+            except ValueError as e:
+                # A property that can't be locked is the user's to fix --
+                # a misspelled one, or a tool that isn't installed. The
+                # remote branch below already reports these; this one used
+                # to let them out as a traceback.
+                raise_error(str(e))
         else:
             # For a host that isn't this one, checking means getting to the
             # point where we can actually reach it -- better sorted out here
@@ -512,20 +519,28 @@ def check_environment(
                 )
                 # Calkit is needed there to read the machine's properties,
                 # and to activate an inner env, but an environment that
-                # only dispatches a command never calls it
+                # only dispatches a command never calls it. A declared
+                # machine ID needs it for the same reason a lock does: the
+                # far end is what reports its own ID, so it has to be asked.
                 locks = bool(env.get("lock"))
+                needs_system_info = locks or bool(ws.machine_id)
                 workspace.ensure_calkit_installed(
                     ws,
                     interactive=interactive,
-                    required=locks,
+                    required=needs_system_info,
                     verbose=verbose,
                 )
-                if locks:
-                    write_system_env_lock(
-                        env_name=env_name,
-                        env=env,
-                        system_info=workspace.remote_system_info(ws),
-                    )
+                if needs_system_info:
+                    system_info = workspace.remote_system_info(ws)
+                    # Before the lock is written, so a mismatched machine is
+                    # reported rather than recorded as what results depend on
+                    workspace.verify_machine_id(ws, system_info)
+                    if locks:
+                        write_system_env_lock(
+                            env_name=env_name,
+                            env=env,
+                            system_info=system_info,
+                        )
             except ValueError as e:
                 raise_error(str(e))
     elif env["kind"] == "nix":
@@ -595,6 +610,12 @@ def check_environments(
         typer.echo(f"Checking environment: '{env_name}'")
         try:
             check_environment(env_name=env_name, verbose=verbose)
+        except typer.Exit:
+            # The check reported its own reason through raise_error, which
+            # has already printed it. Repeating it here would replace a
+            # real message ("Unknown system property to lock: ...") with
+            # the exit code, since that is all this exception carries.
+            failures.append(env_name)
         except Exception as e:
             warn(f"Error checking environment '{env_name}': {e}")
             failures.append(env_name)

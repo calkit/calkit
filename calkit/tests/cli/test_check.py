@@ -2,6 +2,7 @@
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 
@@ -213,6 +214,39 @@ def test_check_docker_env(tmp_dir):
             ]
         )
     assert not os.path.exists("Dockerfile-lock.json")
+
+
+def test_check_env_rejects_an_invalid_lock_property(tmp_dir):
+    # A misspelled property is the user's mistake to fix, so it has to say
+    # what was wrong and fail. It used to escape the local branch as a
+    # traceback, and 'check envs' then reported the exit code in place of
+    # the reason -- leaving a warning that said '1'.
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "laptop": {
+            "kind": "system",
+            "host": socket.gethostname(),
+            "lock": ["python", "os"],
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    for argv in (
+        ["calkit", "check", "env", "-n", "laptop"],
+        ["calkit", "check", "envs"],
+    ):
+        proc = subprocess.run(argv, capture_output=True, text=True)
+        assert proc.returncode != 0, argv
+        combined = proc.stdout + proc.stderr
+        assert "Unknown system property to lock: 'python'" in combined, argv
+        # The valid options are listed, since knowing the name is wrong
+        # doesn't tell anyone what the right one is
+        assert "python-version" in combined, argv
+        assert "Traceback" not in combined, argv
+    # Nothing is recorded for an environment that couldn't be locked, so a
+    # stage can't depend on a half-written pin
+    assert not os.path.exists(os.path.join(".calkit", "env-locks", "laptop"))
 
 
 def test_check_envs_preloads_env_vars(tmp_dir, monkeypatch):

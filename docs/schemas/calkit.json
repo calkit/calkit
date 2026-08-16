@@ -6386,7 +6386,7 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
         "description": {
           "anyOf": [
@@ -6424,6 +6424,7 @@
               "machine",
               "processor",
               "hostname",
+              "machine-id",
               "cpu-count",
               "memory-gb",
               "python-version",
@@ -6443,6 +6444,19 @@
           },
           "title": "Lock",
           "type": "array"
+        },
+        "machine_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.",
+          "title": "Machine Id"
         },
         "ssh_key": {
           "anyOf": [

@@ -522,6 +522,64 @@ def test_remote_system_info_reads_the_machine_that_runs_the_stage(
         ws.remote_system_info(w)
 
 
+def test_workspace_from_env_carries_the_machine_id():
+    # The far end reports its own ID, so the one to check it against has to
+    # travel with the connection details
+    w = ws.Workspace.from_env(
+        env={
+            "kind": "system",
+            "host": "box.example.org",
+            "wdir": "/w",
+            "machine_id": "abc-123",
+        },
+        env_name="remote",
+    )
+    assert w.machine_id == "abc-123"
+    # Kept out of a shared calkit.yaml the same way a host can be
+    os.environ["CK_TEST_MACHINE_ID"] = "def-456"
+    try:
+        w = ws.Workspace.from_env(
+            env={
+                "kind": "system",
+                "host": "box",
+                "wdir": "/w",
+                "machine_id": "${CK_TEST_MACHINE_ID}",
+            },
+            env_name="remote",
+        )
+        assert w.machine_id == "def-456"
+    finally:
+        del os.environ["CK_TEST_MACHINE_ID"]
+    # An env that names no machine has nothing to verify
+    w = ws.Workspace.from_env(
+        env={"kind": "system", "host": "box", "wdir": "/w"},
+        env_name="remote",
+    )
+    assert w.machine_id is None
+
+
+def test_verify_machine_id_catches_a_host_pointing_somewhere_else():
+    # A name that has come to point at a different box is silent from here:
+    # SSH connects, the workspace syncs, and the stage runs somewhere the
+    # project never named. Asking the machine who it is is the only way to
+    # tell, and it can only be asked once we've connected.
+    w = ws.Workspace(host="box", wdir="/w", machine_id="abc-123")
+    with pytest.raises(ws.MachineMismatch, match="not the machine"):
+        ws.verify_machine_id(w, {"machine_id": "def-456"})
+    # Matching is quiet, however the two were written
+    ws.verify_machine_id(w, {"machine_id": "ABC123"})
+    # An env that names no machine has nothing to check, so a far end that
+    # reports anything at all is fine
+    ws.verify_machine_id(
+        ws.Workspace(host="box", wdir="/w"), {"machine_id": "def-456"}
+    )
+    # "Unknown" is not "different": an older Calkit on the far end doesn't
+    # report the field, which is a reason to say nothing can be verified
+    # rather than to claim the machine is the wrong one
+    with pytest.warns(UserWarning, match="did not report a machine ID"):
+        ws.verify_machine_id(w, {"os": "Linux"})
+
+
 def test_expand_with_prompts_asks_for_what_the_environment_lacks(
     tmp_dir, monkeypatch
 ):

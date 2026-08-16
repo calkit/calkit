@@ -79,6 +79,7 @@ SYSTEM_LOCK_PROPERTIES = {
     "machine": "machine",
     "processor": "processor",
     "hostname": "hostname",
+    "machine-id": "machine_id",
     "cpu-count": "cpu_count",
     "memory-gb": "memory_gb",
     "python-version": "python_version",
@@ -104,7 +105,14 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "platform": "Full platform string, which folds in most of the above.",
     "machine": "Machine architecture, e.g. 'x86_64' or 'arm64'.",
     "processor": "Processor name, where the OS reports one.",
-    "hostname": "The machine's name. Pins results to one specific host.",
+    "hostname": "The machine's name. Pins results to one specific host, "
+    "but only by name: renaming the machine breaks the pin, and a machine "
+    "elsewhere with the same name satisfies it. Prefer 'machine-id'.",
+    "machine-id": "A stable identifier for the machine itself, read from "
+    "the platform. Pins results to one specific machine, and unlike "
+    "'hostname' survives renaming it. Declaring a 'machine_id' on the "
+    "environment says where to run, not that results depend on it, so "
+    "lock this to also rerun stages when the machine changes.",
     "cpu-count": "Number of CPUs, which can change what a run produces "
     "where results depend on how work was divided.",
     "memory-gb": "Total memory in GB.",
@@ -207,10 +215,46 @@ def _address_is_local(family: int, address: str) -> bool:
 
 
 def _resolves_to_this_machine(host: str) -> bool:
-    return any(
+    if any(
         _address_is_local(family, address)
         for family, address in _host_addresses(host)
+    ):
+        return True
+    # A bare name can be one only mDNS knows, which is not in the resolver's
+    # search list the way a DNS domain is -- so it resolves under '.local'
+    # and nowhere else. This is the name macOS shows the user as theirs (in
+    # Sharing, and from 'scutil --get LocalHostName'), so it is the name
+    # they are most likely to write down, and it would otherwise be the one
+    # name for this machine that fails to match it.
+    if "." in host:
+        return False
+    return any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host + ".local")
     )
+
+
+def env_is_local(env: dict) -> bool:
+    """Whether an environment's machine is the one we're running on.
+
+    A declared ``machine_id`` is the answer when there is one: it is a
+    stronger claim than a name, so a host that resolves here while the ID
+    says otherwise is a machine that was rebuilt or a name that now points
+    somewhere else -- both cases where running here would be wrong.
+
+    That only holds while we can tell which machine this is. Where no ID
+    can be read, a declared one can never match, and taking that as "not
+    this machine" would send a user off to SSH into the box they are
+    sitting at; the name is what's left to go on, so it decides.
+    """
+    declared = env.get("machine_id")
+    if declared:
+        declared = os.path.expandvars(declared)
+    if declared:
+        current = calkit.get_machine_id()
+        if current is not None:
+            return calkit.machine_ids_match(declared, current)
+    return host_is_local(os.path.expandvars(env.get("host") or ""))
 
 
 def get_julia_packages_dir() -> str:
@@ -672,8 +716,18 @@ def get_system_lock_data(
             )
         value = system_info.get(key)
         if value is None:
+            hint = ""
+            if prop == "machine-id":
+                # The one lockable property that can be supplied by hand,
+                # and the one most likely to be locked implicitly -- so the
+                # way out is worth naming rather than leaving to the docs
+                hint = (
+                    "; no identifier could be read from the platform, so "
+                    "give it one with 'calkit config set machine_id <id>'"
+                )
             raise ValueError(
                 f"System property '{prop}' is not available on this machine"
+                + hint
             )
         data[prop] = value
     return data
@@ -705,9 +759,9 @@ def write_system_env_lock(
     )
     if lock_fpath is None:
         return None
-    parent = os.path.dirname(lock_fpath)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
+    # Read before anything is created: a misspelled property or a tool
+    # that isn't installed raises here, and an env that failed to lock
+    # shouldn't leave a directory behind suggesting it did
     content = (
         json.dumps(
             get_system_lock_data(lock, system_info=system_info),
@@ -716,6 +770,9 @@ def write_system_env_lock(
         )
         + "\n"
     )
+    parent = os.path.dirname(lock_fpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     if os.path.isfile(lock_fpath):
         with open(lock_fpath, "r") as f:
             if f.read() == content:

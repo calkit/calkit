@@ -398,6 +398,7 @@ SystemLockProperty = Literal[
     "machine",
     "processor",
     "hostname",
+    "machine-id",
     "cpu-count",
     "memory-gb",
     "python-version",
@@ -435,6 +436,22 @@ class SystemEnvironment(Environment):
     ``_system`` environment is shorthand for this kind on ``localhost``
     with nothing locked.
 
+    ``machine_id`` says *which* machine, where ``host`` only says what it
+    answers to. Names are renamed, resolve differently from different
+    networks, and are reused; a project that means one particular machine
+    can name it here instead and have that survive all of it. It replaces
+    the name in deciding whether this is that machine, and is checked again
+    on the far end when it isn't -- so a host that has come to point at a
+    different box is reported rather than run on. ``host`` is still what
+    reaches it, so both are worth declaring for a machine that isn't this
+    one. Run ``calkit describe system`` on a machine to read its ID.
+
+    Declaring one says where to run, which is a separate question from
+    whether results depend on the machine: moving a project to a new one
+    and updating this need not invalidate everything computed on the old
+    one. Whether it does is left to ``lock``, where ``machine-id`` is
+    available for projects whose results really are machine-specific.
+
     ``wdir`` is the project's workspace on that host -- the directory the
     stage runs in. It defaults to
     ``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just
@@ -455,6 +472,15 @@ class SystemEnvironment(Environment):
         default="localhost",
         description="Host on which to run. Reached over SSH unless it names "
         "this machine.",
+    )
+    machine_id: str | None = Field(
+        default=None,
+        description="Stable identifier of the machine to run on, as "
+        "reported by 'calkit describe system'. Decides whether this is "
+        "that machine, in place of matching 'host' by name; 'host' is "
+        "still how the machine is reached when it isn't this one. Says "
+        "where to run, not that results depend on the machine; lock "
+        "'machine-id' for that.",
     )
     user: str | None = Field(
         default=None,

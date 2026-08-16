@@ -100,7 +100,14 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     """Join a command to be compatible with running at the shell.
 
     This is similar to ``shlex.join`` but works with Git Bash on Windows.
+
+    A single argument is passed through untouched, because that is someone
+    writing a shell command line rather than a program and its arguments:
+    ``-- "cat a > b"`` means the redirect, and quoting it would turn the
+    whole thing into the name of a program that does not exist.
     """
+    if len(cmd) == 1:
+        return cmd[0]
     quoted_cmd = []
     for part in cmd:
         # Find quotes within quotes and escape them

@@ -1246,3 +1246,53 @@ def test_remote_existing_filters_to_what_is_actually_there(monkeypatch):
         "data/raw.csv"
     ]
     assert ws.remote_existing(w, []) == []
+
+
+def test_a_failed_job_frees_the_workspace(tmp_dir, monkeypatch):
+    # The job stopping is how we know it failed, so the workspace is free
+    # whatever the verdict. Holding the lock would leave it stuck until
+    # someone deleted it by hand, and the job waited on forever instead of
+    # being retried.
+    repo = _init_repo()
+    released = []
+    monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(
+        ws, "release_lock", lambda ws_, holder, **kw: released.append(holder)
+    )
+    _stub_transfer(monkeypatch, status=4, collected=[])
+    monkeypatch.setattr(
+        ws, "release_lock", lambda ws_, holder, **kw: released.append(holder)
+    )
+    monkeypatch.setattr(
+        ws, "_log_tail", lambda ws_: "\n\nWhat it printed:\n\nboom"
+    )
+    with pytest.raises(ws.RemoteJobFailed) as excinfo:
+        ws.run_in_workspace(
+            workspace=ws.Workspace(host="box", wdir="/w"),
+            command="./run.sh",
+            job_key="c::s",
+            label="c",
+            repo=repo,
+            echo=lambda *a: None,
+        )
+    assert released, "a failed job left the workspace locked"
+    # Its output is the only account of what went wrong, on the far side of
+    # a connection that has since closed
+    assert "boom" in str(excinfo.value)
+    # And the record is cleared, so the next run dispatches a fresh job
+    # rather than waiting again on one that already stopped
+    assert ws._load_jobs(ws.JOBS_FPATH)["c::s"]["remote_pid"] is None
+
+
+def test_a_single_argument_is_a_shell_command_line():
+    from calkit.cli.main.core import _to_shell_cmd
+
+    # '-- "cat a > b"' means the redirect; quoting it would make the whole
+    # string the name of a program that doesn't exist
+    assert _to_shell_cmd(["cat README.md > out.txt"]) == (
+        "cat README.md > out.txt"
+    )
+    assert _to_shell_cmd(["echo hi; exit 4"]) == "echo hi; exit 4"
+    # A program and its arguments still get quoted individually
+    assert _to_shell_cmd(["echo", "hello world"]) == 'echo "hello world"'
+    assert _to_shell_cmd(["bash"]) == "bash"

@@ -1051,6 +1051,38 @@ def status_file(wdir: str) -> str:
     return posixpath.join(lock_path(wdir), "status")
 
 
+def log_file(wdir: str) -> str:
+    """Where a job's output is kept, alongside its exit status."""
+    return posixpath.join(lock_path(wdir), "log")
+
+
+LOG_TAIL_LINES = 40
+
+
+def _log_tail(workspace: Workspace) -> str:
+    """The end of a failed job's output, for the error that reports it.
+
+    A job runs detached on the far side of a connection that has since
+    closed, so its output is the only account of what went wrong. Printing
+    the tail beats telling someone a status code and leaving them to go
+    and find the rest themselves.
+    """
+    try:
+        out = subprocess.check_output(
+            workspace.ssh_argv(
+                f"tail -n {LOG_TAIL_LINES} "
+                f"{shlex.quote(log_file(workspace.wdir))} 2>/dev/null"
+            ),
+            stderr=subprocess.DEVNULL,
+        ).decode(errors="replace")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    out = out.strip()
+    if not out:
+        return ""
+    return f"\n\nWhat it printed:\n\n{out}"
+
+
 def read_status(workspace: Workspace) -> int | None:
     """The exit code a finished job recorded, or None if it recorded none.
 
@@ -1354,18 +1386,26 @@ def run_in_workspace(
     if repo is None:
         repo = calkit.git.get_repo()
     run_wdir = workspace.path(wdir) if wdir else workspace.wdir
-    # Detached, with output discarded, so the connection can drop.
-    # TODO: Should we collect output instead of send to /dev/null?
+    # Detached so the connection can drop, with output kept rather than
+    # discarded: when a job fails, what it said is the only thing that
+    # explains why, and it is on the other side of an ssh connection that
+    # has already closed.
     # The exit code is written where we can read it afterwards, because a
     # vanished PID says only that the command stopped -- not whether it
     # worked. Without this a failing job looks exactly like a successful
     # one, and whatever happened to be in the workspace gets collected and
     # recorded as its output.
     status_path = status_file(workspace.wdir)
-    inner = f"{command}; echo $? > {shlex.quote(status_path)}"
+    log_path = log_file(workspace.wdir)
+    # The command runs in a subshell so that its own 'exit' ends that
+    # subshell rather than the one recording the status. Without it, any
+    # command that exits explicitly -- which is most scripts that fail on
+    # purpose -- would leave no verdict behind at all.
+    inner = f"( {command} ); echo $? > {shlex.quote(status_path)}"
     remote_cmd = (
         f"cd {shlex.quote(run_wdir)} ; "
-        f"nohup sh -c {shlex.quote(inner)} > /dev/null 2>&1 & echo $!"
+        f"nohup sh -c {shlex.quote(inner)} > {shlex.quote(log_path)} 2>&1 "
+        "& echo $!"
     )
     jobs = _load_jobs(JOBS_FPATH)
     job = jobs.get(job_key, {})
@@ -1446,70 +1486,74 @@ def run_in_workspace(
         except subprocess.CalledProcessError:
             echo("Remote process finished")
             break
-    # A vanished PID is not a verdict. Ask what the job actually reported
-    # before anything it left behind is treated as a result.
-    status = read_status(workspace)
-    if status is None:
-        raise RemoteJobFailed(
-            f"The job on '{workspace.host}' stopped without recording an "
-            "exit status, so there is no way to tell whether it worked. "
-            "Nothing was collected; run it again."
-        )
-    if status != 0:
-        raise RemoteJobFailed(
-            f"The job on '{workspace.host}' exited with status {status}. "
-            "Nothing was collected."
-        )
-    if snapshot is not None:
-        # DVC hashes this stage's dependencies from the local files once we
-        # return. If they moved while it ran elsewhere, recording the result
-        # would pair inputs that were never used with outputs they never
-        # produced, and that lock file reads as up to date forever.
-        changed = changed_deps(
-            job.get("dep_md5s") or {}, job.get("deps") or []
-        )
-        if changed:
-            raise WorkspaceStateChanged(
-                "These changed while the job was running on "
-                f"'{workspace.host}', so its outputs did not come from "
-                "what is here now: "
-                + ", ".join(sorted(changed))
-                + ". Nothing was collected; run it again."
-            )
-        # And the workspace has to still be on what we sent it. The lock
-        # should make this impossible, but a lock cleared by hand, or a
-        # workspace somebody worked in directly, would otherwise hand back
-        # outputs built from code this run never sent.
-        if not holds_snapshot(workspace, sha=snapshot):
-            raise WorkspaceStateChanged(
-                f"The workspace on '{workspace.host}' is no longer on the "
-                "commit this run sent it, so its outputs came from "
-                "something else. Nothing was collected; run it again."
-            )
-    # Outputs DVC tracks are ignored by Git, so the workspace has to say
-    # what they were; committing them is what makes it able to
-    commit_workspace_outputs(workspace, verbose=verbose)
-    produced = produced_paths(workspace)
-    # An output DVC caches is added to .gitignore, so the workspace's Git
-    # cannot see it and it has to be asked for by name
-    for out in remote_existing(workspace, job.get("outs") or []):
-        if out not in produced:
-            produced.append(out)
-    if produced:
-        echo(f"Collecting {len(produced)} path(s) the run produced")
-        fetch_paths(workspace=workspace, paths=produced, verbose=verbose)
+    # The job has stopped, so the workspace is free whatever the
+    # verdict was. Everything from here releases it and clears the
+    # record: a job that merely failed would otherwise hold the
+    # workspace until someone deleted the lock by hand, and would be
+    # waited on again forever instead of being retried.
     try:
-        prune_remote_snapshots(workspace=workspace, verbose=verbose)
-    except subprocess.CalledProcessError:
-        echo("Warning: failed to clean up workspace snapshots")
-    job["remote_pid"] = None
-    job["finished"] = time.time()
-    jobs[job_key] = job
-    _save_jobs(JOBS_FPATH, jobs)
-    # Released only now that the job is done and collected. If this process
-    # dies mid-wait the lock stays, which is right: the remote job is still
-    # running and the workspace is still busy.
-    release_lock(workspace, holder=holder, verbose=verbose)
+        # A vanished PID is not a verdict. Ask what the job actually reported
+        # before anything it left behind is treated as a result.
+        status = read_status(workspace)
+        if status is None:
+            raise RemoteJobFailed(
+                f"The job on '{workspace.host}' stopped without recording an "
+                "exit status, so there is no way to tell whether it worked. "
+                "Nothing was collected; run it again." + _log_tail(workspace)
+            )
+        if status != 0:
+            raise RemoteJobFailed(
+                f"The job on '{workspace.host}' exited with status {status}. "
+                "Nothing was collected." + _log_tail(workspace)
+            )
+        if snapshot is not None:
+            # DVC hashes this stage's dependencies from the local files once we
+            # return. If they moved while it ran elsewhere, recording the result
+            # would pair inputs that were never used with outputs they never
+            # produced, and that lock file reads as up to date forever.
+            changed = changed_deps(
+                job.get("dep_md5s") or {}, job.get("deps") or []
+            )
+            if changed:
+                raise WorkspaceStateChanged(
+                    "These changed while the job was running on "
+                    f"'{workspace.host}', so its outputs did not come from "
+                    "what is here now: "
+                    + ", ".join(sorted(changed))
+                    + ". Nothing was collected; run it again."
+                )
+            # And the workspace has to still be on what we sent it. The lock
+            # should make this impossible, but a lock cleared by hand, or a
+            # workspace somebody worked in directly, would otherwise hand back
+            # outputs built from code this run never sent.
+            if not holds_snapshot(workspace, sha=snapshot):
+                raise WorkspaceStateChanged(
+                    f"The workspace on '{workspace.host}' is no longer on the "
+                    "commit this run sent it, so its outputs came from "
+                    "something else. Nothing was collected; run it again."
+                )
+        # Outputs DVC tracks are ignored by Git, so the workspace has to say
+        # what they were; committing them is what makes it able to
+        commit_workspace_outputs(workspace, verbose=verbose)
+        produced = produced_paths(workspace)
+        # An output DVC caches is added to .gitignore, so the workspace's Git
+        # cannot see it and it has to be asked for by name
+        for out in remote_existing(workspace, job.get("outs") or []):
+            if out not in produced:
+                produced.append(out)
+        if produced:
+            echo(f"Collecting {len(produced)} path(s) the run produced")
+            fetch_paths(workspace=workspace, paths=produced, verbose=verbose)
+        try:
+            prune_remote_snapshots(workspace=workspace, verbose=verbose)
+        except subprocess.CalledProcessError:
+            echo("Warning: failed to clean up workspace snapshots")
+    finally:
+        job["remote_pid"] = None
+        job["finished"] = time.time()
+        jobs[job_key] = job
+        _save_jobs(JOBS_FPATH, jobs)
+        release_lock(workspace, holder=holder, verbose=verbose)
 
 
 class WorkspaceStateChanged(ValueError):

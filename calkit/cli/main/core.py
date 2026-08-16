@@ -2982,6 +2982,14 @@ def run_in_env(
             ws = workspace.resolve_wdir(ws, verbose=verbose)
         except (ValueError, subprocess.CalledProcessError) as e:
             raise_error(str(e))
+        # Checked here for the same reason the local branch checks: an
+        # environment that has never been set up should say so before a
+        # command is dispatched to it, and a 'lock' should be recorded from
+        # the machine that is about to run the stage. Compiled pipeline
+        # commands pass --no-check, having already done this once up front.
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
         repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
         try:

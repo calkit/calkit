@@ -1799,6 +1799,7 @@ def _build_question_evidence(
     evidence_ck: list,
     figures_by_path: dict[str, Figure],
     results_by_path: dict[tuple[str, str | None], Result],
+    tables_by_path: dict[str, Result],
     publications_by_path: dict[str, Publication],
     result_value_cache: dict[str, dict | None],
 ) -> list[QuestionEvidence]:
@@ -1824,9 +1825,19 @@ def _build_question_evidence(
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
         elif item.kind in ("result", "table"):
-            item.result = results_by_path.get(
-                (path, item.key)
-            ) or results_by_path.get((path, None))
+            # A declared table answers table evidence first; a result at
+            # the same path answers result evidence. Falling through to
+            # results covers a table nobody declared, which is still worth
+            # resolving from an auto-detected data file.
+            #
+            # For results, the exact (path, key) pair or nothing: falling
+            # back to the whole-file result would put its title and
+            # description on a value it says nothing about. Keyless
+            # evidence already looks up (path, None).
+            if item.kind == "table":
+                item.result = tables_by_path.get(path)
+            if item.result is None:
+                item.result = results_by_path.get((path, item.key))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
@@ -1894,14 +1905,14 @@ def _build_questions_public(
         # an unrelated result's title.
         for res in _build_results(project=project, repo=repo, ref=ref):
             results_by_path[(res.path, res.key)] = res
-        # Declared tables resolve through the same lookup, since that is
-        # the field the response carries; a result already at that path
-        # wins, being the more specific declaration
-        if "table" in kinds:
-            for tbl in _build_declared_tables(
-                project=project, repo=repo, ref=ref
-            ):
-                results_by_path.setdefault((tbl.path, None), tbl)
+    # Kept apart from results rather than merged into them. A project can
+    # declare a table and a result at one path, and they are different
+    # things with different titles: folding them into one lookup means
+    # whichever is built second decides what the other one is called.
+    tables_by_path: dict[str, Result] = {}
+    if "table" in kinds:
+        for tbl in _build_declared_tables(project=project, repo=repo, ref=ref):
+            tables_by_path[tbl.path] = tbl
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {
@@ -1921,6 +1932,7 @@ def _build_questions_public(
             evidence_ck=_evidence_of(q_ck),
             figures_by_path=figures_by_path,
             results_by_path=results_by_path,
+            tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
             result_value_cache=result_value_cache,
         )

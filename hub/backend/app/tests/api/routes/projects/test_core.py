@@ -1306,7 +1306,13 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     from app.models.core import Figure, Publication, Result
 
     fig = Figure(path="figures/x.png", title="X")
-    res = Result(path="results/summary.json", title="Summary")
+    # Declared with the key the evidence cites: a result is identified by
+    # (path, key), and this test used to assert that citing 'metrics.mean'
+    # resolved to a whole-file result, which is the mislabeling that
+    # fallback caused
+    res = Result(
+        path="results/summary.json", title="Summary", key="metrics.mean"
+    )
     pub = Publication(path="paper/paper.pdf", title="Paper")
     evidence_ck = [
         {"kind": "figure", "path": "figures/x.png", "explanation": "shows x"},
@@ -1344,6 +1350,7 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
             evidence_ck=evidence_ck,
             figures_by_path={fig.path: fig},
             results_by_path={(res.path, res.key): res},
+            tables_by_path={},
             publications_by_path={pub.path: pub},
             result_value_cache={},
         )
@@ -3277,10 +3284,8 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
             ref=None,
             evidence_ck=evidence_ck,
             figures_by_path={},
-            results_by_path={
-                (mean.path, mean.key): mean,
-                (table.path, None): table,
-            },
+            results_by_path={(mean.path, mean.key): mean},
+            tables_by_path={table.path: table},
             publications_by_path={},
             result_value_cache={},
         )
@@ -3324,3 +3329,68 @@ def test_declared_tables_reach_the_evidence_lookup() -> None:
     # One without a title still gets a readable one from its path, rather
     # than rendering as nothing
     assert tables[1].title
+
+
+def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # A project can declare both at one path. They are different things
+    # with different titles, so neither may decide what the other is
+    # called -- which is what one shared lookup would do.
+    result = Result(path="shared.csv", title="Summary statistic")
+    table = Result(path="shared.csv", title="Sample sizes")
+    evidence_ck = [
+        {"kind": "result", "path": "shared.csv"},
+        {"kind": "table", "path": "shared.csv"},
+    ]
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            figures_by_path={},
+            results_by_path={(result.path, None): result},
+            tables_by_path={table.path: table},
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is not None
+    assert evidence[0].result.title == "Summary statistic"
+    assert evidence[1].result is not None
+    assert evidence[1].result.title == "Sample sizes"
+
+
+def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # A result is identified by (path, key). Falling back to the whole-file
+    # result would put its title on a value it says nothing about.
+    whole = Result(path="results/summary.json", title="Whole file")
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=[
+                {
+                    "kind": "result",
+                    "path": "results/summary.json",
+                    "key": "metrics.p95",
+                }
+            ],
+            figures_by_path={},
+            results_by_path={(whole.path, None): whole},
+            tables_by_path={},
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is None

@@ -560,9 +560,9 @@ pipeline.
 In a terminal, that check walks you through whatever is missing, asking
 before each step:
 
-- Any environment variable the definition refers to---like the
-  `${CK_SSH_HOST}` above---is prompted for and saved to `.env`, so it's
-  only asked once.
+- Any environment variable the definition refers to, such as a host
+  written as `${CK_SSH_HOST}`, is prompted for and saved to `.env`, so
+  it's only asked once.
   `.env` is added to `.gitignore` if it isn't already.
 - If you have no SSH key, it offers to create one (`ed25519`, no
   passphrase, so stages can run unattended).

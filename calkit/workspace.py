@@ -362,12 +362,28 @@ class Workspace:
         return ["-i", self.ssh_key] if self.ssh_key else []
 
     @property
+    def batch_options(self) -> list[str]:
+        """SSH options for anything that runs unattended.
+
+        ``BatchMode`` is the difference between failing and hanging. Every
+        transfer and remote command here may run in the middle of a
+        pipeline, where a password prompt has nobody to answer it and no
+        way to be seen -- so key authentication is the only kind offered,
+        and its absence is reported rather than waited on.
+
+        Deliberately not used for setting a machine up: ``ssh-copy-id``
+        needs a password once to install the key that makes it
+        unnecessary, and verifying a host's fingerprint needs its prompt.
+        """
+        return self.ssh_options + ["-o", "BatchMode=yes"]
+
+    @property
     def git_ssh_command(self) -> str:
         """What Git should use as its transport, honoring the env's key."""
-        return " ".join(["ssh"] + [shlex.quote(o) for o in self.ssh_options])
+        return " ".join(["ssh"] + [shlex.quote(o) for o in self.batch_options])
 
     def ssh_argv(self, remote_command: str) -> list[str]:
-        return ["ssh"] + self.ssh_options + [self.target, remote_command]
+        return ["ssh"] + self.batch_options + [self.target, remote_command]
 
     def login_argv(self, remote_command: str) -> list[str]:
         """Run a command the way logging in to the host would.
@@ -387,7 +403,7 @@ class Workspace:
     def scp_to_argv(self, srcs: list[str], dest: str) -> list[str]:
         return (
             ["scp", "-r"]
-            + self.ssh_options
+            + self.batch_options
             + srcs
             + [f"{self.scp_target}:{dest}"]
         )
@@ -395,7 +411,7 @@ class Workspace:
     def scp_from_argv(self, src: str, dest: str) -> list[str]:
         return (
             ["scp", "-r"]
-            + self.ssh_options
+            + self.batch_options
             + [f"{self.scp_target}:{src}", dest]
         )
 
@@ -599,6 +615,25 @@ class HostKeyChanged(ConnectionProblem):
     """
 
 
+def _authorize_hint(workspace: Workspace) -> str:
+    """How to authorize this machine, spelled out for the user to run.
+
+    Built from the workspace rather than fixed at the point of failure, so
+    a user learned during setup shows up in the command we suggest instead
+    of leaving them to work out that it was missing.
+    """
+    # ssh-copy-id takes the key with -i; ssh-add takes it positionally
+    copy_id_key = f" -i {workspace.ssh_key}" if workspace.ssh_key else ""
+    add_key = f" {workspace.ssh_key}" if workspace.ssh_key else ""
+    return (
+        f"Could not connect to '{workspace.host}' without being prompted. "
+        "Check the host is reachable, then authorize this machine with:"
+        f"\n\n    ssh-copy-id{copy_id_key} {workspace.target}"
+        "\n\nIf the key has a passphrase, add it to your agent with "
+        f"'ssh-add{add_key}' so commands can run unattended."
+    )
+
+
 def check_connection(workspace: Workspace) -> None:
     """Verify the host can be reached without a prompt.
 
@@ -648,17 +683,7 @@ def check_connection(workspace: Workspace) -> None:
             "Answering 'yes' records it, and later connections are checked "
             "against it."
         )
-    # ssh-copy-id takes the key with -i; ssh-add takes it positionally
-    copy_id_key = f" -i {workspace.ssh_key}" if workspace.ssh_key else ""
-    add_key = f" {workspace.ssh_key}" if workspace.ssh_key else ""
-    raise ConnectionProblem(
-        f"Could not connect to '{workspace.host}' without being "
-        "prompted. Check the host is reachable, then authorize this "
-        f"machine with:\n\n    ssh-copy-id{copy_id_key} "
-        f"{workspace.target}"
-        "\n\nIf the key has a passphrase, add it to your agent with "
-        f"'ssh-add{add_key}' so commands can run unattended."
-    )
+    raise ConnectionProblem(_authorize_hint(workspace))
 
 
 def remote_system_info(workspace: Workspace) -> dict:
@@ -770,11 +795,72 @@ def _existing_key() -> str | None:
     return None
 
 
+SSH_CONFIG_PATH = "~/.ssh/config"
+
+
+def ssh_login_user(host: str) -> str | None:
+    """Who SSH would log in to ``host`` as, given its own configuration.
+
+    Asking SSH rather than guessing means an existing ``~/.ssh/config``
+    entry is honored, and that the default we offer is the one the user
+    would get by typing ``ssh <host>`` themselves.
+    """
+    try:
+        out = subprocess.check_output(
+            ["ssh", "-G", host], stderr=subprocess.DEVNULL
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return None
+    for line in out.splitlines():
+        if line.startswith("user "):
+            return line.split(None, 1)[1].strip() or None
+    return None
+
+
+def ssh_config_has_host(host: str) -> bool:
+    """Whether ``~/.ssh/config`` already has a Host block for this host."""
+    path = os.path.expanduser(SSH_CONFIG_PATH)
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path) as f:
+            content = f.read()
+    except OSError:
+        return False
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped.lower().startswith("host "):
+            continue
+        if host in stripped.split()[1:]:
+            return True
+    return False
+
+
+def remember_ssh_user(host: str, user: str) -> str:
+    """Record the login user for a host in ``~/.ssh/config``.
+
+    This is where "which user for which host" belongs: plain ``ssh`` reads
+    it too, so the project never has to carry a value that differs per
+    person. Appended rather than merged, and only when there is no block
+    for this host already, so an existing configuration is never rewritten.
+    """
+    path = os.path.expanduser(SSH_CONFIG_PATH)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    exists = os.path.isfile(path)
+    with open(path, "a") as f:
+        if exists and os.path.getsize(path):
+            f.write("\n")
+        f.write(f"# Added by Calkit\nHost {host}\n    User {user}\n")
+    if not exists:
+        os.chmod(path, 0o600)
+    return path
+
+
 def ensure_reachable(
     workspace: Workspace,
     interactive: bool,
     verbose: bool = False,
-) -> None:
+) -> Workspace:
     """Get to the point where the host answers without a prompt.
 
     Setting a machine up is a few steps that are easy to get subtly wrong
@@ -785,11 +871,15 @@ def ensure_reachable(
 
     Without a terminal this is only a check, and it fails with the commands
     to run, since a pipeline in CI has nobody to answer.
+
+    Returns the workspace to use, which is not always the one passed in: a
+    key created here belongs to it, and dropping that would leave the
+    caller connecting without the key it just made.
     """
     unreachable: ValueError
     try:
         check_connection(workspace)
-        return
+        return workspace
     except HostKeyChanged:
         # Never remedied here, interactive or not. Removing the recorded
         # key on the user's behalf is exactly the wrong move when the
@@ -814,10 +904,14 @@ def ensure_reachable(
         )
         try:
             check_connection(workspace)
-            return
+            return workspace
         except ValueError as e:
             unreachable = e
     key = workspace.ssh_key or _existing_key()
+    if key and workspace.ssh_key is None:
+        # Once we know which key we're using, say so: it goes into the
+        # command we suggest, and into every later connection
+        workspace = replace(workspace, ssh_key=key)
     if key is None or not os.path.isfile(key):
         key = key or os.path.expanduser(DEFAULT_SSH_KEY_PATH)
         print(f"No SSH key found at {key}")
@@ -841,17 +935,39 @@ def ensure_reachable(
             verbose=verbose,
         )
         workspace = replace(workspace, ssh_key=key)
+    # ssh-copy-id has to log in to install the key, which needs a user.
+    # Asking here is what makes declaring one in the project unnecessary:
+    # it is only ever needed at this moment, and the answer belongs in
+    # ~/.ssh/config, where plain ssh reads it too.
+    if workspace.user is None:
+        default = ssh_login_user(workspace.host)
+        prompt = f"Log in to '{workspace.host}' as"
+        prompt += f" [{default}]" if default else ""
+        try:
+            answer = input(f"{prompt}: ").strip() or default
+        except EOFError:
+            answer = None
+        if not answer:
+            raise unreachable
+        workspace = replace(workspace, user=answer)
+        if answer != default and not ssh_config_has_host(workspace.host):
+            if _confirm(f"Remember that in {SSH_CONFIG_PATH}?"):
+                written = remember_ssh_user(workspace.host, answer)
+                print(
+                    f"Added a Host entry for '{workspace.host}' to {written}"
+                )
     print(f"This machine is not authorized on '{workspace.host}' yet")
     if not _confirm(
         f"Authorize it now with ssh-copy-id as {workspace.target}?"
     ):
-        raise unreachable
+        raise ConnectionProblem(_authorize_hint(workspace))
     _run(
         ["ssh-copy-id"] + (["-i", key] if key else []) + [workspace.target],
         verbose=verbose,
     )
     # Confirm it actually took, rather than trusting the copy
     check_connection(workspace)
+    return workspace
 
 
 CALKIT_INSTALL_CMD = "curl -LsSf install.calkit.org | sh"

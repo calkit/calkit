@@ -21,6 +21,21 @@ skipif_windows_remote_shell = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolated_home(tmp_path_factory, monkeypatch):
+    """Keep every test in this module out of the real home directory.
+
+    Setup here writes SSH keys and ~/.ssh/config entries, which is
+    someone's actual machine configuration. A test that reaches it is not
+    a failing test, it is a damaged laptop, so the isolation is applied to
+    the whole module rather than remembered per test.
+    """
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    return home
+
+
 def _init_repo() -> git.Repo:
     repo = git.Repo.init(".")
     repo.git.config("user.name", "Test")
@@ -407,12 +422,16 @@ def test_ensure_reachable_lets_ssh_show_the_fingerprint(monkeypatch):
     assert len(attempts) == 2
 
 
-def test_workspace_without_a_key_omits_ssh_options():
+def test_workspace_without_a_key_omits_the_identity_flag():
+    # No key declared means SSH picks the identity itself, from its own
+    # config or agent -- which is where a key for one particular host
+    # belongs anyway
     w = ws.Workspace(host="box", user="me", wdir="/w")
     assert w.ssh_options == []
-    assert w.git_ssh_command == "ssh"
-    assert w.scp_to_argv(["a"], "/w") == ["scp", "-r", "a", "me@box:/w"]
-    assert w.scp_from_argv("/w/a", ".") == ["scp", "-r", "me@box:/w/a", "."]
+    assert "-i" not in w.git_ssh_command
+    assert "-i" not in w.scp_to_argv(["a"], "/w")
+    assert w.scp_to_argv(["a"], "/w")[-2:] == ["a", "me@box:/w"]
+    assert w.scp_from_argv("/w/a", ".")[-2:] == ["me@box:/w/a", "."]
 
 
 def test_paths_to_transfer_skips_what_the_snapshot_carries(tmp_dir):
@@ -537,7 +556,7 @@ def test_expand_with_prompts_asks_for_what_the_environment_lacks(
 
 
 def test_ensure_reachable_offers_to_authorize_this_machine(monkeypatch):
-    w = ws.Workspace(host="box", wdir="/w", ssh_key="/tmp/k")
+    w = ws.Workspace(host="box", user="me", wdir="/w", ssh_key="/tmp/k")
     # Already reachable: nothing is asked and nothing is changed
     monkeypatch.setattr(ws, "check_connection", lambda ws_: None)
     monkeypatch.setattr(
@@ -573,7 +592,7 @@ def test_ensure_reachable_offers_to_authorize_this_machine(monkeypatch):
     monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
     ws.ensure_reachable(w, interactive=True)
     assert ran and ran[0][0] == "ssh-copy-id"
-    assert "-i" in ran[0] and "box" in ran[0]
+    assert "-i" in ran[0] and "me@box" in ran[0]
     assert len(attempts) == 2
 
 
@@ -875,3 +894,127 @@ def test_hosts_work_the_same_written_as_a_name_or_an_address():
     w = ws.Workspace(host="10.0.0.9", wdir="/w")
     assert w.git_url == "ssh://10.0.0.9/w"
     assert w.scp_target == "10.0.0.9"
+
+
+def test_ensure_reachable_creates_a_key_when_there_is_none(
+    tmp_dir, monkeypatch
+):
+    # Someone starting from nothing shouldn't have to know the ssh-keygen
+    # incantation; the point is that the setup walks them through it
+    home = os.path.join(os.getcwd(), "home")
+    os.makedirs(home)
+    monkeypatch.setenv("HOME", home)
+    monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", home))
+    w = ws.Workspace(host="box", wdir="/w")
+    attempts = []
+
+    def unreachable_then_fine(ws_):
+        attempts.append(ws_)
+        if len(attempts) == 1:
+            raise ws.ConnectionProblem("no key")
+
+    monkeypatch.setattr(ws, "check_connection", unreachable_then_fine)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+    ran = []
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
+    result = ws.ensure_reachable(w, interactive=True)
+    keygen = [a for a in ran if a[0] == "ssh-keygen"]
+    assert keygen, "did not offer to create a key"
+    # ed25519 with no passphrase, so stages can run unattended
+    assert "-t" in keygen[0] and "ed25519" in keygen[0]
+    assert keygen[0][keygen[0].index("-N") + 1] == ""
+    key_path = keygen[0][keygen[0].index("-f") + 1]
+    assert key_path.endswith("id_ed25519")
+    # The created key has to come back with the workspace, or the caller
+    # goes on connecting without the key that was just made for it
+    assert result.ssh_key == key_path
+    # Then it authorizes with that key, and confirms rather than assuming
+    copy = [a for a in ran if a[0] == "ssh-copy-id"]
+    assert copy and key_path in copy[0]
+    assert len(attempts) == 2
+
+
+def test_unattended_work_never_waits_on_a_password():
+    # Every transfer and remote command can run mid-pipeline, where a
+    # password prompt has nobody to answer it and no way to be seen. Key
+    # authentication is the only kind offered, so its absence is reported
+    # rather than hung on -- which is also what pushes people toward keys.
+    w = ws.Workspace(host="box", user="me", wdir="/w", ssh_key="/k")
+    assert "BatchMode=yes" in w.ssh_argv("ls")
+    assert "BatchMode=yes" in w.login_argv("ls")
+    assert "BatchMode=yes" in w.scp_to_argv(["a"], "/d")
+    assert "BatchMode=yes" in w.scp_from_argv("/d/a", ".")
+    assert "BatchMode=yes" in w.git_ssh_command
+    # Setting a machine up is the exception: ssh-copy-id needs a password
+    # once to install the key that makes it unnecessary, and verifying a
+    # host's fingerprint needs its prompt
+    assert "BatchMode=yes" not in w.ssh_options
+
+
+def test_ensure_reachable_asks_who_to_log_in_as(monkeypatch):
+    # A login user is only ever needed at this moment -- to install the key
+    # that makes it unnecessary -- so asking here is what lets a project
+    # leave 'user' out entirely
+    w = ws.Workspace(host="box", wdir="/w")
+    attempts = []
+
+    def unreachable_then_fine(ws_):
+        attempts.append(ws_)
+        if len(attempts) == 1:
+            raise ws.ConnectionProblem("not authorized")
+
+    monkeypatch.setattr(ws, "check_connection", unreachable_then_fine)
+    monkeypatch.setattr(ws, "_existing_key", lambda: "/tmp/k")
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(
+        os.path, "isfile", lambda p: p == "/tmp/k" or real_isfile(p)
+    )
+    monkeypatch.setattr(ws, "ssh_login_user", lambda host: "pete")
+    answers = iter(["parallels", "y", "y"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    ran = []
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
+    result = ws.ensure_reachable(w, interactive=True)
+    # The answer is used to authorize, and comes back on the workspace
+    copy = [a for a in ran if a[0] == "ssh-copy-id"]
+    assert copy and "parallels@box" in copy[0]
+    assert result.user == "parallels"
+    # And it's offered to ~/.ssh/config, where plain ssh reads it too, so
+    # it never has to be asked again or carried in the project
+    config = os.path.join(os.environ["HOME"], ".ssh", "config")
+    with open(config) as f:
+        written = f.read()
+    assert "Host box" in written and "User parallels" in written
+    # Someone's private config: readable only by them
+    assert oct(os.stat(config).st_mode)[-3:] == "600"
+
+
+def test_declining_still_says_who_to_authorize_as(monkeypatch):
+    # The suggested command has to carry the user we just learned, or it
+    # leaves the reader to work out what was missing
+    w = ws.Workspace(host="box", wdir="/w")
+    monkeypatch.setattr(
+        ws,
+        "check_connection",
+        lambda ws_: (_ for _ in ()).throw(ws.ConnectionProblem("nope")),
+    )
+    monkeypatch.setattr(ws, "_existing_key", lambda: "/tmp/k")
+    real_isfile = os.path.isfile
+    monkeypatch.setattr(
+        os.path, "isfile", lambda p: p == "/tmp/k" or real_isfile(p)
+    )
+    monkeypatch.setattr(ws, "ssh_login_user", lambda host: None)
+    answers = iter(["parallels", "n", "n"])
+    monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
+    with pytest.raises(ws.ConnectionProblem) as excinfo:
+        ws.ensure_reachable(w, interactive=True)
+    assert "ssh-copy-id -i /tmp/k parallels@box" in str(excinfo.value)
+
+
+def test_tests_cannot_reach_the_real_home():
+    # The guard above is load-bearing: this module writes SSH keys and
+    # ~/.ssh/config entries, and reaching a real one damages a machine
+    home = os.environ["HOME"]
+    assert "pytest" in home, f"HOME is not isolated: {home}"
+    assert os.path.expanduser("~") == home

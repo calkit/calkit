@@ -73,6 +73,12 @@ When `calkit run` (or `calkit check deps`) encounters a missing
 `env-var` dependency on an interactive terminal, it prompts the user
 for a value, writes it to `.env`, and exports it for the rest of the
 run.
+`calkit status` does the same, except that a variable left unset is
+reported rather than treated as fatal, since status reports rather than
+enforces.
+
+`calkit check deps` is also available as `calkit check setup` and
+`calkit check dependencies`, which are the same command.
 A per-variable `default` may be declared so that pressing Enter accepts
 the default:
 

@@ -525,6 +525,11 @@ Everything else has a sensible default:
   It's hidden because Calkit checks the workspace out with `--force`, so
   it must not look like somewhere you'd keep your own work.
 - `ssh_key` is left to SSH and its agent.
+  If a particular host needs a particular key, that belongs in
+  `~/.ssh/config`, which already answers "which key for which host"
+  and is where people look for it.
+  The field is for cases where that isn't available, such as CI
+  dropping a key at a known path.
 
 So the fuller form, if you do need to be explicit, is:
 

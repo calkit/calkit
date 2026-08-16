@@ -2807,22 +2807,22 @@ Options:
 
 Check things.
 
-| Command                                                     | Description                                                                                                  |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
-| [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
-| [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
-| [`environments`](#subcommand-check-environments)            |                                                                                                              |
-| [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
-| [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
-| [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
-| [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
-| [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
-| [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
-| [`deps\|dependencies`](#subcommand-check-deps-dependencies) | Check that a project's system-level dependencies are set up correctly.                                       |
-| [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
-| [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
-| [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
+| Command                                                                  | Description                                                                                                  |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| [`repro`](#subcommand-check-repro)                                       | Check the reproducibility of a project.                                                                      |
+| [`environment`](#subcommand-check-environment)                           | Check that an environment is up-to-date.                                                                     |
+| [`julia-env`](#subcommand-check-julia-env)                               | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
+| [`environments`](#subcommand-check-environments)                         |                                                                                                              |
+| [`envs`](#subcommand-check-envs)                                         | Check that all environments are up-to-date.                                                                  |
+| [`renv`](#subcommand-check-renv)                                         | Check an renv R environment, initializing if needed.                                                         |
+| [`docker-env`](#subcommand-check-docker-env)                             | Check that Docker environment is up-to-date.                                                                 |
+| [`conda-env`](#subcommand-check-conda-env)                               | Check a conda environment and rebuild if necessary.                                                          |
+| [`venv`](#subcommand-check-venv)                                         | Check a Python virtual environment (uv or virtualenv).                                                       |
+| [`matlab-env`](#subcommand-check-matlab-env)                             | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
+| [`deps\|dependencies\|setup`](#subcommand-check-deps-dependencies-setup) | Check that a project's system-level dependencies are set up correctly.                                       |
+| [`env-vars`](#subcommand-check-env-vars)                                 | Check that the project's required environmental variables exist.                                             |
+| [`pipeline`](#subcommand-check-pipeline)                                 | Check that the project pipeline is defined correctly.                                                        |
+| [`call`](#subcommand-check-call)                                         | Check that a command succeeds and run an alternate if not.                                                   |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3054,16 +3054,16 @@ Options:
 | `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
 | `--output`, `-o` | text | yes      |         |                                  |
 
-<a id="subcommand-check-deps-dependencies"></a>
+<a id="subcommand-check-deps-dependencies-setup"></a>
 
-#### `calkit check deps|dependencies`
+#### `calkit check deps|dependencies|setup`
 
 Check that a project's system-level dependencies are set up correctly.
 
 Usage:
 
 ```text
-calkit check deps|dependencies [OPTIONS]
+calkit check deps|dependencies|setup [OPTIONS]
 ```
 
 Options:

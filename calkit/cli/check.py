@@ -505,7 +505,9 @@ def check_environment(
                     env_name=env_name,
                     ck_info=ck_info,
                 )
-                workspace.ensure_reachable(
+                # Reassigned: a key created during setup belongs to the
+                # workspace we go on to use
+                ws = workspace.ensure_reachable(
                     ws, interactive=interactive, verbose=verbose
                 )
                 # Calkit is needed there to read the machine's properties,
@@ -1350,7 +1352,7 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="deps|dependencies")
+@check_app.command(name="deps|dependencies|setup")
 def check_dependencies(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")

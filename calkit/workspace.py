@@ -1363,6 +1363,8 @@ def run_in_workspace(
     job_key: str,
     label: str,
     wdir: str | None = None,
+    deps: list[str] | None = None,
+    outs: list[str] | None = None,
     repo: git.Repo | None = None,
     poll_seconds: float = 2.0,
     echo=print,
@@ -1382,6 +1384,11 @@ def run_in_workspace(
 
     Nothing is declared about what moves. The tree goes as a snapshot, and
     what comes back is whatever the workspace says the run produced.
+
+    ``deps`` and ``outs`` are for a caller that already knows them, such as
+    ``calkit scheduler batch``, whose own --dep/--out options say so.
+    Everyone else leaves them out and they are read from the compiled
+    pipeline, which is where they are already written down.
     """
     if repo is None:
         repo = calkit.git.get_repo()
@@ -1470,8 +1477,12 @@ def run_in_workspace(
         job["snapshot"] = snapshot
         # Hashed at dispatch, compared when it finishes -- the same way a
         # scheduler job decides whether it is still valid
-        job["deps"] = deps_for_command(command)
-        job["outs"] = outs_for_command(command)
+        job["deps"] = (
+            list(deps) if deps is not None else deps_for_command(command)
+        )
+        job["outs"] = (
+            list(outs) if outs is not None else outs_for_command(command)
+        )
         job["dep_md5s"] = dep_md5s(job["deps"])
         job["submitted"] = time.time()
         job["finished"] = None

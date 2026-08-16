@@ -1300,3 +1300,54 @@ def test_a_single_argument_is_a_shell_command_line():
     # A program and its arguments still get quoted individually
     assert _to_shell_cmd(["echo", "hello world"]) == 'echo "hello world"'
     assert _to_shell_cmd(["bash"]) == "bash"
+
+
+def test_scheduler_dispatches_to_a_remote_host(tmp_dir, monkeypatch):
+    # A scheduler env names the cluster its jobs belong to, so submitting
+    # from anywhere else has to go there first. This exercises the call
+    # itself: the arguments drifted out of step with run_in_workspace once
+    # already, and every remote submission raised TypeError instead of
+    # dispatching.
+    import calkit.cli.scheduler as sched
+
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "name: sched-test\n"
+            "owner: calkit\n"
+            "environments:\n"
+            "  hpc:\n"
+            "    kind: slurm\n"
+            "    host: cluster.example.org\n"
+        )
+    calls = []
+    monkeypatch.setattr(ws, "resolve_wdir", lambda w, **kw: w)
+    monkeypatch.setattr(
+        ws,
+        "run_in_workspace",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    monkeypatch.setattr(
+        sched.calkit.environments, "host_is_local", lambda h: False
+    )
+    sched.run_batch(
+        name="sim",
+        target="./run.sh",
+        args=[],
+        deps=["scripts/collect.py"],
+        outs=["results"],
+        options=[],
+        setup_cmds=[],
+        environment="hpc",
+        log_path=None,
+        is_command=False,
+        env_default_options="replace",
+        env_default_setup="replace",
+    )
+    assert calls, "a remote scheduler env never dispatched"
+    kwargs = calls[0]
+    # It knows its own deps and outs, from its --dep/--out options, so it
+    # says so rather than making the workspace go and look them up
+    assert kwargs["deps"] == ["scripts/collect.py"]
+    assert kwargs["outs"] == ["results"]
+    # And it re-runs itself over there, where sbatch actually exists
+    assert kwargs["command"].startswith("calkit ")

@@ -919,8 +919,8 @@ def run_batch(
                 command=remote_command,
                 job_key=f"{environment}::{name}",
                 label=f"{environment} job '{name}'",
-                send=list(deps or []),
-                get=list(outs or []),
+                deps=list(deps or []),
+                outs=list(outs or []),
                 echo=typer.echo,
             )
         except (ValueError, subprocess.CalledProcessError) as e:

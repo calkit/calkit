@@ -455,10 +455,10 @@ class Stage(BaseModel):
             # Dispatch to the machine, telling it what this stage reads and
             # writes so the transfer follows the pipeline instead of a
             # hand-maintained list that can drift out of step with it.
-            cmd = (
-                f"calkit xenv -n {self._system_env} --no-check"
-                + self.workspace_transfer_args
-            )
+            # Nothing about what to move: the transfer works that out
+            # from the snapshot and from what the workspace says the run
+            # produced, so it can't fall out of step with the pipeline
+            cmd = f"calkit xenv -n {self._system_env} --no-check"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -478,22 +478,6 @@ class Stage(BaseModel):
             if path not in paths:
                 paths.append(path)
         return paths
-
-    @property
-    def workspace_transfer_args(self) -> str:
-        """What a workspace has to be given, and what to collect back.
-
-        Derived from the stage rather than declared per environment: an
-        environment doesn't know which files a stage reads, and a list
-        maintained by hand silently runs against stale inputs the moment it
-        falls behind the pipeline.
-        """
-        args = ""
-        for dep in self.dvc_deps:
-            args += f" --send {shlex.quote(dep)}"
-        for out in self.dvc_out_paths:
-            args += f" --get {shlex.quote(out)}"
-        return args
 
     @property
     def scheduler_cmd(self) -> str:

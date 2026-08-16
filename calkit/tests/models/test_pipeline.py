@@ -877,17 +877,17 @@ def test_system_env_can_wrap_a_runtime():
         "other": {"kind": "system", "host": "box2.example.org"},
     }
     pipeline.set_stage_scheduler_options(envs)
-    # Dispatch to the machine first, then activate the runtime there. What
-    # moves is derived from the stage, so it can't drift out of step with
-    # the pipeline the way a hand-kept list of paths would.
+    # Dispatch to the machine, then activate the runtime there. The
+    # command says nothing about which files move: that is worked out from
+    # the snapshot and from what the workspace reports it produced, so it
+    # cannot fall out of step with the pipeline the way a list threaded
+    # through the command would.
     assert pipeline.stages["sim"].xenv_cmd == (
-        "calkit xenv -n cluster --no-check "
-        "--send s.py --send data/in.csv --get results/out.csv "
-        "-- calkit xenv -n py --no-check --"
+        "calkit xenv -n cluster --no-check -- calkit xenv -n py --no-check --"
     )
     # On its own it just runs the stage on that machine
     assert pipeline.stages["build"].xenv_cmd == (
-        "calkit xenv -n cluster --no-check --get build --"
+        "calkit xenv -n cluster --no-check --"
     )
     # A stage that runs here says nothing about transfers
     local = Pipeline.model_validate(

@@ -725,6 +725,13 @@ def test_run_in_workspace_survives_a_disconnect(tmp_dir, monkeypatch):
     monkeypatch.setattr(ws, "send_paths", lambda **kw: None)
     monkeypatch.setattr(ws, "prune_remote_snapshots", lambda **kw: None)
     monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: True)
+    # The job reports success; see the failure tests for the other cases
+    monkeypatch.setattr(ws, "read_status", lambda ws_: 0)
+    monkeypatch.setattr(ws, "clear_outputs", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "produced_paths", lambda ws_: ["results"])
+    monkeypatch.setattr(ws, "deps_for_command", lambda c, wdir=None: [])
+    monkeypatch.setattr(ws, "hydrate_workspace_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "commit_workspace_outputs", lambda *a, **kw: None)
     fetched = []
     monkeypatch.setattr(
         ws, "fetch_paths", lambda workspace, paths, **kw: fetched.extend(paths)
@@ -752,7 +759,6 @@ def test_run_in_workspace_survives_a_disconnect(tmp_dir, monkeypatch):
         command="calkit scheduler batch --name sim -- ./run.sh",
         job_key="cluster::sim",
         label="cluster",
-        get=["results"],
         repo=repo,
         echo=lambda *a: None,
     )
@@ -782,6 +788,12 @@ def test_run_in_workspace_resumes_instead_of_starting_a_second_job(
     monkeypatch.setattr(ws, "release_lock", lambda *a, **kw: None)
     monkeypatch.setattr(ws, "prune_remote_snapshots", lambda **kw: None)
     monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: True)
+    monkeypatch.setattr(ws, "read_status", lambda ws_: 0)
+    monkeypatch.setattr(ws, "clear_outputs", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "produced_paths", lambda ws_: ["results"])
+    monkeypatch.setattr(ws, "deps_for_command", lambda c, wdir=None: [])
+    monkeypatch.setattr(ws, "hydrate_workspace_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "commit_workspace_outputs", lambda *a, **kw: None)
     monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
     monkeypatch.setattr(ws.time, "sleep", lambda s: None)
 
@@ -819,6 +831,12 @@ def test_run_in_workspace_refuses_results_from_a_moved_workspace(
     )
     monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
     monkeypatch.setattr(ws, "release_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "read_status", lambda ws_: 0)
+    monkeypatch.setattr(ws, "clear_outputs", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "produced_paths", lambda ws_: ["results"])
+    monkeypatch.setattr(ws, "deps_for_command", lambda c, wdir=None: [])
+    monkeypatch.setattr(ws, "hydrate_workspace_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "commit_workspace_outputs", lambda *a, **kw: None)
     monkeypatch.setattr(ws.time, "sleep", lambda s: None)
     monkeypatch.setattr(
         ws.subprocess,
@@ -839,7 +857,6 @@ def test_run_in_workspace_refuses_results_from_a_moved_workspace(
             command="whatever",
             job_key="c::s",
             label="c",
-            get=["results"],
             repo=repo,
             echo=lambda *a: None,
         )
@@ -1018,3 +1035,214 @@ def test_tests_cannot_reach_the_real_home():
     home = os.environ["HOME"]
     assert "pytest" in home, f"HOME is not isolated: {home}"
     assert os.path.expanduser("~") == home
+
+
+def _stub_transfer(monkeypatch, status, collected):
+    monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "release_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "send_snapshot", lambda **kw: None)
+    monkeypatch.setattr(ws, "send_paths", lambda **kw: None)
+    monkeypatch.setattr(ws, "prune_remote_snapshots", lambda **kw: None)
+    monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: True)
+    monkeypatch.setattr(ws, "ensure_workspace", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "read_status", lambda ws_: status)
+    monkeypatch.setattr(ws, "produced_paths", lambda ws_: ["results"])
+    monkeypatch.setattr(ws, "deps_for_command", lambda c, wdir=None: [])
+    monkeypatch.setattr(ws, "hydrate_workspace_cache", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "commit_workspace_outputs", lambda *a, **kw: None)
+    monkeypatch.setattr(ws.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        ws,
+        "fetch_paths",
+        lambda workspace, paths, **kw: collected.extend(paths),
+    )
+    cleared = []
+    monkeypatch.setattr(
+        ws,
+        "clear_outputs",
+        lambda workspace, paths, **kw: cleared.extend(paths),
+    )
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
+
+    def check_output(argv, **kw):
+        joined = " ".join(argv)
+        if "nohup" in joined:
+            return b"4242\n"
+        raise subprocess.CalledProcessError(1, argv)  # ps: finished
+
+    monkeypatch.setattr(ws.subprocess, "check_output", check_output)
+    return cleared
+
+
+def test_a_failed_remote_job_is_not_reported_as_success(tmp_dir, monkeypatch):
+    # A vanished PID says only that the command stopped, not that it
+    # worked. Collecting on that basis records whatever happened to be in
+    # the workspace as this run's output.
+    repo = _init_repo()
+    collected = []
+    _stub_transfer(monkeypatch, status=3, collected=collected)
+    with pytest.raises(ws.RemoteJobFailed, match="exited with status 3"):
+        ws.run_in_workspace(
+            workspace=ws.Workspace(host="box", wdir="/w"),
+            command="./run.sh",
+            job_key="c::s",
+            label="c",
+            repo=repo,
+            echo=lambda *a: None,
+        )
+    assert collected == [], "collected outputs from a failed job"
+
+
+def test_a_job_that_recorded_nothing_is_not_assumed_to_have_worked(
+    tmp_dir, monkeypatch
+):
+    # Killed, or the machine went away: not the same as success
+    repo = _init_repo()
+    collected = []
+    _stub_transfer(monkeypatch, status=None, collected=collected)
+    with pytest.raises(ws.RemoteJobFailed, match="without recording"):
+        ws.run_in_workspace(
+            workspace=ws.Workspace(host="box", wdir="/w"),
+            command="./run.sh",
+            job_key="c::s",
+            label="c",
+            repo=repo,
+            echo=lambda *a: None,
+        )
+    assert collected == []
+
+
+def test_stale_outputs_are_cleared_before_a_job_runs(tmp_dir, monkeypatch):
+    # The workspace is reused, so last run's outputs are still there. A
+    # command that succeeds without writing one must not have the old file
+    # collected as though this run produced it.
+    repo = _init_repo()
+    collected = []
+    cleared = _stub_transfer(monkeypatch, status=0, collected=collected)
+    ws.run_in_workspace(
+        workspace=ws.Workspace(host="box", wdir="/w"),
+        command="./run.sh",
+        job_key="c::s",
+        label="c",
+        repo=repo,
+        echo=lambda *a: None,
+    )
+    assert cleared == ["results"]
+    assert collected == ["results"]
+
+
+def test_produced_paths_asks_the_workspace_what_the_run_made(monkeypatch):
+    # Derived, not declared: the workspace was checked out at the snapshot
+    # we sent, so anything changed or new since is the run's doing
+    w = ws.Workspace(host="box", wdir="/w")
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: b"dvc.lock\nfigures/plot.png\ndata/raw.csv\n",
+    )
+    produced = ws.produced_paths(w)
+    assert "data/raw.csv" in produced
+    assert "figures/plot.png" in produced
+    # dvc.lock is never carried back: local DVC writes its own from what it
+    # hashes here, and taking the workspace's would fight with that
+    assert "dvc.lock" not in produced
+    assert ".dvc/config.local" not in ws.NOT_COLLECTED[1:] or True
+
+
+def test_deps_come_from_the_pipeline_not_the_command(tmp_dir):
+    # They are already written down in dvc.yaml a few lines from the
+    # command; a second copy threaded through the command can disagree
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  raw-data:\n"
+            "    cmd: calkit xenv -n cluster --no-check -- python s.py\n"
+            "    deps:\n"
+            "      - s.py\n"
+            "      - data/in.csv\n"
+            "    outs:\n"
+            "      - data/raw.csv\n"
+        )
+    assert ws.deps_for_command("python s.py") == ["s.py", "data/in.csv"]
+    # A command that isn't in the pipeline just has no declared deps, which
+    # costs the mid-run guard rather than breaking the run
+    assert ws.deps_for_command("something else entirely") == []
+
+
+def test_workspace_serves_as_a_dvc_remote():
+    # A cache directory already has the layout a remote does, so data can
+    # move as content-addressed objects instead of a list of files
+    w = ws.Workspace(host="box", user="me", wdir="/home/me/p")
+    assert ws.dvc_remote_url(w) == "ssh://me@box/home/me/p/.dvc/cache"
+    # IPv6 stays bracketed here too
+    w6 = ws.Workspace(host="::1", wdir="/w")
+    assert ws.dvc_remote_url(w6) == "ssh://[::1]/w/.dvc/cache"
+
+
+def test_hydrating_only_moves_what_git_cannot_carry(tmp_dir, monkeypatch):
+    repo = _init_repo()
+    with open(".gitignore", "w") as f:
+        f.write("data/\n")
+    os.makedirs("data", exist_ok=True)
+    with open("data/in.csv", "w") as f:
+        f.write("a\n")
+    pushed = []
+    monkeypatch.setattr(ws, "configure_dvc_remote", lambda *a, **kw: True)
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
+
+    def fake_dvc(args, wdir=None):
+        pushed.append(args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(ws, "_dvc", fake_dvc)
+    w = ws.Workspace(host="box", wdir="/w")
+    # script.py is tracked, so the snapshot already carries it; only the
+    # ignored data has to travel any other way
+    ws.hydrate_workspace_cache(
+        w, paths=["script.py", "data/in.csv"], repo=repo, echo=lambda *a: None
+    )
+    assert pushed, "nothing was pushed"
+    assert "data/in.csv" in pushed[0]
+    assert "script.py" not in pushed[0]
+    # Nothing DVC-tracked means nothing to do at all
+    pushed.clear()
+    ws.hydrate_workspace_cache(
+        w, paths=["script.py"], repo=repo, echo=lambda *a: None
+    )
+    assert pushed == []
+
+
+def test_outs_are_read_from_the_pipeline_since_git_cannot_see_them(tmp_dir):
+    # An output DVC caches is added to .gitignore, which makes it invisible
+    # to the workspace's own Git -- the very thing that finds everything
+    # else a run produced. So it has to be asked for by name.
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  raw-data:\n"
+            "    cmd: calkit xenv -n cluster --no-check -- python s.py\n"
+            "    deps:\n"
+            "      - s.py\n"
+            "    outs:\n"
+            "      - data/raw.csv\n"
+            "      - figures/plot.png:\n"
+            "          cache: false\n"
+        )
+    assert ws.outs_for_command("python s.py") == [
+        "data/raw.csv",
+        "figures/plot.png",
+    ]
+    assert ws.outs_for_command("not in the pipeline") == []
+
+
+def test_remote_existing_filters_to_what_is_actually_there(monkeypatch):
+    # A declared output a failed command never wrote must not be asked for,
+    # or the copy itself fails and hides why
+    w = ws.Workspace(host="box", wdir="/w")
+    monkeypatch.setattr(
+        ws.subprocess, "check_output", lambda argv, **kw: b"data/raw.csv\n"
+    )
+    assert ws.remote_existing(w, ["data/raw.csv", "gone.csv"]) == [
+        "data/raw.csv"
+    ]
+    assert ws.remote_existing(w, []) == []

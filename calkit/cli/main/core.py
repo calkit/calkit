@@ -2649,28 +2649,6 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
-    send: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--send",
-            help=(
-                "Path the command reads, to be made available in the "
-                "workspace. Only used when the environment runs on another "
-                "machine. Normally set by the pipeline."
-            ),
-        ),
-    ] = None,
-    get: Annotated[
-        list[str] | None,
-        typer.Option(
-            "--get",
-            help=(
-                "Path the command writes, to be collected from the "
-                "workspace afterwards. Only used when the environment runs "
-                "on another machine. Normally set by the pipeline."
-            ),
-        ),
-    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -2723,6 +2701,7 @@ def run_in_env(
     if (
         not no_check
         and env["kind"] not in calkit.environments.KINDS_NO_CHECK
+        and calkit.environments.cacheable(env)
         and calkit.environments.check_cache(
             env_name=env_name, env=env, wdir=wdir
         )
@@ -3005,8 +2984,6 @@ def run_in_env(
                 job_key=f"{env_name}::{remote_shell_cmd}",
                 label=env_name,
                 wdir=wdir,
-                send=list(send or []),
-                get=list(get or []),
                 repo=repo,
                 echo=typer.echo,
                 verbose=verbose,

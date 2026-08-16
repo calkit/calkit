@@ -1041,6 +1041,153 @@ def lock_path(wdir: str) -> str:
     return wdir.rstrip("/") + ".lock"
 
 
+def status_file(wdir: str) -> str:
+    """Where a job records its exit code, inside its own lock directory.
+
+    The lock exists for exactly as long as the job does, including across
+    a disconnect and a later resume, so a status written there is still
+    readable when we come back for it and is cleaned up with the lock.
+    """
+    return posixpath.join(lock_path(wdir), "status")
+
+
+def read_status(workspace: Workspace) -> int | None:
+    """The exit code a finished job recorded, or None if it recorded none.
+
+    None means the job stopped without saying how it went -- killed, or the
+    machine went away -- which is not the same as success and must not be
+    treated as it.
+    """
+    try:
+        out = subprocess.check_output(
+            workspace.ssh_argv(
+                f"cat {shlex.quote(status_file(workspace.wdir))} 2>/dev/null"
+            ),
+            stderr=subprocess.DEVNULL,
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    for line in reversed(out.splitlines()):
+        stripped = line.strip()
+        if stripped.isdigit():
+            return int(stripped)
+    return None
+
+
+def clear_outputs(
+    workspace: Workspace, paths: list[str], verbose: bool = False
+) -> None:
+    """Remove a job's declared outputs from the workspace before it runs.
+
+    A workspace is reused, so last run's outputs are still sitting there. A
+    command that fails to write one would otherwise have the old file
+    collected and recorded as though this run had produced it.
+    """
+    if not paths:
+        return
+    quoted = " ".join(
+        shlex.quote(workspace.path(p.replace(os.sep, "/"))) for p in paths
+    )
+    _run(workspace.ssh_argv(f"rm -rf {quoted}"), verbose=verbose)
+
+
+# Never collected back, however the workspace changed them. Local DVC
+# writes dvc.lock itself from what it hashes here, and .dvc/config.local
+# is per-machine by definition -- ours points at the workspace, theirs
+# would point somewhere meaningless.
+NOT_COLLECTED = ["dvc.lock", ".dvc/config.local"]
+
+
+def produced_paths(workspace: Workspace) -> list[str]:
+    """What the run produced, as the workspace's own Git sees it.
+
+    Asked rather than declared. The workspace was checked out at the
+    snapshot we sent, so anything modified or newly appeared since is the
+    run's doing -- and .gitignore already filters out the noise a command
+    leaves behind. This is why a stage's outputs no longer have to be
+    repeated into the command that runs it.
+    """
+    remote_command = (
+        f"cd {shlex.quote(workspace.wdir)} && "
+        "git diff --name-only HEAD; "
+        "git ls-files --others --exclude-standard"
+    )
+    try:
+        out = subprocess.check_output(
+            workspace.ssh_argv(remote_command), stderr=subprocess.DEVNULL
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    paths = []
+    for line in out.splitlines():
+        path = line.strip()
+        if path and path not in NOT_COLLECTED and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _stage_for_command(command: str, wdir: str | None = None) -> dict:
+    """The compiled stage whose command this is, if it can be found."""
+    import calkit.dvc
+
+    wanted = command.strip()
+    pipeline = calkit.dvc.read_pipeline(wdir or ".") or {}
+    for stage in (pipeline.get("stages") or {}).values():
+        if not isinstance(stage, dict):
+            continue
+        cmd = stage.get("cmd")
+        if isinstance(cmd, str) and cmd.strip().endswith(wanted):
+            return stage
+    return {}
+
+
+def outs_for_command(command: str, wdir: str | None = None) -> list[str]:
+    """The outputs DVC records for the stage running this command.
+
+    Needed because an output DVC caches is added to .gitignore, which makes
+    it invisible to the workspace's own Git -- the very thing that finds
+    everything else a run produced. Read from the compiled pipeline for the
+    same reason the dependencies are: it is already written down there.
+    """
+    outs = []
+    for out in _stage_for_command(command, wdir=wdir).get("outs") or []:
+        if isinstance(out, str):
+            outs.append(out)
+        elif isinstance(out, dict) and out:
+            outs.append(next(iter(out)))
+    return outs
+
+
+def remote_existing(workspace: Workspace, paths: list[str]) -> list[str]:
+    """Which of ``paths`` are actually present in the workspace."""
+    if not paths:
+        return []
+    tests = "; ".join(
+        f"[ -e {shlex.quote(workspace.path(p))} ] && echo {shlex.quote(p)}"
+        for p in paths
+    )
+    try:
+        out = subprocess.check_output(
+            workspace.ssh_argv(tests), stderr=subprocess.DEVNULL
+        ).decode()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    found = {line.strip() for line in out.splitlines() if line.strip()}
+    return [p for p in paths if p in found]
+
+
+def deps_for_command(command: str, wdir: str | None = None) -> list[str]:
+    """The dependencies DVC records for the stage running this command.
+
+    Read from the compiled pipeline rather than passed in. They are already
+    written down in dvc.yaml a few lines from the command itself, and a
+    second copy threaded through that command is one that can disagree with
+    the first.
+    """
+    stage = _stage_for_command(command, wdir=wdir)
+    return [d for d in stage.get("deps") or [] if isinstance(d, str)]
+
+
 def acquire_lock(
     workspace: Workspace,
     holder: str,
@@ -1060,22 +1207,41 @@ def acquire_lock(
     is what lets a disconnected job be waited on again.
     """
     lock = lock_path(workspace.wdir)
+    # The parent has to exist before the lock can be made inside it, and on
+    # a first run none of it does. Only the lock directory itself needs to
+    # be created atomically, so the path down to it is made first and the
+    # race is left where it belongs.
     remote_command = (
         f"lock={shlex.quote(lock)}; "
+        'mkdir -p "$(dirname "$lock")" || { echo NOPARENT; exit 0; }; '
         'if mkdir "$lock" 2>/dev/null; then '
         f"printf '%s' {shlex.quote(holder)} > \"$lock/holder\"; "
         f"printf '%s' {shlex.quote(info)} > \"$lock/info\"; "
         "echo ACQUIRED; "
-        "else "
+        'elif [ -d "$lock" ]; then '
         'printf "HELD\\t"; cat "$lock/holder" 2>/dev/null; '
         'printf "\\t"; cat "$lock/info" 2>/dev/null; echo; '
-        "fi"
+        "else echo NOLOCK; fi"
     )
     out = subprocess.check_output(workspace.ssh_argv(remote_command)).decode()
     line = ""
     for candidate in out.splitlines():
-        if candidate.startswith(("ACQUIRED", "HELD")):
+        if candidate.startswith(("ACQUIRED", "HELD", "NOPARENT", "NOLOCK")):
             line = candidate
+    # A directory we could not create is not a directory somebody else is
+    # using, and saying so would send the reader looking for a run that
+    # does not exist
+    if line.startswith("NOPARENT"):
+        raise ConnectionProblem(
+            f"Could not create the workspace directory on '{workspace.host}' "
+            f"for '{workspace.wdir}'. Check the path is writable."
+        )
+    if line.startswith("NOLOCK"):
+        raise ConnectionProblem(
+            f"Could not lock the workspace on '{workspace.host}' at "
+            f"'{lock}', and nothing is holding it. Check the path is "
+            "writable."
+        )
     if line.startswith("ACQUIRED"):
         if verbose:
             print(f"Acquired workspace lock at {lock}")
@@ -1165,8 +1331,6 @@ def run_in_workspace(
     job_key: str,
     label: str,
     wdir: str | None = None,
-    send: list[str] | None = None,
-    get: list[str] | None = None,
     repo: git.Repo | None = None,
     poll_seconds: float = 2.0,
     echo=print,
@@ -1183,15 +1347,25 @@ def run_in_workspace(
     the problem is the same whether the command is the stage itself or a
     ``calkit scheduler batch`` that queues it: get this working tree there,
     start something, survive a disconnect, bring the results back.
+
+    Nothing is declared about what moves. The tree goes as a snapshot, and
+    what comes back is whatever the workspace says the run produced.
     """
     if repo is None:
         repo = calkit.git.get_repo()
     run_wdir = workspace.path(wdir) if wdir else workspace.wdir
-    # Detached, with output discarded, so the connection can drop
+    # Detached, with output discarded, so the connection can drop.
     # TODO: Should we collect output instead of send to /dev/null?
+    # The exit code is written where we can read it afterwards, because a
+    # vanished PID says only that the command stopped -- not whether it
+    # worked. Without this a failing job looks exactly like a successful
+    # one, and whatever happened to be in the workspace gets collected and
+    # recorded as its output.
+    status_path = status_file(workspace.wdir)
+    inner = f"{command}; echo $? > {shlex.quote(status_path)}"
     remote_cmd = (
-        f"cd {shlex.quote(run_wdir)} ; nohup {command} "
-        "> /dev/null 2>&1 & echo $!"
+        f"cd {shlex.quote(run_wdir)} ; "
+        f"nohup sh -c {shlex.quote(inner)} > /dev/null 2>&1 & echo $!"
     )
     jobs = _load_jobs(JOBS_FPATH)
     job = jobs.get(job_key, {})
@@ -1223,12 +1397,20 @@ def run_in_workspace(
             send_snapshot(
                 workspace=workspace, sha=snapshot, repo=repo, verbose=verbose
             )
-            # Whatever the snapshot doesn't carry is data DVC tracks, which
-            # is ignored by Git and so has to go separately
-            to_send = paths_to_transfer(list(send or []), repo=repo)
-            if to_send:
-                echo(f"Sending {len(to_send)} data path(s)")
-                send_paths(workspace=workspace, paths=to_send, verbose=verbose)
+            # Last run's leftovers are still in the workspace; a command
+            # that fails to write an output must not have the old file
+            # collected as though this run had produced it
+            stale = produced_paths(workspace) + (job.get("outs") or [])
+            clear_outputs(workspace, stale, verbose=verbose)
+            # Data the snapshot cannot carry, because Git ignores it, goes
+            # through the workspace's own DVC cache
+            hydrate_workspace_cache(
+                workspace,
+                paths=job.get("deps") or [],
+                repo=repo,
+                verbose=verbose,
+                echo=echo,
+            )
             echo(f"Running on {workspace.host}: {command}")
             if verbose:
                 echo(f"Full command: {remote_cmd}")
@@ -1248,7 +1430,9 @@ def run_in_workspace(
         job["snapshot"] = snapshot
         # Hashed at dispatch, compared when it finishes -- the same way a
         # scheduler job decides whether it is still valid
-        job["dep_md5s"] = dep_md5s(list(send or []))
+        job["deps"] = deps_for_command(command)
+        job["outs"] = outs_for_command(command)
+        job["dep_md5s"] = dep_md5s(job["deps"])
         job["submitted"] = time.time()
         job["finished"] = None
         jobs[job_key] = job
@@ -1262,12 +1446,28 @@ def run_in_workspace(
         except subprocess.CalledProcessError:
             echo("Remote process finished")
             break
+    # A vanished PID is not a verdict. Ask what the job actually reported
+    # before anything it left behind is treated as a result.
+    status = read_status(workspace)
+    if status is None:
+        raise RemoteJobFailed(
+            f"The job on '{workspace.host}' stopped without recording an "
+            "exit status, so there is no way to tell whether it worked. "
+            "Nothing was collected; run it again."
+        )
+    if status != 0:
+        raise RemoteJobFailed(
+            f"The job on '{workspace.host}' exited with status {status}. "
+            "Nothing was collected."
+        )
     if snapshot is not None:
         # DVC hashes this stage's dependencies from the local files once we
         # return. If they moved while it ran elsewhere, recording the result
         # would pair inputs that were never used with outputs they never
         # produced, and that lock file reads as up to date forever.
-        changed = changed_deps(job.get("dep_md5s") or {}, list(send or []))
+        changed = changed_deps(
+            job.get("dep_md5s") or {}, job.get("deps") or []
+        )
         if changed:
             raise WorkspaceStateChanged(
                 "These changed while the job was running on "
@@ -1286,9 +1486,18 @@ def run_in_workspace(
                 "commit this run sent it, so its outputs came from "
                 "something else. Nothing was collected; run it again."
             )
-    if get:
-        echo(f"Collecting {len(get)} output path(s)")
-        fetch_paths(workspace=workspace, paths=list(get), verbose=verbose)
+    # Outputs DVC tracks are ignored by Git, so the workspace has to say
+    # what they were; committing them is what makes it able to
+    commit_workspace_outputs(workspace, verbose=verbose)
+    produced = produced_paths(workspace)
+    # An output DVC caches is added to .gitignore, so the workspace's Git
+    # cannot see it and it has to be asked for by name
+    for out in remote_existing(workspace, job.get("outs") or []):
+        if out not in produced:
+            produced.append(out)
+    if produced:
+        echo(f"Collecting {len(produced)} path(s) the run produced")
+        fetch_paths(workspace=workspace, paths=produced, verbose=verbose)
     try:
         prune_remote_snapshots(workspace=workspace, verbose=verbose)
     except subprocess.CalledProcessError:
@@ -1305,3 +1514,149 @@ def run_in_workspace(
 
 class WorkspaceStateChanged(ValueError):
     """Something moved underneath a run, so its results can't be trusted."""
+
+
+class RemoteJobFailed(ValueError):
+    """A job on another machine did not finish successfully."""
+
+
+# Written to .dvc/config.local, which is gitignored, so pointing a project
+# at one person's workspace never lands in the project itself.
+DVC_REMOTE_NAME = "calkit-workspace"
+
+
+def dvc_remote_url(workspace: Workspace) -> str:
+    """The workspace's DVC cache, addressed as a DVC remote.
+
+    A cache directory already has the layout a remote does, so the
+    workspace can serve as one without anything being set up there. That
+    is what lets data move as content-addressed objects -- only what is
+    missing, deduplicated -- rather than as a list of files someone had to
+    write down.
+    """
+    return f"ssh://{workspace.scp_target}{workspace.path('.dvc', 'cache')}"
+
+
+def _dvc(
+    args: list[str], wdir: str | None = None
+) -> subprocess.CompletedProcess:
+
+    return subprocess.run(
+        ["dvc"] + args,
+        cwd=wdir,
+        capture_output=True,
+        text=True,
+    )
+
+
+def configure_dvc_remote(workspace: Workspace, verbose: bool = False) -> bool:
+    """Point a local DVC remote at the workspace's cache.
+
+    Local, so it is per-machine and gitignored: a workspace belongs to
+    whoever is running, not to the project.
+    """
+    url = dvc_remote_url(workspace)
+    result = _dvc(["remote", "add", "--local", "-f", DVC_REMOTE_NAME, url])
+    if result.returncode != 0:
+        if verbose:
+            print(f"Could not add DVC remote: {result.stderr.strip()}")
+        return False
+    if workspace.ssh_key:
+        _dvc(
+            [
+                "remote",
+                "modify",
+                "--local",
+                DVC_REMOTE_NAME,
+                "keyfile",
+                workspace.ssh_key,
+            ]
+        )
+    if workspace.user:
+        _dvc(
+            [
+                "remote",
+                "modify",
+                "--local",
+                DVC_REMOTE_NAME,
+                "user",
+                workspace.user,
+            ]
+        )
+    return True
+
+
+def dvc_tracked_deps(
+    paths: list[str], repo: git.Repo | None = None
+) -> list[str]:
+    """Which dependencies DVC tracks, i.e. the ones Git does not carry.
+
+    These are exactly the paths the snapshot leaves behind, so they are
+    exactly the ones that have to travel some other way.
+    """
+    return paths_to_transfer(paths, repo=repo)
+
+
+def hydrate_workspace_cache(
+    workspace: Workspace,
+    paths: list[str],
+    repo: git.Repo | None = None,
+    verbose: bool = False,
+    echo=print,
+) -> None:
+    """Put the data a job needs into the workspace, via its own cache.
+
+    Pushed as DVC objects rather than copied as files: only what the
+    workspace is missing crosses the wire, and it lands addressed by
+    content so a second project or a second run reuses it.
+    """
+    tracked = dvc_tracked_deps(paths, repo=repo)
+    if not tracked:
+        return
+    if not configure_dvc_remote(workspace, verbose=verbose):
+        echo("Warning: could not reach the workspace cache; sending files")
+        send_paths(workspace=workspace, paths=tracked, verbose=verbose)
+        return
+    echo(f"Sending {len(tracked)} data path(s) to the workspace cache")
+    push = _dvc(["push", "-r", DVC_REMOTE_NAME] + tracked)
+    if push.returncode != 0:
+        echo("Warning: DVC push failed; sending files instead")
+        send_paths(workspace=workspace, paths=tracked, verbose=verbose)
+        return
+    # Objects in the cache are not files in the tree until checked out
+    _run(
+        workspace.login_argv(
+            f"cd {shlex.quote(workspace.wdir)} && "
+            "calkit dvc checkout " + " ".join(shlex.quote(p) for p in tracked)
+        ),
+        verbose=verbose,
+    )
+
+
+def commit_workspace_outputs(
+    workspace: Workspace, verbose: bool = False
+) -> None:
+    """Have the workspace record what the job produced.
+
+    Nothing runs DVC out there on its own, so a stage's outputs sit in the
+    working tree and in no cache at all. Committing them is what puts them
+    somewhere they can be fetched from, and is also what makes the
+    workspace's dvc.lock say which paths they were.
+    """
+    # Through Calkit rather than DVC directly: a project's remotes can use
+    # the ck:// scheme, which only Calkit registers, and a bare dvc there
+    # fails on the config before it gets as far as committing anything.
+    result = subprocess.run(
+        workspace.login_argv(
+            f"cd {shlex.quote(workspace.wdir)} && calkit dvc commit -f"
+        ),
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # A project with nothing DVC-tracked has nothing to commit, which
+        # is not a failure of the job that just ran
+        if verbose:
+            print(
+                f"Nothing committed in the workspace: {result.stderr.strip()}"
+            )

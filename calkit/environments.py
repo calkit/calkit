@@ -56,6 +56,19 @@ SCHEDULER_DISPATCH_ONLY_KEYS = {"max_concurrent_jobs"}
 # check, and locking a machine we can't observe is an error.
 KINDS_NO_CHECK: list[str] = []
 
+# Kinds whose check must not be cached. Caching exists to skip rebuilding
+# something expensive, but checking a ``system`` env *is* reading the
+# machine -- there is nothing to skip. Caching it means a locked property
+# can change and be missed until the cache expires, which is precisely the
+# drift ``lock`` exists to catch.
+KINDS_NO_CACHE = ["system"]
+
+
+def cacheable(env: dict) -> bool:
+    """Whether an environment's check is worth remembering."""
+    return env.get("kind") not in KINDS_NO_CACHE
+
+
 # Maps the kebab-case properties a ``system`` environment can lock onto the
 # keys ``get_system_info`` returns. Not a mechanical transformation, hence
 # the explicit table: note ``Rscript_version``'s capital R.
@@ -922,7 +935,9 @@ def check_all_in_pipeline(
         if env.get("kind") in KINDS_NO_CHECK:
             continue
         if not force:
-            up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
+            up_to_date = cacheable(env) and check_cache(
+                env_name=env_name, env=env, wdir=wdir
+            )
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}
                 continue

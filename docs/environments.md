@@ -600,11 +600,11 @@ pipeline:
 
 #### How the workspace is kept in sync
 
-Notice that nothing above says which files to copy back and forth.
-Calkit works that out from the stage, because an environment doesn't know
-what a stage reads, and a list maintained by hand falls behind the pipeline
-sooner or later---at which point the stage quietly runs against stale
-inputs, which is the failure you'd least want here.
+Notice that nothing above says which files to copy back and forth, and
+nothing in the compiled pipeline does either.
+Calkit works it out, because a list of paths written down anywhere is a
+list that can fall behind the pipeline---at which point the stage quietly
+runs against stale inputs, which is the failure you'd least want here.
 
 Before the command runs, Calkit captures your working tree---including
 edits you haven't committed---as a Git snapshot, pushes it straight to the
@@ -613,9 +613,17 @@ No branch is created on either side, so several people (or several clones)
 can share one workspace without their branch names colliding, and cleaning
 up afterwards is a single reserved namespace rather than a set of names
 someone has to recognize.
-Data that DVC tracks is ignored by Git, so it's sent separately, and only
-the paths the stage actually declares as inputs.
-Afterwards, the stage's declared outputs are copied back.
+Data that DVC tracks is ignored by Git, so it can't ride along in the
+snapshot.
+It travels through the workspace's own DVC cache instead, which Calkit
+addresses as a DVC remote: only the objects the workspace is missing cross
+the wire, deduplicated by content.
+
+Afterwards, the workspace is asked what the run produced---anything it
+reports as changed or newly appeared since the snapshot it was given---and
+that is what comes back.
+`dvc.lock` is deliberately never carried back: your DVC writes its own
+from what it hashes locally.
 
 The workspace is reused between runs, which is what keeps environments,
 the DVC cache, and the Git history warm---a fresh one would rebuild all

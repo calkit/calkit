@@ -1301,3 +1301,16 @@ def test_system_lock_can_describe_another_machine(tmp_dir):
     assert lock_fpath is not None
     with open(lock_fpath) as f:
         assert json.load(f) == {"cpu-count": 64}
+
+
+def test_system_env_checks_are_not_cached():
+    import calkit.environments as envs
+
+    # Caching exists to skip rebuilding something expensive. Checking a
+    # system env *is* reading the machine, so there is nothing to skip --
+    # and caching it means a locked property can change and be missed,
+    # which is exactly the drift 'lock' exists to catch.
+    assert not envs.cacheable({"kind": "system", "lock": ["cpu-count"]})
+    assert not envs.cacheable({"kind": "system"})
+    for kind in ["uv", "conda", "docker", "slurm", "renv"]:
+        assert envs.cacheable({"kind": kind}), kind

@@ -234,6 +234,12 @@ members = ["hub/backend"]
 # setting in hub/backend/pyproject.toml for why uv needs to be told that
 [tool.uv]
 cache-keys = [{ git = { commit = true, tags = true } }]
+# 'emails' and 'encutils' (via the hub backend and cssutils) ask for chardet
+# with no upper bound, so resolution picks up 7.x. requests asserts chardet
+# < 6 at import and warns on every single command when it doesn't hold, which
+# is noise on top of every pipeline run in this workspace. Nothing here needs
+# chardet 6+, so bound it rather than teach everyone to ignore a warning.
+constraint-dependencies = ["chardet<6"]
 
 [tool.pytest.ini_options]
 env = [

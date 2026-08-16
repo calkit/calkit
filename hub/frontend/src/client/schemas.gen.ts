@@ -5519,7 +5519,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "publication"],
+      enum: ["figure", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -5599,7 +5599,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "publication"],
+      enum: ["figure", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -7440,6 +7440,17 @@ export const ResultSchema = {
         },
       ],
       title: "Stage",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
     },
   },
   type: "object",

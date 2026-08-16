@@ -1894,6 +1894,14 @@ def _build_questions_public(
         # an unrelated result's title.
         for res in _build_results(project=project, repo=repo, ref=ref):
             results_by_path[(res.path, res.key)] = res
+        # Declared tables resolve through the same lookup, since that is
+        # the field the response carries; a result already at that path
+        # wins, being the more specific declaration
+        if "table" in kinds:
+            for tbl in _build_declared_tables(
+                project=project, repo=repo, ref=ref
+            ):
+                results_by_path.setdefault((tbl.path, None), tbl)
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {
@@ -2498,6 +2506,43 @@ def _build_results(
             continue
         _maybe_add_result(dvc_path)
     return [Result.model_validate(res) for res in results]
+
+
+def _build_declared_tables(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+) -> list[Result]:
+    """Tables the project declares, shaped like results.
+
+    Table evidence resolves through the same lookup results do, since that
+    is the field the response carries. Without this a declared table is
+    never found there -- ``_build_results`` only knows about results, and
+    auto-detection does not treat a tables directory as one -- so its title
+    and description never reach the reader.
+    """
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+    )
+    tables = []
+    for tbl in ck_info.get("tables") or []:
+        if not isinstance(tbl, dict) or not tbl.get("path"):
+            continue
+        tbl = dict(tbl)
+        if not tbl.get("title"):
+            tbl["title"] = _title_from_path(tbl["path"])
+        tables.append(
+            Result.model_validate(
+                {
+                    k: v
+                    for k, v in tbl.items()
+                    if k in {"path", "title", "description", "stage"}
+                }
+            )
+        )
+    return tables
 
 
 def _build_publications(

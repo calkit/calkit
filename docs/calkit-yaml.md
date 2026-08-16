@@ -157,9 +157,15 @@ per-column types and units belong.
 Calkit publishes a [JSON Schema](https://json-schema.org/) describing
 `calkit.yaml` at
 [docs.calkit.org/schemas/calkit.json](https://docs.calkit.org/schemas/calkit.json).
-Editors use it to flag mistakes as you type---misspelled keys, missing
-required fields, invalid environment or stage kinds---and to autocomplete
-keys and values with inline documentation.
+Editors use it to flag mistakes as you type---invalid environment or stage
+kinds, missing required fields, misspelled keys within a pipeline
+stage---and to autocomplete keys and values with inline documentation.
+
+Top-level keys and keys inside an environment are deliberately permissive:
+an unknown one there validates rather than failing, so a project using a
+newer or experimental feature isn't reported as broken by an older schema.
+Pipeline stages are the exception, and are strict, because a misspelled key
+there silently changes what runs.
 
 Projects created with `calkit init` or `calkit new project` get a schema
 reference on the first line of their `calkit.yaml`:

@@ -863,51 +863,6 @@ Model class: `CondaEnvironment`
 | prefix      | str              | no       | Path at which to create the environment. |
 | description | str              | no       | A description of the environment.        |
 
-#### `uv`
-
-Model class: `UvEnvironment`
-
-| Parameter   | Type          | Required | Description                              |
-| ----------- | ------------- | -------- | ---------------------------------------- |
-| kind        | Literal['uv'] | yes      | What kind of environment this is.        |
-| path        | str           | yes      | Path to the uv project's pyproject.toml. |
-| description | str           | no       | A description of the environment.        |
-
-#### `venv`
-
-Model class: `VenvEnvironment`
-
-| Parameter   | Type            | Required | Description                                                                                                                                                                     |
-| ----------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| path        | str             | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
-| prefix      | str             | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
-| python      | str             | no       | Python version to use when creating the environment.                                                                                                                            |
-| description | str             | no       | A description of the environment.                                                                                                                                               |
-
-#### `uv-venv`
-
-Model class: `UvVenvEnvironment`
-
-| Parameter   | Type               | Required | Description                                                                                                                                                                     |
-| ----------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['uv-venv'] | yes      | What kind of environment this is.                                                                                                                                               |
-| path        | str                | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
-| prefix      | str                | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
-| python      | str                | no       | Python version to use when creating the environment.                                                                                                                            |
-| description | str                | no       | A description of the environment.                                                                                                                                               |
-
-#### `pixi`
-
-Model class: `PixiEnvironment`
-
-| Parameter   | Type            | Required | Description                                       |
-| ----------- | --------------- | -------- | ------------------------------------------------- |
-| kind        | Literal['pixi'] | yes      | What kind of environment this is.                 |
-| path        | str             | yes      | Path to the Pixi manifest file.                   |
-| name        | str             | no       | Name of the environment within the Pixi manifest. |
-| description | str             | no       | A description of the environment.                 |
-
 #### `docker`
 
 Model class: `DockerEnvironment`
@@ -964,6 +919,41 @@ Model class: `NixEnvironment`
 | shell       | str            | no       | Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.                      |
 | description | str            | no       | A description of the environment.                                                                                                    |
 
+#### `pbs`
+
+Model class: `PBSEnvironment`
+
+| Parameter           | Type           | Required | Description                                                                                             |
+| ------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| kind                | Literal['pbs'] | yes      | What kind of environment this is.                                                                       |
+| host                | str            | no       | Host on which to submit jobs, over SSH if not localhost.                                                |
+| default_options     | list[str]      | no       | Options passed to qsub by default.                                                                      |
+| default_setup       | list[str]      | no       | Commands run at the start of every job script.                                                          |
+| max_concurrent_jobs | int            | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit. |
+| description         | str            | no       | A description of the environment.                                                                       |
+
+#### `pixi`
+
+Model class: `PixiEnvironment`
+
+| Parameter   | Type            | Required | Description                                       |
+| ----------- | --------------- | -------- | ------------------------------------------------- |
+| kind        | Literal['pixi'] | yes      | What kind of environment this is.                 |
+| path        | str             | yes      | Path to the Pixi manifest file.                   |
+| name        | str             | no       | Name of the environment within the Pixi manifest. |
+| description | str             | no       | A description of the environment.                 |
+
+#### `renv`
+
+Model class: `REnvironment`
+
+| Parameter   | Type            | Required | Description                                                                       |
+| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
+| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
+| path        | str             | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it. |
+| prefix      | str             | no       | Path at which to create the environment.                                          |
+| description | str             | no       | A description of the environment.                                                 |
+
 #### `slurm`
 
 Model class: `SlurmEnvironment`
@@ -976,17 +966,6 @@ Model class: `SlurmEnvironment`
 | default_setup       | list[str]        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
 | max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
 | description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
-
-#### `renv`
-
-Model class: `REnvironment`
-
-| Parameter   | Type            | Required | Description                                                                       |
-| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
-| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
-| path        | str             | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it. |
-| prefix      | str             | no       | Path at which to create the environment.                                          |
-| description | str             | no       | A description of the environment.                                                 |
 
 #### `system`
 
@@ -1034,5 +1013,39 @@ stale inputs; the paths are taken from the stage instead.
 | wdir        | str                                                                                                                                                                                                                                                                                                                            | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'. |
 | lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                        |
 | description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                                                    |
+
+#### `uv`
+
+Model class: `UvEnvironment`
+
+| Parameter   | Type          | Required | Description                              |
+| ----------- | ------------- | -------- | ---------------------------------------- |
+| kind        | Literal['uv'] | yes      | What kind of environment this is.        |
+| path        | str           | yes      | Path to the uv project's pyproject.toml. |
+| description | str           | no       | A description of the environment.        |
+
+#### `uv-venv`
+
+Model class: `UvVenvEnvironment`
+
+| Parameter   | Type               | Required | Description                                                                                                                                                                     |
+| ----------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['uv-venv'] | yes      | What kind of environment this is.                                                                                                                                               |
+| path        | str                | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
+| prefix      | str                | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
+| python      | str                | no       | Python version to use when creating the environment.                                                                                                                            |
+| description | str                | no       | A description of the environment.                                                                                                                                               |
+
+#### `venv`
+
+Model class: `VenvEnvironment`
+
+| Parameter   | Type            | Required | Description                                                                                                                                                                     |
+| ----------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['venv'] | yes      | What kind of environment this is.                                                                                                                                               |
+| path        | str             | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
+| prefix      | str             | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
+| python      | str             | no       | Python version to use when creating the environment.                                                                                                                            |
+| description | str             | no       | A description of the environment.                                                                                                                                               |
 
 <!-- AUTO-GENERATED: ENV-KINDS:END -->

@@ -3288,3 +3288,39 @@ def test_build_question_evidence_keyed_results_and_tables() -> None:
     assert evidence[1].kind == "table"
     assert evidence[1].result is not None
     assert evidence[1].result.title == "Sample sizes"
+
+
+def test_declared_tables_reach_the_evidence_lookup() -> None:
+    from app.api.routes.projects.core import _build_declared_tables
+
+    # A declared table is not something _build_results knows about, and a
+    # tables directory is not auto-detected as results either, so without
+    # this its title and description never reach the reader
+    ck_info = {
+        "tables": [
+            {
+                "path": "tables/sample-sizes.csv",
+                "title": "Sample sizes",
+                "description": "How many runs per case.",
+            },
+            {"path": "tables/untitled.csv"},
+            {"title": "no path, skipped"},
+            "not-a-dict",
+        ]
+    }
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+        return_value=ck_info,
+    ):
+        tables = _build_declared_tables(
+            project=SimpleNamespace(), repo=SimpleNamespace(), ref=None
+        )
+    assert [t.path for t in tables] == [
+        "tables/sample-sizes.csv",
+        "tables/untitled.csv",
+    ]
+    assert tables[0].title == "Sample sizes"
+    assert tables[0].description == "How many runs per case."
+    # One without a title still gets a readable one from its path, rather
+    # than rendering as nothing
+    assert tables[1].title

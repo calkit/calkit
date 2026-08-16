@@ -111,3 +111,24 @@ def test_system_lock_properties_are_documented(
     # A property only one platform can supply says so, since locking it
     # anywhere else is an error rather than a silent no-op
     assert "macOS only" in block
+
+
+def test_every_environment_kind_is_documented(
+    generator: types.ModuleType,
+) -> None:
+    from typing import get_args
+
+    from calkit.models.core import Environment
+
+    # The reference used to be a hand-kept list of model classes, which is
+    # how 'pbs' ended up a supported kind with no section at all
+    fpath = os.path.join(REPO_ROOT, "docs", "environments.md")
+    with open(fpath, encoding="utf-8") as f:
+        doc = f.read()
+    kinds = set(get_args(Environment.model_fields["kind"].annotation))
+    assert kinds, "no environment kinds found"
+    for kind in kinds:
+        assert f"#### `{kind}`" in doc, (
+            f"environment kind '{kind}' is missing from the reference; "
+            "regenerate it with 'make sync-docs'"
+        )

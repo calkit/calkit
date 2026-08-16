@@ -17,19 +17,7 @@ from pydantic.fields import PydanticUndefined
 
 from calkit.cli.main.core import app
 from calkit.models.core import (
-    CondaEnvironment,
-    DockerEnvironment,
     Environment,
-    JuliaEnvironment,
-    MatlabEnvironment,
-    NixEnvironment,
-    PixiEnvironment,
-    REnvironment,
-    SlurmEnvironment,
-    SystemEnvironment,
-    UvEnvironment,
-    UvVenvEnvironment,
-    VenvEnvironment,
 )
 from calkit.models.pipeline import Stage
 
@@ -616,21 +604,18 @@ def _env_rows_from_model(cls: type[Any]) -> list[tuple[str, ...]]:
 
 
 def generate_environment_kinds_markdown() -> str:
-    env_classes = [
-        Environment,
-        CondaEnvironment,
-        UvEnvironment,
-        VenvEnvironment,
-        UvVenvEnvironment,
-        PixiEnvironment,
-        DockerEnvironment,
-        JuliaEnvironment,
-        MatlabEnvironment,
-        NixEnvironment,
-        SlurmEnvironment,
-        REnvironment,
-        SystemEnvironment,
-    ]
+    # Derived from the models rather than listed by hand, the same way the
+    # stage kinds are. A hand-kept list is a list that silently omits a
+    # kind -- 'pbs' was missing from the reference entirely for exactly
+    # that reason.
+    env_classes = [Environment] + sorted(
+        (
+            cls
+            for cls in Environment.__subclasses__()
+            if _kind_for_model_class(cls)
+        ),
+        key=_kind_for_model_class,
+    )
     env_classes_by_kind = {
         _kind_for_model_class(cls): cls
         for cls in env_classes

@@ -455,6 +455,7 @@ def test_paths_to_transfer_skips_what_the_snapshot_carries(tmp_dir):
     assert ws.paths_to_transfer([], repo=repo) == []
 
 
+@skipif_windows_remote_shell
 def test_prune_command_cleans_a_workspace_without_touching_its_checkout(
     tmp_dir,
 ):
@@ -1002,8 +1003,11 @@ def test_ensure_reachable_asks_who_to_log_in_as(monkeypatch):
     with open(config) as f:
         written = f.read()
     assert "Host box" in written and "User parallels" in written
-    # Someone's private config: readable only by them
-    assert oct(os.stat(config).st_mode)[-3:] == "600"
+    # Someone's private config: readable only by them. Windows has no
+    # POSIX mode bits -- chmod there carries only the read-only flag -- so
+    # there is nothing to assert about them.
+    if sys.platform != "win32":
+        assert oct(os.stat(config).st_mode)[-3:] == "600"
 
 
 def test_declining_still_says_who_to_authorize_as(monkeypatch):

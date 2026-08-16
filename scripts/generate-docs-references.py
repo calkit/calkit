@@ -33,6 +33,33 @@ KEYS_START = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:START -->"
 KEYS_END = "<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->"
 
 
+def rst_to_markdown(text: str) -> str:
+    """Convert RST-style inline markup in a docstring to markdown.
+
+    Everything generated here is written back into a file that prettier
+    then formats. Emitting markup prettier disagrees with means every
+    ``make format`` run reports the generated file as modified, so the
+    conversion has to produce what prettier would produce, not merely
+    something that renders the same.
+
+    Docstrings are read as Python source as well as rendered as docs, so
+    the RST spellings are what belongs in them; normalizing here keeps
+    authors from having to write markdown by hand in a docstring.
+    """
+    # ``double backticks`` are RST inline code; markdown uses one
+    text = text.replace("``", "`")
+    # *emphasis* is RST (and the natural thing to type); prettier
+    # normalizes single-asterisk emphasis to underscores, but leaves
+    # **strong** alone. Bounded to one line, and the delimiters exclude
+    # '*' and whitespace on both sides so '**strong**' isn't mangled into
+    # '_*strong*_' and a '* ' bullet isn't read as an opening delimiter.
+    return re.sub(
+        r"(?<![\w*])\*([^\s*][^*\n]*?[^\s*]|[^\s*])\*(?![\w*])",
+        r"_\1_",
+        text,
+    )
+
+
 def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     if not rows:
         return "(none)\n"
@@ -62,11 +89,10 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
 
 
 def _command_text(cmd: click.Command) -> str:
-    # CLI helps written in RST style use ``double backticks`` for inline
-    # code; convert to markdown single backticks so prettier doesn't
+    # CLI helps are written in RST style; convert so prettier doesn't
     # rewrite the generated file and fail the pre-commit hook.
     text = (cmd.help or cmd.short_help or "").strip()
-    return text.replace("``", "`")
+    return rst_to_markdown(text)
 
 
 def _command_desc(cmd: click.Command) -> str:
@@ -475,8 +501,7 @@ def _docstring_text(obj: Any) -> str:
         cleaned.append(line)
         prev_blank = False
     text = "\n".join(cleaned).strip()
-    # Convert common RST-style inline code markup to markdown.
-    return text.replace("``", "`")
+    return rst_to_markdown(text)
 
 
 def _kind_for_model_class(cls: type[Any]) -> str:

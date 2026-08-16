@@ -1,5 +1,6 @@
 """Functionality related to environments."""
 
+import functools
 import glob
 import hashlib
 import json
@@ -81,6 +82,33 @@ SYSTEM_LOCK_PROPERTIES = {
     "brew-version": "brew_version",
 }
 
+# What each lockable property means, for the published documentation. Kept
+# beside the table above so the two can be checked against each other; a
+# property nobody can describe is one nobody can decide whether to lock.
+SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
+    "os": "Operating system name, e.g. 'Linux' or 'Darwin'.",
+    "os-version": "Operating system release, e.g. a kernel version.",
+    "platform": "Full platform string, which folds in most of the above.",
+    "machine": "Machine architecture, e.g. 'x86_64' or 'arm64'.",
+    "processor": "Processor name, where the OS reports one.",
+    "hostname": "The machine's name. Pins results to one specific host.",
+    "cpu-count": "Number of CPUs, which can change what a run produces "
+    "where results depend on how work was divided.",
+    "memory-gb": "Total memory in GB.",
+    "python-version": "Version of the Python running Calkit.",
+    "python-implementation": "Python implementation, e.g. 'CPython'.",
+    "git-version": "Installed Git version.",
+    "docker-version": "Installed Docker version.",
+    "conda-version": "Installed Conda version.",
+    "mamba-version": "Installed Mamba version.",
+    "uv-version": "Installed uv version.",
+    "pixi-version": "Installed Pixi version.",
+    "julia-version": "Installed Julia version.",
+    "juliaup-version": "Installed Juliaup version.",
+    "rscript-version": "Installed Rscript version.",
+    "brew-version": "Installed Homebrew version.",
+}
+
 # Properties only one platform can supply, since ``get_system_info`` collects
 # package manager versions per OS. Locking one from another platform raises
 # in ``get_system_lock_data`` rather than recording nothing, so this table is
@@ -120,15 +148,56 @@ def host_is_local(host: str | None) -> bool:
     if "." not in host:
         # A bare env host matches this machine's short name, however this
         # machine happens to report itself.
-        return host in (
+        if host in (
             current_host.split(".")[0],
             current_fqdn.split(".")[0],
-        )
-    if "." not in current_fqdn:
+        ):
+            return True
+    elif "." not in current_fqdn:
         # A qualified env host can still name a machine that only knows its
         # own short name; there is no domain here to contradict it.
-        return host.split(".")[0] in (current_host, current_fqdn)
-    return False
+        if host.split(".")[0] in (current_host, current_fqdn):
+            return True
+    # Names are not the only way to write a machine down. A host given as
+    # an IP address never matches a hostname, and a machine reached at one
+    # address may call itself something else entirely -- so ask whether any
+    # address this host resolves to is one of ours.
+    return _resolves_to_this_machine(host)
+
+
+@functools.lru_cache(maxsize=128)
+def _host_addresses(host: str) -> tuple[tuple[int, str], ...]:
+    """The addresses ``host`` resolves to, as (family, address) pairs."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_DGRAM)
+    except (socket.gaierror, UnicodeError, OSError):
+        return ()
+    return tuple(
+        {(family, sockaddr[0]) for family, _, _, _, sockaddr in infos}
+    )
+
+
+def _address_is_local(family: int, address: str) -> bool:
+    """Whether an address belongs to an interface on this machine.
+
+    Binding is the question itself rather than a proxy for it: an address
+    can only be bound where it is actually configured, which is exactly
+    what "this is my address" means. Reading interfaces directly would need
+    a dependency and would still have to answer the same question.
+    """
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((address, 0))
+        return True
+    except OSError:
+        return False
+
+
+def _resolves_to_this_machine(host: str) -> bool:
+    return any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host)
+    )
 
 
 def get_julia_packages_dir() -> str:
@@ -564,15 +633,22 @@ def write_scheduler_env_lock(
     return lock_fpath
 
 
-def get_system_lock_data(lock: list[str]) -> dict:
+def get_system_lock_data(
+    lock: list[str], system_info: dict | None = None
+) -> dict:
     """Read the machine properties a ``system`` environment locks.
 
-    Raises if a locked property isn't available on this machine, e.g., a
+    Raises if a locked property isn't available on the machine, e.g., a
     tool that isn't installed. Recording it as null would quietly claim the
     stage is pinned to something it isn't, which is worse than not pinning
     it at all.
+
+    ``system_info`` describes a machine other than this one, for an
+    environment whose host is somewhere else: what the results depend on is
+    the machine the stage runs on, so that is what gets pinned.
     """
-    system_info = calkit.get_system_info()
+    if system_info is None:
+        system_info = calkit.get_system_info()
     data = {}
     for prop in lock:
         key = SYSTEM_LOCK_PROPERTIES.get(prop)
@@ -594,6 +670,7 @@ def write_system_env_lock(
     env_name: str,
     env: dict,
     wdir: str | None = None,
+    system_info: dict | None = None,
 ) -> str | None:
     """Write a JSON lock file for a ``system`` environment.
 
@@ -619,7 +696,12 @@ def write_system_env_lock(
     if parent:
         os.makedirs(parent, exist_ok=True)
     content = (
-        json.dumps(get_system_lock_data(lock), indent=2, sort_keys=True) + "\n"
+        json.dumps(
+            get_system_lock_data(lock, system_info=system_info),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
     )
     if os.path.isfile(lock_fpath):
         with open(lock_fpath, "r") as f:

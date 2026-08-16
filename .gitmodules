@@ -1,3 +1,6 @@
 [submodule "examples/basic"]
 	path = examples/basic
 	url = https://github.com/calkit/example-basic.git
+[submodule "examples/ssh"]
+	path = examples/ssh
+	url = git@github.com:calkit/example-ssh.git

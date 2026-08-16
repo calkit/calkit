@@ -1215,6 +1215,35 @@ def test_system_env_lock(tmp_dir):
             envs.get_system_lock_data(["os"])
 
 
+def test_host_is_local_by_address(monkeypatch):
+    import calkit.environments as envs
+
+    # A project commonly writes a machine down as an IP, which never
+    # matches a hostname however the machine reports itself -- so running
+    # on that very machine would otherwise mean connecting to itself
+    envs._host_addresses.cache_clear()
+    assert envs.host_is_local("127.0.0.1")
+    assert envs.host_is_local("::1")
+    own = socket.gethostbyname(socket.gethostname())
+    assert envs.host_is_local(own)
+    # An address that isn't ours stays not ours, whatever we're called
+    assert not envs.host_is_local("192.0.2.1")  # TEST-NET-1, unroutable
+    # A name that doesn't resolve is not this machine either
+    assert not envs.host_is_local("definitely-not-a-host.invalid")
+    # Names still decide it when they match, without a lookup
+    gh = mock.patch.object(socket, "gethostname", return_value="cluster01")
+    gf = mock.patch.object(socket, "getfqdn", return_value="cluster01")
+
+    def no_lookup(*a, **kw):
+        raise AssertionError("resolved a host that matched by name")
+
+    with gh, gf:
+        envs._host_addresses.cache_clear()
+        monkeypatch.setattr(socket, "getaddrinfo", no_lookup)
+        assert envs.host_is_local("cluster01")
+    envs._host_addresses.cache_clear()
+
+
 def test_host_is_local():
     import calkit.environments as envs
 
@@ -1250,3 +1279,25 @@ def test_host_is_local():
     with gh, gf:
         assert envs.host_is_local("web01.dev.example.com")
         assert not envs.host_is_local("web01.prod.example.com")
+
+
+def test_system_lock_can_describe_another_machine(tmp_dir):
+    import calkit.environments as envs
+
+    # What a stage's results depend on is the machine it runs on, so a lock
+    # for a remote host is written from that host's properties rather than
+    # from this one's
+    remote = {"cpu_count": 64, "os": "Linux", "python_version": "3.12.7"}
+    data = envs.get_system_lock_data(["cpu-count", "os"], system_info=remote)
+    assert data == {"cpu-count": 64, "os": "Linux"}
+    assert data != envs.get_system_lock_data(["cpu-count", "os"])
+    # A property that machine can't supply is still an error, not a null
+    with pytest.raises(ValueError, match="not available"):
+        envs.get_system_lock_data(["docker-version"], system_info=remote)
+    env = {"kind": "system", "host": "box", "lock": ["cpu-count"]}
+    lock_fpath = envs.write_system_env_lock(
+        env_name="remote", env=env, system_info=remote
+    )
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        assert json.load(f) == {"cpu-count": 64}

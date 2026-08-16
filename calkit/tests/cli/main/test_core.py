@@ -568,8 +568,10 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert "hi" in out
-    # Reaching another machine needs somewhere to run, so a system env that
-    # names one without a workspace fails loudly rather than guessing
+    # A workspace directory is derived from the project name, so a project
+    # without one has nothing to derive from and says so rather than
+    # picking a directory it was never told about. No user is needed: SSH
+    # resolves that itself.
     with open("calkit.yaml", "w") as f:
         f.write(
             "environments:\n"
@@ -584,27 +586,8 @@ def test_run_in_env_system(tmp_dir):
     )
     assert res.returncode != 0
     combined = res.stdout + res.stderr
-    assert "'user'" in combined and "'wdir'" in combined
-    # Locking properties of a machine we can't observe is an error, not a
-    # silent no-op
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  remote:\n"
-            "    kind: system\n"
-            "    host: not-this-box.invalid\n"
-            "    user: me\n"
-            "    wdir: /home/me/proj\n"
-            "    lock:\n"
-            "      - os\n"
-        )
-    res = subprocess.run(
-        ["calkit", "check", "env", "-n", "remote"],
-        capture_output=True,
-        text=True,
-    )
-    assert res.returncode != 0
-    assert "not supported yet" in res.stdout + res.stderr
+    assert "'wdir'" in combined
+    assert "'user'" not in combined
 
 
 def test_to_shell_cmd():

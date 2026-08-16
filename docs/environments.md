@@ -455,7 +455,37 @@ Locked properties are written to the environment's lock file,
 which stages depend on,
 so moving to a machine where one of them differs reruns the stage
 rather than silently reusing a cached result.
-Run `calkit describe system` to see what's available to lock.
+
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->
+
+The properties that can be locked are:
+
+| Property                | Description                                                                                        |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `os`                    | Operating system name, e.g. 'Linux' or 'Darwin'.                                                   |
+| `os-version`            | Operating system release, e.g. a kernel version.                                                   |
+| `platform`              | Full platform string, which folds in most of the above.                                            |
+| `machine`               | Machine architecture, e.g. 'x86_64' or 'arm64'.                                                    |
+| `processor`             | Processor name, where the OS reports one.                                                          |
+| `hostname`              | The machine's name. Pins results to one specific host.                                             |
+| `cpu-count`             | Number of CPUs, which can change what a run produces where results depend on how work was divided. |
+| `memory-gb`             | Total memory in GB.                                                                                |
+| `python-version`        | Version of the Python running Calkit.                                                              |
+| `python-implementation` | Python implementation, e.g. 'CPython'.                                                             |
+| `git-version`           | Installed Git version.                                                                             |
+| `docker-version`        | Installed Docker version.                                                                          |
+| `conda-version`         | Installed Conda version.                                                                           |
+| `mamba-version`         | Installed Mamba version.                                                                           |
+| `uv-version`            | Installed uv version.                                                                              |
+| `pixi-version`          | Installed Pixi version.                                                                            |
+| `julia-version`         | Installed Julia version.                                                                           |
+| `juliaup-version`       | Installed Juliaup version.                                                                         |
+| `rscript-version`       | Installed Rscript version.                                                                         |
+| `brew-version`          | Installed Homebrew version. macOS only.                                                            |
+
+Run `calkit describe system` to see what these are on the machine you're on.
+
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->
 
 The built-in `_system` environment is shorthand for this kind
 on `localhost` with nothing locked.
@@ -478,22 +508,75 @@ environments:
   cluster:
     kind: system
     host: "10.225.22.25"
-    user: my-user-name
-    wdir: /home/my-user-name/calkit/example
-    key: ~/.ssh/id_ed25519
 ```
 
-Here `wdir` is the project's _workspace_ on that machine---a clone of the
-project, and the directory stages run in.
-It's required to reach another host, since there's nowhere to put the
-project otherwise.
-`user` is the account to connect as, and `key` is the path to an SSH key on
-this machine, so we can connect without a password.
+The host is the only thing you have to declare.
+Everything else has a sensible default:
 
-To register an SSH key with the host, use `ssh-copy-id`. For example:
+- `user` is left to SSH, which resolves it from `~/.ssh/config` or falls
+  back to your current account.
+  Repeating it here would only be a second place for it to be wrong.
+- `wdir`---the project's _workspace_ on that machine, a clone of the
+  project and the directory stages run in---defaults to
+  `~/.calkit/workspaces/<hub>/<owner>/<name>`.
+  A relative path is taken from the connecting user's home directory.
+  It's qualified by hub and owner because a host is shared: two projects
+  named `example-ssh` from different owners are different projects.
+  It's hidden because Calkit checks the workspace out with `--force`, so
+  it must not look like somewhere you'd keep your own work.
+- `ssh_key` is left to SSH and its agent.
+
+So the fuller form, if you do need to be explicit, is:
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: "10.225.22.25"
+    user: my-user-name
+    wdir: /home/my-user-name/calkit/example
+    ssh_key: ~/.ssh/id_ed25519
+```
+
+#### Getting set up
+
+Check that the host is actually reachable before running anything:
+
+```sh
+calkit check env -n cluster
+```
+
+`calkit run` does the same check for every environment in the pipeline, so
+you don't have to remember to.
+Either way it connects without allowing a password prompt, so an
+unauthorized key is reported now rather than hanging halfway through a
+pipeline.
+
+In a terminal, that check walks you through whatever is missing, asking
+before each step:
+
+- Any environment variable the definition refers to---like the
+  `${CK_SSH_HOST}` above---is prompted for and saved to `.env`, so it's
+  only asked once.
+  `.env` is added to `.gitignore` if it isn't already.
+- If you have no SSH key, it offers to create one (`ed25519`, no
+  passphrase, so stages can run unattended).
+- If this machine isn't authorized on the host yet, it offers to run
+  `ssh-copy-id`, then re-checks rather than assuming it worked.
+- If Calkit isn't installed on the host, it offers to install it there.
+  That's needed to activate an inner environment or to read the machine's
+  properties for a `lock`.
+
+Nothing happens without you agreeing to it, since creating a key and
+authorizing a machine both change things outside the project.
+
+Without a terminal---in CI, say---none of this is attempted, because
+there's nobody to answer.
+It fails instead with the exact commands to run, e.g.:
 
 ```sh
 ssh-copy-id -i ~/.ssh/id_ed25519 my-user-name@10.225.22.25
+ssh my-user-name@10.225.22.25 'curl -LsSf install.calkit.org | sh'
 ```
 
 To execute a command in this environment, we can add a stage like this
@@ -529,6 +612,17 @@ Data that DVC tracks is ignored by Git, so it's sent separately, and only
 the paths the stage actually declares as inputs.
 Afterwards, the stage's declared outputs are copied back.
 
+The workspace is reused between runs, which is what keeps environments,
+the DVC cache, and the Git history warm---a fresh one would rebuild all
+three every time.
+Because it's a single checkout at a single commit, a run holds a lock on
+it, and a second run that wants the same workspace is told who has it
+rather than checking out over them.
+The lock sits beside the workspace, not inside it, and is released once a
+run's outputs have been collected; if the run is interrupted while the
+remote job is still going, the lock stays, because the workspace really is
+still busy.
+
 One consequence worth knowing: if the project changes locally while a stage
 is running elsewhere, Calkit refuses to collect the results rather than
 recording them.
@@ -538,10 +632,13 @@ pairing inputs that were never used with outputs they never produced---and
 unlike a stale stage, which simply reruns, a lock file like that goes on
 looking up to date indefinitely.
 
-Note that `lock` can only be used when the host is the machine you're on.
-Locking the properties of a machine Calkit can't observe would claim the
-stage is pinned to something it isn't, so it's an error rather than a
-silent no-op.
+`lock` works the same way here as it does locally, except that the
+properties recorded are the _host's_---what a stage's results depend on is
+the machine it actually ran on.
+Calkit reads them from that machine when the environment is checked, which
+means Calkit has to be installed there.
+It already is if you pair the environment with a runtime (see below), since
+that's what activates the inner environment on the far end.
 
 #### Pairing with a runtime
 
@@ -902,22 +999,27 @@ machine runs here, the same way a SLURM env does. The built-in
 with nothing locked.
 
 `wdir` is the project's workspace on that host -- the directory the
-stage runs in. It is required to reach another machine, since there is
-nowhere to put the project otherwise.
+stage runs in. It defaults to
+`~/.calkit/workspaces/<hub>/<owner>/<name>`, so a project that just
+names a host lands somewhere predictable rather than having to spell
+out a path that is the same on every machine anyway. Qualified by hub
+and owner because a host is shared, and hidden because transfers check
+out with `--force`: a path that looks like the user's own checkout is
+one whose edits would be silently destroyed.
 
 What moves in and out of that workspace is deliberately not declared
 here. An environment doesn't know which files a stage reads, so a list
 kept alongside it can fall behind the pipeline and quietly run against
 stale inputs; the paths are taken from the stage instead.
 
-| Parameter   | Type                                                                                                                                                                                                                                                                                                                           | Required | Description                                                                                                                                                   |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['system']                                                                                                                                                                                                                                                                                                              | yes      | What kind of environment this is.                                                                                                                             |
-| host        | str                                                                                                                                                                                                                                                                                                                            | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                          |
-| user        | str                                                                                                                                                                                                                                                                                                                            | no       | User to connect as. Required to reach another host.                                                                                                           |
-| key         | str                                                                                                                                                                                                                                                                                                                            | no       | Path to the SSH private key used to reach another host.                                                                                                       |
-| wdir        | str                                                                                                                                                                                                                                                                                                                            | no       | The project's workspace on the host, in which stages run. Required to reach another host.                                                                     |
-| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned. |
-| description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                             |
+| Parameter   | Type                                                                                                                                                                                                                                                                                                                           | Required | Description                                                                                                                                                                          |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| kind        | Literal['system']                                                                                                                                                                                                                                                                                                              | yes      | What kind of environment this is.                                                                                                                                                    |
+| host        | str                                                                                                                                                                                                                                                                                                                            | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                 |
+| user        | str                                                                                                                                                                                                                                                                                                                            | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                  |
+| ssh_key     | str                                                                                                                                                                                                                                                                                                                            | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                        |
+| wdir        | str                                                                                                                                                                                                                                                                                                                            | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'. |
+| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                        |
+| description | str                                                                                                                                                                                                                                                                                                                            | no       | A description of the environment.                                                                                                                                                    |
 
 <!-- AUTO-GENERATED: ENV-KINDS:END -->

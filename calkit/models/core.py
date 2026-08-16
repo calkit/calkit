@@ -436,8 +436,13 @@ class SystemEnvironment(Environment):
     with nothing locked.
 
     ``wdir`` is the project's workspace on that host -- the directory the
-    stage runs in. It is required to reach another machine, since there is
-    nowhere to put the project otherwise.
+    stage runs in. It defaults to
+    ``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just
+    names a host lands somewhere predictable rather than having to spell
+    out a path that is the same on every machine anyway. Qualified by hub
+    and owner because a host is shared, and hidden because transfers check
+    out with ``--force``: a path that looks like the user's own checkout is
+    one whose edits would be silently destroyed.
 
     What moves in and out of that workspace is deliberately not declared
     here. An environment doesn't know which files a stage reads, so a list
@@ -453,16 +458,19 @@ class SystemEnvironment(Environment):
     )
     user: str | None = Field(
         default=None,
-        description="User to connect as. Required to reach another host.",
+        description="User to connect as. Left to SSH by default, which "
+        "resolves it from ~/.ssh/config or falls back to the current user.",
     )
-    key: str | None = Field(
+    ssh_key: str | None = Field(
         default=None,
-        description="Path to the SSH private key used to reach another host.",
+        description="Path to the SSH private key used to reach another "
+        "host. Left to SSH and its agent by default.",
     )
     wdir: str | None = Field(
         default=None,
         description="The project's workspace on the host, in which stages "
-        "run. Required to reach another host.",
+        "run. A relative path is taken from the connecting user's home "
+        "directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.",
     )
     lock: list[SystemLockProperty] = Field(
         default=[],

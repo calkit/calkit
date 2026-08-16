@@ -51,7 +51,7 @@ Each entry is flagged `detected` to tell the two apart.
 
 Declaring one in `calkit.yaml` anyway is how you say it has standalone
 significance: that it's worth a title and a description, that it's one of
-the things the project is *for*, rather than an incidental file that
+the things the project is _for_, rather than an incidental file that
 happens to sit in the right directory.
 Declaring it also makes its kind explicit rather than guessed from its
 path, which several commands rely on.

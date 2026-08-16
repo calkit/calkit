@@ -474,14 +474,58 @@ def check_environment(
         # recording them, so stages depending on the env see them change.
         if calkit.environments.host_is_local(env.get("host")):
             write_system_env_lock(env_name=env_name, env=env)
-        elif env.get("lock"):
-            # The properties belong to the other machine, and reading this
-            # one's would pin the stage to something it never ran on.
-            raise_error(
-                f"Environment '{env_name}' locks machine properties but "
-                f"runs on host '{env.get('host')}', which this is not; "
-                "locking another host's properties is not supported yet"
-            )
+        else:
+            # For a host that isn't this one, checking means getting to the
+            # point where we can actually reach it -- better sorted out here
+            # than partway through a pipeline -- and reading the properties
+            # from that machine, since those are the ones the results
+            # depend on.
+            import calkit.workspace as workspace
+            from calkit.dependencies import _is_interactive
+
+            interactive = _is_interactive()
+            ck_info = calkit.load_calkit_info()
+            try:
+                # Anything written as ${CK_SSH_HOST} is the first thing to
+                # be missing for anyone but the project's author, since a
+                # project shares its calkit.yaml but not its .env
+                env = dict(env)
+                for key in workspace.CONNECTION_FIELDS:
+                    if isinstance(env.get(key), str):
+                        env[key] = workspace.expand_with_prompts(
+                            env[key],
+                            interactive=interactive,
+                            described_as=(
+                                f"environment '{env_name}' "
+                                f"{key.replace('_', ' ')}"
+                            ),
+                        )
+                ws = workspace.Workspace.from_env(
+                    env=env,
+                    env_name=env_name,
+                    ck_info=ck_info,
+                )
+                workspace.ensure_reachable(
+                    ws, interactive=interactive, verbose=verbose
+                )
+                # Calkit is needed there to read the machine's properties,
+                # and to activate an inner env, but an environment that
+                # only dispatches a command never calls it
+                locks = bool(env.get("lock"))
+                workspace.ensure_calkit_installed(
+                    ws,
+                    interactive=interactive,
+                    required=locks,
+                    verbose=verbose,
+                )
+                if locks:
+                    write_system_env_lock(
+                        env_name=env_name,
+                        env=env,
+                        system_info=workspace.remote_system_info(ws),
+                    )
+            except ValueError as e:
+                raise_error(str(e))
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
     else:

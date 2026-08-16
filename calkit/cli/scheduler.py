@@ -15,7 +15,6 @@ import re
 import shlex
 import shutil
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -896,14 +895,37 @@ def run_batch(
         log_path = os.path.join(LOGS_DIR, f"{name}.out")
     if is_command is None:
         is_command = not os.path.isfile(target)
-    # Host check: a scheduler env names the cluster its jobs belong to, and
-    # submitting from anywhere else would queue them on the wrong one.
+    # A scheduler env names the cluster its jobs belong to. Submitting from
+    # anywhere else would queue them on the wrong one, so if this isn't that
+    # machine, go there and submit from a workspace instead. Nothing about
+    # the submission changes: the same command runs on the cluster, where
+    # sbatch/qsub exist and where the job's files have to be anyway.
     env_host = env.get("host", "localhost")
     if not calkit.environments.host_is_local(env_host):
-        raise_error(
-            f"Environment '{environment}' is for host '{env_host}', "
-            f"but this is '{socket.gethostname()}'"
-        )
+        import calkit.workspace as workspace
+
+        ck_info_full = calkit.load_calkit_info()
+        try:
+            ws = workspace.Workspace.from_env(
+                env=env, env_name=environment, ck_info=ck_info_full
+            )
+            ws = workspace.resolve_wdir(ws)
+            # Re-run this same invocation over there. It terminates rather
+            # than bouncing onward, since on the cluster the env's host is
+            # local and this branch isn't taken.
+            remote_command = "calkit " + shlex.join(sys.argv[1:])
+            workspace.run_in_workspace(
+                workspace=ws,
+                command=remote_command,
+                job_key=f"{environment}::{name}",
+                label=f"{environment} job '{name}'",
+                send=list(deps or []),
+                get=list(outs or []),
+                echo=typer.echo,
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
+        return
     # Apply env defaults per mode
     env_setup_cmds = env.get("default_setup", []) or []
     if env_default_setup == "merge" and env_setup_cmds:

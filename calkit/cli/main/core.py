@@ -8,7 +8,6 @@ import logging
 import os
 import platform as _platform
 import posixpath
-import shlex
 import shutil
 import signal
 import subprocess
@@ -447,7 +446,24 @@ def get_status(
     import git
     from git.exc import InvalidGitRepositoryError
 
+    dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
+    # Status is usually the first command someone runs on a project that
+    # isn't theirs, which is exactly when the variables it declares are
+    # missing. Ask while there's somebody to answer -- the environment
+    # checks below need them. Unlike 'calkit run', status reports rather
+    # than enforces, so anything still unset is a warning: it must not stop
+    # the rest of the status from being shown.
+    if ck_info:
+        missing_env_vars = calkit.dependencies.resolve_env_var_deps(ck_info)
+        if missing_env_vars:
+            warn(
+                "Missing environmental variable(s): "
+                + ", ".join(missing_env_vars)
+                + ". Set with 'calkit set-env-var <name> <value>'.",
+                # Keep machine-readable output on stdout uncorrupted
+                err=as_json,
+            )
     # If there's anything in ck_info and this isn't a Git repo, initialize one.
     # Use search_parent_directories so a subproject folder inside a parent repo
     # is discovered correctly rather than getting a new git init.
@@ -2970,120 +2986,33 @@ def run_in_env(
         import calkit.workspace as workspace
 
         try:
-            ws = workspace.Workspace.from_env(env=env, env_name=env_name)
-        except ValueError as e:
+            ws = workspace.Workspace.from_env(
+                env=env,
+                env_name=env_name,
+                ck_info=ck_info,
+            )
+            # The default workspace lives under the connecting user's home,
+            # which only that machine can resolve
+            ws = workspace.resolve_wdir(ws, verbose=verbose)
+        except (ValueError, subprocess.CalledProcessError) as e:
             raise_error(str(e))
         repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
-        # The stage's own wdir is relative to the workspace, the same way it
-        # is relative to the project root locally
-        remote_run_wdir = ws.path(wdir) if wdir else ws.wdir
-        # Run with nohup so we can disconnect
-        # TODO: Should we collect output instead of send to /dev/null?
-        remote_cmd = (
-            f"cd '{remote_run_wdir}' ; nohup {remote_shell_cmd} "
-            "> /dev/null 2>&1 & echo $! "
-        )
-        # Check to see if we've already submitted a job with this command
-        jobs_fpath = ".calkit/jobs.yaml"
-        job_key = f"{env_name}::{remote_shell_cmd}"
-        remote_pid = None
-        if os.path.isfile(jobs_fpath):
-            with open(jobs_fpath) as f:
-                jobs = calkit.ryaml.load(f)
-            if jobs is None:
-                jobs = {}
-        else:
-            jobs = {}
-        job = jobs.get(job_key, {})
-        remote_pid = job.get("remote_pid")
-        snapshot = job.get("snapshot")
-        if remote_pid is None:
-            typer.echo("Ensuring workspace directory exists")
-            subprocess.check_call(
-                ws.ssh_argv(f"mkdir -p {shlex.quote(ws.wdir)}")
-            )
-            # Put the workspace on exactly this working tree
-            snapshot = workspace.create_snapshot(repo=repo)
-            typer.echo(f"Sending workspace snapshot {snapshot[:8]}")
-            workspace.send_snapshot(
-                workspace=ws, sha=snapshot, repo=repo, verbose=verbose
-            )
-            # Whatever the snapshot doesn't carry is data DVC tracks, which
-            # is ignored by Git and so has to go separately
-            to_send = workspace.paths_to_transfer(list(send or []), repo=repo)
-            if to_send:
-                typer.echo(f"Sending {len(to_send)} data path(s)")
-                workspace.send_paths(
-                    workspace=ws, paths=to_send, verbose=verbose
-                )
-            typer.echo(f"Running remote command: {remote_shell_cmd}")
-            if verbose:
-                typer.echo(f"Full command: {remote_cmd}")
-            remote_pid = (
-                subprocess.check_output(ws.ssh_argv(remote_cmd))
-                .decode()
-                .strip()
-            )
-            typer.echo(f"Running with remote PID: {remote_pid}")
-            # Save PID to jobs database so we can resume waiting
-            typer.echo("Updating jobs database")
-            os.makedirs(".calkit", exist_ok=True)
-            job["remote_pid"] = remote_pid
-            job["snapshot"] = snapshot
-            job["submitted"] = time.time()
-            job["finished"] = None
-            jobs[job_key] = job
-            with open(jobs_fpath, "w") as f:
-                calkit.ryaml.dump(jobs, f)
-        # Now wait for the job to complete
-        typer.echo(f"Waiting for remote PID {remote_pid} to finish")
-        ps_cmd = ws.ssh_argv(f"ps -p {shlex.quote(str(remote_pid))}")
-        finished = False
-        while not finished:
-            try:
-                subprocess.check_output(ps_cmd)
-                finished = False
-                time.sleep(2)
-            except subprocess.CalledProcessError:
-                finished = True
-                typer.echo("Remote process finished")
-        # DVC hashes this stage's dependencies from the local files once we
-        # return. If they moved while the stage ran elsewhere, recording the
-        # result would pair inputs that were never used with outputs they
-        # never produced, and that lock file reads as up to date forever --
-        # worse than the stage staying stale, because it never announces
-        # itself. Refuse instead.
-        if snapshot is not None and not workspace.working_tree_matches(
-            snapshot, repo=repo
-        ):
-            raise_error(
-                "The project changed while this stage was running on "
-                f"'{ws.host}', so its outputs no longer correspond to what "
-                "is here. Nothing was collected; rerun the stage."
-            )
-        # Now collect what the stage produced
-        # TODO: Figure out how to do this in one command
-        # Getting the syntax right is troublesome since it appears to work
-        # differently on different platforms
-        if get:
-            typer.echo(f"Collecting {len(get)} output path(s)")
-            workspace.fetch_paths(
-                workspace=ws, paths=list(get), verbose=verbose
-            )
-        # Leave the workspace holding only what it is running
         try:
-            workspace.prune_remote_snapshots(workspace=ws, verbose=verbose)
-        except subprocess.CalledProcessError:
-            warn("Failed to clean up workspace snapshots")
-        # Now delete the remote PID from the jobs file
-        typer.echo("Updating jobs database")
-        os.makedirs(".calkit", exist_ok=True)
-        job["remote_pid"] = None
-        job["finished"] = time.time()
-        jobs[job_key] = job
-        with open(jobs_fpath, "w") as f:
-            calkit.ryaml.dump(jobs, f)
+            workspace.run_in_workspace(
+                workspace=ws,
+                command=remote_shell_cmd,
+                job_key=f"{env_name}::{remote_shell_cmd}",
+                label=env_name,
+                wdir=wdir,
+                send=list(send or []),
+                get=list(get or []),
+                repo=repo,
+                echo=typer.echo,
+                verbose=verbose,
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
     elif env["kind"] == "renv":
         from calkit.cli.check import check_renv
 
@@ -3221,18 +3150,18 @@ def run_in_env(
         if not no_check:
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
-        # The env's workspace is where the project lives on this host, and
-        # the stage's own wdir is relative to it
-        run_wdir = env.get("wdir")
-        if run_wdir is not None:
-            run_wdir = os.path.expanduser(os.path.expandvars(run_wdir))
-        if wdir is not None:
-            run_wdir = os.path.join(run_wdir, wdir) if run_wdir else wdir
+        # The env's 'wdir' is deliberately ignored here. It says where to
+        # put the project when it has to be sent to another machine; we are
+        # already on that machine, in a checkout of the project, and that
+        # checkout is the one the user is working in. Running in the
+        # tool-managed workspace instead would execute a different copy of
+        # the project from the one DVC is about to hash. Only the stage's
+        # own wdir, which is relative to the project root, applies.
         shell_cmd = _to_shell_cmd(cmd)
         if verbose:
             typer.echo(f"Running command: {shell_cmd}")
         try:
-            subprocess.check_call(shell_cmd, shell=True, cwd=run_wdir)
+            subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in system environment")
     else:

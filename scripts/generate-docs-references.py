@@ -33,6 +33,8 @@ from calkit.models.core import (
 )
 from calkit.models.pipeline import Stage
 
+SYSTEM_LOCK_START = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->"
+SYSTEM_LOCK_END = "<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->"
 ENV_START = "<!-- AUTO-GENERATED: ENV-KINDS:START -->"
 ENV_END = "<!-- AUTO-GENERATED: ENV-KINDS:END -->"
 STAGE_START = "<!-- AUTO-GENERATED: PIPELINE-STAGE-KINDS:START -->"
@@ -934,6 +936,35 @@ def _remove_legacy_combined_block(content: str) -> str:
     return content
 
 
+def generate_system_lock_properties_markdown() -> str:
+    """Table of the machine properties a ``system`` environment can lock."""
+    from calkit.environments import (
+        SYSTEM_LOCK_PROPERTIES,
+        SYSTEM_LOCK_PROPERTY_DESCRIPTIONS,
+        SYSTEM_LOCK_PROPERTY_PLATFORMS,
+    )
+
+    rows = []
+    for prop in SYSTEM_LOCK_PROPERTIES:
+        description = SYSTEM_LOCK_PROPERTY_DESCRIPTIONS.get(prop, "")
+        only_on = SYSTEM_LOCK_PROPERTY_PLATFORMS.get(prop)
+        if only_on:
+            # platform.system() names, spelled the way people say them
+            friendly = {"Darwin": "macOS"}.get(only_on, only_on)
+            description = f"{description} {friendly} only.".strip()
+        rows.append((f"`{prop}`", description))
+    # No leading newline: _replace_marked_block already separates the block
+    # from its markers, and an extra blank line here is one Prettier strips
+    # right back out -- leaving the generator and the formatter undoing each
+    # other on every commit.
+    return (
+        "The properties that can be locked are:\n\n"
+        + make_table(rows, ["Property", "Description"]).rstrip()
+        + "\n\nRun `calkit describe system` to see what these are on the "
+        "machine you're on.\n"
+    )
+
+
 def main() -> None:
     repo_root = Path(__file__).resolve().parent.parent
 
@@ -949,6 +980,12 @@ def main() -> None:
         ENV_START,
         ENV_END,
         generate_environment_kinds_markdown(),
+    )
+    env_content = _replace_marked_block(
+        env_content,
+        SYSTEM_LOCK_START,
+        SYSTEM_LOCK_END,
+        generate_system_lock_properties_markdown(),
     )
     env_doc.write_text(env_content, encoding="utf-8")
 

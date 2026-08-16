@@ -104,6 +104,17 @@ def check_calkit_version(spec: str) -> None:
         return
     if current in spec_set:
         return
+    # A development build of X sorts *before* X under PEP 440, so someone
+    # running a dev build of the very version a project asks for would be
+    # told to upgrade to what they are already running -- which is exactly
+    # the position anyone working on Calkit itself is in. Judge it by the
+    # release it is a development of.
+    if current.is_devrelease or current.is_prerelease:
+        try:
+            if Version(current.base_version) in spec_set:
+                return
+        except InvalidVersion:
+            pass
     suggested = _suggest_version_from_spec(spec_str)
     msg = (
         f"calkit{spec_str} required, but installed version is "
@@ -322,6 +333,53 @@ def prompt_and_store_env_var(
     os.environ[name] = value
     _ensure_env_gitignored(dotenv_path)
     return value
+
+
+def _env_var_dep_default(name: str, deps: list) -> str | None:
+    """The default declared for an env-var dependency, if it has one."""
+    for dep in deps:
+        if not isinstance(dep, dict):
+            continue
+        if dep.get("name") == name:
+            return dep.get("default")
+        if list(dep.keys()) == [name]:
+            return (dep[name] or {}).get("default")
+    return None
+
+
+def resolve_env_var_deps(
+    ck_info: dict,
+    interactive: bool | None = None,
+) -> list[str]:
+    """Set any declared env-var dependencies that aren't set yet.
+
+    A project shares its ``calkit.yaml`` but not its ``.env``, so the
+    variables it declares are the first thing missing for anyone but its
+    author. Asking on a terminal turns that from an error someone has to
+    decode into a question they can answer.
+
+    Returns the names still unset, so a caller that reports rather than
+    enforces -- ``calkit status``, say -- can mention them without failing.
+    """
+    import calkit
+
+    if interactive is None:
+        interactive = _is_interactive()
+    deps = ck_info.get("dependencies", []) or []
+    missing = []
+    for name in calkit.get_env_var_dep_names(ck_info):
+        if os.environ.get(name):
+            continue
+        if not interactive:
+            missing.append(name)
+            continue
+        print(f"Missing env var '{name}'")
+        value = prompt_and_store_env_var(
+            name, default=_env_var_dep_default(name, deps)
+        )
+        if value is None:
+            missing.append(name)
+    return missing
 
 
 def _ensure_env_gitignored(dotenv_path: str) -> None:

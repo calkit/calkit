@@ -203,36 +203,208 @@ def test_working_tree_matches_catches_edits_during_a_remote_run(tmp_dir):
     assert ws.working_tree_matches(sent, repo=repo)
 
 
-def test_workspace_from_env_requires_somewhere_to_run():
-    # Guessing a user or a directory would run the stage somewhere the
-    # project never named
-    for env in [
-        {"kind": "system", "host": "box"},
-        {"kind": "system", "host": "box", "user": "me"},
-        {"kind": "system", "host": "box", "wdir": "/w"},
-    ]:
-        with pytest.raises(ValueError, match="'user'.*'wdir'"):
-            ws.Workspace.from_env(env=env, env_name="remote")
+def test_workspace_from_env_needs_only_a_host():
+    # A host is the one thing the project has to say. Repeating the user
+    # here would just be a second place for it to be wrong, so it's left to
+    # SSH, which resolves it from ~/.ssh/config or the current account.
+    w = ws.Workspace.from_env(
+        env={"kind": "system", "host": "box.example.org"},
+        env_name="remote",
+        ck_info={"name": "example-ssh", "owner": "calkit"},
+    )
+    assert w.target == "box.example.org"
+    assert w.user is None
+    # And the workspace lands somewhere predictable rather than needing a
+    # path spelled out that would be the same on every machine
+    assert w.wdir == ".calkit/workspaces/calkit.io/calkit/example-ssh"
+    # Declaring them still works, and wins
     w = ws.Workspace.from_env(
         env={
             "kind": "system",
             "host": "box.example.org",
             "user": "me",
             "wdir": "/home/me/proj",
-            "key": "~/.ssh/id_ed25519",
+            "ssh_key": "~/.ssh/id_ed25519",
         },
         env_name="remote",
+        ck_info={"name": "example-ssh", "owner": "calkit"},
     )
     assert w.target == "me@box.example.org"
     # Pushed straight to the workspace, so snapshots never touch whatever
     # remote the project is hosted on
     assert w.git_url == "ssh://me@box.example.org/home/me/proj"
-    assert w.key is not None and w.key.startswith(os.path.expanduser("~"))
+    assert w.ssh_key is not None
+    assert w.ssh_key.startswith(os.path.expanduser("~"))
     assert w.ssh_options[0] == "-i"
     assert w.git_ssh_command.startswith("ssh -i ")
     assert w.ssh_argv("ls")[:1] == ["ssh"]
     assert w.ssh_argv("ls")[-2:] == ["me@box.example.org", "ls"]
     assert w.path("sub") == "/home/me/proj/sub"
+
+
+def test_workspace_from_env_still_needs_somewhere_to_run():
+    # Without a host there is nothing to reach
+    with pytest.raises(ValueError, match="no host"):
+        ws.Workspace.from_env(env={"kind": "system"}, env_name="remote")
+    # A nameless project can't have a directory derived for it, and picking
+    # one anyway would run the stage somewhere it never named
+    with pytest.raises(ValueError, match="'wdir'"):
+        ws.Workspace.from_env(
+            env={"kind": "system", "host": "box"}, env_name="remote"
+        )
+
+
+def test_resolve_wdir_expands_against_the_far_ends_home(monkeypatch):
+    # The default workspace is relative to the connecting user's home, which
+    # only that machine can resolve; an ssh:// URL and a cd both need it
+    # absolute
+    calls = []
+
+    def fake_check_output(argv, *a, **kw):
+        calls.append(argv)
+        return b"/home/parallels\n"
+
+    monkeypatch.setattr(ws.subprocess, "check_output", fake_check_output)
+    w = ws.Workspace(host="box", wdir="calkit/example-ssh")
+    resolved = ws.resolve_wdir(w)
+    assert resolved.wdir == "/home/parallels/calkit/example-ssh"
+    assert resolved.git_url == "ssh://box/home/parallels/calkit/example-ssh"
+    assert calls and calls[0][-1] == "echo $HOME"
+    # A tilde means the same thing
+    assert (
+        ws.resolve_wdir(ws.Workspace(host="box", wdir="~/work")).wdir
+        == "/home/parallels/work"
+    )
+    assert ws.resolve_wdir(ws.Workspace(host="box", wdir="~")).wdir == (
+        "/home/parallels"
+    )
+    # An absolute one is already unambiguous, so nothing is asked
+    calls.clear()
+    already = ws.Workspace(host="box", wdir="/abs/dir")
+    assert ws.resolve_wdir(already) is already
+    assert calls == []
+
+
+def test_check_connection_refuses_to_sit_at_a_prompt(monkeypatch):
+    # BatchMode is what makes this a check rather than a hang waiting for a
+    # password, which is the whole reason it can run during 'calkit run'
+    seen = []
+    monkeypatch.setattr(
+        ws.subprocess,
+        "run",
+        lambda argv, **kw: (
+            seen.append(argv) or subprocess.CompletedProcess(argv, 0)
+        ),
+    )
+    ws.check_connection(ws.Workspace(host="box", user="me", wdir="/w"))
+    assert "BatchMode=yes" in seen[0]
+    assert "ConnectTimeout=10" in seen[0]
+
+
+def test_ensure_calkit_installed_offers_to_install_it_there(monkeypatch):
+    w = ws.Workspace(host="box", wdir="/w")
+    monkeypatch.setattr(ws, "has_calkit", lambda ws_: True)
+    assert ws.ensure_calkit_installed(w, interactive=False, required=True)
+    # Missing but never called: don't block on a tool this run doesn't use
+    monkeypatch.setattr(ws, "has_calkit", lambda ws_: False)
+    assert not ws.ensure_calkit_installed(w, interactive=False, required=False)
+    # Missing and needed, with nobody to ask: give the command
+    with pytest.raises(ValueError, match="install.calkit.org"):
+        ws.ensure_calkit_installed(w, interactive=False, required=True)
+    # At a terminal, offer to run it there
+    ran = []
+    seen = [False]
+
+    def has(ws_):
+        return seen[0]
+
+    monkeypatch.setattr(ws, "has_calkit", has)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+
+    def run(argv, **kw):
+        ran.append(argv)
+        seen[0] = True
+
+    monkeypatch.setattr(ws, "_run", run)
+    assert ws.ensure_calkit_installed(w, interactive=True, required=True)
+    assert ran and "install.calkit.org" in " ".join(ran[0])
+
+
+def _ssh_failure(stderr: str):
+    def run(argv, **kw):
+        raise subprocess.CalledProcessError(255, argv, stderr=stderr.encode())
+
+    return run
+
+
+def test_check_connection_tells_the_failures_apart(monkeypatch):
+    # SSH refuses for more than one reason and the fixes differ, so
+    # reporting every failure as an unauthorized key sends people down the
+    # wrong path
+    w = ws.Workspace(host="box", wdir="/w", ssh_key="/k")
+    monkeypatch.setattr(
+        ws.subprocess, "run", _ssh_failure("Host key verification failed.")
+    )
+    with pytest.raises(ws.HostKeyUnknown, match="ssh box"):
+        ws.check_connection(w)
+    monkeypatch.setattr(
+        ws.subprocess,
+        "run",
+        _ssh_failure("@ REMOTE HOST IDENTIFICATION HAS CHANGED! @"),
+    )
+    with pytest.raises(ws.HostKeyChanged, match="ssh-keygen -R box"):
+        ws.check_connection(w)
+    monkeypatch.setattr(
+        ws.subprocess, "run", _ssh_failure("Permission denied (publickey).")
+    )
+    with pytest.raises(ws.ConnectionProblem) as excinfo:
+        ws.check_connection(w)
+    # ssh-copy-id takes the key with -i, ssh-add takes it positionally
+    assert "ssh-copy-id -i /k box" in str(excinfo.value)
+    assert "ssh-add /k" in str(excinfo.value)
+
+
+def test_ensure_reachable_never_papers_over_a_changed_host_key(monkeypatch):
+    # A changed key is what both a rebuilt VM and a machine-in-the-middle
+    # look like, and only the user can tell those apart
+    w = ws.Workspace(host="box", wdir="/w")
+
+    def changed(ws_):
+        raise ws.HostKeyChanged("changed")
+
+    monkeypatch.setattr(ws, "check_connection", changed)
+    monkeypatch.setattr(
+        "builtins.input", lambda *a: pytest.fail("offered to fix it")
+    )
+    ran = []
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
+    with pytest.raises(ws.HostKeyChanged):
+        ws.ensure_reachable(w, interactive=True)
+    assert ran == []
+
+
+def test_ensure_reachable_lets_ssh_show_the_fingerprint(monkeypatch):
+    # An unknown host is verified by the user, not accepted on their behalf
+    w = ws.Workspace(host="box", wdir="/w")
+    attempts = []
+
+    def unknown_then_fine(ws_):
+        attempts.append(ws_)
+        if len(attempts) == 1:
+            raise ws.HostKeyUnknown("unknown")
+
+    monkeypatch.setattr(ws, "check_connection", unknown_then_fine)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+    ran = []
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
+    ws.ensure_reachable(w, interactive=True)
+    assert ran and ran[0][0] == "ssh"
+    # Neither of these may appear: they would skip the very check the
+    # prompt exists to perform
+    joined = " ".join(ran[0])
+    assert "BatchMode" not in joined
+    assert "StrictHostKeyChecking" not in joined
+    assert len(attempts) == 2
 
 
 def test_workspace_without_a_key_omits_ssh_options():
@@ -264,7 +436,6 @@ def test_paths_to_transfer_skips_what_the_snapshot_carries(tmp_dir):
     assert ws.paths_to_transfer([], repo=repo) == []
 
 
-@skipif_windows_remote_shell
 def test_prune_command_cleans_a_workspace_without_touching_its_checkout(
     tmp_dir,
 ):
@@ -307,3 +478,400 @@ def test_prune_command_is_quoted_and_scoped():
     # And whatever the workspace is sitting on is spared
     assert "git rev-parse HEAD" in cmd
     assert '"$obj" != "$head"' in cmd
+
+
+def test_remote_system_info_reads_the_machine_that_runs_the_stage(
+    monkeypatch,
+):
+    # A system env's lock describes the machine the results depend on, which
+    # is the far end, not this one
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, *a, **kw: b'{"cpu_count": 64, "os": "Linux"}',
+    )
+    w = ws.Workspace(host="box", wdir="/w")
+    assert ws.remote_system_info(w) == {"cpu_count": 64, "os": "Linux"}
+
+    # Calkit has to be there to answer; say so rather than failing obscurely
+    def fail(argv, *a, **kw):
+        raise subprocess.CalledProcessError(127, argv)
+
+    monkeypatch.setattr(ws.subprocess, "check_output", fail)
+    with pytest.raises(ValueError, match="requires Calkit on that machine"):
+        ws.remote_system_info(w)
+
+
+def test_expand_with_prompts_asks_for_what_the_environment_lacks(
+    tmp_dir, monkeypatch
+):
+    # A project shares calkit.yaml but not .env, so ${CK_SSH_HOST} is the
+    # first thing to be missing for anyone but its author
+    monkeypatch.delenv("CK_SSH_HOST", raising=False)
+    monkeypatch.setattr("builtins.input", lambda *a: "box.example.org")
+    assert (
+        ws.expand_with_prompts(
+            "${CK_SSH_HOST}", interactive=True, described_as="the host"
+        )
+        == "box.example.org"
+    )
+    # Stored, so it's only asked once, and kept out of Git
+    assert os.environ["CK_SSH_HOST"] == "box.example.org"
+    with open(".env") as f:
+        assert "CK_SSH_HOST" in f.read()
+    # Already set means no question
+    monkeypatch.setattr("builtins.input", lambda *a: pytest.fail("asked"))
+    assert (
+        ws.expand_with_prompts(
+            "${CK_SSH_HOST}", interactive=True, described_as="the host"
+        )
+        == "box.example.org"
+    )
+    # With nobody to answer, say what to set rather than trying a host
+    # literally named '${CK_SSH_KEY}'
+    monkeypatch.delenv("CK_SSH_KEY", raising=False)
+    with pytest.raises(ValueError, match="calkit set-env-var CK_SSH_KEY"):
+        ws.expand_with_prompts(
+            "${CK_SSH_KEY}", interactive=False, described_as="the key"
+        )
+
+
+def test_ensure_reachable_offers_to_authorize_this_machine(monkeypatch):
+    w = ws.Workspace(host="box", wdir="/w", ssh_key="/tmp/k")
+    # Already reachable: nothing is asked and nothing is changed
+    monkeypatch.setattr(ws, "check_connection", lambda ws_: None)
+    monkeypatch.setattr(
+        "builtins.input", lambda *a: pytest.fail("asked needlessly")
+    )
+    ws.ensure_reachable(w, interactive=True)
+
+    # Unreachable with nobody watching: fail with the commands to run,
+    # since a pipeline in CI has nobody to answer
+    def unreachable(ws_):
+        raise ws.ConnectionProblem("Could not connect; run ssh-copy-id")
+
+    monkeypatch.setattr(ws, "check_connection", unreachable)
+    with pytest.raises(ValueError, match="ssh-copy-id"):
+        ws.ensure_reachable(w, interactive=False)
+    # Unreachable at a terminal, and the user declines: their answer stands
+    monkeypatch.setattr(os.path, "isfile", lambda p: True)
+    monkeypatch.setattr("builtins.input", lambda *a: "n")
+    with pytest.raises(ValueError, match="ssh-copy-id"):
+        ws.ensure_reachable(w, interactive=True)
+    # Accepting runs ssh-copy-id, then confirms it actually took rather
+    # than trusting the copy
+    ran = []
+    attempts = []
+
+    def sometimes(ws_):
+        attempts.append(ws_)
+        if len(attempts) == 1:
+            raise ws.ConnectionProblem("Could not connect; run ssh-copy-id")
+
+    monkeypatch.setattr(ws, "check_connection", sometimes)
+    monkeypatch.setattr("builtins.input", lambda *a: "y")
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: ran.append(argv))
+    ws.ensure_reachable(w, interactive=True)
+    assert ran and ran[0][0] == "ssh-copy-id"
+    assert "-i" in ran[0] and "box" in ran[0]
+    assert len(attempts) == 2
+
+
+def test_default_wdir_is_qualified_and_tool_managed():
+    # A host is shared, so two projects named the same from different
+    # owners must not land on one checkout
+    mine = ws.default_wdir(
+        {"name": "example-ssh", "owner": "calkit", "hub": "calkit.io"}
+    )
+    theirs = ws.default_wdir(
+        {"name": "example-ssh", "owner": "someone-else", "hub": "calkit.io"}
+    )
+    assert mine == ".calkit/workspaces/calkit.io/calkit/example-ssh"
+    assert mine != theirs
+    # Hidden and tool-managed, because transfers check out with --force:
+    # a path that looks like the user's own checkout is one whose edits we
+    # would silently destroy
+    assert mine.startswith(".calkit/workspaces/")
+    # A hub may be written with a scheme, and a project may have neither
+    # hub nor owner
+    assert (
+        ws.default_wdir(
+            {"name": "p", "owner": "o", "hub": "https://hub.example.org/"}
+        )
+        == ".calkit/workspaces/hub.example.org/o/p"
+    )
+    assert ws.default_wdir({"name": "p"}).startswith(
+        ".calkit/workspaces/calkit.io/"
+    )
+    # These come from a config file, so they can't be trusted to be
+    # well-behaved directory names
+    escaped = ws.default_wdir(
+        {"name": "../evil", "owner": "..", "hub": "x/../y"}
+    )
+    assert ".." not in escaped.split("/")
+    assert escaped.startswith(".calkit/workspaces/")
+    with pytest.raises(ValueError, match="no name"):
+        ws.default_wdir({})
+
+
+def test_lock_is_beside_the_workspace_not_inside_it():
+    # Inside would put it in the checkout that transfers overwrite, and in
+    # the project whose files the stage reads
+    assert (
+        ws.lock_path("/home/me/.calkit/workspaces/h/o/p")
+        == "/home/me/.calkit/workspaces/h/o/p.lock"
+    )
+    assert ws.lock_path("/w/") == "/w.lock"
+
+
+def test_acquire_lock_takes_turns_and_says_who_has_it(monkeypatch):
+    w = ws.Workspace(host="box", wdir="/w")
+    # mkdir is the gate because it's atomic; winning it means it's ours
+    monkeypatch.setattr(
+        ws.subprocess, "check_output", lambda argv, **kw: b"ACQUIRED\n"
+    )
+    ws.acquire_lock(w, holder="abc", info="stage x")
+    # Held by this same run, e.g. waiting again on a job dispatched
+    # earlier, is not a conflict with ourselves
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: b"HELD\tabc\tstage x from laptop\n",
+    )
+    ws.acquire_lock(w, holder="abc", info="stage x")
+    # Held by someone else: say who, and how to clear it if they're gone
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: b"HELD\tzzz\tother-stage from server\n",
+    )
+    with pytest.raises(ws.WorkspaceBusy) as excinfo:
+        ws.acquire_lock(w, holder="abc", info="stage x")
+    assert "other-stage from server" in str(excinfo.value)
+    assert "rm -rf /w.lock" in str(excinfo.value)
+    # A login banner ahead of the answer must not be mistaken for one
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: b"Welcome to Ubuntu\nACQUIRED\n",
+    )
+    ws.acquire_lock(w, holder="abc", info="stage x")
+
+
+def test_holds_snapshot_guards_against_a_workspace_that_moved(monkeypatch):
+    w = ws.Workspace(host="box", wdir="/w")
+    sha = "a" * 40
+    monkeypatch.setattr(
+        ws.subprocess, "check_output", lambda argv, **kw: (sha + "\n").encode()
+    )
+    assert ws.holds_snapshot(w, sha)
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: (("b" * 40) + "\n").encode(),
+    )
+    assert not ws.holds_snapshot(w, sha)
+
+    # An unreachable or non-repo workspace is not proof it's on our commit
+    def fail(argv, **kw):
+        raise subprocess.CalledProcessError(128, argv)
+
+    monkeypatch.setattr(ws.subprocess, "check_output", fail)
+    assert not ws.holds_snapshot(w, sha)
+
+
+def test_login_argv_runs_the_way_logging_in_would():
+    # ssh gives a non-login, non-interactive shell, so ~/.local/bin -- where
+    # Calkit's own installer puts it -- is not on PATH
+    w = ws.Workspace(host="box", wdir="/w")
+    argv = w.login_argv("command -v calkit")
+    assert argv[0] == "ssh"
+    assert argv[-2] == "box"
+    assert argv[-1].startswith("bash -lc ")
+    assert "command -v calkit" in argv[-1]
+
+
+def test_run_in_workspace_survives_a_disconnect(tmp_dir, monkeypatch):
+    # The whole point of dispatching detached: losing the connection, or
+    # stopping the pipeline, must not kill the work, and running again has
+    # to pick the same job back up rather than starting a second one
+    repo = _init_repo()
+    w = ws.Workspace(host="box", wdir="/w")
+    monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
+    released = []
+    monkeypatch.setattr(
+        ws, "release_lock", lambda ws_, holder, **kw: released.append(holder)
+    )
+    monkeypatch.setattr(ws, "send_snapshot", lambda **kw: None)
+    monkeypatch.setattr(ws, "send_paths", lambda **kw: None)
+    monkeypatch.setattr(ws, "prune_remote_snapshots", lambda **kw: None)
+    monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: True)
+    fetched = []
+    monkeypatch.setattr(
+        ws, "fetch_paths", lambda workspace, paths, **kw: fetched.extend(paths)
+    )
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
+    monkeypatch.setattr(ws.time, "sleep", lambda s: None)
+    dispatched = []
+    alive = [True]
+
+    def check_output(argv, **kw):
+        joined = " ".join(argv)
+        if "nohup" in joined:
+            dispatched.append(joined)
+            return b"Welcome to Ubuntu\n4242\n"
+        if "ps -p" in joined:
+            if alive[0]:
+                alive[0] = False
+                return b"  PID TTY\n 4242 ?\n"
+            raise subprocess.CalledProcessError(1, argv)
+        raise AssertionError(f"unexpected: {joined}")
+
+    monkeypatch.setattr(ws.subprocess, "check_output", check_output)
+    ws.run_in_workspace(
+        workspace=w,
+        command="calkit scheduler batch --name sim -- ./run.sh",
+        job_key="cluster::sim",
+        label="cluster",
+        get=["results"],
+        repo=repo,
+        echo=lambda *a: None,
+    )
+    # Started detached, and the PID survives a login banner on stdout
+    assert len(dispatched) == 1 and "nohup" in dispatched[0]
+    assert fetched == ["results"]
+    assert released
+    # The job is recorded so a later run can find it again
+    jobs = ws._load_jobs(ws.JOBS_FPATH)
+    assert "cluster::sim" in jobs
+    assert jobs["cluster::sim"]["remote_pid"] is None
+    assert jobs["cluster::sim"]["snapshot"]
+
+
+def test_run_in_workspace_resumes_instead_of_starting_a_second_job(
+    tmp_dir, monkeypatch
+):
+    repo = _init_repo()
+    w = ws.Workspace(host="box", wdir="/w")
+    snapshot = ws.create_snapshot(repo=repo)
+    # Stand in for a previous run that was interrupted while waiting
+    ws._save_jobs(
+        ws.JOBS_FPATH,
+        {"cluster::sim": {"remote_pid": "4242", "snapshot": snapshot}},
+    )
+    monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "release_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "prune_remote_snapshots", lambda **kw: None)
+    monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: True)
+    monkeypatch.setattr(ws, "_run", lambda argv, **kw: None)
+    monkeypatch.setattr(ws.time, "sleep", lambda s: None)
+
+    def no_dispatch(**kw):
+        pytest.fail("started a second job instead of waiting for the first")
+
+    monkeypatch.setattr(ws, "send_snapshot", no_dispatch)
+
+    def check_output(argv, **kw):
+        joined = " ".join(argv)
+        assert "nohup" not in joined, "resubmitted an already-running job"
+        raise subprocess.CalledProcessError(1, argv)  # already finished
+
+    monkeypatch.setattr(ws.subprocess, "check_output", check_output)
+    ws.run_in_workspace(
+        workspace=w,
+        command="whatever",
+        job_key="cluster::sim",
+        label="cluster",
+        repo=repo,
+        echo=lambda *a: None,
+    )
+    assert ws._load_jobs(ws.JOBS_FPATH)["cluster::sim"]["remote_pid"] is None
+
+
+def test_run_in_workspace_refuses_results_from_a_moved_workspace(
+    tmp_dir, monkeypatch
+):
+    repo = _init_repo()
+    w = ws.Workspace(host="box", wdir="/w")
+    snapshot = ws.create_snapshot(repo=repo)
+    ws._save_jobs(
+        ws.JOBS_FPATH,
+        {"c::s": {"remote_pid": "1", "snapshot": snapshot}},
+    )
+    monkeypatch.setattr(ws, "acquire_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws, "release_lock", lambda *a, **kw: None)
+    monkeypatch.setattr(ws.time, "sleep", lambda s: None)
+    monkeypatch.setattr(
+        ws.subprocess,
+        "check_output",
+        lambda argv, **kw: (_ for _ in ()).throw(
+            subprocess.CalledProcessError(1, argv)
+        ),
+    )
+    # The workspace is no longer on the commit we sent it, so its outputs
+    # came from something this run never sent
+    monkeypatch.setattr(ws, "holds_snapshot", lambda ws_, sha: False)
+    monkeypatch.setattr(
+        ws, "fetch_paths", lambda **kw: pytest.fail("collected anyway")
+    )
+    with pytest.raises(ws.WorkspaceStateChanged, match="no longer on the"):
+        ws.run_in_workspace(
+            workspace=w,
+            command="whatever",
+            job_key="c::s",
+            label="c",
+            get=["results"],
+            repo=repo,
+            echo=lambda *a: None,
+        )
+
+
+def test_changed_deps_only_cares_about_the_job_s_dependencies(tmp_dir):
+    # Hashing deps at dispatch and comparing when the job finishes is the
+    # same check a scheduler job makes about its own validity
+    _init_repo()
+    os.makedirs("scripts", exist_ok=True)
+    with open("scripts/collect.py", "w") as f:
+        f.write("print('one')\n")
+    with open("README.md", "w") as f:
+        f.write("unrelated\n")
+    deps = ["scripts/collect.py"]
+    before = ws.dep_md5s(deps)
+    assert ws.changed_deps(before, deps) == []
+    # An untracked dependency still counts -- it was sent, so it matters.
+    # (A plain 'git diff <commit> -- path' would call it deleted.)
+    assert "scripts/collect.py" in before
+    # Editing something the job never read must not discard a finished job
+    with open("README.md", "w") as f:
+        f.write("edited while the job ran\n")
+    assert ws.changed_deps(before, deps) == []
+    # Editing what it did read must
+    with open("scripts/collect.py", "w") as f:
+        f.write("print('two')\n")
+    assert ws.changed_deps(before, deps) == ["scripts/collect.py"]
+    # So must deleting it
+    os.remove("scripts/collect.py")
+    assert ws.changed_deps(before, deps) == ["scripts/collect.py"]
+    # A job with no declared deps has nothing to invalidate
+    assert ws.changed_deps({}, []) == []
+
+
+def test_hosts_work_the_same_written_as_a_name_or_an_address():
+    # A project writes its machine down whichever way is convenient, and
+    # neither form should be second class
+    for host in ["cluster.example.org", "10.211.55.5"]:
+        w = ws.Workspace(host=host, user="me", wdir="/home/me/p")
+        assert w.git_url == f"ssh://me@{host}/home/me/p"
+        assert w.scp_to_argv(["a"], "/d")[-1] == f"me@{host}:/d"
+        assert w.ssh_argv("ls")[-2] == f"me@{host}"
+    # An IPv6 literal is all colons, which is what separates a host from a
+    # port, so a URL has to bracket it or it isn't a URL at all
+    w = ws.Workspace(host="::1", user="me", wdir="/home/me/p")
+    assert w.git_url == "ssh://me@[::1]/home/me/p"
+    assert w.scp_to_argv(["a"], "/d")[-1] == "me@[::1]:/d"
+    # ssh itself takes the bare form
+    assert w.ssh_argv("ls")[-2] == "me@::1"
+    # And a host with no user declared stays userless in every form
+    w = ws.Workspace(host="10.0.0.9", wdir="/w")
+    assert w.git_url == "ssh://10.0.0.9/w"
+    assert w.scp_target == "10.0.0.9"

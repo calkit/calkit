@@ -75,3 +75,39 @@ def test_descriptions_fall_back_to_the_base_class(
     section = markdown.split("#### `docker`")[1].split("####")[0]
     assert "What kind of environment this is." in section
     assert "Name of the Docker image." in section
+
+
+def test_system_lock_properties_are_documented(
+    generator: types.ModuleType,
+) -> None:
+    from typing import get_args
+
+    from calkit.environments import (
+        SYSTEM_LOCK_PROPERTIES,
+        SYSTEM_LOCK_PROPERTY_DESCRIPTIONS,
+    )
+    from calkit.models.core import SystemLockProperty
+
+    # Someone deciding what to lock needs to know what's on offer, and
+    # 'list[Literal[...]]' crammed into a type column is not that
+    assert set(SYSTEM_LOCK_PROPERTY_DESCRIPTIONS) == set(
+        SYSTEM_LOCK_PROPERTIES
+    ), "every lockable property needs a description, and vice versa"
+    assert set(get_args(SystemLockProperty)) == set(SYSTEM_LOCK_PROPERTIES)
+    fpath = os.path.join(REPO_ROOT, "docs", "environments.md")
+    with open(fpath, encoding="utf-8") as f:
+        doc = f.read()
+    block = doc.split(generator.SYSTEM_LOCK_START)[1].split(
+        generator.SYSTEM_LOCK_END
+    )[0]
+    for prop, description in SYSTEM_LOCK_PROPERTY_DESCRIPTIONS.items():
+        assert f"`{prop}`" in block, (
+            f"'{prop}' is missing from the environments reference; "
+            "regenerate it with 'make sync-docs'"
+        )
+        assert description.split(".")[0] in block, (
+            f"'{prop}' is listed without its description"
+        )
+    # A property only one platform can supply says so, since locking it
+    # anywhere else is an error rather than a silent no-op
+    assert "macOS only" in block

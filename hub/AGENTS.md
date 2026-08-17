@@ -76,6 +76,86 @@ If instead you are running the built image (plain `docker compose up`, not
 `make dev`), the frontend is a static Nginx build and will keep serving old code
 until you rebuild it: `docker compose build frontend`.
 
+### A frontend request fails with a network error
+
+A network error (as opposed to an HTTP status) means nothing answered, so the
+backend is most likely not running. Check with `docker compose ps -a`: if
+`backend` shows `exited (1)`, read `docker compose logs backend` for the
+traceback.
+
+An `ImportError` or `ModuleNotFoundError` from `calkit` there — for example
+`cannot import name 'MARIMO_DETECT_N_BYTES' from 'calkit.notebooks'` — usually
+means the container's virtual environment is stale, not that the code is wrong.
+In dev, `docker-compose.override.yml` mounts the repo at `/app` and masks the
+image's environment with an **anonymous volume** at `/app/.venv`. That volume
+outlives `docker compose build` and `up --force-recreate`, so an environment
+created months ago keeps shadowing the working tree no matter how often the
+image is rebuilt. Renew it explicitly:
+
+```sh
+docker compose build backend
+docker compose up -d --renew-anon-volumes backend
+```
+
+`--renew-anon-volumes` only discards anonymous volumes; named volumes such as
+the database keep their data. Reach for this after merging a branch that changes
+dependencies or moves code between calkit-python and the backend.
+
+Once the volume is current, calkit-python is installed as an editable workspace
+member resolving to `/app/calkit`, so host edits to it are live and this should
+not recur until the environment itself needs to change.
+
+### Postgres errors that a column does not exist
+
+A log full of `ERROR: column project.<something> does not exist` means the
+schema is behind the models: migrations did not run. Check why in the prestart
+logs, not the backend's:
+
+```sh
+docker compose logs prestart
+```
+
+`Can't locate revision identified by '<rev>'` means `alembic_version` points at
+a revision that isn't in `backend/app/alembic/versions/`, so alembic refuses to
+run anything and the schema freezes wherever it was. This comes from having
+migrated the dev database while on a branch whose migration was later squashed,
+renamed, or abandoned — the revision can be gone from git entirely, so don't
+assume it is recoverable (`git log --all -S '<rev>'` to find out).
+
+The reliable fix on a dev database is to recreate it, since all data is seeded
+by `create-initial-data.py` anyway:
+
+```sh
+docker compose down db
+docker volume rm calkit_app-db-data
+docker compose up -d db backend
+```
+
+Repairing in place is possible but fiddly: the abandoned branch has usually
+applied *some* of its DDL, so the database is genuinely half-migrated rather
+than merely mis-stamped. It takes `alembic stamp <rev> --purge` (plain `stamp`
+also reads the current revision and hits the same error) to a revision known to
+predate the divergence, then hand-applying whatever the next migration would
+have done that isn't already there, then `alembic upgrade head`.
+
+Either way, verify the result against a from-scratch migration rather than
+trusting the stamp — build a scratch database, migrate it from empty, and diff:
+
+```sh
+docker compose exec db psql -U postgres -d postgres -c "CREATE DATABASE app_check"
+docker compose exec -e POSTGRES_DB=app_check backend alembic upgrade head
+docker compose exec db pg_dump -U postgres -d app --schema-only > /tmp/a.sql
+docker compose exec db pg_dump -U postgres -d app_check --schema-only > /tmp/b.sql
+diff /tmp/a.sql /tmp/b.sql
+docker compose exec db psql -U postgres -d postgres -c "DROP DATABASE app_check"
+```
+
+Note that `alembic check` is not a clean signal here: it reports drift
+(a missing `ck_account_name_lowercase` check constraint, some foreign-key
+churn) even against a perfectly migrated database, because the models don't
+declare those constraints. The from-scratch diff is what distinguishes real
+divergence from that baseline noise.
+
 ## Common Patterns
 
 ### Modifying API Contracts

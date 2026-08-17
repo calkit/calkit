@@ -60,8 +60,8 @@ sync-docs: schema ## Sync documentation content from docs/*.md into README.md.
 	@echo "🚀 Syncing documentation"
 	@uv run python scripts/sync-docs.py
 
-.PHONY: changes
-changes: ## List each product's commits since its last release.
+.PHONY: unreleased
+unreleased: ## List each product's commits since its last release.
 	@uv run python scripts/list-changes.py
 
 .PHONY: sync-resources

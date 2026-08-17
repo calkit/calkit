@@ -9,7 +9,7 @@ export type EnvKind =
   | "uv"
   | "uv-venv"
   | "venv"
-  | "ssh"
+  | "system"
   | "_system"
   | string;
 

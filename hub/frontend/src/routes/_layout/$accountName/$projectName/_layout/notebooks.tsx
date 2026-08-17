@@ -6,14 +6,15 @@ import {
   HStack,
   Heading,
   Icon,
+  Link,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
 import { useNavigate } from "@tanstack/react-router"
 import { FaCodeBranch } from "react-icons/fa"
-import { SiJupyter } from "react-icons/si"
+import { SiJupyter, SiPython } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import Tooltip from "../../../../../components/Common/Tooltip"
@@ -40,9 +41,15 @@ export const Route = createFileRoute(
 
 function NotebookInfo({
   notebook,
+  accountName,
+  projectName,
+  gitRef,
   onOpenCompare,
 }: {
   notebook: Notebook
+  accountName: string
+  projectName: string
+  gitRef?: string
   onOpenCompare: () => void
 }) {
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
@@ -64,19 +71,57 @@ function NotebookInfo({
           {notebook.description ?? ""}
         </Text>
       </Text>
+      {/* Path and stage link out the way they do in the other info panels,
+      each carrying the ref being browsed so the file or stage opens at the
+      same commit rather than on the default branch */}
       <Text fontSize="sm" mb={1}>
-        <Text as="span">Path:</Text> <Code fontSize="xs">{notebook.path}</Code>
+        <Text as="span">Path:</Text>{" "}
+        <Link
+          as={RouterLink}
+          to={`/${accountName}/${projectName}/files`}
+          search={{ path: notebook.path, ref: gitRef } as any}
+        >
+          <Code fontSize="xs" cursor="pointer">
+            {notebook.path}
+          </Code>
+        </Link>
       </Text>
       <Text fontSize="sm" mb={1}>
         <Text as="span">Pipeline stage:</Text>{" "}
         {notebook.stage ? (
-          <Code fontSize="xs">{notebook.stage}</Code>
+          <Link
+            as={RouterLink}
+            to={`/${accountName}/${projectName}/pipeline`}
+            search={{ stage: notebook.stage, ref: gitRef } as any}
+          >
+            <Code fontSize="xs" cursor="pointer">
+              {notebook.stage}
+            </Code>
+          </Link>
         ) : (
           <Text as="span" color="red.500">
             Not in pipeline
           </Text>
         )}
       </Text>
+      {/* The notebook's stage is what builds the app, so this is where a
+      reader finds out the notebook has one to look at */}
+      {notebook.app ? (
+        <Text fontSize="sm" mb={1}>
+          <Text as="span">App:</Text>{" "}
+          <Link
+            as={RouterLink}
+            variant="blue"
+            to={`/${accountName}/${projectName}/apps/${notebook.app}`}
+            // Carry the ref being browsed, so the app shown is the one this
+            // notebook builds at that commit rather than silently the one
+            // on the default branch
+            search={{ ref: gitRef } as any}
+          >
+            {notebook.app}
+          </Link>
+        </Text>
+      ) : null}
       <Button mt={2} size="sm" onClick={onOpenCompare}>
         <Icon as={FaCodeBranch} mr={1} />
         Browse history
@@ -164,7 +209,17 @@ function Notebooks() {
                       onClick={() => setSelectedPath(nb.path ?? "")}
                       spacing={1}
                     >
-                      <Icon as={SiJupyter} flexShrink={0} color="orange.400" />
+                      {/* Not every notebook is a Jupyter one; a marimo
+                      notebook is a Python module */}
+                      {nb.path?.endsWith(".py") ? (
+                        <Icon as={SiPython} flexShrink={0} color="blue.400" />
+                      ) : (
+                        <Icon
+                          as={SiJupyter}
+                          flexShrink={0}
+                          color="orange.400"
+                        />
+                      )}
                       <Text fontSize="sm" noOfLines={1}>
                         {nb.title ?? nb.path}
                       </Text>
@@ -206,6 +261,9 @@ function Notebooks() {
             <Box w="240px" flexShrink={0}>
               <NotebookInfo
                 notebook={selectedNotebook}
+                accountName={accountName}
+                projectName={projectName}
+                gitRef={ref}
                 onOpenCompare={() => openCompare(selectedNotebook.path ?? "")}
               />
               <ArtifactCompareModal

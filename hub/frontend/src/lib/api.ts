@@ -52,6 +52,11 @@ export const dataOrNull = <T>(response: AxiosResponse<T>): T | null => {
  * refetch the same stale bytes. One `ttl=0` read forces the server to
  * re-pull first; that also warms the clone, so the refetches triggered by
  * the invalidation below see the new commit without each re-pulling.
+ *
+ * Never rejects. Callers fire this off after a save has already succeeded,
+ * so a failure here means the UI is briefly stale, not that anything went
+ * wrong with the save -- and an unhandled rejection would be worse than the
+ * staleness.
  */
 export const refreshProjectContents = async (
   ownerName: string,
@@ -68,7 +73,12 @@ export const refreshProjectContents = async (
     // Best effort: still invalidate, so a failed refresh doesn't leave the
     // UI showing pre-save content.
   }
-  await queryClient.invalidateQueries({
-    queryKey: ["projects", ownerName, projectName],
-  })
+  try {
+    await queryClient.invalidateQueries({
+      queryKey: ["projects", ownerName, projectName],
+    })
+  } catch {
+    // A refetch that fails leaves its own query in an error state, which the
+    // pages already render; there's nothing useful to do with it here.
+  }
 }

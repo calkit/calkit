@@ -69,6 +69,8 @@ xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
+  "jsonschema",
+  "types-jsonschema",
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
@@ -181,6 +183,12 @@ show_error_codes = true
 module = ["sqlitedict", "networkx", "yaml"]
 ignore_missing_imports = true
 
+# jsonschema's stubs come from the types-jsonschema dev dependency, which
+# mypy doesn't always resolve from the virtual environment.
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
+ignore_missing_imports = true
+
 # The hub backend is checked strict; mypy can't set ``strict`` per-module,
 # so the remainder of its flag bundle is enumerated here (the rest are
 # already enabled globally above)
@@ -226,9 +234,24 @@ members = ["hub/backend"]
 # setting in hub/backend/pyproject.toml for why uv needs to be told that
 [tool.uv]
 cache-keys = [{ git = { commit = true, tags = true } }]
+# 'emails' and 'encutils' (via the hub backend and cssutils) ask for chardet
+# with no upper bound, so resolution picks up 7.x. requests asserts chardet
+# < 6 at import and warns on every single command when it doesn't hold, which
+# is noise on top of every pipeline run in this workspace. Nothing here needs
+# chardet 6+, so bound it rather than teach everyone to ignore a warning.
+constraint-dependencies = ["chardet<6"]
 
 [tool.pytest.ini_options]
-env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
+env = [
+  "CALKIT_ENV=test",
+  "CALKIT_TEST_OVERLEAF_TOKEN=none",
+  # Keep tests off the real system keyring. Without this, macOS prompts to
+  # unlock the 'calkit-test' Keychain item on every run (and again whenever
+  # the venv is recreated, since that changes the binary's code signature).
+  # The fail backend raises NoKeyringError, so supports_keyring() is False
+  # and the config falls back to its YAML file, which is what tests want.
+  "PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring",
+]
 # The hub backend's tests need the compose stack and its own environment;
 # they run via test-hub.yml, not from the workspace root
 addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"

@@ -294,6 +294,7 @@ def new_project(
                         ),
                         f,
                     )
+                calkit.schema.ensure_modeline(calkit_fpath)
                 repo.git.add("calkit.yaml")
                 if not no_commit:
                     repo.git.commit(
@@ -403,6 +404,7 @@ def new_project(
         # Write Calkit info
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
             ryaml.dump(ck_info, f)
+        calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
         # Update README
         readme_fpath = os.path.join(abs_path, "README.md")
         typer.echo("Generating README.md")
@@ -463,6 +465,7 @@ def new_project(
     ck_info = dict(name=name, title=title, description=description) | ck_info
     with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
+    calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
     repo.git.add("calkit.yaml")
     # Create dev container spec
     update_devcontainer(wdir=abs_path)
@@ -619,22 +622,41 @@ def new_figure(
 def _new_simple_artifact(
     kind: Literal["results", "presentations"],
     path: str,
-    title: str,
+    title: str | None,
     description: str | None,
     stage_name: str | None,
     no_commit: bool,
     overwrite: bool,
+    obj_kind: str | None = None,
+    key: str | None = None,
+    name: str | None = None,
 ) -> None:
     """Declare a simple artifact (path/title/description/stage) in calkit.yaml."""
     singular = kind.rstrip("s")
     ck_info = calkit.load_calkit_info()
     objects = ck_info.get(kind, [])
-    paths = [o.get("path") for o in objects]
-    if not overwrite and path in paths:
-        raise_error(f"{singular.capitalize()} at path {path} already exists")
-    if overwrite and path in paths:
-        objects = [o for o in objects if o.get("path") != path]
-    obj = dict(path=path, title=title)
+    # Results are identified by path and key together, since several can read
+    # different values out of one file; everything else is just its path
+    existing = [(o.get("path"), o.get("key")) for o in objects]
+    if (path, key) in existing:
+        if not overwrite:
+            at_key = f" with key {key}" if key is not None else ""
+            raise_error(
+                f"{singular.capitalize()} at path {path}{at_key} "
+                "already exists"
+            )
+        objects = [
+            o for o in objects if (o.get("path"), o.get("key")) != (path, key)
+        ]
+    obj = dict(path=path)
+    if name is not None:
+        obj["name"] = name
+    if key is not None:
+        obj["key"] = key
+    if title is not None:
+        obj["title"] = title
+    if obj_kind is not None:
+        obj["kind"] = obj_kind
     if description is not None:
         obj["description"] = description
     if stage_name is not None:
@@ -653,7 +675,27 @@ def _new_simple_artifact(
 @new_app.command(name="result")
 def new_result(
     path: str,
-    title: Annotated[str, typer.Option("--title")],
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help=(
+                "Short handle for referring to this result, which stays "
+                "stable if the file is renamed."
+            ),
+        ),
+    ] = None,
+    title: Annotated[str | None, typer.Option("--title")] = None,
+    key: Annotated[
+        str | None,
+        typer.Option(
+            "--key",
+            help=(
+                "Path to the value within the file, e.g., 'metrics.mean'. "
+                "Omit if the whole file is the result."
+            ),
+        ),
+    ] = None,
     description: Annotated[str | None, typer.Option("--description")] = None,
     stage_name: Annotated[
         str | None,
@@ -674,7 +716,15 @@ def new_result(
 ):
     """Declare a new result."""
     _new_simple_artifact(
-        "results", path, title, description, stage_name, no_commit, overwrite
+        "results",
+        path,
+        title,
+        description,
+        stage_name,
+        no_commit,
+        overwrite,
+        key=key,
+        name=name,
     )
 
 
@@ -683,6 +733,13 @@ def new_presentation(
     path: str,
     title: Annotated[str, typer.Option("--title")],
     description: Annotated[str | None, typer.Option("--description")] = None,
+    kind: Annotated[
+        str | None,
+        typer.Option(
+            "--kind",
+            help="Kind of presentation, either 'slides' or 'poster'.",
+        ),
+    ] = None,
     stage_name: Annotated[
         str | None,
         typer.Option(
@@ -701,6 +758,8 @@ def new_presentation(
     ] = False,
 ):
     """Declare a new presentation."""
+    if kind is not None and kind not in ["slides", "poster"]:
+        raise_error("Presentation kind must be either 'slides' or 'poster'")
     _new_simple_artifact(
         "presentations",
         path,
@@ -709,6 +768,7 @@ def new_presentation(
         stage_name,
         no_commit,
         overwrite,
+        obj_kind=kind,
     )
 
 
@@ -1234,7 +1294,7 @@ def new_publication(
 ) -> None:
     from calkit.models.pipeline import LatexStage
 
-    ck_info = calkit.load_calkit_info(process_includes=False)
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     envs = ck_info.get("environments", {})
     pub_paths = [p.get("path") for p in pubs]
@@ -1422,7 +1482,7 @@ def new_conda_env(
         assert isinstance(packages, list)
         # Write environment to path
         _check_path_dir(path)
-        conda_env = dict(
+        conda_env: dict = dict(
             name=conda_name, channels=["conda-forge"], dependencies=packages
         )
         if prefix is not None:
@@ -1437,7 +1497,7 @@ def new_conda_env(
             ryaml.dump(conda_env, f)
     elif packages is None and os.path.isfile(path):
         with open(path) as f:
-            conda_env: dict = ryaml.load(f)
+            conda_env = ryaml.load(f)
         # Remove prefix
         conda_env.pop("prefix", None)
         if prefix is not None:
@@ -3617,15 +3677,18 @@ def new_release(
             pubtype = artifact.get("kind")  # type: ignore
             if pubtype == "journal-article":
                 resource_type = "publication-article"
-            elif pubtype == "presentation":
-                resource_type = "presentation"
-            elif pubtype == "poster":
-                resource_type = "poster"
             else:
                 resource_type = "publication-other"
+        elif release_kind == "presentation":
+            # Posters are presentations here, but InvenioRDM has a distinct
+            # resource type for them
+            if artifact.get("kind") == "poster":  # type: ignore
+                resource_type = "poster"
+            else:
+                resource_type = "presentation"
         elif release_kind == "figure":
             resource_type = "image-figure"
-        elif release_kind in ["dataset", "software", "poster", "presentation"]:
+        elif release_kind in ["dataset", "software"]:
             resource_type = release_kind
         else:
             # Default for "project" and other unknown types

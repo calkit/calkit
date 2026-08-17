@@ -359,7 +359,8 @@ const LatexEditor = ({
         project: `${ownerName}/${projectName}`,
         file_count: dirtyRef.current.size,
       })
-      refreshProjectContents(ownerName, projectName, queryClient)
+      // Fire-and-forget: the save already succeeded, and this never rejects.
+      void refreshProjectContents(ownerName, projectName, queryClient)
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)

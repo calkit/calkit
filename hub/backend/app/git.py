@@ -480,9 +480,7 @@ def get_zip_path_map_from_repo(repo: git.Repo) -> dict:
         return {}
 
 
-def get_ck_info_from_repo(
-    repo: git.Repo, process_includes=False, read_only: bool = False
-) -> dict:
+def get_ck_info_from_repo(repo: git.Repo, read_only: bool = False) -> dict:
     """Load calkit.yaml from the repo's working tree.
 
     Pass ``read_only=True`` when the result is only inspected, never written
@@ -492,7 +490,6 @@ def get_ck_info_from_repo(
     try:
         ck_info = calkit.load_calkit_info(
             wdir=repo.working_dir,
-            process_includes=process_includes,
             read_only=read_only,
         )
     except (YAMLError, IndexError) as e:
@@ -517,7 +514,6 @@ def get_ck_info(
     user: User | None,
     session: Session,
     ttl=None,
-    process_includes=False,
     ref: str | None = None,
 ) -> dict:
     """Load the calkit.yaml file contents into a dictionary."""
@@ -528,7 +524,7 @@ def get_ck_info(
         ttl=ttl,
         ref=ref,
     )
-    return get_ck_info_from_repo(repo=repo, process_includes=process_includes)
+    return get_ck_info_from_repo(repo=repo)
 
 
 def get_dvc_pipeline(

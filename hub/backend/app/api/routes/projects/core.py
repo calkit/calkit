@@ -5,6 +5,7 @@ import concurrent.futures
 import io
 import json
 import logging
+import mimetypes
 import os
 import posixpath
 import re
@@ -36,9 +37,9 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from git.exc import GitCommandError
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
@@ -138,6 +139,7 @@ from app.models import (
 from app.models.core import ROLE_IDS, ROLE_NAMES
 from app.models.projects import (
     Showcase,
+    ShowcaseAppInput,
     ShowcaseFigure,
     ShowcaseFigureInput,
     ShowcaseInput,
@@ -1796,7 +1798,8 @@ def _build_question_evidence(
     ref: str | None,
     evidence_ck: list,
     figures_by_path: dict[str, Figure],
-    results_by_path: dict[str, Result],
+    results_by_path: dict[tuple[str, str | None], Result],
+    tables_by_path: dict[str, Result],
     publications_by_path: dict[str, Publication],
     result_value_cache: dict[str, dict | None],
 ) -> list[QuestionEvidence]:
@@ -1806,6 +1809,7 @@ def _build_question_evidence(
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
             "result",
+            "table",
             "publication",
         ):
             continue
@@ -1820,8 +1824,20 @@ def _build_question_evidence(
             item.figure = figures_by_path.get(path)
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
-        else:
-            item.result = results_by_path.get(path)
+        elif item.kind in ("result", "table"):
+            # A declared table answers table evidence first; a result at
+            # the same path answers result evidence. Falling through to
+            # results covers a table nobody declared, which is still worth
+            # resolving from an auto-detected data file.
+            #
+            # For results, the exact (path, key) pair or nothing: falling
+            # back to the whole-file result would put its title and
+            # description on a value it says nothing about. Keyless
+            # evidence already looks up (path, None).
+            if item.kind == "table":
+                item.result = tables_by_path.get(path)
+            if item.result is None:
+                item.result = results_by_path.get((path, item.key))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
@@ -1880,12 +1896,23 @@ def _build_questions_public(
                 figures=cited,
             )
         }
-    results_by_path: dict[str, Result] = {}
-    if "result" in kinds:
-        results_by_path = {
-            res.path: res
-            for res in _build_results(project=project, repo=repo, ref=ref)
-        }
+    results_by_path: dict[tuple[str, str | None], Result] = {}
+    if kinds & {"result", "table"}:
+        # Keyed by (path, key), since several results can point at one file.
+        # A keyless result lands under (path, None), which is what keyless
+        # evidence resolves against; a keyed one must not stand in for it,
+        # or evidence citing an undeclared key would show that value under
+        # an unrelated result's title.
+        for res in _build_results(project=project, repo=repo, ref=ref):
+            results_by_path[(res.path, res.key)] = res
+    # Kept apart from results rather than merged into them. A project can
+    # declare a table and a result at one path, and they are different
+    # things with different titles: folding them into one lookup means
+    # whichever is built second decides what the other one is called.
+    tables_by_path: dict[str, Result] = {}
+    if "table" in kinds:
+        for tbl in _build_declared_tables(project=project, repo=repo, ref=ref):
+            tables_by_path[tbl.path] = tbl
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {
@@ -1905,6 +1932,7 @@ def _build_questions_public(
             evidence_ck=_evidence_of(q_ck),
             figures_by_path=figures_by_path,
             results_by_path=results_by_path,
+            tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
             result_value_cache=result_value_cache,
         )
@@ -1990,10 +2018,7 @@ def post_project_question(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_from_repo(
-        repo=repo,
-        process_includes=True,
-    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
     ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
@@ -2070,10 +2095,7 @@ def put_project_question(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_from_repo(
-        repo=repo,
-        process_includes=True,
-    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
     if number < 1 or number > len(ck_questions):
         raise HTTPException(404, "Question not found")
@@ -2440,10 +2462,16 @@ def _build_results(
         repo=repo,
         ref=ref,
     )
-    results = ck_info.get("results", [])
-    for res in results:
+    results = []
+    for res in ck_info.get("results") or []:
+        if not isinstance(res, dict) or not res.get("path"):
+            continue
+        res = dict(res)
         if not res.get("title"):
-            res["title"] = _title_from_path(res["path"])
+            # A result's name is a better title than its path, since several
+            # results can share one file and only the name tells them apart
+            res["title"] = res.get("name") or _title_from_path(res["path"])
+        results.append(res)
     declared_paths = {res["path"] for res in results}
 
     def _is_result_path(path: str) -> bool:
@@ -2490,6 +2518,43 @@ def _build_results(
             continue
         _maybe_add_result(dvc_path)
     return [Result.model_validate(res) for res in results]
+
+
+def _build_declared_tables(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+) -> list[Result]:
+    """Tables the project declares, shaped like results.
+
+    Table evidence resolves through the same lookup results do, since that
+    is the field the response carries. Without this a declared table is
+    never found there -- ``_build_results`` only knows about results, and
+    auto-detection does not treat a tables directory as one -- so its title
+    and description never reach the reader.
+    """
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+    )
+    tables = []
+    for tbl in ck_info.get("tables") or []:
+        if not isinstance(tbl, dict) or not tbl.get("path"):
+            continue
+        tbl = dict(tbl)
+        if not tbl.get("title"):
+            tbl["title"] = _title_from_path(tbl["path"])
+        tables.append(
+            Result.model_validate(
+                {
+                    k: v
+                    for k, v in tbl.items()
+                    if k in {"path", "title", "description", "stage"}
+                }
+            )
+        )
+    return tables
 
 
 def _build_publications(
@@ -5330,9 +5395,7 @@ def put_project_pipeline_stage(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    # Write into the file as it is on disk, not the include-processed view,
-    # so a project that splits its pipeline across files keeps that split.
-    ck_info = get_ck_info_from_repo(repo=repo, process_includes=False)
+    ck_info = get_ck_info_from_repo(repo=repo)
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if stage_name not in stages:
         raise HTTPException(404, "Stage not found")
@@ -7801,39 +7864,24 @@ def get_project_notebooks(
         repo=repo,
         ref=ref,
     )
-    notebooks = ck_info.get("notebooks", [])
-    # Also detect undeclared .ipynb files not under hidden directories
+    tree = app.projects.get_repo_tree_for_ref(repo, ref)
+    notebooks = app.projects.notebooks_from_ck_info(ck_info)
     declared_paths = {nb["path"] for nb in notebooks}
+    # Also detect undeclared .ipynb files not under hidden directories
     try:
-        for root, dirs, files in os.walk(repo.working_dir):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
-            for fname in files:
-                if fname.endswith(".ipynb"):
-                    rel = os.path.relpath(
-                        os.path.join(root, fname), repo.working_dir
-                    )
-                    if rel not in declared_paths:
-                        notebooks.append({"path": rel})
-                        declared_paths.add(rel)
+        for rel in app.projects.find_notebook_paths_in_tree(tree):
+            if rel not in declared_paths:
+                notebooks.append({"path": rel})
+                declared_paths.add(rel)
     except Exception as e:
         logger.warning(f"Failed to scan for undeclared notebooks: {e}")
     if not notebooks:
-        return notebooks
-    # Detect stages from jupyter-notebook ``notebook_path`` items
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
-    nb_path_to_stage_name = {}
-    for stage_name, stage in stages.items():
-        if stage.get("kind") == "jupyter-notebook":
-            nb_path = stage.get("notebook_path")
-            if nb_path:
-                nb_path_to_stage_name[nb_path] = stage_name
+        return []
+    # Attach the stage that runs each notebook, and the app that stage
+    # builds, if any
     for nb in notebooks:
-        nb_path = nb.get("path")
-        if nb_path in nb_path_to_stage_name:
-            nb["stage"] = nb_path_to_stage_name[nb_path]
+        app.projects.link_notebook_to_stage_and_app(nb, ck_info)
     # Get the notebook content and base64 encode it
-    tree = app.projects.get_repo_tree_for_ref(repo, ref)
     (
         ck_info_full,
         dvc_lock_outs,
@@ -7852,22 +7900,30 @@ def get_project_notebooks(
             )
         except HTTPException:
             continue
-        try:
-            # If the notebook has a pre-built HTML output, prefer that
-            html_path = get_executed_notebook_path(
-                notebook_path=notebook["path"], to="html"
-            )
-            html_item = app.projects.get_contents_from_tree(
-                project=project,
-                tree=tree,
-                path=html_path,
-                ck_info=ck_info_full,
-                dvc_lock_outs=dvc_lock_outs,
-            )
-            item = html_item
-            notebook["output_format"] = "html"
-        except HTTPException as e:
-            logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+        # A marimo notebook is a Python module, and running it produces an
+        # app rather than an executed copy of itself, so there's no HTML
+        # export to look for and its source is what there is to show
+        if app.projects.item_is_marimo_notebook(notebook["path"], item):
+            notebook["output_format"] = "source"
+        else:
+            try:
+                # If the notebook has a pre-built HTML output, prefer that
+                html_path = get_executed_notebook_path(
+                    notebook_path=notebook["path"], to="html"
+                )
+                html_item = app.projects.get_contents_from_tree(
+                    project=project,
+                    tree=tree,
+                    path=html_path,
+                    ck_info=ck_info_full,
+                    dvc_lock_outs=dvc_lock_outs,
+                )
+                item = html_item
+                notebook["output_format"] = "html"
+            except HTTPException as e:
+                logger.info(
+                    f"Notebook HTML does not exist at {html_path}: {e}"
+                )
         notebook["url"] = item.url
         notebook["content"] = item.content
         notebook["storage"] = item.storage
@@ -7940,10 +7996,131 @@ def put_project_dev_container(
 
 
 class ProjectApp(BaseModel):
+    # Key in the project's ``apps`` mapping, which is also the URL segment
+    # this app is served under. Always set, since an app is only reachable
+    # by its key.
+    name: str
+    kind: str = "static-html"
     path: str | None = None
+    # The path under our own API that serves this app's entrypoint, so the
+    # frontend doesn't have to build it. Always ours: we don't embed an app
+    # hosted anywhere else.
     url: str | None = None
     title: str | None = None
     description: str | None = None
+    stage: str | None = None
+
+    @field_validator("path")
+    @classmethod
+    def check_path(cls, v: str | None) -> str | None:
+        """Enforce the same rule ``StaticHtmlApp`` does in calkit.yaml.
+
+        The directory holding this path becomes the serving root, and file
+        reads join onto the checkout root, so a path escaping the project
+        would read from the server's filesystem. Repeated here rather than
+        trusted from the client because nothing between calkit.yaml and
+        here validates it.
+        """
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("Path must not be empty")
+        if posixpath.isabs(v):
+            raise ValueError(f"Path must be relative: {v}")
+        norm = posixpath.normpath(v)
+        if norm == "." or norm == ".." or norm.startswith("../"):
+            raise ValueError(f"Path must be within the project: {v}")
+        if not norm.endswith((".html", ".htm")):
+            raise ValueError(f"Path must name an HTML file: {v}")
+        return norm
+
+
+def _app_serve_url(owner_name: str, project_name: str, name: str) -> str:
+    return (
+        f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+        f"/apps/{name}/serve/"
+    )
+
+
+def _project_apps_from_ck_info(
+    ck_info: dict, owner_name: str, project_name: str
+) -> list[ProjectApp]:
+    """Read the project's apps.
+
+    Only apps we serve ourselves are returned. The old singular ``app`` key
+    named a URL hosted elsewhere for us to embed, which is no longer
+    supported, so projects still using it come back with no apps.
+    """
+    apps_info = ck_info.get("apps")
+    if not isinstance(apps_info, dict):
+        return []
+    apps = []
+    for name, info in apps_info.items():
+        if not isinstance(info, dict):
+            continue
+        # Skip kinds we don't serve rather than failing the whole listing,
+        # so one unrecognized app doesn't hide the rest
+        if info.get("kind", "static-html") != "static-html":
+            continue
+        # Likewise, an entry we can't make sense of drops out on its own
+        # rather than failing the request
+        try:
+            project_app = ProjectApp.model_validate(info | dict(name=name))
+        except ValidationError as e:
+            logger.warning(
+                f"Skipping invalid app '{name}' in "
+                f"{owner_name}/{project_name}: {e}"
+            )
+            continue
+        if not project_app.path:
+            continue
+        # The URL is derived, never read from calkit.yaml, so it can't go
+        # stale when the project moves or is renamed, and a project can't
+        # point it at something we don't host
+        project_app.url = _app_serve_url(
+            owner_name=owner_name,
+            project_name=project_name,
+            name=name,
+        )
+        apps.append(project_app)
+    return apps
+
+
+@router.get("/projects/{owner_name}/{project_name}/apps")
+def get_project_apps(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+) -> list[ProjectApp]:
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    # get_ck_info reads the working tree, which is whatever branch the
+    # cached clone sits on, so it would ignore ref and hide apps declared on
+    # any other branch. Read the tree at the requested ref instead, as the
+    # showcase endpoint does.
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+        read_only=True,
+    )
+    return _project_apps_from_ck_info(
+        ck_info, owner_name=owner_name, project_name=project_name
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/app")
@@ -7954,6 +8131,57 @@ def get_project_app(
     session: SessionDep,
     ref: str | None = None,
 ) -> ProjectApp | None:
+    """Return the project's first app.
+
+    Superseded by the ``apps`` endpoint; kept so existing clients keep
+    working.
+    """
+    apps = get_project_apps(
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        session=session,
+        ref=ref,
+    )
+    return apps[0] if apps else None
+
+
+# Only the entrypoint route is in the schema. The other three are the same
+# operation reached with an asset path and/or a pinned commit, and a browser
+# resolves those itself from a relative URL; leaving them in generates three
+# more near-identical methods in every client we generate.
+@router.get("/projects/{owner_name}/{project_name}/apps/{app_name}/serve")
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/serve/{path:path}",
+    include_in_schema=False,
+)
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}"
+    "/{git_sha}/serve/{path:path}",
+    include_in_schema=False,
+)
+@router.get(
+    "/projects/{owner_name}/{project_name}/apps/{app_name}/{git_sha}/serve",
+    include_in_schema=False,
+)
+def serve_project_app_file(
+    owner_name: str,
+    project_name: str,
+    app_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str = "",
+    ref: str | None = None,
+    git_sha: str | None = None,
+) -> Response:
+    """Serve one file from a static-html app.
+
+    The app's declared path names its entrypoint, and the directory holding
+    it is the serving root, so sibling assets resolve against it. Bytes are
+    proxied rather than redirected to a presigned URL because the browser
+    refuses an ES module whose content type isn't exactly right, and a
+    WASM app is almost entirely module imports.
+    """
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7961,17 +8189,88 @@ def get_project_app(
         current_user=current_user,
         min_access_level="read",
     )
-    ck_info = get_ck_info(
+    repo = get_repo(
         project=project,
         user=current_user,
         session=session,
         ttl=DEFAULT_REPO_TTL,
-        ref=ref,
+        ref=ref or git_sha,
     )
-    project_app = ck_info.get("app")
-    if project_app is None:
-        return
-    return ProjectApp.model_validate(project_app)
+    # A relative URL inside the app drops the query string, so every asset
+    # would come back here without the ref and resolve against the default
+    # branch. Redirect the entrypoint to a URL carrying the commit in its
+    # path, which the app's own relative paths then inherit. A SHA, not the
+    # ref name, since branch names can contain slashes.
+    if ref is not None and git_sha is None:
+        # Resolves the same way tree reads do, including the origin/<ref>
+        # fallback and a fetch for a ref pushed since the last clone update
+        resolved = resolve_commit_sha(repo, ref)
+        if resolved is None:
+            raise HTTPException(404, "Ref not found")
+        base = (
+            f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+            f"/apps/{app_name}/{resolved}/serve/"
+        )
+        return RedirectResponse(base + path.strip("/"), status_code=302)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=git_sha, read_only=True
+    )
+    apps = _project_apps_from_ck_info(
+        ck_info, owner_name=owner_name, project_name=project_name
+    )
+    matches = [a for a in apps if a.name == app_name]
+    if not matches:
+        raise HTTPException(404, "App not found")
+    project_app = matches[0]
+    if project_app.kind != "static-html" or not project_app.path:
+        raise HTTPException(404, "App is not served from this project")
+    serve_dir = posixpath.dirname(project_app.path)
+    entrypoint = posixpath.basename(project_app.path)
+    rel_path = path.strip("/") or entrypoint
+    # Reject traversal outside the app's directory. Checked on the relative
+    # path itself rather than on the joined one, since an app whose
+    # entrypoint sits at the repo root has an empty serve_dir, and a
+    # serve_dir-based guard silently does nothing in that case. read_app_file
+    # checks both paths again, since it reads the filesystem directly.
+    norm_rel_path = posixpath.normpath(rel_path)
+    if norm_rel_path == ".." or norm_rel_path.startswith("../"):
+        raise HTTPException(404)
+    content = app.projects.read_app_file(
+        project=project,
+        repo=repo,
+        dir_path=serve_dir,
+        rel_path=rel_path,
+        ref=git_sha,
+    )
+    if content is None:
+        raise HTTPException(404)
+    media_type, _ = mimetypes.guess_type(rel_path)
+    if rel_path.endswith(".wasm"):
+        # Browsers refuse to stream-compile WebAssembly served as anything
+        # else, and mimetypes doesn't know it on older Pythons
+        media_type = "application/wasm"
+    # A SHA-scoped URL can never change what it returns, so it's cacheable
+    # forever; that's what makes returning to an app cheap. The unpinned
+    # path tracks the default branch, so it has to stay short. Private
+    # unless the project is public: this response is gated on the read check
+    # above, so a shared cache holding it would serve those bytes to
+    # somebody we'd have refused.
+    visibility = "public" if project.is_public else "private"
+    cache_control = (
+        f"{visibility}, max-age=31536000, immutable"
+        if git_sha
+        else f"{visibility}, max-age=300"
+    )
+    return Response(
+        content=content,
+        media_type=media_type or "application/octet-stream",
+        headers={
+            "Cache-Control": cache_control,
+            # These bytes are project-supplied, so don't let a browser
+            # second-guess the type we set and render, say, an image as HTML
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/showcase")
@@ -8161,6 +8460,15 @@ def get_project_showcase(
                         f"Notebook for path '{element_in.notebook}' not found"
                     )
                 )
+        elif isinstance(element_in, ShowcaseAppInput):
+            # Accepted so an app entry doesn't fail validation and take the
+            # whole showcase down with it, but embedding an app here isn't
+            # implemented yet, so it renders as nothing
+            logger.info(
+                f"Skipping showcase app '{element_in.app}' in "
+                f"{owner_name}/{project_name}: not implemented"
+            )
+            continue
         else:
             element_out = element_in
         elements_out.append(element_out)

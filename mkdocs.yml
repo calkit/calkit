@@ -44,7 +44,7 @@ nav:
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
   - The calkit.yaml file: calkit-yaml.md
-  - Dependencies, configuration, and secrets: dependencies.md
+  - Requirements, configuration, and secrets: requirements.md
   - Environments: environments.md
   - The pipeline:
       - pipeline/index.md

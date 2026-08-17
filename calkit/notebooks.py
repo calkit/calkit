@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from calkit.models.io import InputsFromStageOutputs, PathOutput
+    from calkit.models.io import (
+        InputsFromStageOutputs,
+        PathInput,
+        PathOutput,
+    )
 
 
 def get_executed_notebook_path(
@@ -52,6 +56,24 @@ def get_executed_notebook_path(
     if as_posix:
         p = Path(p).as_posix()
     return p
+
+
+# How much of a file to read when deciding whether it's a marimo notebook.
+# marimo writes its header at the top, but a project's own license banner or
+# module docstring comes first, so leave room for one.
+MARIMO_DETECT_N_BYTES = 8192
+
+
+def is_marimo_notebook(content: str) -> bool:
+    """Determine whether some Python source is a marimo notebook.
+
+    A marimo notebook is a Python module that constructs a ``marimo.App``,
+    which is both what makes it one and what marimo itself writes at the top
+    of every notebook it generates. Keyed on the constructor call rather
+    than on the word 'marimo' appearing somewhere, so a script that merely
+    imports or mentions marimo isn't mistaken for a notebook.
+    """
+    return "marimo.App(" in content
 
 
 def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
@@ -142,7 +164,7 @@ def declare_notebook(
     path: str,
     stage_name: str,
     environment_name: str,
-    inputs: list[str | InputsFromStageOutputs] = [],
+    inputs: list[str | PathInput | InputsFromStageOutputs] = [],
     outputs: list[str | PathOutput] = [],
     always_run: bool = False,
     title: str | None = None,

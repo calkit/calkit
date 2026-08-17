@@ -165,7 +165,8 @@ const StageEditorModal = ({
       setCommitMessage("")
       commitModal.onClose()
       showToast("Saved", `Stage ${stageName} was updated.`, "success")
-      refreshProjectContents(ownerName, projectName, queryClient)
+      // Fire-and-forget: the save already succeeded, and this never rejects.
+      void refreshProjectContents(ownerName, projectName, queryClient)
       onClose()
     },
     onError: (err: AxiosError) => {

@@ -891,6 +891,9 @@ class Result(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
+    # Which value inside the file this result is; null means the whole file.
+    # Several results can share a path with different keys.
+    key: str | None = None
 
 
 class CommentHighlight(BaseModel):
@@ -1200,7 +1203,7 @@ class Publication(BaseModel):
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1214,7 +1217,7 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1261,10 +1264,16 @@ class Notebook(BaseModel):
     title: str | None = None
     description: str | None = None
     stage: str | None = None
-    output_format: Literal["html", "notebook"] | None = None
+    # 'source' is the notebook's own code, which is what there is to show for
+    # a marimo notebook: it's a Python module, and what running it produces
+    # is an app rather than an executed copy of itself.
+    output_format: Literal["html", "notebook", "source"] | None = None
     url: str | None = None
     content: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Key in the project's ``apps`` mapping, when this notebook's stage is
+    # what builds that app
+    app: str | None = None
 
 
 class FeatureVote(SQLModel, table=True):

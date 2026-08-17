@@ -16,6 +16,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Discriminator,
+    Field,
     PrivateAttr,
     ValidationError,
     field_validator,
@@ -24,7 +25,7 @@ from pydantic import (
 from typing_extensions import Annotated
 
 import calkit.latex
-from calkit.models.io import InputsFromStageOutputs, PathOutput
+from calkit.models.io import InputsFromStageOutputs, PathInput, PathOutput
 from calkit.models.iteration import (
     ExpandedParametersType,
     ParameterIteration,
@@ -68,6 +69,21 @@ RelativeChildPathString = Annotated[
 ]
 
 
+def _non_glob_prefix(path: str) -> str:
+    """Return the longest leading portion of a path containing no glob
+    characters, so a pattern can be reduced to something usable as a DVC
+    dependency, e.g. ``figures/*-umag.png`` becomes ``figures``.
+
+    A path with no glob characters is returned unchanged.
+    """
+    kept = []
+    for part in Path(path).as_posix().split("/"):
+        if any(c in part for c in "*?["):
+            break
+        kept.append(part)
+    return "/".join(kept)
+
+
 class StageIteration(BaseModel):
     """A model for the ``iterate_over`` key in a stage definition.
 
@@ -75,7 +91,10 @@ class StageIteration(BaseModel):
     each sublist the length of ``arg_name``.
     """
 
-    arg_name: str | list[str]
+    arg_name: str | list[str] = Field(
+        description="Name(s) of the argument(s) to substitute into the "
+        "stage's command and paths."
+    )
     values: list[
         int
         | float
@@ -83,7 +102,7 @@ class StageIteration(BaseModel):
         | RangeIteration
         | ParameterIteration
         | list[int | float | str]
-    ]
+    ] = Field(description="Values over which to iterate.")
 
     @field_validator("values")
     @classmethod
@@ -166,18 +185,53 @@ class StageSchedulerOptions(BaseModel):
       the stage provided any values.
     """
 
-    options: list[str] | None = None
-    setup: list[str] | None = None
-    env_default_options: EnvDefaultsMode = "replace"
-    env_default_setup: EnvDefaultsMode = "replace"
-    log_path: str | None = None
-    log_storage: Literal["git", "dvc"] | None = "git"
+    options: list[str] | None = Field(
+        default=None,
+        description="Options passed to the scheduler at submission.",
+    )
+    setup: list[str] | None = Field(
+        default=None,
+        description="Commands run at the start of the job script.",
+    )
+    env_default_options: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'options' with the environment's "
+        "default_options.",
+    )
+    env_default_setup: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'setup' with the environment's "
+        "default_setup.",
+    )
+    log_path: str | None = Field(
+        default=None, description="Path at which to write the job log."
+    )
+    log_storage: Literal["git", "dvc"] | None = Field(
+        default="git", description="Where to store the job log."
+    )
+
+
+def _allow_null(schema: dict[str, Any]) -> None:
+    """Let a list field's published schema accept null as well as an array.
+
+    An empty ``inputs:`` key parses as null, which ``Stage`` normalizes to an
+    empty list. Without this the generated schema would reject a stage that
+    loads and runs fine, which is the one thing the schema must never do.
+    """
+    annotations = {"title", "description", "default", "deprecated"}
+    inner = {k: v for k, v in schema.items() if k not in annotations}
+    for key in inner:
+        schema.pop(key)
+    schema["anyOf"] = [inner, {"type": "null"}]
 
 
 class Stage(BaseModel):
     """A stage in the pipeline."""
 
-    name: str | None = None
+    name: str | None = Field(
+        default=None,
+        description="The stage's name, which must match its key if set.",
+    )
     kind: Literal[
         "python-script",
         "latex",
@@ -194,22 +248,58 @@ class Stage(BaseModel):
         "julia-command",
         "word-to-pdf",
         "map-paths",
-    ]
-    environment: str
+        "marimo-html-wasm",
+    ] = Field(description="What kind of stage this is.")
+    environment: str = Field(
+        description="Name of the environment in which to run this stage."
+    )
     # Constrained like other stage path fields (e.g. MatlabScriptStage's
     # matlab_path): this becomes the DVC stage's working directory and is
     # joined with the stage's other paths, where an absolute value would
     # silently win, so an unchecked one lets a project's pipeline run
     # against paths outside itself.
-    wdir: RelativeChildPathString | None = None
+    wdir: RelativeChildPathString | None = Field(
+        default=None,
+        description="Working directory in which to run, relative to the "
+        "project root. Note that all other paths in the stage are relative "
+        "to this.",
+    )
     # TODO: Support other input types
-    inputs: list[str | InputsFromStageOutputs] = []
-    outputs: list[str | PathOutput] = []  # TODO: Support database outputs
-    always_run: bool = False
-    iterate_over: list[StageIteration] | None = None
-    description: str | None = None
-    frozen: bool = False
-    scheduler: StageSchedulerOptions | None = None
+    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
+        default=[],
+        description="Paths this stage depends on, which trigger a rerun when "
+        "they change. Normally plain path strings; an object carrying a "
+        "'path' is also accepted.",
+        json_schema_extra=_allow_null,
+    )
+    # TODO: Support database outputs
+    outputs: list[str | PathOutput] = Field(
+        default=[],
+        description="Paths this stage produces.",
+        json_schema_extra=_allow_null,
+    )
+    always_run: bool = Field(
+        default=False,
+        description="Run this stage every time the pipeline is run, even if "
+        "nothing has changed.",
+    )
+    iterate_over: list[StageIteration] | None = Field(
+        default=None,
+        description="Arguments over which to run this stage multiple times.",
+    )
+    description: str | None = Field(
+        default=None, description="A description of what this stage does."
+    )
+    frozen: bool = Field(
+        default=False,
+        description="Never rerun this stage, treating its outputs as "
+        "up-to-date.",
+    )
+    scheduler: StageSchedulerOptions | None = Field(
+        default=None,
+        description="Options for running this stage on a job scheduler "
+        "(SLURM or PBS).",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
@@ -219,19 +309,48 @@ class Stage(BaseModel):
     # through a job scheduler; used to derive the default log path so the
     # log file can be tracked as a DVC output.
     _scheduler_kind: str | None = PrivateAttr(default=None)
+    # The name of the outer ``system`` env when this stage runs on a
+    # particular machine, whether or not it also names an inner runtime, so
+    # the compiled command dispatches there first. Also resolved by
+    # set_stage_scheduler_options.
+    _system_env: str | None = PrivateAttr(default=None)
+
+    # Declared so the published schema accepts what the validator below
+    # already migrates; without it an editor flags a ``slurm:`` stage that
+    # runs fine.
+    slurm: StageSchedulerOptions | None = Field(
+        default=None,
+        deprecated=True,
+        description="Deprecated name for 'scheduler'; set 'scheduler' "
+        "instead.",
+    )
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_slurm_field(cls, data: Any) -> Any:
-        """Auto-migrate the old ``slurm:`` field to ``scheduler:``."""
-        if not isinstance(data, dict) or "slurm" not in data:
+    def normalize_legacy_keys(cls, data: Any) -> Any:
+        """Accept older and looser spellings of a stage's keys.
+
+        Migrates the old ``slurm:`` field to ``scheduler:``, and treats an
+        empty ``inputs:``/``outputs:`` key, which parses as None, the same as
+        omitting it rather than failing to load the stage.
+
+        Works on a copy, so validating a stage doesn't rewrite the caller's
+        parsed ``calkit.yaml`` underneath it.
+        """
+        if not isinstance(data, dict):
             return data
-        if data.get("scheduler") is not None:
+        if "slurm" in data and data.get("scheduler") is not None:
             raise ValueError(
                 "Stage has both 'slurm' and 'scheduler' options set; "
                 "remove 'slurm' (use 'scheduler' only)"
             )
-        data["scheduler"] = data.pop("slurm")
+        data = {
+            k: v
+            for k, v in data.items()
+            if not (k in ("inputs", "outputs") and v is None)
+        }
+        if "slurm" in data:
+            data["scheduler"] = data.pop("slurm")
         return data
 
     def to_ck_dict(self) -> dict:
@@ -279,8 +398,11 @@ class Stage(BaseModel):
     def dvc_deps(self) -> list[str]:
         deps = []
         for i in self.inputs:
-            if isinstance(i, str) and i not in deps:
-                deps.append(i)
+            if isinstance(i, InputsFromStageOutputs):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in deps:
+                deps.append(path)
         return deps
 
     @property
@@ -312,6 +434,10 @@ class Stage(BaseModel):
         scheduled command with ``calkit xenv -n <inner-env>``. For a plain
         scheduler env (no inner runtime needed), we skip the inner xenv
         wrap and let the user's command run directly inside the job.
+
+        A ``system`` env says which machine to run on rather than what to
+        run in, so it wraps the same way: ``<system-env>:<inner-env>``
+        dispatches to the machine and activates the runtime once there.
         """
         if self.environment == "_system" and self.scheduler is None:
             return ""
@@ -325,7 +451,33 @@ class Stage(BaseModel):
                 + " --command -- "
                 + f"calkit xenv -n {self.inner_environment} --no-check --"
             )
+        if self._system_env is not None:
+            # Dispatch to the machine, telling it what this stage reads and
+            # writes so the transfer follows the pipeline instead of a
+            # hand-maintained list that can drift out of step with it.
+            # Nothing about what to move: the transfer works that out
+            # from the snapshot and from what the workspace says the run
+            # produced, so it can't fall out of step with the pipeline
+            cmd = f"calkit xenv -n {self._system_env} --no-check"
+            if self.inner_environment == self.outer_environment:
+                return cmd + " --"
+            # The inner xenv runs in the workspace rather than here
+            return (
+                cmd
+                + " -- "
+                + f"calkit xenv -n {self.inner_environment} --no-check --"
+            )
         return f"calkit xenv -n {self.inner_environment} --no-check --"
+
+    @property
+    def dvc_out_paths(self) -> list[str]:
+        """The paths this stage writes, however its outputs are spelled."""
+        paths = []
+        for out in self.dvc_outs:
+            path = out if isinstance(out, str) else next(iter(out))
+            if path not in paths:
+                paths.append(path)
+        return paths
 
     @property
     def scheduler_cmd(self) -> str:
@@ -427,8 +579,11 @@ class Stage(BaseModel):
         cmd = self.dvc_cmd
         deps = self.dvc_deps
         for i in self.inputs:
-            if isinstance(i, str) and i not in deps:
-                deps.append(i)
+            if isinstance(i, InputsFromStageOutputs):
+                continue
+            path = i if isinstance(i, str) else i.path
+            if path not in deps:
+                deps.append(path)
         outs = self.dvc_outs
         log_out = self.scheduler_log_output
         if log_out is not None:
@@ -484,8 +639,12 @@ class Stage(BaseModel):
 
 class PythonScriptStage(Stage):
     kind: Literal["python-script"] = "python-script"
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the Python script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -501,9 +660,18 @@ class PythonScriptStage(Stage):
 
 class MapPathsStage(Stage):
     class CopyFileToFile(BaseModel):
-        kind: Literal["file-to-file"] = "file-to-file"
-        src: RelativeChildPathString
-        dest: RelativeChildPathString
+        """Copy a single file to a single destination path."""
+
+        kind: Literal["file-to-file"] = Field(
+            default="file-to-file",
+            description="Copy one file to one destination path.",
+        )
+        src: RelativeChildPathString = Field(
+            description="Path to the file to copy."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to which the file is copied."
+        )
 
         @property
         def arg(self) -> str:
@@ -514,9 +682,18 @@ class MapPathsStage(Stage):
             return self.dest
 
     class CopyFileToDir(BaseModel):
-        kind: Literal["file-to-dir"] = "file-to-dir"
-        src: RelativeChildPathString
-        dest: RelativeChildPathString
+        """Copy a single file into a directory, keeping its name."""
+
+        kind: Literal["file-to-dir"] = Field(
+            default="file-to-dir",
+            description="Copy one file into a destination directory.",
+        )
+        src: RelativeChildPathString = Field(
+            description="Path to the file to copy."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to the directory into which the file is copied."
+        )
 
         @property
         def arg(self) -> str:
@@ -527,9 +704,18 @@ class MapPathsStage(Stage):
             return Path(self.dest, Path(self.src).name).as_posix()
 
     class DirToDirMerge(BaseModel):
-        kind: Literal["dir-to-dir-merge"] = "dir-to-dir-merge"
-        src: RelativeChildPathString
-        dest: RelativeChildPathString
+        """Copy a directory's contents into another, keeping what's there."""
+
+        kind: Literal["dir-to-dir-merge"] = Field(
+            default="dir-to-dir-merge",
+            description="Merge one directory's contents into another.",
+        )
+        src: RelativeChildPathString = Field(
+            description="Path to the directory to copy from."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to the directory to copy into."
+        )
 
         @property
         def arg(self) -> str:
@@ -540,9 +726,19 @@ class MapPathsStage(Stage):
             return self.dest
 
     class DirToDirReplace(BaseModel):
-        kind: Literal["dir-to-dir-replace"] = "dir-to-dir-replace"
-        src: RelativeChildPathString
-        dest: RelativeChildPathString
+        """Replace a directory with the contents of another."""
+
+        kind: Literal["dir-to-dir-replace"] = Field(
+            default="dir-to-dir-replace",
+            description="Replace the destination directory entirely.",
+        )
+        src: RelativeChildPathString = Field(
+            description="Path to the directory to copy from."
+        )
+        dest: RelativeChildPathString = Field(
+            description="Path to the directory to replace, which is deleted "
+            "first."
+        )
 
         @field_validator("dest")
         @classmethod
@@ -576,7 +772,7 @@ class MapPathsStage(Stage):
             (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
             Discriminator("kind"),
         ]
-    ]
+    ] = Field(description="Copy operations to perform.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -603,22 +799,47 @@ class MapPathsStage(Stage):
 
 class LatexStage(Stage):
     kind: Literal["latex"] = "latex"
-    target_path: str
-    output_dir: str | None = None
-    aux_dir: str | None = None
-    latexmkrc_path: str | None = None
-    pdf_storage: Literal["git", "dvc"] | None = "dvc"
-    # Comparisons to keep for this document, each a pair of revisions. A
-    # bare string is shorthand for comparing that revision against the
-    # working tree.
-    diffs: list[str | list[str]] = []
-    diff_pdf_storage: Literal["git", "dvc"] | None = "dvc"
-    verbose: bool = False
-    force: bool = False
-    synctex: bool = True
-    # Extra arguments passed straight through to latexmk, for control Calkit
-    # does not model.
-    latexmk_args: list[str] = []
+    target_path: str = Field(description="Path to the .tex file to compile.")
+    output_dir: str | None = Field(
+        default=None,
+        description="Directory for latexmk output. Defaults to compiling in "
+        "place, alongside the target.",
+    )
+    aux_dir: str | None = Field(
+        default=None,
+        description="Directory for latexmk auxiliary files.",
+    )
+    latexmkrc_path: str | None = Field(
+        default=None, description="Path to a latexmkrc file to use."
+    )
+    pdf_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the resulting PDF."
+    )
+    diffs: list[str | list[str]] = Field(
+        default=[],
+        description="Comparisons to keep for this document, each a pair of "
+        "revisions. A bare string is shorthand for comparing that revision "
+        "against the working tree.",
+    )
+    diff_pdf_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the resulting diff PDFs."
+    )
+    verbose: bool = Field(
+        default=False, description="Show full latexmk output."
+    )
+    force: bool = Field(
+        default=False,
+        description="Keep compiling despite errors (latexmk -f).",
+    )
+    synctex: bool = Field(
+        default=True,
+        description="Generate SyncTeX data for editor/PDF navigation.",
+    )
+    latexmk_args: list[str] = Field(
+        default=[],
+        description="Extra arguments passed straight through to latexmk, for "
+        "control Calkit does not model.",
+    )
 
     @property
     def diff_pairs(self) -> list[tuple[str, str]]:
@@ -849,9 +1070,17 @@ class QuartoStage(Stage):
     """
 
     kind: Literal["quarto"] = "quarto"
-    target_path: str
-    to: str | None = None
-    args: list[str] = []
+    target_path: str = Field(
+        description="Path to the Quarto document to render."
+    )
+    to: str | None = Field(
+        default=None,
+        description="Output format, passed to 'quarto render --to'. Defaults "
+        "to what the document's metadata specifies.",
+    )
+    args: list[str] = Field(
+        default=[], description="Extra arguments passed to 'quarto render'."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -870,13 +1099,21 @@ class QuartoStage(Stage):
 class JsonToLatexStage(Stage):
     kind: Literal["json-to-latex"] = "json-to-latex"
     environment: str = "_system"
-    command_name: str | None = None
-    format: dict[str, str] | None = None
+    command_name: str | None = Field(
+        default=None,
+        description="Name of the LaTeX command to define for each value.",
+    )
+    format: dict[str, str] | None = Field(
+        default=None,
+        description="Format strings for values, keyed by their JSON key.",
+    )
 
     @property
     def dvc_cmd(self) -> str:
         cmd = "calkit latex from-json"
-        for input_path in self.inputs:
+        # dvc_deps rather than inputs, since an input can be an object
+        # carrying a path, which would otherwise interpolate its repr.
+        for input_path in self.dvc_deps:
             cmd += f" '{input_path}'"
         for out in self.outputs:
             if isinstance(out, str):
@@ -912,8 +1149,13 @@ class JsonToLatexStage(Stage):
 
 class MatlabScriptStage(Stage):
     kind: Literal["matlab-script"]
-    script_path: RelativeChildPathString
-    matlab_path: RelativeChildPathString | None = None
+    script_path: RelativeChildPathString = Field(
+        description="Path to the MATLAB script to run."
+    )
+    matlab_path: RelativeChildPathString | None = Field(
+        default=None,
+        description="Directory added to the MATLAB path, recursively.",
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -934,7 +1176,7 @@ class MatlabScriptStage(Stage):
 
 class MatlabCommandStage(Stage):
     kind: Literal["matlab-command"] = "matlab-command"
-    command: str
+    command: str = Field(description="MATLAB command to run.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -949,8 +1191,10 @@ class MatlabCommandStage(Stage):
 
 class ShellCommandStage(Stage):
     kind: Literal["shell-command"]
-    command: str
-    shell: Literal["sh", "bash", "zsh"] = "bash"
+    command: str = Field(description="Shell command to run.")
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash", description="Shell in which to run the command."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -966,9 +1210,15 @@ class ShellCommandStage(Stage):
 
 class ShellScriptStage(Stage):
     kind: Literal["shell-script"]
-    script_path: RelativeChildPathString
-    args: list[str] = []
-    shell: Literal["sh", "bash", "zsh"] = "bash"
+    script_path: RelativeChildPathString = Field(
+        description="Path to the shell script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash", description="Shell in which to run the script."
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -1005,7 +1255,9 @@ class ShellScriptStage(Stage):
 
 class DockerCommandStage(Stage):
     kind: Literal["docker-command"]
-    command: str
+    command: str = Field(
+        description="Full command to run, including the 'docker run' call."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1014,7 +1266,7 @@ class DockerCommandStage(Stage):
 
 class CommandStage(Stage):
     kind: Literal["command"] = "command"
-    command: str
+    command: str = Field(description="Command to run in the environment.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -1023,8 +1275,12 @@ class CommandStage(Stage):
 
 class RScriptStage(Stage):
     kind: Literal["r-script"]
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the R script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_deps(self) -> list[str]:
@@ -1040,8 +1296,12 @@ class RScriptStage(Stage):
 
 class JuliaScriptStage(Stage):
     kind: Literal["julia-script"] = "julia-script"
-    script_path: RelativeChildPathString
-    args: list[str] = []
+    script_path: RelativeChildPathString = Field(
+        description="Path to the Julia script to run."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1057,7 +1317,7 @@ class JuliaScriptStage(Stage):
 
 class JuliaCommandStage(Stage):
     kind: Literal["julia-command"] = "julia-command"
-    command: str
+    command: str = Field(description="Julia command to run.")
 
     @property
     def dvc_cmd(self) -> str:
@@ -1074,11 +1334,21 @@ class JuliaCommandStage(Stage):
 # ``convert_sbatch_stages`` to remove the legacy complexity.
 class SBatchStage(Stage):
     kind: Literal["sbatch"] = "sbatch"
-    script_path: RelativeChildPathString
-    args: list[str] = []
-    sbatch_options: list[str] = []
-    log_path: str | None = None
-    log_storage: Literal["git", "dvc"] | None = "git"
+    script_path: RelativeChildPathString = Field(
+        description="Path to the script to submit."
+    )
+    args: list[str] = Field(
+        default=[], description="Arguments passed to the script."
+    )
+    sbatch_options: list[str] = Field(
+        default=[], description="Options passed to sbatch."
+    )
+    log_path: str | None = Field(
+        default=None, description="Path at which to write the job log."
+    )
+    log_storage: Literal["git", "dvc"] | None = Field(
+        default="git", description="Where to store the job log."
+    )
 
     @property
     def log_output(self) -> PathOutput:
@@ -1163,12 +1433,28 @@ class JupyterNotebookStage(Stage):
     """
 
     kind: Literal["jupyter-notebook"] = "jupyter-notebook"
-    notebook_path: str
-    cleaned_ipynb_storage: Literal["git", "dvc"] | None = None
-    executed_ipynb_storage: Literal["git", "dvc"] | None = "dvc"
-    html_storage: Literal["git", "dvc"] | None = "dvc"
-    parameters: dict[str, Any] = {}
-    language: Literal["python", "matlab", "julia"] | None = None
+    notebook_path: str = Field(description="Path to the notebook to execute.")
+    cleaned_ipynb_storage: Literal["git", "dvc"] | None = Field(
+        default=None,
+        description="Where to store the output-stripped notebook.",
+    )
+    executed_ipynb_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the executed notebook."
+    )
+    html_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc",
+        description="Where to store the executed notebook as HTML.",
+    )
+    parameters: dict[str, Any] = Field(
+        default={},
+        description="Parameters injected into the notebook. A value like "
+        "'{name}' is filled in from the project-level parameters.",
+    )
+    language: Literal["python", "matlab", "julia"] | None = Field(
+        default=None,
+        description="The notebook's language. Detected automatically if "
+        "unset.",
+    )
 
     def update_parameters(self, params: dict) -> None:
         """If we have any templated parameters, update those, e.g., from
@@ -1289,7 +1575,9 @@ class JupyterNotebookStage(Stage):
 
 class WordToPdfStage(Stage):
     kind: Literal["word-to-pdf"] = "word-to-pdf"
-    word_doc_path: str
+    word_doc_path: str = Field(
+        description="Path to the Word document to convert."
+    )
     environment: str = "_system"
 
     @property
@@ -1318,7 +1606,155 @@ class WordToPdfStage(Stage):
         )
 
 
+class MarimoHtmlWasmStage(Stage):
+    """A stage that exports a marimo notebook to a WebAssembly app.
+
+    The app runs entirely in the browser via Pyodide, so it can be served
+    as static files with no backend.
+
+    marimo's export commands differ enough from each other that each gets
+    its own stage kind and CLI command, rather than one kind with a format
+    option whose other fields only apply to some of its values.
+
+    marimo's own export is not self-contained: it requires the data an app
+    reads to already sit in a ``public`` directory next to the notebook, and
+    copies only that directory into the output. Assembling that is this
+    stage's main job, and it happens in a build directory rather than
+    in place, so nothing is generated in the project tree. Paths in ``include_paths`` are
+    copied beneath ``public`` at their project-relative paths, so notebook
+    code that reads ``mo.notebook_location() / "public" / "data.csv"`` works
+    the same locally as it does in the browser.
+
+    ``include_paths`` is deliberately separate from ``inputs`` because these
+    files are published to the web, which should be opt-in per path rather
+    than inferred from the dependency graph. They are dependencies too.
+    """
+
+    kind: Literal["marimo-html-wasm"] = "marimo-html-wasm"
+    notebook_path: str = Field(
+        description="Path to the marimo notebook to export."
+    )
+    # The layout file is named inside the notebook source
+    # (``marimo.App(layout_file=...)``), so we can't detect it without
+    # parsing Python, and a grid app silently degrades to a linear notebook
+    # if it goes missing.
+    layout_path: str | None = Field(
+        default=None,
+        description="Path to the notebook's layout file, if it has one.",
+    )
+    mode: Literal["run", "edit"] = Field(
+        default="run",
+        description="Whether the app runs its cells or opens as an editable "
+        "notebook.",
+    )
+    show_code: bool = Field(
+        default=False, description="Show the notebook's code in the app."
+    )
+    include_paths: list[str] = Field(
+        default=[],
+        description="Paths published with the app, readable from the "
+        "notebook at 'public/<path>'. These are dependencies as well.",
+    )
+    output_dir: str = Field(
+        description="Directory into which the app is exported."
+    )
+    output_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc", description="Where to store the exported app."
+    )
+    # A WASM export doesn't run the notebook, so we run it once beforehand to
+    # keep a broken app from shipping green. That doubles the stage's runtime,
+    # which isn't worth it for a notebook that takes a while and is already
+    # executed elsewhere in the pipeline. Not named ``validate``, which
+    # shadows a Pydantic attribute on the base model.
+    validate_notebook: bool = Field(
+        default=True,
+        description="Run the notebook before exporting, to catch one that "
+        "would fail in the browser.",
+    )
+
+    @model_validator(mode="after")
+    def check_include_paths_have_a_stable_dep(self) -> MarimoHtmlWasmStage:
+        """Reject an include pattern whose first segment is a glob.
+
+        Dependencies are the pattern's longest non-glob parent, so a
+        top-level pattern like ``*.csv`` leaves nothing to depend on, and
+        silently dropping it would let DVC order this stage before whatever
+        produces those files.
+        """
+        for path in self.include_paths:
+            if not _non_glob_prefix(path):
+                raise ValueError(
+                    f"Included path '{path}' begins with a glob, leaving no "
+                    "directory to depend on; put it under one, e.g. "
+                    f"'data/{path}'"
+                )
+        return self
+
+    @model_validator(mode="after")
+    def check_export_options(self) -> MarimoHtmlWasmStage:
+        """Reject options that contradict each other."""
+        if self.mode == "edit" and self.show_code:
+            raise ValueError(
+                "Stage option 'show_code' is redundant with 'mode: edit', "
+                "where code is always visible"
+            )
+        return self
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = [self.notebook_path]
+        if self.layout_path is not None:
+            deps.append(self.layout_path)
+        # A glob can't be a DVC dep, and expanding one at compile time would
+        # yield no deps at all before the producing stage has ever run,
+        # letting DVC order this stage first. Depend on the longest non-glob
+        # parent instead: conservative, but stable and correctly ordered.
+        for path in self.include_paths:
+            dep = _non_glob_prefix(path)
+            if dep not in deps:
+                deps.append(dep)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs = super().dvc_outs
+        if self.output_storage:
+            outs.append(
+                {self.output_dir: {"cache": self.output_storage == "dvc"}}
+            )
+        return outs
+
+    @property
+    def app_outputs(self) -> list[PathOutput]:
+        """Return the exported app so its storage can be respected."""
+        return [PathOutput(path=self.output_dir, storage=self.output_storage)]
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = (
+            "calkit nb export-marimo-wasm --environment "
+            f"{self.inner_environment} --no-check"
+        )
+        if self.mode != "run":
+            cmd += f" --mode {self.mode}"
+        if self.show_code:
+            cmd += " --show-code"
+        if not self.validate_notebook:
+            cmd += " --no-validate"
+        if self.layout_path is not None:
+            cmd += f" --layout {shlex.quote(self.layout_path)}"
+        for path in self.include_paths:
+            cmd += f" --include {shlex.quote(path)}"
+        cmd += f" -o {shlex.quote(self.output_dir)}"
+        cmd += f" {shlex.quote(self.notebook_path)}"
+        if self.scheduler is not None:
+            cmd = self.scheduler_cmd + " --command -- " + cmd
+        return cmd
+
+
 class Pipeline(BaseModel):
+    """The project's reproducible pipeline."""
+
     stages: dict[
         str,
         Annotated[
@@ -1340,6 +1776,7 @@ class Pipeline(BaseModel):
                 | JuliaCommandStage
                 | SBatchStage
                 | MapPathsStage
+                | MarimoHtmlWasmStage
             ),
             Discriminator("kind"),
         ],
@@ -1400,6 +1837,29 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            if kind == "system":
+                # A system env names the machine, so it can wrap an inner
+                # runtime the same way a scheduler env does.
+                stage._system_env = stage.outer_environment
+                if stage.inner_environment == stage.outer_environment:
+                    continue
+                inner_env = environments.get(stage.inner_environment)
+                if inner_env is None:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has inner environment "
+                        f"'{stage.inner_environment}' that is not "
+                        "defined in environments"
+                    )
+                if inner_env.get("kind") in set(scheduler_kinds) | {"system"}:
+                    raise ValueError(
+                        f"Stage '{stage.name}' has system outer environment "
+                        f"'{stage.outer_environment}' and inner environment "
+                        f"'{stage.inner_environment}' of kind "
+                        f"'{inner_env.get('kind')}'; the inner environment "
+                        "must be a runtime, not another machine or a job "
+                        "scheduler"
+                    )
+                continue
             if kind not in scheduler_kinds:
                 continue
             cli_alias = scheduler_kinds[kind]

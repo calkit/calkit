@@ -1,9 +1,12 @@
 import { Box, Flex, Text } from "@chakra-ui/react"
 import { Suspense, lazy } from "react"
+import SyntaxHighlighter from "react-syntax-highlighter"
+import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
 
 import { type Notebook } from "../../client"
 import { decodeBase64Utf8 } from "../../lib/strings"
 import LoadingSpinner from "../Common/LoadingSpinner"
+import { getLanguage } from "../Files/FileContent"
 
 const IpynbRenderer = lazy(() =>
   import("react-ipynb-renderer").then(async (m) => {
@@ -47,6 +50,27 @@ function NotebookView({ notebook }: NotebookViewProps) {
     } catch {
       // Fall through to the other renderers below
     }
+  }
+  // A marimo notebook is a Python module whose stage builds an app, so its
+  // source is the notebook itself rather than a rendering of a run
+  if (notebook.output_format === "source" && notebook.content) {
+    return (
+      <Box borderRadius="lg" overflow="hidden" height="100%" fontSize="sm">
+        <SyntaxHighlighter
+          language={getLanguage(notebook.path)}
+          style={atomOneDark}
+          customStyle={{
+            height: "100%",
+            margin: 0,
+            borderRadius: "8px",
+            overflowX: "auto",
+            overflowY: "auto",
+          }}
+        >
+          {decodeBase64Utf8(notebook.content)}
+        </SyntaxHighlighter>
+      </Box>
+    )
   }
   if (notebook.output_format === "html" && notebook.content) {
     return (

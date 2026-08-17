@@ -1409,3 +1409,68 @@ def test_scheduler_dispatches_to_a_remote_host(tmp_dir, monkeypatch):
     assert kwargs["outs"] == ["results"]
     # And it re-runs itself over there, where sbatch actually exists
     assert kwargs["command"].startswith("calkit ")
+
+
+def test_requirements_are_checked_where_the_stage_will_run(monkeypatch):
+    w = ws.Workspace(host="box", wdir="/w")
+    ran: list[str] = []
+    failing: set[str] = set()
+
+    class Result:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+    def fake_run(argv, **kw):
+        # The command reaches the far end wrapped in a login shell
+        command = argv[-1]
+        ran.append(command)
+        return Result(1 if any(f in command for f in failing) else 0)
+
+    monkeypatch.setattr(ws.subprocess, "run", fake_run)
+    ws.check_requirements(
+        w,
+        [
+            "julia",
+            {"kind": "env-var", "name": "SCRATCH"},
+            {"kind": "setup", "name": "auth", "check_command": "gh auth"},
+        ],
+    )
+    assert any("command -v julia" in c for c in ran)
+    assert any("SCRATCH" in c for c in ran)
+    assert any("gh auth" in c for c in ran)
+    # What's missing is named, and so is the machine it's missing from
+    failing.add("command -v julia")
+    with pytest.raises(ValueError, match="app 'julia' was not found on host"):
+        ws.check_requirements(w, ["julia"])
+    failing.clear()
+    failing.add("SCRATCH")
+    with pytest.raises(ValueError, match="env-var 'SCRATCH' is not set"):
+        ws.check_requirements(w, [{"kind": "env-var", "name": "SCRATCH"}])
+    failing.clear()
+    failing.add("gh auth")
+    with pytest.raises(ValueError, match="To satisfy it there, run: gh login"):
+        ws.check_requirements(
+            w,
+            [
+                {
+                    "kind": "setup",
+                    "name": "auth",
+                    "check_command": "gh auth",
+                    "setup_command": "gh login",
+                }
+            ],
+        )
+    failing.clear()
+    # Machine properties come from the description that host gives of
+    # itself, not from this one
+    ran.clear()
+    info = {"cpu_count": 64, "os": "Linux"}
+    ws.check_requirements(w, [{"kind": "cpu-count", "min": 32}], info)
+    assert ran == []
+    with pytest.raises(ValueError, match="host 'box' has cpu-count 64"):
+        ws.check_requirements(w, [{"kind": "cpu-count", "min": 128}], info)
+    # Reading those properties needs Calkit there, so it's only asked for
+    # when something actually wants an answer from that machine
+    assert not ws.requirements_need_system_info(["julia"])
+    assert ws.requirements_need_system_info([{"kind": "cpu-count", "min": 2}])
+    assert ws.requirements_need_system_info(["julia>=1.10"])

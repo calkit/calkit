@@ -365,7 +365,7 @@ def resolve_env_var_deps(
 
     if interactive is None:
         interactive = _is_interactive()
-    deps = ck_info.get("dependencies", []) or []
+    deps = calkit.get_requirements(ck_info)
     missing = []
     for name in calkit.get_env_var_dep_names(ck_info):
         if os.environ.get(name):

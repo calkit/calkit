@@ -871,7 +871,8 @@ def generate_stage_kinds_markdown() -> str:
 # Keys whose contents are big enough to have earned their own page, which
 # says far more than a type name in a table can
 _KEY_DOC_PAGES = {
-    "dependencies": "dependencies.md",
+    "requirements": "requirements.md",
+    "dependencies": "requirements.md",
     "environments": "environments.md",
     "pipeline": "pipeline/index.md",
     "questions": "questions.md",

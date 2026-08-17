@@ -491,6 +491,57 @@ Run `calkit describe system` to see what these are on the machine you're on.
 The built-in `_system` environment is shorthand for this kind
 on `localhost` with nothing locked.
 
+#### Requirements
+
+A `system` environment can also declare
+[requirements](requirements.md)---what has to be true of that machine
+before stages run on it:
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: hpc.example.edu
+    requirements:
+      - kind: cpu-count
+        min: 16
+      - julia>=1.10
+    lock:
+      - cpu-count
+      - julia-version
+```
+
+`requirements` and `lock` answer different questions,
+which is why a property can appear in both.
+A requirement is a precondition: it's checked before anything runs,
+and one that isn't met stops the run and says what was found and what
+was needed.
+A lock is a cache input: nothing is checked, but the property's observed
+value is recorded, and a stage reruns when it changes.
+So the example above means "refuse to run on fewer than 16 CPUs,"
+and separately "rerun everything if the number of CPUs isn't what it was
+last time."
+
+If you don't care what a property is but do care when it changes,
+lock it and leave it out of `requirements`.
+A requirement that constrains nothing is rejected, since it asserts
+nothing.
+
+Requirements are checked _on the machine the environment names_.
+For a host that isn't this one, that means an app is looked for on that
+host's `PATH`, a variable is read from the shell a login gets there, and
+a `setup` requirement's `check_command` runs there.
+Nothing is offered as a fix in that case---installing something on
+another machine belongs to whoever administers it---so Calkit reports
+what was missing and where.
+Checking a requirement about the machine itself, like `cpu-count`, needs
+Calkit installed on that host, since that's what reports its properties.
+
+The project's own top-level `requirements` describe the host you're
+driving from, which is the `_system` environment.
+They're checked on every `calkit run`, wherever stages end up running,
+because that machine still has to be able to drive the pipeline.
+
 #### Running on another machine
 
 A `system` environment's `host` names the machine the work belongs on.
@@ -984,6 +1035,15 @@ Locked properties are written to the environment's lock file, which
 stages depend on, so moving to a machine where one of them differs
 invalidates the cached result rather than silently reusing it.
 
+`requirements` is the other half, and answers a different question.
+It says what must be _true_ of this machine -- apps that must be
+installed, variables that must be set, at least this many CPUs -- and
+is checked before anything runs, on the machine the environment names.
+A requirement that fails stops the run and says how to fix it; a locked
+property that changes silently invalidates a cached result. One gates,
+the other pins, so a property that matters both ways is written in both
+places.
+
 `host` names the machine. SSH is how a machine is reached, not a kind
 of environment, so there is no separate `ssh` kind: a system env whose
 host isn't this machine is reached over SSH, and one whose host is this
@@ -1021,16 +1081,17 @@ here. An environment doesn't know which files a stage reads, so a list
 kept alongside it can fall behind the pipeline and quietly run against
 stale inputs; the paths are taken from the stage instead.
 
-| Parameter   | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                               |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind        | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                         |
-| host        | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                      |
-| machine_id  | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that. |
-| user        | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                       |
-| ssh_key     | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                             |
-| wdir        | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                      |
-| lock        | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                             |
-| description | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                         |
+| Parameter    | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind         | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                         |
+| host         | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                      |
+| machine_id   | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that. |
+| user         | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                       |
+| ssh_key      | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                             |
+| wdir         | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                      |
+| lock         | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                             |
+| requirements | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                             | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                            |
+| description  | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                         |
 
 #### `uv`
 

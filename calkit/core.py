@@ -428,108 +428,377 @@ def check_dep_exists(
         return False
 
 
-def _normalize_dep(dep) -> dict:
-    """Normalize a calkit.yaml dependency entry into a ``{name, kind, ...}`` dict.
+def system_property_requirement_kinds() -> dict[str, str]:
+    """Requirement kinds that name a machine property, and their info keys.
 
-    Accepts the three forms supported by ``check_system_deps`` so callers
-    that need access to extra fields (``check_command``, ``setup_command``,
-    etc.) don't have to re-parse:
+    These constrain something about the machine rather than requiring a
+    thing to be present, so they carry no name: ``cpu-count`` is the whole
+    identity of the entry. The values are the keys
+    :func:`get_system_info` reports them under.
+    """
+    from typing import get_args
 
-    - plain string (treated as an app name, version specifiers stripped)
+    from calkit.environments import SYSTEM_LOCK_PROPERTIES
+    from calkit.models.core import SystemNumberProperty, SystemValueProperty
+
+    props = list(get_args(SystemNumberProperty)) + list(
+        get_args(SystemValueProperty)
+    )
+    return {prop: SYSTEM_LOCK_PROPERTIES[prop] for prop in props}
+
+
+def _numeric_property_kinds() -> tuple[str, ...]:
+    from typing import get_args
+
+    from calkit.models.core import SystemNumberProperty
+
+    return get_args(SystemNumberProperty)
+
+
+# Whether the old key's deprecation has already been mentioned. Reading
+# the requirements happens several times in one command -- the preflight
+# check, the env-var resolution, the environment build -- and a project is
+# only asked to rename the key once, not once per reader.
+_warned_deprecated_dependencies_key = False
+
+
+def get_requirements(ck_info: dict) -> list:
+    """Read a project's requirements, honoring the old key name.
+
+    ``dependencies`` was renamed to ``requirements`` once the list grew to
+    hold things that can't be depended on so much as demanded -- a CPU
+    count, an amount of memory. The old key still works, and says so once,
+    since a rename nobody is told about is one nobody makes. A project that
+    sets both has said the same thing twice in two places that can drift
+    apart, so that is reported rather than merged.
+    """
+    global _warned_deprecated_dependencies_key
+    reqs = ck_info.get("requirements")
+    deps = ck_info.get("dependencies")
+    if reqs and deps:
+        raise ValueError(
+            "Both 'requirements' and 'dependencies' are set in calkit.yaml; "
+            "'dependencies' is the old name for the same key, so merge them "
+            "into 'requirements'"
+        )
+    if deps and not _warned_deprecated_dependencies_key:
+        _warned_deprecated_dependencies_key = True
+        warnings.warn(
+            "The 'dependencies' key in calkit.yaml is deprecated; rename it "
+            "to 'requirements', which is what it's called now that it also "
+            "holds constraints on the machine itself."
+        )
+    return list(reqs or deps or [])
+
+
+def _normalize_requirement(req) -> dict:
+    """Normalize a calkit.yaml requirement entry into a ``{kind, ...}`` dict.
+
+    Accepts every form supported by ``check_requirements`` so callers that
+    need access to extra fields (``check_command``, ``min``, etc.) don't
+    have to re-parse:
+
+    - plain string (treated as an app name, version specifiers split off)
     - ``{name: {kind: ..., ...attrs}}`` single-key form
     - ``{name, kind, ...attrs}`` flat form
 
-    For ``kind: setup`` only, ``name`` is optional and synthesized from a
-    short hash of ``check_command`` -- a single anonymous setup dep is
-    common and forcing users to invent a name adds friction.
+    ``name`` is the identity of an ``app`` or ``env-var``, so it is
+    required there. A ``setup`` requirement may omit it, since a single
+    anonymous setup step is common and forcing users to invent a name adds
+    friction; a stable one is synthesized from a short hash of
+    ``check_command``. A machine-property requirement has no name at all --
+    ``kind: cpu-count`` already says everything there is to say about which
+    property it constrains -- so the kind is used as the name in messages.
     """
+    dep = req
     if isinstance(dep, str):
         # Split on the first version operator so a string like
         # ``calkit>=0.38`` produces both a clean name and a version spec
         # the caller can validate.
         m = re.match(r"^([A-Za-z0-9_.\-]+)(.*)$", dep.strip())
         if m is None:
-            raise ValueError(f"Malformed dependency: {dep}")
+            raise ValueError(f"Malformed requirement: {dep}")
         out: dict = {"name": m.group(1), "kind": "app"}
         spec = m.group(2).strip()
         if spec:
             out["version_spec"] = spec
         return out
     if not isinstance(dep, dict):
-        raise ValueError(f"Malformed dependency: {dep}")
+        raise ValueError(f"Malformed requirement: {dep}")
     keys = list(dep.keys())
     # Flat form with explicit kind: only requires ``name`` for kinds where
-    # name is the identity (app, env-var). Setup deps may omit it.
+    # name is the identity (app, env-var). Setup requirements may omit it,
+    # and property requirements have none to give.
     if "kind" in keys:
         out = dict(dep)
         if "name" not in out:
-            if out["kind"] != "setup":
-                raise ValueError(f"Dependency missing required 'name': {dep}")
-            check_command = out.get("check_command", "")
-            short = hashlib.sha1(check_command.encode("utf-8")).hexdigest()[:8]
-            out["name"] = f"setup-{short}"
+            kind = out["kind"]
+            if kind in system_property_requirement_kinds():
+                out["name"] = kind
+            elif kind == "setup":
+                check_command = out.get("check_command", "")
+                short = hashlib.sha1(
+                    check_command.encode("utf-8")
+                ).hexdigest()[:8]
+                out["name"] = f"setup-{short}"
+            else:
+                raise ValueError(f"Requirement missing required 'name': {dep}")
         return out
     if "name" in keys:
         out = dict(dep)
         out.setdefault("kind", "app")
         return out
     if len(keys) != 1:
-        raise ValueError(f"Malformed dependency: {dep}")
+        raise ValueError(f"Malformed requirement: {dep}")
     # Single-key form: {name: {kind: ..., ...}}
     name = keys[0]
     attrs = dep[name] or {}
     if not isinstance(attrs, dict):
-        raise ValueError(f"Malformed dependency: {dep}")
+        raise ValueError(f"Malformed requirement: {dep}")
     out = dict(attrs)
     out["name"] = name
     out.setdefault("kind", "app")
     return out
 
 
-def check_system_deps(
+def check_property_requirement(
+    req: dict, system_info: dict, described_as: str = "this machine"
+) -> None:
+    """Check one machine-property requirement against a machine.
+
+    ``system_info`` is what :func:`get_system_info` reports, either from
+    here or from the far end of an SSH connection, so the same constraints
+    can be checked wherever the stage will actually run. ``described_as``
+    names that machine in any error, since "2 CPUs are required, this has
+    1" is a different problem depending on which machine "this" is.
+
+    Raises ``ValueError`` describing what was asked for and what was found.
+    A property the machine can't report is an error too, rather than a
+    silent pass: an unanswerable question isn't a satisfied one.
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    prop = req["kind"]
+    key = system_property_requirement_kinds()[prop]
+    value = system_info.get(key)
+    if value is None:
+        raise ValueError(
+            f"Requirement on '{prop}' can't be checked because "
+            f"{described_as} doesn't report it"
+        )
+    # Numeric properties are bounded; everything else is matched or
+    # compared as a version.
+    if prop in _numeric_property_kinds():
+        minimum = req.get("min")
+        maximum = req.get("max")
+        if minimum is None and maximum is None:
+            raise ValueError(
+                f"Requirement on '{prop}' needs a 'min' or a 'max'; to "
+                "depend on its value rather than constrain it, add it to "
+                "the environment's 'lock'"
+            )
+        if minimum is not None and value < minimum:
+            raise ValueError(
+                f"{described_as} has {prop} {_fmt_prop(value)}, but at least "
+                f"{_fmt_prop(minimum)} is required"
+            )
+        if maximum is not None and value > maximum:
+            raise ValueError(
+                f"{described_as} has {prop} {_fmt_prop(value)}, but at most "
+                f"{_fmt_prop(maximum)} is required"
+            )
+        return
+    equals = req.get("equals")
+    spec = req.get("version_spec")
+    if equals is None and spec is None:
+        raise ValueError(
+            f"Requirement on '{prop}' needs an 'equals' or a 'version_spec'; "
+            "to depend on its value rather than constrain it, add it to the "
+            "environment's 'lock'"
+        )
+    if equals is not None:
+        allowed = [equals] if isinstance(equals, str) else list(equals)
+        # Matched case-insensitively because the same machine is 'Darwin'
+        # or 'darwin' depending on who is writing it down, and nobody means
+        # those to be different answers.
+        if str(value).lower() not in [str(a).lower() for a in allowed]:
+            wanted = " or ".join(f"'{a}'" for a in allowed)
+            raise ValueError(
+                f"{described_as} has {prop} '{value}', but {wanted} is "
+                "required"
+            )
+    if spec is not None:
+        try:
+            spec_set = SpecifierSet(
+                spec if spec[0] in "<>=!~" else f"=={spec}"
+            )
+        except Exception as e:
+            raise ValueError(f"Invalid version_spec '{spec}' for {prop}: {e}")
+        try:
+            parsed = Version(str(value))
+        except InvalidVersion:
+            raise ValueError(
+                f"{described_as} reports {prop} '{value}', which can't be "
+                f"read as a version to compare against '{spec}'"
+            )
+        if parsed not in spec_set:
+            raise ValueError(
+                f"{described_as} has {prop} '{value}', but '{spec}' is "
+                "required"
+            )
+
+
+def _fmt_prop(value: float) -> str:
+    """Format a numeric property so whole numbers don't read as floats."""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, float):
+        return f"{value:.1f}"
+    return str(value)
+
+
+def extract_version(text: str) -> str | None:
+    """Pull a comparable version out of what a tool prints for ``--version``.
+
+    Tools answer that question in their own way -- 'git version 2.39.5',
+    'uv 0.4.18 (a1b2c3d)' -- so the number has to be found rather than
+    read off. The first dotted number is it in every case we've seen; a
+    build hash that follows is not part of what a specifier compares.
+    """
+    m = re.search(r"\d+(?:\.\d+)+|\d+", text or "")
+    return m.group(0) if m else None
+
+
+def check_app_version(
+    name: str,
+    spec: str,
+    system_info: dict | None = None,
+    described_as: str = "this machine",
+    probe_locally: bool = True,
+) -> None:
+    """Check an installed app against a version specifier.
+
+    ``system_info`` supplies versions for the tools a system description
+    already collects; anything else is asked directly, unless the machine
+    in question isn't this one, which is what ``probe_locally=False``
+    says. Reading a local version to check a remote requirement would
+    answer a different question than the one asked.
+
+    A version that can't be read is reported rather than treated as a
+    failure: plenty of tools don't answer ``--version`` in any parseable
+    way, and refusing to run because we couldn't read one would make the
+    field unusable for them. Saying so keeps it from looking checked.
+    """
+    from packaging.specifiers import SpecifierSet
+    from packaging.version import InvalidVersion, Version
+
+    raw = (system_info or {}).get(f"{name}_version")
+    if raw is None and probe_locally:
+        raw = get_dep_version(name)
+    found = extract_version(raw) if raw else None
+    if found is None:
+        print(
+            f"Warning: could not read {name}'s version on {described_as}, so "
+            f"'{spec}' was not checked"
+        )
+        return
+    spec_str = spec if spec[0] in "<>=!~" else f"=={spec}"
+    try:
+        spec_set = SpecifierSet(spec_str)
+    except Exception as e:
+        raise ValueError(f"Invalid version_spec '{spec}' for app {name}: {e}")
+    try:
+        parsed = Version(found)
+    except InvalidVersion:
+        print(
+            f"Warning: {name} reports version '{found}' on {described_as}, "
+            f"which can't be compared against '{spec}'"
+        )
+        return
+    if parsed not in spec_set:
+        raise ValueError(
+            f"app '{name}' is version {found} on {described_as}, but "
+            f"'{spec_str}' is required"
+        )
+
+
+def check_requirements(
     ck_info: dict | None = None,
     wdir: str | None = None,
     system_info: dict | None = None,
     interactive: bool | None = None,
     use_cache: bool = True,
+    requirements: list | None = None,
+    described_as: str = "this machine",
 ) -> None:
-    """Check that the dependencies declared in a project's ``calkit.yaml`` file
-    exist.
+    """Check that a project's declared requirements are satisfied.
 
-    ``setup`` dependencies are verified via
-    :func:`calkit.dependencies.check_setup_dep`, which runs the dep's
+    With no ``requirements`` given, the project's own list is checked,
+    which describes the host -- the built-in ``_system`` environment. A
+    ``system`` environment passes its own list here instead, for the
+    machine it names.
+
+    ``setup`` requirements are verified via
+    :func:`calkit.dependencies.check_setup_dep`, which runs the
     ``check_command`` and -- on an interactive TTY -- optionally runs the
     declared ``setup_command`` after asking the user. Non-interactive
     failures abort with the fix-it command printed for the user to run.
     """
-    if ck_info is None:
-        ck_info = load_calkit_info(wdir=wdir)
-    deps = list(ck_info.get("dependencies", []))
-    if "git" not in deps:
-        deps.append("git")
+    if requirements is not None:
+        # An environment's own list is checked exactly as declared: it
+        # describes a machine that runs stages, which is a smaller claim
+        # than being where the project lives.
+        deps = list(requirements)
+    else:
+        if ck_info is None:
+            ck_info = load_calkit_info(wdir=wdir)
+        deps = get_requirements(ck_info)
+        # Git is how a project exists at all, so the host needs it whether
+        # or not anyone wrote it down.
+        if "git" not in deps:
+            deps.append("git")
     # Resolve TTY interactivity once so a single per-call answer drives
     # every prompt (env-var, app installer, setup step).
     if interactive is None:
         from calkit.dependencies import _is_interactive
 
         interactive = _is_interactive()
-    # Process in dependency order: env-vars first (some installers and
-    # setup commands read from them), then apps (env managers like pixi
-    # / uv need to exist before setup steps that run inside an env), then
-    # setup steps last. The setup-step ``check_command`` typically wraps
-    # ``calkit xenv``, which validates its own environment, so we don't
-    # need a separate env-check phase here.
-    buckets: dict[str, list[dict]] = {"env-var": [], "app": [], "setup": []}
+    # Process in dependency order: machine properties first, since a
+    # machine that is too small to run the project at all should say so
+    # before we start installing things on it, then env-vars (some
+    # installers and setup commands read from them), then apps (env
+    # managers like pixi / uv need to exist before setup steps that run
+    # inside an env), then setup steps last. The setup-step
+    # ``check_command`` typically wraps ``calkit xenv``, which validates
+    # its own environment, so we don't need a separate env-check phase.
+    property_kinds = system_property_requirement_kinds()
+    buckets: dict[str, list[dict]] = {
+        "_property": [],
+        "env-var": [],
+        "app": [],
+        "setup": [],
+    }
     for raw_dep in deps:
-        dep = _normalize_dep(raw_dep)
+        dep = _normalize_requirement(raw_dep)
         kind = dep["kind"]
-        if kind not in buckets:
+        if kind in property_kinds:
+            buckets["_property"].append(dep)
+        elif kind not in buckets:
             # Unknown / legacy kinds (e.g., ``calkit-config``) fall through
             # to ``check_dep_exists`` in original order so we don't change
             # behavior for them silently.
             buckets.setdefault("_other", []).append(dep)
         else:
             buckets[kind].append(dep)
+    if buckets["_property"]:
+        # Read the machine only when something asks about it; describing a
+        # system shells out for a version from every package manager it can
+        # find, which is not a cost to pay for a project that has no
+        # property requirements at all.
+        info = system_info if system_info is not None else get_system_info()
+        for dep in buckets["_property"]:
+            check_property_requirement(dep, info, described_as=described_as)
     for dep in buckets["env-var"]:
         dep_name = dep["name"]
         if dep_name in os.environ:
@@ -560,7 +829,15 @@ def check_system_deps(
 
                 check_calkit_version(spec)
             continue
+        spec = dep.get("version_spec")
         if check_dep_exists(dep_name, "app", system_info=system_info):
+            if spec:
+                check_app_version(
+                    dep_name,
+                    spec,
+                    system_info=system_info,
+                    described_as=described_as,
+                )
             continue
         # Offer the registered native installer when we have one.
         from calkit import install as _install
@@ -570,8 +847,15 @@ def check_system_deps(
             if _install.prompt_and_install(
                 dep_name, interactive=interactive
             ) and check_dep_exists(dep_name, "app", system_info=system_info):
+                if spec:
+                    check_app_version(
+                        dep_name,
+                        spec,
+                        system_info=system_info,
+                        described_as=described_as,
+                    )
                 continue
-        raise ValueError(f"app '{dep_name}' not found")
+        raise ValueError(f"app '{dep_name}' not found on {described_as}")
     for dep in buckets.get("_other", []):
         dep_name = dep["name"]
         dep_kind = dep["kind"]
@@ -588,8 +872,13 @@ def check_system_deps(
         )
         if not ok:
             raise ValueError(
-                f"setup dependency '{dep['name']}' is not satisfied"
+                f"setup requirement '{dep['name']}' is not satisfied"
             )
+
+
+# Pre-rename names, kept so existing callers keep working.
+check_system_deps = check_requirements
+_normalize_dep = _normalize_requirement
 
 
 def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
@@ -597,12 +886,12 @@ def get_env_var_dep_names(ck_info: dict | None = None) -> list[str]:
     if ck_info is None:
         ck_info = load_calkit_info()
     env_vars = []
-    for dep in ck_info.get("dependencies", []):
-        # Delegate shape-parsing to ``_normalize_dep`` so this stays in
-        # lockstep with ``check_system_deps`` -- string deps, single-key
-        # dicts, flat dicts, and nameless setup deps all flow through
-        # one path.
-        normalized = _normalize_dep(dep)
+    for dep in get_requirements(ck_info):
+        # Delegate shape-parsing to ``_normalize_requirement`` so this stays
+        # in lockstep with ``check_requirements`` -- string entries,
+        # single-key dicts, flat dicts, and nameless setup steps all flow
+        # through one path.
+        normalized = _normalize_requirement(dep)
         if normalized["kind"] == "env-var":
             env_vars.append(normalized["name"])
     return env_vars

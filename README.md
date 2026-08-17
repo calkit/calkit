@@ -202,7 +202,7 @@ This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
 so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
 You can also declare a minimum version in `calkit.yaml`;
 see
-[Pinning the Calkit CLI version](https://docs.calkit.org/dependencies.md#pinning-the-calkit-cli-version).
+[Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
 
 ### Calkit Assistant
 

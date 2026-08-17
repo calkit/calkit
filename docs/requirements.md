@@ -1,4 +1,4 @@
-# Dependencies, configuration, and secrets
+# Requirements, configuration, and secrets
 
 One major barrier to reproducibility is dependency management.
 If one relies too much on system-level dependencies,
@@ -16,8 +16,8 @@ Python packages is a bad idea.
 For software libraries and tools more specific to a project,
 use [environments](environments.md).
 
-Dependencies can be declared in a project's `calkit.yaml` file
-as a list in the `dependencies` section,
+Requirements can be declared in a project's `calkit.yaml` file
+as a list in the `requirements` section,
 and these will be checked before running the pipeline when
 `calkit run` is called.
 This way, when someone else tries to run your project,
@@ -25,10 +25,21 @@ they will be notified and can fix the issue before trying again,
 which is more convenient than telling them to run through a
 list of setup steps in a README.
 
-Dependencies can be apps or environmental variables,
-the latter being useful for configuration of a project that needs to be
-unique on each user's machine,
+A requirement can be an app, an environmental variable, a one-time setup
+step, or a constraint on the machine itself, like how many CPUs it has.
+Environmental variables are useful for configuration of a project that
+needs to be unique on each user's machine,
 which can also be used to avoid committing secrets to the repo.
+
+<!-- prettier-ignore -->
+!!! note
+
+    This section used to be called `dependencies`, and that name still
+    works, with a deprecation warning. It was renamed because half of
+    what belongs here isn't something you can install: a CPU count or an
+    amount of memory is required, not depended upon. Set one key or the
+    other; setting both is an error, since they'd be two places for the
+    same list to drift apart.
 
 The example below, taken from
 [this project](https://github.com/petebachant/strava-analysis)
@@ -38,7 +49,7 @@ that allow a different user to use copy and reuse the project without
 changing anything.
 
 ```yaml
-dependencies:
+requirements:
   - docker
   - name: STRAVA_CLIENT_ID
     kind: env-var
@@ -69,21 +80,22 @@ env_vars:
 
 These will then be set for calls to the `run` and `xenv` commands.
 
-When `calkit run` (or `calkit check deps`) encounters a missing
-`env-var` dependency on an interactive terminal, it prompts the user
+When `calkit run` (or `calkit check reqs`) encounters a missing
+`env-var` requirement on an interactive terminal, it prompts the user
 for a value, writes it to `.env`, and exports it for the rest of the
 run.
 `calkit status` does the same, except that a variable left unset is
 reported rather than treated as fatal, since status reports rather than
 enforces.
 
-`calkit check deps` is also available as `calkit check setup` and
-`calkit check dependencies`, which are the same command.
+`calkit check reqs` is also available as `calkit check requirements`,
+and, under the key's old name, as `calkit check deps` and
+`calkit check dependencies`.
 A per-variable `default` may be declared so that pressing Enter accepts
 the default:
 
 ```yaml
-dependencies:
+requirements:
   - name: DB_URL
     kind: env-var
     default: postgres://localhost:5432/dev
@@ -92,21 +104,63 @@ dependencies:
 In non-interactive contexts (CI), the same missing variable still
 raises a clear error so failures aren't silent.
 
+## Requiring something of the machine
+
+Not everything a project needs is something you can install.
+A simulation that needs a certain amount of memory to finish, or a stage
+that divides work across cores, is making a claim about the machine
+rather than about what's on it.
+Those are written as a `kind` naming the property, with no name, since
+`cpu-count` already says everything there is to say about which property
+is meant:
+
+```yaml
+requirements:
+  - kind: cpu-count
+    min: 8
+  - kind: memory-gb
+    min: 32
+  - kind: os
+    equals: [Linux, Darwin]
+  - kind: python-version
+    version_spec: ">=3.11"
+```
+
+`cpu-count` and `memory-gb` take `min` and/or `max`.
+Everything else takes `equals`---matched case-insensitively, and a list
+means any one of them will do---or a `version_spec` for properties that
+are versions.
+The properties available are the machine-describing ones from the table
+in [environments](environments.md#system);
+versions of installed tools are reached as an `app` requirement with a
+`version_spec` instead, which is one way to say it rather than two.
+
+An entry that constrains nothing is rejected.
+If you don't want to constrain a property but do want stages to rerun
+when it changes, that's what a `system` environment's
+[`lock`](environments.md#system) is for:
+requirements gate, locks pin.
+
+Checking these means reading the machine, which is what
+`calkit describe system` reports.
+A property the machine doesn't report is an error rather than a silent
+pass---an unanswerable question isn't a satisfied one.
+
 ## Pinning the Calkit CLI version
 
 A project can declare which version of the Calkit CLI it needs by
-listing `calkit` itself as a dependency with a
+listing `calkit` itself as a requirement with a
 [PEP 440](https://peps.python.org/pep-0440/) version specifier:
 
 ```yaml
-dependencies:
+requirements:
   - calkit>=0.38
 ```
 
 Equivalent flat-dict form, useful when you want to add a `notes` field:
 
 ```yaml
-dependencies:
+requirements:
   - name: calkit
     kind: app
     version_spec: ">=0.38"
@@ -145,16 +199,16 @@ parsed by the parent (e.g. `calkit --use-version 0.3 -- --version`).
 ## Auto-installing apps
 
 For a small set of well-known apps, Calkit ships with a registry of
-upstream one-liner installers and can offer to run them when the dep
+upstream one-liner installers and can offer to run them when the app
 is missing.
-On an interactive terminal `calkit run` (and `calkit check deps`)
+On an interactive terminal `calkit run` (and `calkit check reqs`)
 will prompt before installing;
 in CI the same path prints the install command as a fix-it and exits
 non-zero.
 
 Apps currently in the registry:
 
-| Dep name           | Installer                                                                                          |
+| Name               | Installer                                                                                          |
 | ------------------ | -------------------------------------------------------------------------------------------------- |
 | `pixi`             | `curl -fsSL https://pixi.sh/install.sh \| sh` (and PowerShell on Windows)                          |
 | `uv`               | `curl -LsSf https://astral.sh/uv/install.sh \| sh`                                                 |
@@ -173,18 +227,18 @@ calkit install pixi --yes    # non-interactive (scripts, CI provisioning)
 
 After a successful install, Calkit prepends the installer's known
 output directory (e.g. `~/.pixi/bin`) to `PATH` for the current
-process, so the very next dependency check sees the new binary
+process, so the very next requirement check sees the new binary
 without requiring a shell restart.
 
-## Setup dependencies
+## Setup requirements
 
 Some preconditions aren't files or environment variables -- they're
 one-time per-machine actions like `gh auth login` or
 `huggingface-cli login`.
-The `setup` dependency kind captures these declaratively:
+The `setup` requirement kind captures these declaratively:
 
 ```yaml
-dependencies:
+requirements:
   - pixi
   - kind: setup
     name: Authenticate GitHub CLI
@@ -196,10 +250,10 @@ dependencies:
       then pull data from GitHub without further prompts.
 ```
 
-Each `setup` dep declares:
+Each `setup` requirement declares:
 
 - `check_command`: a shell command whose exit code determines whether
-  the dep is satisfied (exit `0` = satisfied). Required.
+  the requirement is satisfied (exit `0` = satisfied). Required.
 - `setup_command`: optional. On an interactive terminal Calkit asks
   before running it; in CI Calkit prints it as a fix-it and aborts.
 - `description`: optional human-readable explanation; used in error
@@ -216,9 +270,9 @@ command fails.
 
 ### Caching setup checks
 
-Probing a network-bound dependency (like `gh auth status`) on every
+Probing a network-bound check (like `gh auth status`) on every
 `calkit run` is wasteful and slow.
-Calkit caches successful setup-dep checks under
+Calkit caches successful setup checks under
 `.calkit/local/dep-checks.sqlite` (which is `.gitignore`d) for one day
 by default.
 
@@ -226,13 +280,13 @@ The cache invalidates automatically whenever the `check_command` itself
 changes, so editing `calkit.yaml` never silently relies on a stale
 "passed" result.
 
-To override the TTL for a single dep, set `cache_ttl` to a duration
+To override the TTL for a single requirement, set `cache_ttl` to a duration
 string (`30s`, `5m`, `2h`, `7d`, `1w`) or a bare integer number of
 seconds.
-`cache_ttl: 0` disables caching for that dep:
+`cache_ttl: 0` disables caching for that requirement:
 
 ```yaml
-dependencies:
+requirements:
   - kind: setup
     name: AWS credentials are valid
     check_command: aws sts get-caller-identity
@@ -243,26 +297,28 @@ dependencies:
     cache_ttl: 0 # always re-probe
 ```
 
-To force a re-probe of every cached setup dep on a single invocation,
-pass `--no-cache`:
+To force a re-probe of every cached setup requirement on a single
+invocation, pass `--no-cache`:
 
 ```sh
-calkit check deps --no-cache
+calkit check reqs --no-cache
 ```
 
-## Ordering and the dependency flow
+## Ordering and the requirement flow
 
-Within a single `calkit run` or `calkit check deps`, Calkit processes
-dependencies in three phases regardless of the order they appear in
+Within a single `calkit run` or `calkit check reqs`, Calkit processes
+requirements in four phases regardless of the order they appear in
 `calkit.yaml`:
 
-1. **`env-var`** -- prompted first so installers and setup steps can
+1. **machine properties** -- first, because a machine too small to run
+   the project at all should say so before anything is installed on it.
+2. **`env-var`** -- prompted next so installers and setup steps can
    read newly-set variables.
-2. **`app`** -- env managers like `pixi` and `uv` must exist before
+3. **`app`** -- env managers like `pixi` and `uv` must exist before
    any setup step that runs inside one of those environments. Missing
    apps with a registered installer trigger the auto-install prompt
    here.
-3. **`setup`** -- last, since `check_command` typically wraps
+4. **`setup`** -- last, since `check_command` typically wraps
    `calkit xenv` and depends on both apps and env vars.
 
 This ordering means a single fresh-clone `calkit run` can prompt for

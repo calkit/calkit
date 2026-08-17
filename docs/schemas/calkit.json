@@ -323,199 +323,6 @@
       "title": "Dataset",
       "type": "object"
     },
-    "Dependency": {
-      "description": "A system-level dependency.\n\nThree kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` dep declares ``check_command`` (a shell command whose\n  exit code determines whether the dep is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. A future ``cache_ttl``\n  field can extend this to skip re-probing for slow checks.",
-      "properties": {
-        "cache_ttl": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cache Ttl"
-        },
-        "check_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Check Command"
-        },
-        "default": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Default"
-        },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
-        },
-        "kind": {
-          "default": "app",
-          "enum": [
-            "app",
-            "env-var",
-            "setup",
-            "calkit-config"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "name": {
-          "title": "Name",
-          "type": "string"
-        },
-        "setup_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Setup Command"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "title": "Dependency",
-      "type": "object"
-    },
-    "DependencyAttrs": {
-      "description": "A dependency's properties, as written under ``{name: {...}}``.\n\n``Dependency`` is this plus the name; the mapping form supplies the name\nas its key instead.",
-      "properties": {
-        "cache_ttl": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cache Ttl"
-        },
-        "check_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Check Command"
-        },
-        "default": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Default"
-        },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Description"
-        },
-        "kind": {
-          "default": "app",
-          "enum": [
-            "app",
-            "env-var",
-            "setup",
-            "calkit-config"
-          ],
-          "title": "Kind",
-          "type": "string"
-        },
-        "notes": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Notes"
-        },
-        "setup_command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Setup Command"
-        },
-        "version_spec": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Version Spec"
-        }
-      },
-      "title": "DependencyAttrs",
-      "type": "object"
-    },
     "DerivedFromProject": {
       "properties": {
         "git_repo_url": {
@@ -5132,6 +4939,224 @@
       "title": "Release",
       "type": "object"
     },
+    "Requirement": {
+      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n:class:`SystemNumberRequirement` and :class:`SystemValueRequirement`\ninstead, which name a property rather than a thing.",
+      "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "default": "app",
+          "enum": [
+            "app",
+            "env-var",
+            "setup",
+            "calkit-config"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "title": "Version Spec"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Requirement",
+      "type": "object"
+    },
+    "RequirementAttrs": {
+      "description": "A requirement's properties, as written under ``{name: {...}}``.\n\n``Requirement`` is this plus the name; the mapping form supplies the\nname as its key instead.",
+      "properties": {
+        "cache_ttl": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Ttl"
+        },
+        "check_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Check Command"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "default": "app",
+          "enum": [
+            "app",
+            "env-var",
+            "setup",
+            "calkit-config"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "setup_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Setup Command"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version Spec"
+        }
+      },
+      "title": "RequirementAttrs",
+      "type": "object"
+    },
     "Result": {
       "description": "A finding the project produced: a value, a table, a map, or a file.\n\nLike the other artifacts, a result is identified by its path, but unlike\nthem several results can share one file, e.g., a mean and a standard\ndeviation both read out of one summary file. ``key`` is what tells those\napart, so the identity is really the ``(path, key)`` pair. Which part of\na file a result refers to is left open on purpose: other forms of\naddressing can be added without reshaping what a result is.",
       "properties": {
@@ -5472,8 +5497,8 @@
       "title": "SBatchStage",
       "type": "object"
     },
-    "SetupDependency": {
-      "description": "A ``setup`` dependency, whose ``name`` may be omitted.\n\nA single anonymous setup step is common enough that requiring a name adds\nfriction, so Calkit synthesizes a stable ``setup-<hash>`` one from\n``check_command``. This is a separate model rather than a loosening of\n``Dependency.name`` so the published schema still rejects an ``app`` or\n``env-var`` dependency with no name, where the name is the identity.",
+    "SetupRequirement": {
+      "description": "A ``setup`` requirement, whose ``name`` may be omitted.\n\nA single anonymous setup step is common enough that requiring a name\nadds friction, so Calkit synthesizes a stable ``setup-<hash>`` one from\n``check_command``. This is a separate model rather than a loosening of\n``Requirement.name`` so the published schema still rejects an ``app``\nor ``env-var`` requirement with no name, where the name is the\nidentity.",
       "properties": {
         "cache_ttl": {
           "anyOf": [
@@ -5544,6 +5569,18 @@
           "default": null,
           "title": "Name"
         },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
         "setup_command": {
           "anyOf": [
             {
@@ -5555,9 +5592,22 @@
           ],
           "default": null,
           "title": "Setup Command"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Version specifier an 'app' must satisfy, e.g. '>=2.40'. A string requirement like 'git>=2.40' is shorthand for this.",
+          "title": "Version Spec"
         }
       },
-      "title": "SetupDependency",
+      "title": "SetupRequirement",
       "type": "object"
     },
     "ShellCommandStage": {
@@ -6386,7 +6436,7 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
         "description": {
           "anyOf": [
@@ -6458,6 +6508,44 @@
           "description": "Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.",
           "title": "Machine Id"
         },
+        "requirements": {
+          "default": [],
+          "description": "What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/SystemNumberRequirement"
+              },
+              {
+                "$ref": "#/$defs/SystemValueRequirement"
+              },
+              {
+                "$ref": "#/$defs/SetupRequirement"
+              },
+              {
+                "$ref": "#/$defs/Requirement"
+              },
+              {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/RequirementAttrs"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "object"
+              }
+            ]
+          },
+          "title": "Requirements",
+          "type": "array"
+        },
         "ssh_key": {
           "anyOf": [
             {
@@ -6499,6 +6587,133 @@
         }
       },
       "title": "SystemEnvironment",
+      "type": "object"
+    },
+    "SystemNumberRequirement": {
+      "description": "A bound on a numeric property of the machine.\n\nA property is not a thing that can be installed, so there is nothing to\nname and nothing to offer to fix: the check either passes on this\nmachine or reports what it found against what was asked for.\n\nAt least one bound must be given. An entry that constrains nothing says\nnothing -- if the intent is 'results depend on this property', that is\nwhat a ``system`` environment's ``lock`` is for.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "kind": {
+          "description": "Which numeric property of the machine to constrain.",
+          "enum": [
+            "cpu-count",
+            "memory-gb"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Largest acceptable value, inclusive.",
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Smallest acceptable value, inclusive.",
+          "title": "Min"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "SystemNumberRequirement",
+      "type": "object"
+    },
+    "SystemValueRequirement": {
+      "description": "A constraint on a string-valued property of the machine.\n\n``equals`` matches exactly, case-insensitively, and a list of values\nmeans any of them will do. ``version_spec`` compares as a version, for\nproperties like ``os-version`` and ``python-version`` where '>=' means\nsomething.\n\nAt least one of the two must be given, for the same reason a numeric\nrequirement needs a bound.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "equals": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Value the property must have, matched case-insensitively. A list means any one of them is acceptable.",
+          "title": "Equals"
+        },
+        "kind": {
+          "description": "Which property of the machine to constrain.",
+          "enum": [
+            "os",
+            "os-version",
+            "platform",
+            "machine",
+            "processor",
+            "hostname",
+            "machine-id",
+            "python-version",
+            "python-implementation"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "version_spec": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PEP 440 version specifier the property must satisfy, e.g. '>=3.11'. For properties that are versions.",
+          "title": "Version Spec"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "SystemValueRequirement",
       "type": "object"
     },
     "Table": {
@@ -6970,23 +7185,29 @@
     },
     "dependencies": {
       "default": [],
-      "description": "System-level dependencies: applications that must be on PATH, environmental variables, or per-machine setup steps.",
+      "description": "Deprecated alias for 'requirements', still honored so existing projects keep working. Set one or the other, not both.",
       "items": {
         "anyOf": [
           {
             "type": "string"
           },
           {
-            "$ref": "#/$defs/SetupDependency"
+            "$ref": "#/$defs/SystemNumberRequirement"
           },
           {
-            "$ref": "#/$defs/Dependency"
+            "$ref": "#/$defs/SystemValueRequirement"
+          },
+          {
+            "$ref": "#/$defs/SetupRequirement"
+          },
+          {
+            "$ref": "#/$defs/Requirement"
           },
           {
             "additionalProperties": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/DependencyAttrs"
+                  "$ref": "#/$defs/RequirementAttrs"
                 },
                 {
                   "type": "null"
@@ -7297,6 +7518,44 @@
       "description": "Published or archived snapshots, keyed by name.",
       "title": "Releases",
       "type": "object"
+    },
+    "requirements": {
+      "default": [],
+      "description": "What must be true of the machine before the project runs: applications that must be on PATH, environmental variables, per-machine setup steps, and constraints on machine properties like CPU count. These describe the host, which is the built-in '_system' environment; a 'system' environment declares its own.",
+      "items": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/SystemNumberRequirement"
+          },
+          {
+            "$ref": "#/$defs/SystemValueRequirement"
+          },
+          {
+            "$ref": "#/$defs/SetupRequirement"
+          },
+          {
+            "$ref": "#/$defs/Requirement"
+          },
+          {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RequirementAttrs"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "title": "Requirements",
+      "type": "array"
     },
     "results": {
       "default": [],

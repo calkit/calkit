@@ -779,6 +779,123 @@ def verify_machine_id(workspace: Workspace, system_info: dict) -> None:
     )
 
 
+def requirements_need_system_info(requirements: list) -> bool:
+    """Whether checking these requires reading the machine's properties.
+
+    Reading them means Calkit has to be installed on the far end, which is
+    a real thing to ask of a host, so it's only asked for when something
+    actually needs an answer from there.
+    """
+    from calkit.core import _normalize_requirement
+
+    prop_kinds = calkit.system_property_requirement_kinds()
+    for raw in requirements:
+        req = _normalize_requirement(raw)
+        if req["kind"] in prop_kinds:
+            return True
+        if req["kind"] == "app" and req.get("version_spec"):
+            return True
+    return False
+
+
+def check_requirements(
+    workspace: Workspace,
+    requirements: list,
+    system_info: dict | None = None,
+    verbose: bool = False,
+) -> None:
+    """Check a ``system`` environment's requirements on the host it names.
+
+    What a stage needs is what the machine it runs on has, so the questions
+    are asked there rather than here: an app is looked for on that host's
+    PATH, a variable is read from the shell a login gets there, and a setup
+    step's check command runs there. Machine properties come from the
+    description that host gives of itself.
+
+    Nothing is offered as a fix. Installing something or answering a prompt
+    belongs to whoever administers that machine, and the useful thing to do
+    from here is say precisely what was missing and where.
+    """
+    from calkit.core import _normalize_requirement
+
+    reqs = [_normalize_requirement(raw) for raw in requirements]
+    if not reqs:
+        return
+    described_as = f"host '{workspace.host}'"
+    prop_kinds = calkit.system_property_requirement_kinds()
+    properties = [req for req in reqs if req["kind"] in prop_kinds]
+    if properties or any(
+        req["kind"] == "app" and req.get("version_spec") for req in reqs
+    ):
+        if system_info is None:
+            system_info = remote_system_info(workspace)
+    for req in properties:
+        calkit.check_property_requirement(
+            req, system_info or {}, described_as=described_as
+        )
+    for req in reqs:
+        kind = req["kind"]
+        name = req["name"]
+        if kind in prop_kinds:
+            continue
+        elif kind == "env-var":
+            # Quoted so the remote shell expands the variable rather than
+            # this one, and ``:-`` so an unset variable isn't an error
+            # under a profile that runs with 'set -u'.
+            cmd = f'test -n "${{{name}:-}}"'
+            if _remote_rc(workspace, cmd, verbose=verbose) != 0:
+                raise ValueError(
+                    f"env-var '{name}' is not set on {described_as}. Set it "
+                    "in that machine's shell profile, since a stage running "
+                    "there reads its environment, not this one's."
+                )
+        elif kind == "app":
+            cmd = f"command -v {shlex.quote(name)}"
+            if _remote_rc(workspace, cmd, verbose=verbose) != 0:
+                raise ValueError(
+                    f"app '{name}' was not found on {described_as}"
+                )
+            spec = req.get("version_spec")
+            if spec:
+                calkit.check_app_version(
+                    name,
+                    spec,
+                    system_info=system_info or {},
+                    described_as=described_as,
+                    probe_locally=False,
+                )
+        elif kind == "setup":
+            check_command = req.get("check_command")
+            if not check_command:
+                raise ValueError(
+                    f"setup requirement '{name}' must declare 'check_command'"
+                )
+            if _remote_rc(workspace, check_command, verbose=verbose) != 0:
+                setup_command = req.get("setup_command")
+                msg = (
+                    f"setup requirement '{name}' is not satisfied on "
+                    f"{described_as}"
+                )
+                if setup_command:
+                    msg += f". To satisfy it there, run: {setup_command}"
+                raise ValueError(msg)
+        else:
+            raise ValueError(
+                f"Requirement kind '{kind}' can't be checked on another "
+                f"machine ({described_as})"
+            )
+
+
+def _remote_rc(
+    workspace: Workspace, command: str, verbose: bool = False
+) -> int:
+    """Run a command on the far end and return its exit code."""
+    argv = workspace.login_argv(command)
+    if verbose:
+        print(f"Running: {argv}")
+    return subprocess.run(argv, capture_output=not verbose).returncode
+
+
 def _referenced_env_vars(value: str) -> list[str]:
     """The environment variables a config value refers to."""
     return [

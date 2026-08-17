@@ -470,17 +470,22 @@ def check_environment(
         write_scheduler_env_lock(env_name=env_name, env=env)
     elif env["kind"] == "system":
         # Nothing is installed or built for a system env; checking it means
-        # reading the machine properties it declared it depends on and
-        # recording them, so stages depending on the env see them change.
+        # making sure the machine is as the project requires, then reading
+        # the properties it declared it depends on and recording them, so
+        # stages depending on the env see them change.
         if calkit.environments.env_is_local(env):
             try:
+                calkit.check_requirements(
+                    requirements=env.get("requirements", [])
+                )
                 write_system_env_lock(env_name=env_name, env=env)
             except ValueError as e:
-                # A property that can't be locked is the user's to fix --
-                # a misspelled one, or a tool that isn't installed. The
-                # remote branch below already reports these; this one used
-                # to let them out as a traceback.
-                raise_error(str(e))
+                # A requirement that isn't met, or a property that can't be
+                # locked -- a misspelled one, or a tool that isn't
+                # installed. Both are the user's to fix. The remote branch
+                # below already reports these; this one used to let them
+                # out as a traceback.
+                raise_error(f"Environment '{env_name}': {e}")
         else:
             # For a host that isn't this one, checking means getting to the
             # point where we can actually reach it -- better sorted out here
@@ -522,27 +527,45 @@ def check_environment(
                 # only dispatches a command never calls it. A declared
                 # machine ID needs it for the same reason a lock does: the
                 # far end is what reports its own ID, so it has to be asked.
+                # Requirements only need it when one of them asks about the
+                # machine itself rather than about what's installed on it.
                 locks = bool(env.get("lock"))
-                needs_system_info = locks or bool(ws.machine_id)
+                requirements = env.get("requirements", []) or []
+                needs_system_info = (
+                    locks
+                    or bool(ws.machine_id)
+                    or workspace.requirements_need_system_info(requirements)
+                )
                 workspace.ensure_calkit_installed(
                     ws,
                     interactive=interactive,
                     required=needs_system_info,
                     verbose=verbose,
                 )
+                system_info = None
                 if needs_system_info:
                     system_info = workspace.remote_system_info(ws)
-                    # Before the lock is written, so a mismatched machine is
-                    # reported rather than recorded as what results depend on
+                    # Before anything else is decided from it, so a
+                    # mismatched machine is reported rather than measured
+                    # and recorded as what results depend on
                     workspace.verify_machine_id(ws, system_info)
-                    if locks:
-                        write_system_env_lock(
-                            env_name=env_name,
-                            env=env,
-                            system_info=system_info,
-                        )
+                # Before the lock: a machine that doesn't meet the project's
+                # requirements shouldn't have its properties written down as
+                # though stages had run there.
+                workspace.check_requirements(
+                    ws,
+                    requirements,
+                    system_info=system_info,
+                    verbose=verbose,
+                )
+                if locks:
+                    write_system_env_lock(
+                        env_name=env_name,
+                        env=env,
+                        system_info=system_info,
+                    )
             except ValueError as e:
-                raise_error(str(e))
+                raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
     else:
@@ -1373,8 +1396,16 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="deps|dependencies|setup")
-def check_dependencies(
+@check_app.command(
+    name="deps|dependencies",
+    hidden=True,
+    help=(
+        "Check that a project's system-level requirements are met "
+        "(alias for 'reqs')."
+    ),
+)
+@check_app.command(name="reqs|requirements")
+def check_project_requirements(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
@@ -1383,21 +1414,19 @@ def check_dependencies(
         typer.Option(
             "--no-cache",
             help=(
-                "Re-probe every setup dependency, ignoring (and clearing) "
+                "Re-probe every setup requirement, ignoring (and clearing) "
                 "the cache at .calkit/local/dep-checks.sqlite."
             ),
         ),
     ] = False,
 ) -> None:
-    """Check that a project's system-level dependencies are set up
-    correctly.
-    """
-    typer.echo("Checking project dependencies")
+    """Check that a project's system-level requirements are met."""
+    typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.dependencies.cache_clear()
     try:
-        calkit.check_system_deps(use_cache=not no_cache)
+        calkit.check_requirements(use_cache=not no_cache)
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
@@ -1414,7 +1443,7 @@ def check_env_vars(
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
-    deps = ck_info.get("dependencies", [])
+    deps = calkit.get_requirements(ck_info)
     env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
     for name in env_var_dep_names:
         if verbose:

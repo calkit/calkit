@@ -7,7 +7,7 @@ from calkit.models.core import (
     ProjectInfo,
     Publication,
     Question,
-    SetupDependency,
+    SetupRequirement,
     ShowcaseApp,
     ShowcaseFigure,
     StaticHtmlApp,
@@ -116,12 +116,12 @@ def test_apps():
         )
 
 
-def test_dependency_forms_match_what_the_runtime_accepts():
+def test_requirement_forms_match_what_the_runtime_accepts():
     # ``calkit.core`` normalizes several spellings; the model must accept
     # every one of them, or an editor flags a project that loads and runs.
     info = ProjectInfo.model_validate(
         {
-            "dependencies": [
+            "requirements": [
                 "git",
                 "calkit>=0.38",
                 {"name": "uv", "kind": "app"},
@@ -138,11 +138,66 @@ def test_dependency_forms_match_what_the_runtime_accepts():
             ]
         }
     )
-    assert len(info.dependencies) == 6
-    setup_dep = info.dependencies[-1]
-    assert isinstance(setup_dep, SetupDependency)
-    assert setup_dep.name is None
+    assert len(info.requirements) == 6
+    setup_req = info.requirements[-1]
+    assert isinstance(setup_req, SetupRequirement)
+    assert setup_req.name is None
     # Name is the identity for the other kinds, so it stays required there
     for bad in [{"kind": "app"}, {"kind": "env-var"}]:
         with pytest.raises(ValidationError):
-            ProjectInfo.model_validate({"dependencies": [bad]})
+            ProjectInfo.model_validate({"requirements": [bad]})
+    # 'dependencies' is the old name for the same key and still validates
+    old = ProjectInfo.model_validate({"dependencies": ["git"]})
+    assert old.dependencies == ["git"]
+
+
+def test_machine_property_requirements():
+    from calkit.models.core import (
+        SystemEnvironment,
+        SystemNumberRequirement,
+        SystemValueRequirement,
+    )
+
+    info = ProjectInfo.model_validate(
+        {
+            "requirements": [
+                {"kind": "cpu-count", "min": 2},
+                {"kind": "memory-gb", "min": 8, "max": 128},
+                {"kind": "os", "equals": ["Linux", "Darwin"]},
+                {"kind": "python-version", "version_spec": ">=3.11"},
+            ]
+        }
+    )
+    assert isinstance(info.requirements[0], SystemNumberRequirement)
+    assert isinstance(info.requirements[2], SystemValueRequirement)
+    # A typo'd constraint leaves the entry saying nothing, which is caught
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "cpu-count", "minimum": 2}]}
+        )
+    # An entry that constrains nothing asserts nothing; locking is what
+    # 'results depend on this' is written as
+    for vacuous in [{"kind": "cpu-count"}, {"kind": "os"}]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"requirements": [vacuous]})
+    # Nor can it ask for something nothing satisfies
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "cpu-count", "min": 8, "max": 4}]}
+        )
+    # Versions of installed tools are an app requirement, not a property
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "julia-version", "equals": "1.10"}]}
+        )
+    # A system environment declares its own, alongside what it locks
+    env = SystemEnvironment.model_validate(
+        {
+            "kind": "system",
+            "host": "box",
+            "requirements": [{"kind": "cpu-count", "min": 16}, "julia>=1.10"],
+            "lock": ["cpu-count", "julia-version"],
+        }
+    )
+    assert len(env.requirements) == 2
+    assert env.lock == ["cpu-count", "julia-version"]

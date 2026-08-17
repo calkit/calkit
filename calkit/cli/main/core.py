@@ -2004,7 +2004,7 @@ def run(
         ),
     ] = False,
 ) -> dict:
-    """Check dependencies and run the pipeline."""
+    """Check requirements and run the pipeline."""
     import dvc.log
     import dvc.repo
     import dvc.repo.reproduce
@@ -2061,11 +2061,11 @@ def run(
             ".calkit", "systems", system_info["id"] + ".json"
         )
         shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
-    # First check any system-level dependencies exist
+    # First check the host meets the project's requirements
     if not quiet:
-        calkit.echo("🔗 Checking system-level dependencies")
+        calkit.echo("🔗 Checking system-level requirements")
     try:
-        calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
+        calkit.check_requirements(ck_info=ck_info, system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))

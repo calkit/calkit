@@ -1206,6 +1206,17 @@ def test_system_env_lock(tmp_dir):
     )
     with open(lock_fpath) as f:
         assert set(json.load(f)) == {"os", "machine"}
+    # Total memory is a bare division of bytes, so it's recorded rounded:
+    # a firmware or kernel update that reserves a little differently must
+    # not read as the machine having changed
+    assert envs.get_system_lock_data(
+        ["memory-gb"], system_info={"memory_gb": 15.492069244384766}
+    ) == {"memory-gb": 15.5}
+    # Everything else is recorded exactly as reported
+    assert envs.get_system_lock_data(
+        ["cpu-count", "os-version"],
+        system_info={"cpu_count": 10, "os_version": "24.5.0"},
+    ) == {"cpu-count": 10, "os-version": "24.5.0"}
     # A property that doesn't exist, and one this machine can't supply,
     # both raise rather than quietly recording nothing
     with pytest.raises(ValueError, match="Unknown system property"):

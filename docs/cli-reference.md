@@ -20,7 +20,7 @@
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
-| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
@@ -318,7 +318,7 @@ calkit local-server
 
 ### `calkit run`
 
-Check dependencies and run the pipeline.
+Check requirements and run the pipeline.
 
 Usage:
 
@@ -2805,22 +2805,22 @@ Options:
 
 Check things.
 
-| Command                                                                  | Description                                                                                                  |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| [`repro`](#subcommand-check-repro)                                       | Check the reproducibility of a project.                                                                      |
-| [`environment`](#subcommand-check-environment)                           | Check that an environment is up-to-date.                                                                     |
-| [`julia-env`](#subcommand-check-julia-env)                               | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
-| [`environments`](#subcommand-check-environments)                         |                                                                                                              |
-| [`envs`](#subcommand-check-envs)                                         | Check that all environments are up-to-date.                                                                  |
-| [`renv`](#subcommand-check-renv)                                         | Check an renv R environment, initializing if needed.                                                         |
-| [`docker-env`](#subcommand-check-docker-env)                             | Check that Docker environment is up-to-date.                                                                 |
-| [`conda-env`](#subcommand-check-conda-env)                               | Check a conda environment and rebuild if necessary.                                                          |
-| [`venv`](#subcommand-check-venv)                                         | Check a Python virtual environment (uv or virtualenv).                                                       |
-| [`matlab-env`](#subcommand-check-matlab-env)                             | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
-| [`deps\|dependencies\|setup`](#subcommand-check-deps-dependencies-setup) | Check that a project's system-level dependencies are set up correctly.                                       |
-| [`env-vars`](#subcommand-check-env-vars)                                 | Check that the project's required environmental variables exist.                                             |
-| [`pipeline`](#subcommand-check-pipeline)                                 | Check that the project pipeline is defined correctly.                                                        |
-| [`call`](#subcommand-check-call)                                         | Check that a command succeeds and run an alternate if not.                                                   |
+| Command                                                     | Description                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
+| [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
+| [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
+| [`environments`](#subcommand-check-environments)            |                                                                                                              |
+| [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
+| [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
+| [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
+| [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
+| [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
+| [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
+| [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
+| [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
+| [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
+| [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3052,24 +3052,24 @@ Options:
 | `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
 | `--output`, `-o` | text | yes      |         |                                  |
 
-<a id="subcommand-check-deps-dependencies-setup"></a>
+<a id="subcommand-check-reqs-requirements"></a>
 
-#### `calkit check deps|dependencies|setup`
+#### `calkit check reqs|requirements`
 
-Check that a project's system-level dependencies are set up correctly.
+Check that a project's system-level requirements are met.
 
 Usage:
 
 ```text
-calkit check deps|dependencies|setup [OPTIONS]
+calkit check reqs|requirements [OPTIONS]
 ```
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                            |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                   |
-| `--no-cache`      | boolean | no       | False   | Re-probe every setup dependency, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+| Option            | Type    | Required | Default | Description                                                                                             |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
+| `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
 
 <a id="subcommand-check-env-vars"></a>
 

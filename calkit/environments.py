@@ -130,6 +130,16 @@ SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
     "brew-version": "Installed Homebrew version.",
 }
 
+# How precisely a property is worth recording. Total memory is reported as
+# a bare division of bytes by 1024**3, so a machine describes itself as
+# having 15.492069244384766 GB, and a firmware or kernel update that
+# reserves a little more or less moves that without changing anything a
+# result could depend on. Rounding it is the difference between pinning how
+# much memory the machine has and pinning what it happened to report.
+# Everything else is recorded as given: an OS version or a CPU count means
+# exactly what it says.
+SYSTEM_LOCK_PROPERTY_PRECISION = {"memory-gb": lambda v: round(float(v), 1)}
+
 # Properties only one platform can supply, since ``get_system_info`` collects
 # package manager versions per OS. Locking one from another platform raises
 # in ``get_system_lock_data`` rather than recording nothing, so this table is
@@ -729,7 +739,9 @@ def get_system_lock_data(
                 f"System property '{prop}' is not available on this machine"
                 + hint
             )
-        data[prop] = value
+        data[prop] = SYSTEM_LOCK_PROPERTY_PRECISION.get(prop, lambda v: v)(
+            value
+        )
     return data
 
 

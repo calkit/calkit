@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+import warnings
 
 import git
 import pytest
@@ -118,6 +119,114 @@ def test_check_system_deps(tmp_dir):
     )
     with pytest.raises(ValueError):
         calkit.check_system_deps()
+
+
+def test_get_requirements_honors_the_old_key():
+    reqs = ["git", {"kind": "cpu-count", "min": 2}]
+    assert calkit.get_requirements({"requirements": reqs}) == reqs
+    # 'dependencies' is what this key used to be called
+    assert calkit.get_requirements({"dependencies": reqs}) == reqs
+    assert calkit.get_requirements({}) == []
+    # Saying it twice in two places is two places for it to drift apart
+    with pytest.raises(ValueError, match="merge them"):
+        calkit.get_requirements(
+            {"requirements": ["git"], "dependencies": ["uv"]}
+        )
+    # The old name still works, and says so -- once per process, since a
+    # single command reads the list several times over
+    calkit.core._warned_deprecated_dependencies_key = False
+    with pytest.warns(UserWarning, match="deprecated"):
+        calkit.get_requirements({"dependencies": reqs})
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        calkit.get_requirements({"dependencies": reqs})
+        calkit.get_requirements({"requirements": reqs})
+    # Env-var names are read through whichever key was used
+    ck_info = {"requirements": [{"name": "MY_VAR", "kind": "env-var"}]}
+    assert calkit.get_env_var_dep_names(ck_info) == ["MY_VAR"]
+
+
+def test_check_property_requirement():
+    from calkit.core import check_property_requirement as check
+
+    info = {
+        "cpu_count": 8,
+        "memory_gb": 32.0,
+        "os": "Linux",
+        "python_version": "3.12.4",
+    }
+    # Numeric properties are bounded from either side
+    check({"kind": "cpu-count", "min": 8}, info)
+    check({"kind": "cpu-count", "max": 8}, info)
+    check({"kind": "memory-gb", "min": 16, "max": 64}, info)
+    with pytest.raises(ValueError, match="at least 16"):
+        check({"kind": "cpu-count", "min": 16}, info)
+    with pytest.raises(ValueError, match="at most 4"):
+        check({"kind": "cpu-count", "max": 4}, info)
+    # A bound is what makes the entry say anything at all
+    with pytest.raises(ValueError, match="lock"):
+        check({"kind": "cpu-count"}, info)
+    with pytest.raises(ValueError, match="lock"):
+        check({"kind": "os"}, info)
+    # Values match case-insensitively, and a list means any of them
+    check({"kind": "os", "equals": "linux"}, info)
+    check({"kind": "os", "equals": ["Darwin", "Linux"]}, info)
+    with pytest.raises(ValueError, match="'Darwin' is required"):
+        check({"kind": "os", "equals": "Darwin"}, info)
+    # Versions compare as versions rather than as strings
+    check({"kind": "python-version", "version_spec": ">=3.11"}, info)
+    with pytest.raises(ValueError, match=">=3.13"):
+        check({"kind": "python-version", "version_spec": ">=3.13"}, info)
+    with pytest.raises(ValueError, match="can't be read as a version"):
+        check({"kind": "os", "version_spec": ">=1"}, info)
+    # A property the machine doesn't report is unanswered, not satisfied
+    with pytest.raises(ValueError, match="doesn't report it"):
+        check({"kind": "cpu-count", "min": 1}, {})
+    # The machine an error talks about is the one that was checked
+    with pytest.raises(ValueError, match="host 'box' has cpu-count"):
+        check(
+            {"kind": "cpu-count", "min": 16}, info, described_as="host 'box'"
+        )
+
+
+def test_check_requirements_checks_machine_properties(tmp_dir):
+    ck_info = {"requirements": [{"kind": "cpu-count", "min": 1}]}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.check_requirements(ck_info=ck_info, interactive=False)
+    # A machine that can't meet them stops the run before anything else
+    ck_info["requirements"] = [
+        {"kind": "cpu-count", "min": 10_000},
+        {"kind": "env-var", "name": "NOT_SET_ANYWHERE"},
+    ]
+    with pytest.raises(ValueError, match="cpu-count"):
+        calkit.check_requirements(ck_info=ck_info, interactive=False)
+    # An environment's own list is checked in place of the project's
+    calkit.check_requirements(
+        requirements=[{"kind": "cpu-count", "min": 1}], interactive=False
+    )
+    # check_system_deps is the old name for the same function
+    assert calkit.check_system_deps is calkit.check_requirements
+
+
+def test_check_app_version():
+    from calkit.core import check_app_version, extract_version
+
+    # A version has to be found in whatever the tool prints
+    assert extract_version("git version 2.39.5") == "2.39.5"
+    assert extract_version("uv 0.4.18 (a1b2c3d 2024-09-20)") == "0.4.18"
+    assert extract_version("") is None
+    info = {"git_version": "git version 2.39.5"}
+    check_app_version("git", ">=2.30", system_info=info)
+    check_app_version("git", "2.39.5", system_info=info)
+    with pytest.raises(ValueError, match="but '>=3' is required"):
+        check_app_version("git", ">=3", system_info=info)
+    # An unreadable version is reported rather than failed, since plenty of
+    # tools don't answer --version in any parseable way
+    check_app_version("mystery", ">=1", system_info={}, probe_locally=False)
+    # A version a system description doesn't carry is still read from the
+    # machine, unless the machine in question isn't this one
+    check_app_version("git", ">=1", system_info={})
 
 
 def test_check_dep_exists_conda_off_path(monkeypatch):

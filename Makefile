@@ -6,7 +6,10 @@ help: ## Show this help.
 .PHONY: install
 install: ## Create the project's virtual environment.
 	@echo "🚀 Creating virtual environment"
-	@uv sync
+	# --all-packages, since a bare `uv sync` would install only this
+	# package and uninstall the hub backend's dependencies from the
+	# workspace's single shared .venv
+	@uv sync --all-packages
 
 .PHONY: dev
 dev: ## Start up the hub containers for development.

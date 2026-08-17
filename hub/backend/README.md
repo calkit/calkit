@@ -53,11 +53,19 @@ go there and install it.
 
 The backend is a member of the repo's uv workspace, which installs
 calkit-python from the working tree.
-From this directory you can install all the dependencies with:
+The workspace shares a single virtual environment at the repo root, so
+install with `--all-packages`:
 
 ```console
-$ uv sync
+$ uv sync --all-packages
 ```
+
+A bare `uv sync` installs only one workspace member and uninstalls the
+other's dependencies, so running it here breaks the `calkit` CLI, and
+running it at the repo root leaves the backend unable to start with
+`ModuleNotFoundError` on packages like `mixpanel`.
+Always pass `--all-packages`, in particular after merging a change that
+touches dependencies.
 
 Then you can start a shell session with the new environment (which lives at
 the repo root) with:

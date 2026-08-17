@@ -76,6 +76,35 @@ If instead you are running the built image (plain `docker compose up`, not
 `make dev`), the frontend is a static Nginx build and will keep serving old code
 until you rebuild it: `docker compose build frontend`.
 
+### A frontend request fails with a network error
+
+A network error (as opposed to an HTTP status) means nothing answered, so the
+backend is most likely not running. Check with `docker compose ps -a`: if
+`backend` shows `exited (1)`, read `docker compose logs backend` for the
+traceback.
+
+An `ImportError` or `ModuleNotFoundError` from `calkit` there — for example
+`cannot import name 'MARIMO_DETECT_N_BYTES' from 'calkit.notebooks'` — usually
+means the container's virtual environment is stale, not that the code is wrong.
+In dev, `docker-compose.override.yml` mounts the repo at `/app` and masks the
+image's environment with an **anonymous volume** at `/app/.venv`. That volume
+outlives `docker compose build` and `up --force-recreate`, so an environment
+created months ago keeps shadowing the working tree no matter how often the
+image is rebuilt. Renew it explicitly:
+
+```sh
+docker compose build backend
+docker compose up -d --renew-anon-volumes backend
+```
+
+`--renew-anon-volumes` only discards anonymous volumes; named volumes such as
+the database keep their data. Reach for this after merging a branch that changes
+dependencies or moves code between calkit-python and the backend.
+
+Once the volume is current, calkit-python is installed as an editable workspace
+member resolving to `/app/calkit`, so host edits to it are live and this should
+not recur until the environment itself needs to change.
+
 ## Common Patterns
 
 ### Modifying API Contracts

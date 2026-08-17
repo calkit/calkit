@@ -482,11 +482,17 @@ def get_requirements(ck_info: dict) -> list:
             "into 'requirements'"
         )
     if deps and not _warned_deprecated_dependencies_key:
+        from calkit.cli import warn
+
         _warned_deprecated_dependencies_key = True
-        warnings.warn(
+        # Written for whoever has to act on it rather than raised as a
+        # UserWarning, whose file-and-line formatting reads as a defect in
+        # Calkit instead of a line to change in their own project
+        warn(
             "The 'dependencies' key in calkit.yaml is deprecated; rename it "
             "to 'requirements', which is what it's called now that it also "
-            "holds constraints on the machine itself."
+            "holds constraints on the machine itself.",
+            err=True,
         )
     return list(reqs or deps or [])
 

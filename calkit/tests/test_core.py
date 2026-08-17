@@ -2,7 +2,7 @@
 
 import os
 import subprocess
-import warnings
+from unittest import mock
 
 import git
 import pytest
@@ -135,12 +135,14 @@ def test_get_requirements_honors_the_old_key():
     # The old name still works, and says so -- once per process, since a
     # single command reads the list several times over
     calkit.core._warned_deprecated_dependencies_key = False
-    with pytest.warns(UserWarning, match="deprecated"):
+    with mock.patch("calkit.cli.warn") as warn:
         calkit.get_requirements({"dependencies": reqs})
-    with warnings.catch_warnings():
-        warnings.simplefilter("error")
         calkit.get_requirements({"dependencies": reqs})
         calkit.get_requirements({"requirements": reqs})
+    assert warn.call_count == 1
+    assert "deprecated" in warn.call_args[0][0]
+    # It goes to stderr, so it can't corrupt machine-readable output
+    assert warn.call_args.kwargs["err"]
     # Env-var names are read through whichever key was used
     ck_info = {"requirements": [{"name": "MY_VAR", "kind": "env-var"}]}
     assert calkit.get_env_var_dep_names(ck_info) == ["MY_VAR"]

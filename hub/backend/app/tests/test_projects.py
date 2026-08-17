@@ -472,3 +472,265 @@ def test_get_notebook_from_repo(
             project=project, repo=repo, path="notebooks/nope.ipynb"
         )
     assert exc_info.value.status_code == 404
+
+
+def test_read_app_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(
+        app.projects, "get_data_fpath_for_md5", lambda **kwargs: None
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "app").mkdir()
+    (repo_dir / "app" / "index.html").write_text("<h1>app</h1>")
+    (repo_dir / "app" / "assets").mkdir()
+    (repo_dir / "app" / "assets" / "main.js").write_text("export default 1")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add app"])
+    # A secret next to the checkout, i.e., what a traversal would reach
+    (tmp_path / "secret.txt").write_text("password")
+    read = app.projects.read_app_file
+    assert (
+        read(project=project, repo=repo, dir_path="app", rel_path="index.html")
+        == b"<h1>app</h1>"
+    )
+    assert (
+        read(
+            project=project,
+            repo=repo,
+            dir_path="app",
+            rel_path="assets/main.js",
+        )
+        == b"export default 1"
+    )
+    # Paths are normalized rather than passed through, so a request that
+    # walks back into the app's own directory still resolves
+    assert (
+        read(
+            project=project,
+            repo=repo,
+            dir_path="app",
+            rel_path="assets/../index.html",
+        )
+        == b"<h1>app</h1>"
+    )
+    # Neither the declared app directory nor the requested path may leave the
+    # repo. dir_path comes from the project's own calkit.yaml, and reads go
+    # through the checkout directly, so an unchecked '..' would hand back any
+    # file on the server.
+    for dir_path, rel_path in [
+        ("app", "../../secret.txt"),
+        ("app", "/etc/passwd"),
+        ("../", "secret.txt"),
+        ("app/../..", "secret.txt"),
+        ("/etc", "passwd"),
+        ("app", ""),
+    ]:
+        assert (
+            read(
+                project=project,
+                repo=repo,
+                dir_path=dir_path,
+                rel_path=rel_path,
+            )
+            is None
+        ), (dir_path, rel_path)
+    # A symlink out of the tree reads whatever it points at, so it's refused
+    # the same way it is when browsing files
+    (repo_dir / "app" / "leak.html").symlink_to(tmp_path / "secret.txt")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add symlink"])
+    assert (
+        read(project=project, repo=repo, dir_path="app", rel_path="leak.html")
+        is None
+    )
+
+
+def test_get_notebook_from_repo_marimo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        app.projects, "expand_dvc_lock_outs", lambda *a, **k: {}
+    )
+    project = _make_project()
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "calkit.yaml").write_text(
+        "pipeline:\n"
+        "  stages:\n"
+        "    build-app:\n"
+        "      kind: marimo\n"
+        "      environment: py\n"
+        "      notebook_path: notebook.py\n"
+        "      output_path: app\n"
+        "apps:\n"
+        "  explorer:\n"
+        "    kind: static-html\n"
+        "    path: app/index.html\n"
+        "    stage: build-app\n"
+    )
+    (repo_dir / "notebook.py").write_text(
+        'import marimo\n__generated_with = "0.19.4"\napp = marimo.App()\n'
+    )
+    # A plain script that mentions marimo is not a notebook to show source for
+    (repo_dir / "helper.py").write_text("# helpers for marimo\nx = 1\n")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add marimo notebook"])
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="notebook.py"
+    )
+    # The stage runs the notebook, so it links even though its kind isn't
+    # jupyter-notebook
+    assert nb.stage == "build-app"
+    # That stage builds an app, so the notebook points at it
+    assert nb.app == "explorer"
+    # There's no executed copy of a marimo notebook to render, so its source
+    # is what gets shown
+    assert nb.output_format == "source"
+    assert nb.content is not None
+    assert "marimo.App()" in base64.b64decode(nb.content).decode()
+    nb = app.projects.get_notebook_from_repo(
+        project=project, repo=repo, path="helper.py"
+    )
+    assert nb.output_format != "source"
+    assert nb.stage is None
+    assert nb.app is None
+
+
+def test_link_notebook_to_stage_and_app() -> None:
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "report": {
+                    "kind": "jupyter-notebook",
+                    "notebook_path": "notebooks/report.ipynb",
+                },
+                "build-app": {
+                    "kind": "marimo",
+                    "notebook_path": "notebook.py",
+                },
+                "simulate": {"kind": "python-script", "script_path": "run.py"},
+            }
+        },
+        "apps": {"explorer": {"path": "app/index.html", "stage": "build-app"}},
+    }
+    # A marimo stage ties to its notebook the same way a jupyter-notebook
+    # stage does, and that stage builds an app
+    nb: dict = {"path": "notebook.py"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "build-app"
+    assert nb["app"] == "explorer"
+    # A stage that produces no app leaves the notebook without one
+    nb = {"path": "notebooks/report.ipynb"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "report"
+    assert "app" not in nb
+    # A notebook no stage runs stays unlinked, and a script isn't a notebook
+    for path in ["notebooks/orphan.ipynb", "run.py"]:
+        nb = {"path": path}
+        app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+        assert nb == {"path": path}
+    # A stage declared in calkit.yaml wins nothing over one already set
+    nb = {"path": "notebook.py", "stage": "hand-written"}
+    app.projects.link_notebook_to_stage_and_app(nb, ck_info)
+    assert nb["stage"] == "hand-written"
+    # Nothing blows up on a project with no pipeline or apps
+    nb = {"path": "notebook.py"}
+    app.projects.link_notebook_to_stage_and_app(nb, {})
+    assert nb == {"path": "notebook.py"}
+
+
+def test_notebooks_from_ck_info() -> None:
+    # The shape petebachant/nacafoil-openfoam uses: a marimo notebook that
+    # only the pipeline names, with no `notebooks` section at all
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot-clcd": {
+                    "kind": "python-script",
+                    "script_path": "scripts/plot-clcd.py",
+                },
+                "app": {
+                    "kind": "marimo-html-wasm",
+                    "notebook_path": "notebook.py",
+                    "output_dir": "app",
+                },
+            }
+        }
+    }
+    assert app.projects.notebooks_from_ck_info(ck_info) == [
+        {"path": "notebook.py"}
+    ]
+    # A declared notebook keeps its metadata rather than being duplicated by
+    # the stage that runs it
+    ck_info["notebooks"] = [
+        {"path": "notebook.py", "title": "NACA 0012 explorer"},
+        {"path": "notebooks/scratch.ipynb"},
+    ]
+    assert app.projects.notebooks_from_ck_info(ck_info) == [
+        {"path": "notebook.py", "title": "NACA 0012 explorer"},
+        {"path": "notebooks/scratch.ipynb"},
+    ]
+    # A project with nothing to list, and malformed entries, come back empty
+    # rather than raising
+    assert app.projects.notebooks_from_ck_info({}) == []
+    assert app.projects.notebooks_from_ck_info({"notebooks": "nope"}) == []
+    assert (
+        app.projects.notebooks_from_ck_info(
+            {"notebooks": [None, {"title": "No path"}]}
+        )
+        == []
+    )
+
+
+def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    repo = git.Repo.init(repo_dir)
+    repo.git.config(["user.name", "CI Test"])
+    repo.git.config(["user.email", "ci-test@example.com"])
+    (repo_dir / "top.ipynb").write_text("{}")
+    (repo_dir / "notebooks").mkdir()
+    (repo_dir / "notebooks" / "nested.ipynb").write_text("{}")
+    (repo_dir / "notebooks" / "notes.md").write_text("hi")
+    # Hidden directories hold cleaned/executed copies and virtualenvs, none
+    # of which are the project's own notebooks
+    (repo_dir / ".ipynb_checkpoints").mkdir()
+    (repo_dir / ".ipynb_checkpoints" / "top-checkpoint.ipynb").write_text("{}")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add notebooks"])
+    main_sha = repo.head.commit.hexsha
+    tree = app.projects.get_repo_tree_for_ref(repo, None)
+    assert app.projects.find_notebook_paths_in_tree(tree) == [
+        "notebooks/nested.ipynb",
+        "top.ipynb",
+    ]
+    # A notebook added on another branch belongs to that ref only, and the
+    # working tree is whatever branch the cached clone sits on
+    repo.git.checkout(["-b", "other"])
+    (repo_dir / "later.ipynb").write_text("{}")
+    repo.git.add(["-A"])
+    repo.git.commit(["-m", "Add later notebook"])
+    other_sha = repo.head.commit.hexsha
+    assert app.projects.find_notebook_paths_in_tree(
+        app.projects.get_repo_tree_for_ref(repo, other_sha)
+    ) == ["later.ipynb", "notebooks/nested.ipynb", "top.ipynb"]
+    # The earlier ref doesn't see it, even though the checkout now does
+    assert app.projects.find_notebook_paths_in_tree(
+        app.projects.get_repo_tree_for_ref(repo, main_sha)
+    ) == ["notebooks/nested.ipynb", "top.ipynb"]
+    # A symlinked directory pointing back up the tree doesn't hang the walk
+    (repo_dir / "loop").symlink_to(repo_dir)
+    assert "loop" not in str(
+        app.projects.find_notebook_paths_in_tree(
+            app.projects.get_repo_tree_for_ref(repo, None)
+        )
+    )

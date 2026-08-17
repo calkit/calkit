@@ -71,8 +71,8 @@ def _list_artifacts(
     declared and auto-detected artifacts apart.
     """
     ck_info = calkit.load_calkit_info()
-    declared = ck_info.get(kind, []) or []
-    declared_paths = {o.get("path") for o in declared if isinstance(o, dict)}
+    declared = [o for o in ck_info.get(kind) or [] if isinstance(o, dict)]
+    declared_paths = {o.get("path") for o in declared}
     detected: list[dict] = []
     if not declared_only:
         found = calkit.detect.detect_project_artifacts(ck_info=ck_info)

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         pipeline,
         releases,
         resources,
+        schema,
         server,
         templates,
     )
@@ -78,6 +79,7 @@ _SUBMODULES = {
     "install",
     "magics",
     "ops",
+    "schema",
     "server",
 }
 

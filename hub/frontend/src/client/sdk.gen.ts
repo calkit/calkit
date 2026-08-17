@@ -94,6 +94,8 @@ import type {
   GetOwnedProjectsResponses,
   GetProjectAppErrors,
   GetProjectAppResponses,
+  GetProjectAppsErrors,
+  GetProjectAppsResponses,
   GetProjectCollaboratorsErrors,
   GetProjectCollaboratorsResponses,
   GetProjectCommentsErrors,
@@ -394,6 +396,8 @@ import type {
   ResolveReleaseCommentResponses,
   SearchProjectRefsErrors,
   SearchProjectRefsResponses,
+  ServeProjectAppFileErrors,
+  ServeProjectAppFileResponses,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -6025,7 +6029,52 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Apps
+   */
+  public static getProjectApps<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectAppsResponses,
+    GetProjectAppsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectAppsResponses,
+      GetProjectAppsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/apps",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get Project App
+   *
+   * Return the project's first app.
+   *
+   * Superseded by the ``apps`` endpoint; kept so existing clients keep
+   * working.
    */
   public static getProjectApp<ThrowOnError extends boolean = true>(
     parameters: {
@@ -6055,6 +6104,60 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/app",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Serve Project App File
+   *
+   * Serve one file from a static-html app.
+   *
+   * The app's declared path names its entrypoint, and the directory holding
+   * it is the serving root, so sibling assets resolve against it. Bytes are
+   * proxied rather than redirected to a presigned URL because the browser
+   * refuses an ES module whose content type isn't exactly right, and a
+   * WASM app is almost entirely module imports.
+   */
+  public static serveProjectAppFile<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      app_name: string
+      path?: string
+      ref?: string | null
+      git_sha?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    ServeProjectAppFileResponses,
+    ServeProjectAppFileErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "app_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "git_sha" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      ServeProjectAppFileResponses,
+      ServeProjectAppFileErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve",
       ...options,
       ...params,
     })

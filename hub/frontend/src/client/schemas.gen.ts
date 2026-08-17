@@ -2960,7 +2960,7 @@ export const NotebookSchema = {
       anyOf: [
         {
           type: "string",
-          enum: ["html", "notebook"],
+          enum: ["html", "notebook", "source"],
         },
         {
           type: "null",
@@ -3001,6 +3001,17 @@ export const NotebookSchema = {
         },
       ],
       title: "Storage",
+    },
+    app: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "App",
     },
   },
   type: "object",
@@ -4096,6 +4107,15 @@ export const PresignedUrlAccessSchema = {
 
 export const ProjectAppSchema = {
   properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+      default: "static-html",
+    },
     path: {
       anyOf: [
         {
@@ -4140,8 +4160,20 @@ export const ProjectAppSchema = {
       ],
       title: "Description",
     },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
   },
   type: "object",
+  required: ["name"],
   title: "ProjectApp",
 } as const
 
@@ -5487,7 +5519,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "publication"],
+      enum: ["figure", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -5567,7 +5599,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "publication"],
+      enum: ["figure", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -7408,6 +7440,17 @@ export const ResultSchema = {
         },
       ],
       title: "Stage",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
     },
   },
   type: "object",

@@ -20,7 +20,7 @@
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
-| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
@@ -37,7 +37,7 @@
 | [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
 | [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
 | [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
-| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with Jupyter notebooks.                                                                                 |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
@@ -318,7 +318,7 @@ calkit local-server
 
 ### `calkit run`
 
-Check dependencies and run the pipeline.
+Check requirements and run the pipeline.
 
 Usage:
 
@@ -910,13 +910,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                            |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--title`           | text    | yes      |         |                                                        |
-| `--description`     | text    | no       |         |                                                        |
-| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result. |
-| `--no-commit`       | boolean | no       | False   |                                                        |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.               |
+| Option              | Type    | Required | Default | Description                                                                                    |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--name`            | text    | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
+| `--title`           | text    | no       |         |                                                                                                |
+| `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
+| `--description`     | text    | no       |         |                                                                                                |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result.                                         |
+| `--no-commit`       | boolean | no       | False   |                                                                                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.                                                       |
 
 <a id="subcommand-new-create-presentation-pres"></a>
 
@@ -942,6 +944,7 @@ Options:
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
 | `--title`           | text    | yes      |         |                                                              |
 | `--description`     | text    | no       |         |                                                              |
+| `--kind`            | text    | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
 | `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
@@ -1673,14 +1676,15 @@ Arguments:
 
 ### `calkit notebooks|nb`
 
-Work with Jupyter notebooks.
+Work with computational notebooks.
 
-| Command                                                 | Description                                                         |
-| ------------------------------------------------------- | ------------------------------------------------------------------- |
-| [`clean`](#subcommand-notebooks-nb-clean)               | Clean notebook and place a copy in the cleaned notebooks directory. |
-| [`clean-all`](#subcommand-notebooks-nb-clean-all)       | Clean all notebooks in the pipeline.                                |
-| [`check-kernel`](#subcommand-notebooks-nb-check-kernel) | Check that an environment has a registered Jupyter kernel.          |
-| [`execute`](#subcommand-notebooks-nb-execute)           | Execute notebook and place a copy in the relevant directory.        |
+| Command                                                             | Description                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory. |
+| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                |
+| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.          |
+| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.        |
+| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                      |
 
 <a id="subcommand-notebooks-nb-clean"></a>
 
@@ -1782,6 +1786,38 @@ Options:
 | `--language`, `-l`      | text    | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
 | `--no-replace`          | boolean | no       | False    | Do not replace notebook outputs from executed version.                          |
 | `--verbose`, `-v`       | boolean | no       | False    | Print verbose output.                                                           |
+
+<a id="subcommand-notebooks-nb-export-marimo-wasm"></a>
+
+#### `calkit notebooks|nb export-marimo-wasm`
+
+Export a marimo notebook to a WebAssembly app.
+
+Usage:
+
+```text
+calkit notebooks|nb export-marimo-wasm [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | text | yes      |         | Notebook path. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                             |
+| --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output`      | text    | yes      |         | Output path for the app.                                                                                                |
+| `--environment`, `-e` | text    | no       |         | Name or path to the spec of the environment in which to export the notebook; must include marimo.                       |
+| `--mode`              | text    | no       | run     | Whether the app is read-only ('run') or editable.                                                                       |
+| `--show-code`         | boolean | no       | False   | Show notebook code in the app.                                                                                          |
+| `--layout`            | text    | no       |         | Path to the layout file named in the notebook's marimo.App(layout_file=...) call.                                       |
+| `--include`           | text    | no       |         | Path to publish with the app, copied beneath 'public' at its project-relative path. May be a glob, and may be repeated. |
+| `--no-validate`       | boolean | no       | False   | Skip executing the notebook to check it works before exporting.                                                         |
+| `--no-check`          | boolean | no       | False   | Do not check environment before exporting.                                                                              |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                   |
 
 <a id="command-group-list-ls"></a>
 
@@ -2096,6 +2132,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2151,6 +2188,26 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-schema"></a>
+
+#### `calkit describe|desc schema`
+
+Print the JSON schema for calkit.yaml.
+
+Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+
+Usage:
+
+```text
+calkit describe|desc schema [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                               |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="command-group-import"></a>
 
@@ -2760,7 +2817,7 @@ Check things.
 | [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
 | [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
-| [`deps\|dependencies`](#subcommand-check-deps-dependencies) | Check that a project's system-level dependencies are set up correctly.                                       |
+| [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
@@ -2995,24 +3052,24 @@ Options:
 | `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
 | `--output`, `-o` | text | yes      |         |                                  |
 
-<a id="subcommand-check-deps-dependencies"></a>
+<a id="subcommand-check-reqs-requirements"></a>
 
-#### `calkit check deps|dependencies`
+#### `calkit check reqs|requirements`
 
-Check that a project's system-level dependencies are set up correctly.
+Check that a project's system-level requirements are met.
 
 Usage:
 
 ```text
-calkit check deps|dependencies [OPTIONS]
+calkit check reqs|requirements [OPTIONS]
 ```
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                            |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                   |
-| `--no-cache`      | boolean | no       | False   | Re-probe every setup dependency, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+| Option            | Type    | Required | Default | Description                                                                                             |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
+| `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
 
 <a id="subcommand-check-env-vars"></a>
 
@@ -3197,6 +3254,8 @@ Interact with Overleaf.
 | [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
 | [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
 | [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
 
 <a id="subcommand-overleaf-ol-import"></a>
 
@@ -3225,7 +3284,6 @@ Options:
 | `--target`, `-T`      | text    | no       |         | Target TeX file path inside Overleaf project.                                                                              |
 | `--description`, `-d` | text    | no       |         | Description of the publication.                                                                                            |
 | `--kind`              | text    | no       |         | What of the publication this is, e.g., 'journal-article'.                                                                  |
-| `--sync-path`, `-s`   | text    | no       |         | Paths to sync from the Overleaf project, e.g., 'main.tex'. Note that multiple can be specified.                            |
 | `--push-path`, `-p`   | text    | no       |         | Paths to push to the Overleaf project, e.g., 'figures'. Note that these are relative to the publication working directory. |
 | `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
@@ -3259,6 +3317,9 @@ Options:
 | `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
 | `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
 | `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
 
 <a id="subcommand-overleaf-ol-status-st"></a>
 
@@ -3277,6 +3338,71 @@ Arguments:
 | Argument | Type | Required | Default | Description                                                                                     |
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
 | `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
+
+<a id="subcommand-overleaf-ol-push"></a>
+
+#### `calkit overleaf|ol push`
+
+Get the project's latest figures and text onto Overleaf.
+
+Pulls the latest data, ensures the pipeline is up-to-date, then pushes to Overleaf without pulling anything back, so collaborators see current results before they write against them.
+
+Usage:
+
+```text
+calkit overleaf|ol push [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                          |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to push to Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pushed. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pushing.                                                                |
+| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                       |
+| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                         |
+| `--allow-stale`  | boolean | no       | False   | Push even if the pipeline is out-of-date.                                                                        |
+| `--any-branch`   | boolean | no       | False   | Push even if the current branch is missing commits from the default branch.                                      |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for. |
+| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                           |
+
+<a id="subcommand-overleaf-ol-pull"></a>
+
+#### `calkit overleaf|ol pull`
+
+Bring collaborators' Overleaf writing back into the project.
+
+Syncs in both directions, since Overleaf needs current figures to be worth writing against, then rebuilds the document from whatever came back and saves it.
+
+Usage:
+
+```text
+calkit overleaf|ol pull [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                            |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `paths`  | text | no       |         | Paths to pull from Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pulled. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                 |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pulling. Useful when the default branch is protected, since pulling from Overleaf creates commits. |
+| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                                                  |
+| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                                                    |
+| `--no-run`       | boolean | no       | False   | Do not run the pipeline after pulling.                                                                                                      |
+| `--allow-stale`  | boolean | no       | False   | Pull even if the pipeline is out-of-date.                                                                                                   |
+| `--any-branch`   | boolean | no       | False   | Pull even if the current branch is missing commits from the default branch.                                                                 |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
+| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
 
 <a id="command-group-hub-cloud"></a>
 
@@ -3578,3 +3704,6 @@ Options:
 | `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
 | `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
 | `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |

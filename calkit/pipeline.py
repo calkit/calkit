@@ -1338,8 +1338,9 @@ def to_dvc(
             existing.setdefault("stages", {}).update(wrapper_stages)
             _dump_yaml_if_changed(existing, dvc_yaml_fpath)
         return wrapper_stages
-    # Detect stages with the old ``slurm:`` field before model validation
-    # because model_validate pops it in place.
+    # Detect stages with the old ``slurm:`` field from the raw data, since
+    # validation renames it to ``scheduler`` and the validated stages no
+    # longer say which spelling they were written with.
     raw_stages = ck_info.get("pipeline", {}).get("stages", {})
     _pre_validate_slurm_stages = [
         sname for sname, sdata in raw_stages.items() if "slurm" in sdata
@@ -1559,6 +1560,8 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            elif stage.kind == "marimo-html-wasm":
+                outputs += stage.app_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)

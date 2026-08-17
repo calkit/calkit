@@ -57,6 +57,10 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Needed so the example project in examples/basic is checked
+          # against the calkit.yaml JSON schema
+          submodules: true
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
@@ -83,6 +87,27 @@ jobs:
         uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
+      # Juliaup installs Julia but leaves the depot empty, and the first Pkg
+      # operation then precompiles Pkg and downloads the General registry.
+      # Tests that isolate themselves in a throwaway depot append this one,
+      # so whatever is here is read rather than rebuilt -- measured at 65s
+      # cold vs 1s warm for a single `Pkg.instantiate` on an empty project.
+      - name: Cache the Julia depot
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/packages
+            ~/.julia/registries
+          # A new entry each run, restoring the newest previous one, so the
+          # depot keeps up with whatever the tests install
+          key: julia-depot-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: julia-depot-${{ runner.os }}-
+      # Cheap on a cache hit, and on a miss it pays the precompile once here
+      # rather than inside whichever test happens to reach Julia first
+      - name: Warm the Julia depot
+        run: julia -e 'using Pkg; Pkg.Registry.add("General")'
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

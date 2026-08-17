@@ -391,6 +391,12 @@ class Settings(BaseSettings):
     access_token: KeyringOptionalSecret | None = None
     refresh_token: KeyringOptionalSecret | None = None
     dvc_token: KeyringOptionalSecret | None = None
+    # Overrides the machine ID Calkit reads from the platform. For a machine
+    # that was rebuilt but should still count as the same one, and for
+    # platforms that supply no identifier of their own. Note that
+    # 'calkit config get machine_id' reports this override and nothing else;
+    # 'calkit describe system' reports the ID actually in effect.
+    machine_id: str | None = None
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     run_history_length: int = 10
     github_token: KeyringOptionalSecret | None = None

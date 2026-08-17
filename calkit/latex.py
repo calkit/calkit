@@ -5,10 +5,18 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-
-import git
+from typing import TYPE_CHECKING
 
 from calkit.core import LOCAL_DIR
+
+if TYPE_CHECKING:
+    # Only ever named in annotations here, which this module's
+    # ``from __future__ import annotations`` leaves unevaluated. Importing
+    # GitPython for real runs 'git version' twice as a side effect of the
+    # import, and this module is reached from the CLI's own import chain --
+    # so every 'calkit' invocation paid for two git subprocesses to satisfy
+    # a type hint.
+    import git
 
 # Where revisions are checked out and the marked-up document is built.
 # Inside the project so a containerized TeX environment, which only sees

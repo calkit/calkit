@@ -18,6 +18,10 @@ is `calkit.yaml`, the project's metadata database.
 
 `calkit.yaml` lives at the repo root and contains:
 
+- `requirements`—what must be true of the machine before anything runs
+  (apps on `PATH`, environmental variables, setup steps, machine
+  properties like CPU count); formerly called `dependencies`, which
+  still works
 - `environments`—computational environments (Python venvs, Conda, Docker,
   R, Julia, MATLAB, etc.)
 - `pipeline.stages`—the reproducible pipeline

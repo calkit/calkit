@@ -323,14 +323,19 @@ function FigureInfo({
         </Flex>
       )}
       {figure.description && (
-        <Text fontSize="sm" mb={1}>
+        <Box fontSize="sm" mb={1}>
           <Text as="span" fontWeight="semibold">
             Description:
           </Text>{" "}
-          <Text as="span" color="gray.500">
-            {figure.description}
-          </Text>
-        </Text>
+          <Box
+            as="span"
+            display="inline"
+            color="gray.500"
+            sx={{ "& p": { my: 0 } }}
+          >
+            <Markdown inline>{figure.description}</Markdown>
+          </Box>
+        </Box>
       )}
       <Text fontSize="sm" mb={1}>
         <Text as="span" fontWeight="semibold">

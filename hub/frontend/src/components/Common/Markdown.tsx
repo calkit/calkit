@@ -166,6 +166,10 @@ const Markdown = ({ children, inline = false }: MarkdownProps) => {
 
   return (
     <Box
+      // Inline rendering must not introduce a block-level wrapper, or short text
+      // like a title or description would break onto its own line.
+      as={inline ? "span" : "div"}
+      display={inline ? "inline" : undefined}
       /*
        * Chakra's CSS reset sets img { display: block }, which makes README badges
        * stack vertically. Override within markdown so images (and linked images)

@@ -1798,7 +1798,8 @@ def _build_question_evidence(
     ref: str | None,
     evidence_ck: list,
     figures_by_path: dict[str, Figure],
-    results_by_path: dict[str, Result],
+    results_by_path: dict[tuple[str, str | None], Result],
+    tables_by_path: dict[str, Result],
     publications_by_path: dict[str, Publication],
     result_value_cache: dict[str, dict | None],
 ) -> list[QuestionEvidence]:
@@ -1808,6 +1809,7 @@ def _build_question_evidence(
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
             "result",
+            "table",
             "publication",
         ):
             continue
@@ -1822,8 +1824,20 @@ def _build_question_evidence(
             item.figure = figures_by_path.get(path)
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
-        else:
-            item.result = results_by_path.get(path)
+        elif item.kind in ("result", "table"):
+            # A declared table answers table evidence first; a result at
+            # the same path answers result evidence. Falling through to
+            # results covers a table nobody declared, which is still worth
+            # resolving from an auto-detected data file.
+            #
+            # For results, the exact (path, key) pair or nothing: falling
+            # back to the whole-file result would put its title and
+            # description on a value it says nothing about. Keyless
+            # evidence already looks up (path, None).
+            if item.kind == "table":
+                item.result = tables_by_path.get(path)
+            if item.result is None:
+                item.result = results_by_path.get((path, item.key))
             if item.key:
                 item.value = _resolve_result_value(
                     project=project,
@@ -1882,12 +1896,23 @@ def _build_questions_public(
                 figures=cited,
             )
         }
-    results_by_path: dict[str, Result] = {}
-    if "result" in kinds:
-        results_by_path = {
-            res.path: res
-            for res in _build_results(project=project, repo=repo, ref=ref)
-        }
+    results_by_path: dict[tuple[str, str | None], Result] = {}
+    if kinds & {"result", "table"}:
+        # Keyed by (path, key), since several results can point at one file.
+        # A keyless result lands under (path, None), which is what keyless
+        # evidence resolves against; a keyed one must not stand in for it,
+        # or evidence citing an undeclared key would show that value under
+        # an unrelated result's title.
+        for res in _build_results(project=project, repo=repo, ref=ref):
+            results_by_path[(res.path, res.key)] = res
+    # Kept apart from results rather than merged into them. A project can
+    # declare a table and a result at one path, and they are different
+    # things with different titles: folding them into one lookup means
+    # whichever is built second decides what the other one is called.
+    tables_by_path: dict[str, Result] = {}
+    if "table" in kinds:
+        for tbl in _build_declared_tables(project=project, repo=repo, ref=ref):
+            tables_by_path[tbl.path] = tbl
     publications_by_path: dict[str, Publication] = {}
     if "publication" in kinds:
         publications_by_path = {
@@ -1907,6 +1932,7 @@ def _build_questions_public(
             evidence_ck=_evidence_of(q_ck),
             figures_by_path=figures_by_path,
             results_by_path=results_by_path,
+            tables_by_path=tables_by_path,
             publications_by_path=publications_by_path,
             result_value_cache=result_value_cache,
         )
@@ -1992,10 +2018,7 @@ def post_project_question(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_from_repo(
-        repo=repo,
-        process_includes=True,
-    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
     ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
@@ -2072,10 +2095,7 @@ def put_project_question(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    ck_info = app.projects.get_ck_info_from_repo(
-        repo=repo,
-        process_includes=True,
-    )
+    ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
     if number < 1 or number > len(ck_questions):
         raise HTTPException(404, "Question not found")
@@ -2442,10 +2462,16 @@ def _build_results(
         repo=repo,
         ref=ref,
     )
-    results = ck_info.get("results", [])
-    for res in results:
+    results = []
+    for res in ck_info.get("results") or []:
+        if not isinstance(res, dict) or not res.get("path"):
+            continue
+        res = dict(res)
         if not res.get("title"):
-            res["title"] = _title_from_path(res["path"])
+            # A result's name is a better title than its path, since several
+            # results can share one file and only the name tells them apart
+            res["title"] = res.get("name") or _title_from_path(res["path"])
+        results.append(res)
     declared_paths = {res["path"] for res in results}
 
     def _is_result_path(path: str) -> bool:
@@ -2492,6 +2518,43 @@ def _build_results(
             continue
         _maybe_add_result(dvc_path)
     return [Result.model_validate(res) for res in results]
+
+
+def _build_declared_tables(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+) -> list[Result]:
+    """Tables the project declares, shaped like results.
+
+    Table evidence resolves through the same lookup results do, since that
+    is the field the response carries. Without this a declared table is
+    never found there -- ``_build_results`` only knows about results, and
+    auto-detection does not treat a tables directory as one -- so its title
+    and description never reach the reader.
+    """
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+    )
+    tables = []
+    for tbl in ck_info.get("tables") or []:
+        if not isinstance(tbl, dict) or not tbl.get("path"):
+            continue
+        tbl = dict(tbl)
+        if not tbl.get("title"):
+            tbl["title"] = _title_from_path(tbl["path"])
+        tables.append(
+            Result.model_validate(
+                {
+                    k: v
+                    for k, v in tbl.items()
+                    if k in {"path", "title", "description", "stage"}
+                }
+            )
+        )
+    return tables
 
 
 def _build_publications(
@@ -5332,9 +5395,7 @@ def put_project_pipeline_stage(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    # Write into the file as it is on disk, not the include-processed view,
-    # so a project that splits its pipeline across files keeps that split.
-    ck_info = get_ck_info_from_repo(repo=repo, process_includes=False)
+    ck_info = get_ck_info_from_repo(repo=repo)
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if stage_name not in stages:
         raise HTTPException(404, "Stage not found")

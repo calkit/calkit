@@ -891,6 +891,9 @@ class Result(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
+    # Which value inside the file this result is; null means the whole file.
+    # Several results can share a path with different keys.
+    key: str | None = None
 
 
 class CommentHighlight(BaseModel):
@@ -1200,7 +1203,7 @@ class Publication(BaseModel):
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1214,7 +1217,7 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None

@@ -206,7 +206,7 @@ def import_publication(
     if os.path.isfile(dest_dir):
         raise_error("Destination must be a directory, not a file")
     os.makedirs(dest_dir, exist_ok=True)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     pubs = ck_info.get("publications", [])
     # TODO: Don't allow the same Overleaf project ID in multiple publications
     repo = calkit.git.get_repo()

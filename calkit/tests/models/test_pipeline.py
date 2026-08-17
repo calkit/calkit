@@ -14,6 +14,7 @@ from calkit.models.pipeline import (
     MarimoHtmlWasmStage,
     MatlabCommandStage,
     MatlabScriptStage,
+    Pipeline,
     PythonScriptStage,
     QuartoStage,
     StageIteration,
@@ -802,3 +803,122 @@ def test_stage_paths_reject_empty_and_project_root():
         ],
     )
     assert [p.dest for p in s.paths] == [".", "."]
+
+
+def test_object_inputs_survive_round_trips():
+    # An output copied verbatim into another stage's inputs arrives as an
+    # object. Its extra keys are kept, so rewriting a stage back to
+    # calkit.yaml doesn't quietly drop them.
+    stage = PythonScriptStage.model_validate(
+        {
+            "kind": "python-script",
+            "environment": "main",
+            "script_path": "s.py",
+            "inputs": [{"path": "data.csv", "storage": "dvc"}],
+        }
+    )
+    dumped = stage.inputs[0].model_dump()
+    assert dumped == {"path": "data.csv", "storage": "dvc"}
+    # Only the path is a dependency, wherever it happens to be stored
+    assert stage.dvc_deps == ["s.py", "data.csv"]
+
+
+def test_json_to_latex_cmd_uses_paths_not_objects():
+    # The command interpolates input paths, so an object input has to be
+    # unwrapped rather than rendered as its repr
+    stage = JsonToLatexStage.model_validate(
+        {
+            "kind": "json-to-latex",
+            "inputs": [
+                "a.json",
+                {"path": "b.json", "storage": "dvc"},
+                {"from_stage_outputs": "compute"},
+            ],
+            "outputs": ["out.tex"],
+        }
+    )
+    cmd = stage.dvc_cmd
+    assert "'a.json'" in cmd
+    assert "'b.json'" in cmd
+    assert "PathInput" not in cmd
+    assert "from_stage_outputs" not in cmd
+
+
+def test_system_env_can_wrap_a_runtime():
+    # A system env says which machine to run on, so it composes with an
+    # inner runtime the same way a scheduler env does
+    pipeline = Pipeline.model_validate(
+        {
+            "stages": {
+                "sim": {
+                    "kind": "python-script",
+                    "environment": "cluster:py",
+                    "script_path": "s.py",
+                    "inputs": ["data/in.csv"],
+                    "outputs": ["results/out.csv"],
+                },
+                "build": {
+                    "kind": "shell-command",
+                    "environment": "cluster",
+                    "command": "make",
+                    "outputs": ["build"],
+                },
+            }
+        }
+    )
+    envs = {
+        "cluster": {
+            "kind": "system",
+            "host": "box.example.org",
+            "user": "me",
+            "wdir": "/home/me/proj",
+        },
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+        "other": {"kind": "system", "host": "box2.example.org"},
+    }
+    pipeline.set_stage_scheduler_options(envs)
+    # Dispatch to the machine, then activate the runtime there. The
+    # command says nothing about which files move: that is worked out from
+    # the snapshot and from what the workspace reports it produced, so it
+    # cannot fall out of step with the pipeline the way a list threaded
+    # through the command would.
+    assert pipeline.stages["sim"].xenv_cmd == (
+        "calkit xenv -n cluster --no-check -- calkit xenv -n py --no-check --"
+    )
+    # On its own it just runs the stage on that machine
+    assert pipeline.stages["build"].xenv_cmd == (
+        "calkit xenv -n cluster --no-check --"
+    )
+    # A stage that runs here says nothing about transfers
+    local = Pipeline.model_validate(
+        {
+            "stages": {
+                "here": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "s.py",
+                    "outputs": ["out.csv"],
+                }
+            }
+        }
+    )
+    local.set_stage_scheduler_options(envs)
+    assert local.stages["here"].xenv_cmd == ("calkit xenv -n py --no-check --")
+    # The inner env has to be a runtime: another machine or a scheduler
+    # would mean two answers to where the stage runs
+    for inner in ["other", "sched"]:
+        bad = Pipeline.model_validate(
+            {
+                "stages": {
+                    "sim": {
+                        "kind": "python-script",
+                        "environment": f"cluster:{inner}",
+                        "script_path": "s.py",
+                    }
+                }
+            }
+        )
+        with pytest.raises(ValueError, match="must be a runtime"):
+            bad.set_stage_scheduler_options(
+                envs | {"sched": {"kind": "slurm", "host": "hpc.edu"}}
+            )

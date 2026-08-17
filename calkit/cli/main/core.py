@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import glob
 import json
 import logging
 import os
@@ -101,7 +100,14 @@ def _to_shell_cmd(cmd: list[str]) -> str:
     """Join a command to be compatible with running at the shell.
 
     This is similar to ``shlex.join`` but works with Git Bash on Windows.
+
+    A single argument is passed through untouched, because that is someone
+    writing a shell command line rather than a program and its arguments:
+    ``-- "cat a > b"`` means the redirect, and quoting it would turn the
+    whole thing into the name of a program that does not exist.
     """
+    if len(cmd) == 1:
+        return cmd[0]
     quoted_cmd = []
     for part in cmd:
         # Find quotes within quotes and escape them
@@ -252,8 +258,7 @@ def init(
         repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml", "w"):
-            pass
+        calkit.schema.ensure_modeline("calkit.yaml")
         repo.git.add("calkit.yaml")
         if calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
@@ -448,7 +453,24 @@ def get_status(
     import git
     from git.exc import InvalidGitRepositoryError
 
+    dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
+    # Status is usually the first command someone runs on a project that
+    # isn't theirs, which is exactly when the variables it declares are
+    # missing. Ask while there's somebody to answer -- the environment
+    # checks below need them. Unlike 'calkit run', status reports rather
+    # than enforces, so anything still unset is a warning: it must not stop
+    # the rest of the status from being shown.
+    if ck_info:
+        missing_env_vars = calkit.dependencies.resolve_env_var_deps(ck_info)
+        if missing_env_vars:
+            warn(
+                "Missing environmental variable(s): "
+                + ", ".join(missing_env_vars)
+                + ". Set with 'calkit set-env-var <name> <value>'.",
+                # Keep machine-readable output on stdout uncorrupted
+                err=as_json,
+            )
     # If there's anything in ck_info and this isn't a Git repo, initialize one.
     # Use search_parent_directories so a subproject folder inside a parent repo
     # is discovered correctly rather than getting a new git init.
@@ -1982,7 +2004,7 @@ def run(
         ),
     ] = False,
 ) -> dict:
-    """Check dependencies and run the pipeline."""
+    """Check requirements and run the pipeline."""
     import dvc.log
     import dvc.repo
     import dvc.repo.reproduce
@@ -2039,11 +2061,11 @@ def run(
             ".calkit", "systems", system_info["id"] + ".json"
         )
         shutil.copy2(local_sysinfo_fpath, sysinfo_fpath)
-    # First check any system-level dependencies exist
+    # First check the host meets the project's requirements
     if not quiet:
-        calkit.echo("🔗 Checking system-level dependencies")
+        calkit.echo("🔗 Checking system-level requirements")
     try:
-        calkit.check_system_deps(ck_info=ck_info, system_info=system_info)
+        calkit.check_requirements(ck_info=ck_info, system_info=system_info)
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
@@ -2644,7 +2666,7 @@ def run_in_env(
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
     try:
         res = env_from_name_and_or_path(
@@ -2686,6 +2708,7 @@ def run_in_env(
     if (
         not no_check
         and env["kind"] not in calkit.environments.KINDS_NO_CHECK
+        and calkit.environments.cacheable(env)
         and calkit.environments.check_cache(
             env_name=env_name, env=env, wdir=wdir
         )
@@ -2938,117 +2961,50 @@ def run_in_env(
             )
         except subprocess.CalledProcessError:
             raise_error("Failed to run in julia environment")
-    elif env["kind"] == "ssh":
+    elif env["kind"] == "system" and not calkit.environments.env_is_local(
+        {"host": "localhost", **env}
+    ):
+        # A system env on another machine. The project needs a workspace
+        # there to run in, and that workspace has to hold exactly what the
+        # stage would see here -- including edits that were never committed,
+        # since running something other than what is on screen is the whole
+        # problem this transfer exists to avoid.
+        import calkit.workspace as workspace
+
         try:
-            host = os.path.expandvars(env["host"])
-            user = os.path.expandvars(env["user"])
-            remote_wdir: str = env["wdir"]
-        except KeyError:
-            raise_error(
-                "Host, user, and wdir must be defined for ssh environments"
+            ws = workspace.Workspace.from_env(
+                env=env,
+                env_name=env_name,
+                ck_info=ck_info,
             )
-        send_paths = env.get("send_paths")
-        get_paths = env.get("get_paths")
-        key = env.get("key")
-        if key is not None:
-            key = os.path.expanduser(os.path.expandvars(key))
+            # The default workspace lives under the connecting user's home,
+            # which only that machine can resolve
+            ws = workspace.resolve_wdir(ws, verbose=verbose)
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
+        # Checked here for the same reason the local branch checks: an
+        # environment that has never been set up should say so before a
+        # command is dispatched to it, and a 'lock' should be recorded from
+        # the machine that is about to run the stage. Compiled pipeline
+        # commands pass --no-check, having already done this once up front.
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
+        repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
-        # Run with nohup so we can disconnect
-        # TODO: Should we collect output instead of send to /dev/null?
-        remote_cmd = (
-            f"cd '{remote_wdir}' ; nohup {remote_shell_cmd} "
-            "> /dev/null 2>&1 & echo $! "
-        )
-        key_cmd = ["-i", key] if key is not None else []
-        # Check to see if we've already submitted a job with this command
-        jobs_fpath = ".calkit/jobs.yaml"
-        job_key = f"{env_name}::{remote_shell_cmd}"
-        remote_pid = None
-        if os.path.isfile(jobs_fpath):
-            with open(jobs_fpath) as f:
-                jobs = calkit.ryaml.load(f)
-            if jobs is None:
-                jobs = {}
-        else:
-            jobs = {}
-        job = jobs.get(job_key, {})
-        remote_pid = job.get("remote_pid")
-        if remote_pid is None:
-            # First make sure the remote working dir exists
-            typer.echo("Ensuring remote working directory exists")
-            subprocess.check_call(
-                ["ssh"]
-                + key_cmd
-                + [f"{user}@{host}", f"mkdir -p {remote_wdir}"]
+        try:
+            workspace.run_in_workspace(
+                workspace=ws,
+                command=remote_shell_cmd,
+                job_key=f"{env_name}::{remote_shell_cmd}",
+                label=env_name,
+                wdir=wdir,
+                repo=repo,
+                echo=typer.echo,
+                verbose=verbose,
             )
-            # Now send any necessary files
-            if send_paths:
-                typer.echo("Sending to remote directory")
-                # Accept glob patterns
-                paths = []
-                for p in send_paths:
-                    paths += glob.glob(p)
-                scp_cmd = (
-                    ["scp", "-r"]
-                    + key_cmd
-                    + paths
-                    + [f"{user}@{host}:{remote_wdir}/"]
-                )
-                if verbose:
-                    typer.echo(f"scp cmd: {scp_cmd}")
-                subprocess.check_call(scp_cmd)
-            # Now run the command
-            typer.echo(f"Running remote command: {remote_shell_cmd}")
-            if verbose:
-                typer.echo(f"Full command: {remote_cmd}")
-            remote_pid = (
-                subprocess.check_output(
-                    ["ssh"] + key_cmd + [f"{user}@{host}", remote_cmd]
-                )
-                .decode()
-                .strip()
-            )
-            typer.echo(f"Running with remote PID: {remote_pid}")
-            # Save PID to jobs database so we can resume waiting
-            typer.echo("Updating jobs database")
-            os.makedirs(".calkit", exist_ok=True)
-            job["remote_pid"] = remote_pid
-            job["submitted"] = time.time()
-            job["finished"] = None
-            jobs[job_key] = job
-            with open(jobs_fpath, "w") as f:
-                calkit.ryaml.dump(jobs, f)
-        # Now wait for the job to complete
-        typer.echo(f"Waiting for remote PID {remote_pid} to finish")
-        ps_cmd = ["ssh"] + key_cmd + [f"{user}@{host}", "ps", "-p", remote_pid]
-        finished = False
-        while not finished:
-            try:
-                subprocess.check_output(ps_cmd)
-                finished = False
-                time.sleep(2)
-            except subprocess.CalledProcessError:
-                finished = True
-                typer.echo("Remote process finished")
-        # Now sync the files back
-        # TODO: Figure out how to do this in one command
-        # Getting the syntax right is troublesome since it appears to work
-        # differently on different platforms
-        if get_paths:
-            typer.echo("Copying files back from remote directory")
-            for src_path in get_paths:
-                src_path = remote_wdir + "/" + src_path  # type: ignore
-                src = f"{user}@{host}:{src_path}"
-                scp_cmd = ["scp", "-r"] + key_cmd + [src, "."]
-                subprocess.check_call(scp_cmd)
-        # Now delete the remote PID from the jobs file
-        typer.echo("Updating jobs database")
-        os.makedirs(".calkit", exist_ok=True)
-        job["remote_pid"] = None
-        job["finished"] = time.time()
-        jobs[job_key] = job
-        with open(jobs_fpath, "w") as f:
-            calkit.ryaml.dump(jobs, f)
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
     elif env["kind"] == "renv":
         from calkit.cli.check import check_renv
 
@@ -3178,6 +3134,28 @@ def run_in_env(
             subprocess.check_call(docker_cmd, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in MATLAB environment")
+    elif env["kind"] == "system":
+        # A system env whose host is this machine: nothing to activate, so
+        # the command runs right here, like a stage in the built-in
+        # '_system' env. The check still matters, since it records the
+        # machine properties the env locks.
+        if not no_check:
+            check_environment(env_name=env_name, verbose=verbose)
+            save_env_check_cache()
+        # The env's 'wdir' is deliberately ignored here. It says where to
+        # put the project when it has to be sent to another machine; we are
+        # already on that machine, in a checkout of the project, and that
+        # checkout is the one the user is working in. Running in the
+        # tool-managed workspace instead would execute a different copy of
+        # the project from the one DVC is about to hash. Only the stage's
+        # own wdir, which is relative to the project root, applies.
+        shell_cmd = _to_shell_cmd(cmd)
+        if verbose:
+            typer.echo(f"Running command: {shell_cmd}")
+        try:
+            subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
+        except subprocess.CalledProcessError:
+            raise_error("Failed to run in system environment")
     else:
         raise_error("Environment kind not supported")
 
@@ -3264,7 +3242,7 @@ def run_procedure(
 
     from calkit.models import Procedure
 
-    ck_info = calkit.load_calkit_info(process_includes="procedures")
+    ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
     procs = ck_info.get("procedures", {})
     if name not in procs:

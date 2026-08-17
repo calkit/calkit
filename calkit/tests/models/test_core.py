@@ -7,6 +7,7 @@ from calkit.models.core import (
     ProjectInfo,
     Publication,
     Question,
+    SetupRequirement,
     ShowcaseApp,
     ShowcaseFigure,
     StaticHtmlApp,
@@ -16,7 +17,11 @@ from calkit.models.core import (
 def test_publication_kind_no_longer_allows_presentation():
     # Presentations are a separate top-level concept now.
     with pytest.raises(ValidationError):
-        Publication(path="p.pdf", title="P", kind="presentation")
+        Publication(
+            path="p.pdf",
+            title="P",
+            kind="presentation",  # type: ignore[arg-type]
+        )
     # A normal kind still validates.
     Publication(path="p.pdf", title="P", kind="journal-article")
 
@@ -24,11 +29,15 @@ def test_publication_kind_no_longer_allows_presentation():
 def test_project_info_has_results_and_presentations():
     info = ProjectInfo.model_validate(
         {
-            "results": [{"path": "results/metrics.json", "title": "Metrics"}],
+            "results": [{"path": "results/metrics.json", "key": "mean"}],
             "presentations": [{"path": "slides/talk.pdf", "title": "Talk"}],
         }
     )
     assert info.results[0].path == "results/metrics.json"
+    assert info.results[0].key == "mean"
+    # Both title and name are optional, since the path and key identify it
+    assert info.results[0].title is None
+    assert info.results[0].name is None
     assert info.presentations[0].path == "slides/talk.pdf"
 
 
@@ -105,3 +114,90 @@ def test_apps():
         ProjectInfo.model_validate(
             {"apps": {"legacy": {"kind": "external", "url": "https://x.io"}}}
         )
+
+
+def test_requirement_forms_match_what_the_runtime_accepts():
+    # ``calkit.core`` normalizes several spellings; the model must accept
+    # every one of them, or an editor flags a project that loads and runs.
+    info = ProjectInfo.model_validate(
+        {
+            "requirements": [
+                "git",
+                "calkit>=0.38",
+                {"name": "uv", "kind": "app"},
+                # Mapping form, including one with no body at all
+                {"docker": {"kind": "app"}},
+                {"pixi": None},
+                # A setup dep needs no name: one is synthesized from a hash
+                # of check_command
+                {
+                    "kind": "setup",
+                    "check_command": "gh auth status",
+                    "setup_command": "gh auth login",
+                },
+            ]
+        }
+    )
+    assert len(info.requirements) == 6
+    setup_req = info.requirements[-1]
+    assert isinstance(setup_req, SetupRequirement)
+    assert setup_req.name is None
+    # Name is the identity for the other kinds, so it stays required there
+    for bad in [{"kind": "app"}, {"kind": "env-var"}]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"requirements": [bad]})
+    # 'dependencies' is the old name for the same key and still validates
+    old = ProjectInfo.model_validate({"dependencies": ["git"]})
+    assert old.dependencies == ["git"]
+
+
+def test_machine_property_requirements():
+    from calkit.models.core import (
+        SystemEnvironment,
+        SystemNumberRequirement,
+        SystemValueRequirement,
+    )
+
+    info = ProjectInfo.model_validate(
+        {
+            "requirements": [
+                {"kind": "cpu-count", "min": 2},
+                {"kind": "memory-gb", "min": 8, "max": 128},
+                {"kind": "os", "equals": ["Linux", "Darwin"]},
+                {"kind": "python-version", "version_spec": ">=3.11"},
+            ]
+        }
+    )
+    assert isinstance(info.requirements[0], SystemNumberRequirement)
+    assert isinstance(info.requirements[2], SystemValueRequirement)
+    # A typo'd constraint leaves the entry saying nothing, which is caught
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "cpu-count", "minimum": 2}]}
+        )
+    # An entry that constrains nothing asserts nothing; locking is what
+    # 'results depend on this' is written as
+    for vacuous in [{"kind": "cpu-count"}, {"kind": "os"}]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"requirements": [vacuous]})
+    # Nor can it ask for something nothing satisfies
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "cpu-count", "min": 8, "max": 4}]}
+        )
+    # Versions of installed tools are an app requirement, not a property
+    with pytest.raises(ValidationError):
+        ProjectInfo.model_validate(
+            {"requirements": [{"kind": "julia-version", "equals": "1.10"}]}
+        )
+    # A system environment declares its own, alongside what it locks
+    env = SystemEnvironment.model_validate(
+        {
+            "kind": "system",
+            "host": "box",
+            "requirements": [{"kind": "cpu-count", "min": 16}, "julia>=1.10"],
+            "lock": ["cpu-count", "julia-version"],
+        }
+    )
+    assert len(env.requirements) == 2
+    assert env.lock == ["cpu-count", "julia-version"]

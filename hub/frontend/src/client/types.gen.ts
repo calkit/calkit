@@ -3168,7 +3168,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "publication"
+  kind: "figure" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -3197,7 +3197,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "publication"
+  kind: "figure" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -4242,6 +4242,10 @@ export type Result = {
    * Stage
    */
   stage?: string | null
+  /**
+   * Key
+   */
+  key?: string | null
 }
 
 /**

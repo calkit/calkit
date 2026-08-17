@@ -20,7 +20,7 @@
 | [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
-| [`run`](#top-command-run)                        | Check dependencies and run the pipeline.                                                                     |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
 | [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
 | [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
 | [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
@@ -318,7 +318,7 @@ calkit local-server
 
 ### `calkit run`
 
-Check dependencies and run the pipeline.
+Check requirements and run the pipeline.
 
 Usage:
 
@@ -910,13 +910,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                            |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--title`           | text    | yes      |         |                                                        |
-| `--description`     | text    | no       |         |                                                        |
-| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result. |
-| `--no-commit`       | boolean | no       | False   |                                                        |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.               |
+| Option              | Type    | Required | Default | Description                                                                                    |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--name`            | text    | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
+| `--title`           | text    | no       |         |                                                                                                |
+| `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
+| `--description`     | text    | no       |         |                                                                                                |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result.                                         |
+| `--no-commit`       | boolean | no       | False   |                                                                                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.                                                       |
 
 <a id="subcommand-new-create-presentation-pres"></a>
 
@@ -942,6 +944,7 @@ Options:
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
 | `--title`           | text    | yes      |         |                                                              |
 | `--description`     | text    | no       |         |                                                              |
+| `--kind`            | text    | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
 | `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
@@ -2129,6 +2132,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2184,6 +2188,26 @@ Options:
 | Option   | Type    | Required | Default | Description            |
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-schema"></a>
+
+#### `calkit describe|desc schema`
+
+Print the JSON schema for calkit.yaml.
+
+Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+
+Usage:
+
+```text
+calkit describe|desc schema [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                               |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="command-group-import"></a>
 
@@ -2793,7 +2817,7 @@ Check things.
 | [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
 | [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
 | [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
-| [`deps\|dependencies`](#subcommand-check-deps-dependencies) | Check that a project's system-level dependencies are set up correctly.                                       |
+| [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
@@ -3028,24 +3052,24 @@ Options:
 | `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
 | `--output`, `-o` | text | yes      |         |                                  |
 
-<a id="subcommand-check-deps-dependencies"></a>
+<a id="subcommand-check-reqs-requirements"></a>
 
-#### `calkit check deps|dependencies`
+#### `calkit check reqs|requirements`
 
-Check that a project's system-level dependencies are set up correctly.
+Check that a project's system-level requirements are met.
 
 Usage:
 
 ```text
-calkit check deps|dependencies [OPTIONS]
+calkit check reqs|requirements [OPTIONS]
 ```
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                            |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                   |
-| `--no-cache`      | boolean | no       | False   | Re-probe every setup dependency, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+| Option            | Type    | Required | Default | Description                                                                                             |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
+| `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
 
 <a id="subcommand-check-env-vars"></a>
 

@@ -607,10 +607,14 @@ def record_overleaf_links(
     return links
 
 
-# Categories in calkit.yaml whose items are keyed by a path. This is
-# CATEGORIES_PLURAL_TO_SINGULAR plus presentations, which aren't a Calkit
-# object kind but are still declared with a path.
-_PATH_CATEGORIES = list(CATEGORIES_PLURAL_TO_SINGULAR) + ["presentations"]
+# The artifact collections whose entries declare a path. Several aren't in
+# CATEGORIES_PLURAL_TO_SINGULAR, which only covers the kinds that can be
+# imported between projects, so they're listed explicitly.
+_PATH_CATEGORIES = list(CATEGORIES_PLURAL_TO_SINGULAR) + [
+    "presentations",
+    "results",
+    "tables",
+]
 
 
 def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
@@ -1172,7 +1176,6 @@ def get_ck_info_for_ref(
     project: Project,
     repo: git.Repo,
     ref: str | None = None,
-    process_includes: bool = False,
     read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
@@ -1187,11 +1190,7 @@ def get_ck_info_for_ref(
     """
     if ref is None:
         return normalize_ck_info_paths(
-            get_ck_info_from_repo(
-                repo=repo,
-                process_includes=process_includes,
-                read_only=read_only,
-            )
+            get_ck_info_from_repo(repo=repo, read_only=read_only)
         )
     try:
         ck_item = get_contents_from_repo(

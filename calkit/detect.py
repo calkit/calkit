@@ -2341,7 +2341,7 @@ def _reserved_artifact_paths(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     paths: list[str] = []
     for kind in ("figures", "datasets", "results", "presentations"):
-        for obj in ck_info.get(kind, []) or []:
+        for obj in ck_info.get(kind) or []:
             if isinstance(obj, dict) and isinstance(obj.get("path"), str):
                 paths.append(obj["path"])
     return [p.replace("\\", "/") for p in paths]

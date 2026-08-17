@@ -1295,7 +1295,7 @@ def test_question_text_handles_string_and_object() -> None:
     )
     assert _extract_question_text({}) == ""
     # A non-string/non-dict value (e.g. a list) yields empty text, not a repr.
-    assert _extract_question_text(["a", "b"]) == ""
+    assert _extract_question_text(["a", "b"]) == ""  # type: ignore
 
 
 def test_build_question_evidence_resolves_figures_and_results() -> None:
@@ -1306,7 +1306,13 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
     from app.models.core import Figure, Publication, Result
 
     fig = Figure(path="figures/x.png", title="X")
-    res = Result(path="results/summary.json", title="Summary")
+    # Declared with the key the evidence cites: a result is identified by
+    # (path, key), and this test used to assert that citing 'metrics.mean'
+    # resolved to a whole-file result, which is the mislabeling that
+    # fallback caused
+    res = Result(
+        path="results/summary.json", title="Summary", key="metrics.mean"
+    )
     pub = Publication(path="paper/paper.pdf", title="Paper")
     evidence_ck = [
         {"kind": "figure", "path": "figures/x.png", "explanation": "shows x"},
@@ -1338,12 +1344,13 @@ def test_build_question_evidence_resolves_figures_and_results() -> None:
         return_value=fake_item,
     ):
         evidence = _build_question_evidence(
-            project=SimpleNamespace(),
+            project=SimpleNamespace(),  # type: ignore
             repo=SimpleNamespace(),
             ref=None,
             evidence_ck=evidence_ck,
             figures_by_path={fig.path: fig},
-            results_by_path={res.path: res},
+            results_by_path={(res.path, res.key): res},
+            tables_by_path={},
             publications_by_path={pub.path: pub},
             result_value_cache={},
         )
@@ -3244,3 +3251,146 @@ def test_get_project_notebooks_respects_ref(
         "first.ipynb",
         "second.ipynb",
     ]
+
+
+def test_build_question_evidence_keyed_results_and_tables() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # Two results share a file, told apart only by their keys
+    mean = Result(
+        path="results/summary.json", title="Mean", key="metrics.mean"
+    )
+    table = Result(path="tables/t.csv", title="Sample sizes")
+    evidence_ck = [
+        # A key nobody declared: better to resolve nothing than to show this
+        # value under an unrelated result's title
+        {
+            "kind": "result",
+            "path": "results/summary.json",
+            "key": "metrics.p95",
+        },
+        # Table evidence resolves against the same map, which is why that map
+        # has to be built whenever table evidence is present
+        {"kind": "table", "path": "tables/t.csv"},
+    ]
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            figures_by_path={},
+            results_by_path={(mean.path, mean.key): mean},
+            tables_by_path={table.path: table},
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is None
+    assert evidence[1].kind == "table"
+    assert evidence[1].result is not None
+    assert evidence[1].result.title == "Sample sizes"
+
+
+def test_declared_tables_reach_the_evidence_lookup() -> None:
+    from app.api.routes.projects.core import _build_declared_tables
+
+    # A declared table is not something _build_results knows about, and a
+    # tables directory is not auto-detected as results either, so without
+    # this its title and description never reach the reader
+    ck_info = {
+        "tables": [
+            {
+                "path": "tables/sample-sizes.csv",
+                "title": "Sample sizes",
+                "description": "How many runs per case.",
+            },
+            {"path": "tables/untitled.csv"},
+            {"title": "no path, skipped"},
+            "not-a-dict",
+        ]
+    }
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+        return_value=ck_info,
+    ):
+        tables = _build_declared_tables(
+            project=SimpleNamespace(), repo=SimpleNamespace(), ref=None
+        )
+    assert [t.path for t in tables] == [
+        "tables/sample-sizes.csv",
+        "tables/untitled.csv",
+    ]
+    assert tables[0].title == "Sample sizes"
+    assert tables[0].description == "How many runs per case."
+    # One without a title still gets a readable one from its path, rather
+    # than rendering as nothing
+    assert tables[1].title
+
+
+def test_a_table_and_a_result_at_one_path_stay_distinct() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # A project can declare both at one path. They are different things
+    # with different titles, so neither may decide what the other is
+    # called -- which is what one shared lookup would do.
+    result = Result(path="shared.csv", title="Summary statistic")
+    table = Result(path="shared.csv", title="Sample sizes")
+    evidence_ck = [
+        {"kind": "result", "path": "shared.csv"},
+        {"kind": "table", "path": "shared.csv"},
+    ]
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=evidence_ck,
+            figures_by_path={},
+            results_by_path={(result.path, None): result},
+            tables_by_path={table.path: table},
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is not None
+    assert evidence[0].result.title == "Summary statistic"
+    assert evidence[1].result is not None
+    assert evidence[1].result.title == "Sample sizes"
+
+
+def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
+    from app.api.routes.projects.core import _build_question_evidence
+    from app.models.core import Result
+
+    # A result is identified by (path, key). Falling back to the whole-file
+    # result would put its title on a value it says nothing about.
+    whole = Result(path="results/summary.json", title="Whole file")
+    with patch(
+        "app.api.routes.projects.core.app.projects.get_contents_from_repo",
+        return_value=None,
+    ):
+        evidence = _build_question_evidence(
+            project=SimpleNamespace(),
+            repo=SimpleNamespace(),
+            ref=None,
+            evidence_ck=[
+                {
+                    "kind": "result",
+                    "path": "results/summary.json",
+                    "key": "metrics.p95",
+                }
+            ],
+            figures_by_path={},
+            results_by_path={(whole.path, None): whole},
+            tables_by_path={},
+            publications_by_path={},
+            result_value_cache={},
+        )
+    assert evidence[0].result is None

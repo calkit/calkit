@@ -18,7 +18,7 @@ without the cognitive overhead.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
-![pipeline](/img/pipeline.png)
+![pipeline](img/pipeline.png)
 
 ## Features
 

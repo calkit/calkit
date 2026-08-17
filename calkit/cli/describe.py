@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Annotated
 
 import typer
@@ -95,3 +96,29 @@ def describe_envs(
     for env_name, desc in result.items():
         typer.echo(env_name + ":")
         _echo_description(desc, indent="    ")
+
+
+@describe_app.command(name="schema")
+def describe_schema(
+    output: Annotated[
+        str | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Path at which to write the schema instead of printing it.",
+        ),
+    ] = None,
+) -> None:
+    """Print the JSON schema for calkit.yaml.
+
+    Editors can use this to validate and autocomplete the file. See
+    https://docs.calkit.org/calkit-yaml for how to set that up.
+    """
+    txt = calkit.schema.generate_json()
+    if output is None:
+        typer.echo(txt, nl=False)
+        return
+    os.makedirs(os.path.dirname(output) or ".", exist_ok=True)
+    with open(output, "w", encoding="utf-8") as f:
+        f.write(txt)
+    typer.echo(f"Wrote schema to {output}")

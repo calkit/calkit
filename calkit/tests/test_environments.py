@@ -2,12 +2,16 @@
 
 import json
 import os
+import platform
 import shutil
+import socket
 import subprocess
 from datetime import timedelta
+from unittest import mock
 
 import pytest
 
+import calkit
 import calkit.environments
 
 
@@ -1147,3 +1151,367 @@ def test_add_packages_to_nix_flake(tmp_dir):
         calkit.environments.add_packages_to_nix_flake(
             "hand-rolled.nix", ["python3"]
         )
+
+
+def test_system_env_lock(tmp_dir):
+    from typing import get_args
+
+    import calkit.environments as envs
+    from calkit.models.core import SystemLockProperty
+
+    # The literals offered in the schema and the table that resolves them
+    # must not drift apart, and every one must name a key the system info
+    # can actually produce
+    assert set(get_args(SystemLockProperty)) == set(
+        envs.SYSTEM_LOCK_PROPERTIES
+    )
+    system_info = calkit.get_system_info()
+    for prop, key in envs.SYSTEM_LOCK_PROPERTIES.items():
+        only_on = envs.SYSTEM_LOCK_PROPERTY_PLATFORMS.get(prop)
+        if only_on is not None and platform.system() != only_on:
+            # A package manager version this OS never collects. Absent by
+            # design, and locking it raises rather than recording null.
+            assert key not in system_info
+            with pytest.raises(ValueError, match="not available"):
+                envs.get_system_lock_data([prop])
+            continue
+        assert key in system_info, f"{key} is not in get_system_info()"
+    # Locking nothing means no lock file, so nothing to depend on
+    bare = {"kind": "system"}
+    assert envs.get_env_lock_fpath(env=bare, env_name="sys") is None
+    assert envs.write_system_env_lock(env_name="sys", env=bare) is None
+    # Locking something writes it, and the file is what stages depend on
+    env = {"kind": "system", "lock": ["os", "python-version"]}
+    lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)
+    assert lock_fpath == envs.get_env_lock_fpath(env=env, env_name="sys")
+    # There is exactly one lock file, so a stage depends on the file rather
+    # than its directory, unlike the envs with per-platform lock files
+    assert lock_fpath.endswith("info.json")
+    assert (
+        envs.get_env_lock_fpath(env=env, env_name="sys", for_dvc=True)
+        == lock_fpath
+    )
+    with open(lock_fpath) as f:
+        data = json.load(f)
+    assert set(data) == {"os", "python-version"}
+    assert data["os"] == system_info["os"]
+    # Rewriting identical content leaves the file alone, so an unchanged
+    # machine doesn't invalidate cached stage results
+    mtime = os.path.getmtime(lock_fpath)
+    envs.write_system_env_lock(env_name="sys", env=env)
+    assert os.path.getmtime(lock_fpath) == mtime
+    # Locking more changes the file, which is what triggers a rerun
+    envs.write_system_env_lock(
+        env_name="sys", env={"kind": "system", "lock": ["os", "machine"]}
+    )
+    with open(lock_fpath) as f:
+        assert set(json.load(f)) == {"os", "machine"}
+    # Total memory is a bare division of bytes, so it's recorded rounded:
+    # a firmware or kernel update that reserves a little differently must
+    # not read as the machine having changed
+    assert envs.get_system_lock_data(
+        ["memory-gb"], system_info={"memory_gb": 15.492069244384766}
+    ) == {"memory-gb": 15.5}
+    # Everything else is recorded exactly as reported
+    assert envs.get_system_lock_data(
+        ["cpu-count", "os-version"],
+        system_info={"cpu_count": 10, "os_version": "24.5.0"},
+    ) == {"cpu-count": 10, "os-version": "24.5.0"}
+    # A property that doesn't exist, and one this machine can't supply,
+    # both raise rather than quietly recording nothing
+    with pytest.raises(ValueError, match="Unknown system property"):
+        envs.get_system_lock_data(["not-a-thing"])
+    with mock.patch.object(calkit, "get_system_info", return_value={}):
+        with pytest.raises(ValueError, match="not available on this machine"):
+            envs.get_system_lock_data(["os"])
+
+
+def test_host_is_local_by_address(monkeypatch):
+    import calkit.environments as envs
+
+    # A project commonly writes a machine down as an IP, which never
+    # matches a hostname however the machine reports itself -- so running
+    # on that very machine would otherwise mean connecting to itself
+    envs._host_addresses.cache_clear()
+    assert envs.host_is_local("127.0.0.1")
+    assert envs.host_is_local("::1")
+    own = socket.gethostbyname(socket.gethostname())
+    assert envs.host_is_local(own)
+    # An address that isn't ours stays not ours, whatever we're called
+    assert not envs.host_is_local("192.0.2.1")  # TEST-NET-1, unroutable
+    # A name that doesn't resolve is not this machine either
+    assert not envs.host_is_local("definitely-not-a-host.invalid")
+    # Names still decide it when they match, without a lookup
+    gh = mock.patch.object(socket, "gethostname", return_value="cluster01")
+    gf = mock.patch.object(socket, "getfqdn", return_value="cluster01")
+
+    def no_lookup(*a, **kw):
+        raise AssertionError("resolved a host that matched by name")
+
+    with gh, gf:
+        envs._host_addresses.cache_clear()
+        monkeypatch.setattr(socket, "getaddrinfo", no_lookup)
+        assert envs.host_is_local("cluster01")
+    envs._host_addresses.cache_clear()
+
+
+def test_host_is_local():
+    import calkit.environments as envs
+
+    # An env with no host, or localhost, is this machine by definition
+    assert envs.host_is_local(None)
+    assert envs.host_is_local("")
+    assert envs.host_is_local("localhost")
+    # So is one naming this machine, however either side spells it
+    assert envs.host_is_local(socket.gethostname())
+    assert envs.host_is_local(socket.getfqdn())
+    assert envs.host_is_local(socket.gethostname().split(".")[0])
+    assert envs.host_is_local(socket.getfqdn().split(".")[0])
+    # A machine that isn't this one has to be reached
+    assert not envs.host_is_local("not-this-box.invalid")
+
+    def _with_names(hostname, fqdn):
+        return mock.patch.object(
+            socket, "gethostname", return_value=hostname
+        ), mock.patch.object(socket, "getfqdn", return_value=fqdn)
+
+    # A machine that reports itself qualified still answers to its bare name
+    gh, gf = _with_names("macbookpro.local", "macbookpro.local")
+    with gh, gf:
+        assert envs.host_is_local("macbookpro")
+        assert envs.host_is_local("macbookpro.local")
+    # One that only knows its short name answers to a qualified one
+    gh, gf = _with_names("box", "box")
+    with gh, gf:
+        assert envs.host_is_local("box.example.org")
+    # But two machines sharing a short name under different domains are not
+    # the same machine, so the domain has to be believed
+    gh, gf = _with_names("web01.dev.example.com", "web01.dev.example.com")
+    with gh, gf:
+        assert envs.host_is_local("web01.dev.example.com")
+        assert not envs.host_is_local("web01.prod.example.com")
+
+
+def test_host_is_local_by_mdns_name(monkeypatch):
+    import calkit.environments as envs
+
+    # The name macOS shows the user as theirs -- in Sharing, and from
+    # 'scutil --get LocalHostName' -- is an mDNS name, which is not in the
+    # resolver's search list the way a DNS domain is. It resolves under
+    # '.local' and nowhere else, so the name a user is most likely to write
+    # down would otherwise be the one name for their machine that fails to
+    # match it, sending them off to SSH into the box they're sitting at.
+    own = socket.gethostbyname(socket.gethostname())
+
+    def resolve(host, *a, **kw):
+        if host == "petes-laptop.local":
+            return [(socket.AF_INET, None, None, "", (own, 0))]
+        raise socket.gaierror(-2, "Name or service not known")
+
+    gh = mock.patch.object(socket, "gethostname", return_value="somethingelse")
+    gf = mock.patch.object(socket, "getfqdn", return_value="somethingelse")
+    with gh, gf:
+        envs._host_addresses.cache_clear()
+        monkeypatch.setattr(socket, "getaddrinfo", resolve)
+        assert envs.host_is_local("petes-laptop")
+        # A qualified name is not retried under '.local': the domain it
+        # already carries is an answer, and appending another would let a
+        # machine in one domain match a different one in another
+        envs._host_addresses.cache_clear()
+        assert not envs.host_is_local("petes-laptop.example.org")
+    envs._host_addresses.cache_clear()
+
+
+def test_machine_ids_match_ignores_how_the_id_was_written():
+    # Platforms write the same kind of ID differently -- macOS uppercase
+    # with dashes, systemd lowercase without -- and users paste back
+    # whichever form they were shown
+    assert calkit.machine_ids_match(
+        "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+        "33c4dda774235b6ab86fea6859eb058e",
+    )
+    assert calkit.machine_ids_match(" 33c4dda7 ", "33C4DDA7")
+    assert not calkit.machine_ids_match("33c4dda7", "0000ffff")
+    # Not knowing which machine this is is never evidence that it's the one
+    # being asked about, so an unknown ID matches nothing -- not even
+    # another unknown one
+    assert not calkit.machine_ids_match(None, None)
+    assert not calkit.machine_ids_match("33c4dda7", None)
+    assert not calkit.machine_ids_match(None, "33c4dda7")
+    assert not calkit.machine_ids_match("", "")
+
+
+def test_env_is_local_prefers_the_machine_id_over_the_name():
+    import calkit.environments as envs
+
+    with mock.patch.object(calkit, "get_machine_id", return_value="abc-123"):
+        # A machine ID is a stronger claim than a name, so it decides even
+        # when the host names somewhere unreachable
+        assert envs.env_is_local(
+            {"kind": "system", "machine_id": "ABC123", "host": "nope.invalid"}
+        )
+        # ...and even when the host resolves here. A name that has come to
+        # point at a different box is exactly what an ID exists to catch,
+        # so matching it is not enough to run here.
+        assert not envs.env_is_local(
+            {"kind": "system", "machine_id": "def-456", "host": "localhost"}
+        )
+    # Where no ID can be read, a declared one could never match, and taking
+    # that as "not this machine" would send the user off to SSH into the
+    # machine they're on. The name is what's left to go on.
+    with mock.patch.object(calkit, "get_machine_id", return_value=None):
+        assert envs.env_is_local(
+            {"kind": "system", "machine_id": "abc-123", "host": "localhost"}
+        )
+        assert not envs.env_is_local(
+            {"kind": "system", "machine_id": "abc-123", "host": "box.invalid"}
+        )
+    # An env that declares no ID is decided by its host, as before
+    with mock.patch.object(calkit, "get_machine_id", return_value="abc-123"):
+        assert envs.env_is_local({"kind": "system", "host": "localhost"})
+        assert envs.env_is_local({"kind": "system"})
+        assert not envs.env_is_local({"kind": "system", "host": "no.invalid"})
+
+
+def test_env_is_local_expands_variables_in_the_machine_id(monkeypatch):
+    import calkit.environments as envs
+
+    # A machine ID can be kept out of a shared calkit.yaml the same way a
+    # host can, since it names one particular person's machine
+    monkeypatch.setenv("CK_MACHINE_ID", "abc-123")
+    with mock.patch.object(calkit, "get_machine_id", return_value="ABC123"):
+        assert envs.env_is_local(
+            {"kind": "system", "machine_id": "${CK_MACHINE_ID}"}
+        )
+
+
+def test_machine_id_can_be_overridden_in_config(monkeypatch):
+    import calkit.config
+
+    # Settable, so 'calkit config set machine_id' reaches it
+    assert "machine_id" in calkit.config.Settings.model_fields
+
+    def _configured(value):
+        return mock.patch.object(
+            calkit.config,
+            "read",
+            return_value=calkit.config.Settings(machine_id=value),
+        )
+
+    platform_says = mock.patch.object(
+        calkit.core, "_read_platform_machine_id", return_value="from-platform"
+    )
+    # A machine that was rebuilt can be told to still count as the same one,
+    # and a platform that supplies no ID of its own can be given one
+    with _configured("  chosen-id  "), platform_says:
+        assert calkit.get_machine_id() == "chosen-id"
+    # An override that is absent or only whitespace is not an ID, so the
+    # platform still gets to answer
+    with _configured("   "), platform_says:
+        assert calkit.get_machine_id() == "from-platform"
+    with _configured(None), platform_says:
+        assert calkit.get_machine_id() == "from-platform"
+    # A config too broken to read shouldn't make the machine unidentifiable
+    with (
+        mock.patch.object(
+            calkit.config, "read", side_effect=ValueError("bad config")
+        ),
+        platform_says,
+    ):
+        assert calkit.get_machine_id() == "from-platform"
+
+
+def test_machine_id_is_reported_and_lockable():
+    import calkit.environments as envs
+
+    # Pinning results to one machine is what 'hostname' was being used for,
+    # badly: renaming the machine breaks that pin, and a machine elsewhere
+    # with the same name satisfies it
+    assert envs.SYSTEM_LOCK_PROPERTIES["machine-id"] == "machine_id"
+    with mock.patch.object(
+        calkit, "get_system_info", return_value={"machine_id": "abc-123"}
+    ):
+        assert envs.get_system_lock_data(["machine-id"]) == {
+            "machine-id": "abc-123"
+        }
+    # A machine that can't report one can't pin to one either, rather than
+    # recording null and claiming a pin that isn't there
+    with mock.patch.object(
+        calkit, "get_system_info", return_value={"machine_id": None}
+    ):
+        with pytest.raises(ValueError, match="not available on this machine"):
+            envs.get_system_lock_data(["machine-id"])
+
+
+def test_declaring_a_machine_id_does_not_lock_it(tmp_dir):
+    import calkit.environments as envs
+
+    # Naming a machine says where to run, which is a separate question from
+    # whether results depend on it: moving a project to a new machine and
+    # updating 'machine_id' need not invalidate everything computed on the
+    # old one. Whether it does is the project's call, made through 'lock'.
+    env = {"kind": "system", "machine_id": "abc-123"}
+    assert envs.get_env_lock_fpath(env=env, env_name="laptop") is None
+    with mock.patch.object(
+        calkit, "get_system_info", return_value={"machine_id": "abc-123"}
+    ):
+        assert envs.write_system_env_lock(env_name="laptop", env=env) is None
+        # Saying so explicitly is what pins it
+        env_locked = env | {"lock": ["machine-id"]}
+        lock_fpath = envs.write_system_env_lock(
+            env_name="laptop", env=env_locked
+        )
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        assert json.load(f) == {"machine-id": "abc-123"}
+
+
+def test_locking_an_unreadable_machine_id_says_how_to_supply_one(tmp_dir):
+    import calkit.environments as envs
+
+    # Recording null would claim a pin that isn't there, so this raises --
+    # but this is the one lockable property a user can supply by hand, and
+    # the way to is a config setting they have no reason to know about
+    with mock.patch.object(
+        calkit, "get_system_info", return_value={"machine_id": None}
+    ):
+        with pytest.raises(ValueError, match="calkit config set machine_id"):
+            envs.write_system_env_lock(
+                env_name="laptop",
+                env={"kind": "system", "lock": ["machine-id"]},
+            )
+
+
+def test_system_lock_can_describe_another_machine(tmp_dir):
+    import calkit.environments as envs
+
+    # What a stage's results depend on is the machine it runs on, so a lock
+    # for a remote host is written from that host's properties rather than
+    # from this one's
+    remote = {"cpu_count": 64, "os": "Linux", "python_version": "3.12.7"}
+    data = envs.get_system_lock_data(["cpu-count", "os"], system_info=remote)
+    assert data == {"cpu-count": 64, "os": "Linux"}
+    assert data != envs.get_system_lock_data(["cpu-count", "os"])
+    # A property that machine can't supply is still an error, not a null
+    with pytest.raises(ValueError, match="not available"):
+        envs.get_system_lock_data(["docker-version"], system_info=remote)
+    env = {"kind": "system", "host": "box", "lock": ["cpu-count"]}
+    lock_fpath = envs.write_system_env_lock(
+        env_name="remote", env=env, system_info=remote
+    )
+    assert lock_fpath is not None
+    with open(lock_fpath) as f:
+        assert json.load(f) == {"cpu-count": 64}
+
+
+def test_system_env_checks_are_not_cached():
+    import calkit.environments as envs
+
+    # Caching exists to skip rebuilding something expensive. Checking a
+    # system env *is* reading the machine, so there is nothing to skip --
+    # and caching it means a locked property can change and be missed,
+    # which is exactly the drift 'lock' exists to catch.
+    assert not envs.cacheable({"kind": "system", "lock": ["cpu-count"]})
+    assert not envs.cacheable({"kind": "system"})
+    for kind in ["uv", "conda", "docker", "slurm", "renv"]:
+        assert envs.cacheable({"kind": kind}), kind

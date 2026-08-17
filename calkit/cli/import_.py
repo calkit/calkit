@@ -271,9 +271,7 @@ def import_environment(
         raise_error("Invalid source environment specification")
     if os.path.isdir(project):
         typer.echo(f"Importing from local project directory: {project}")
-        src_ck_info = dict(
-            calkit.load_calkit_info(wdir=project, process_includes=True)
-        )
+        src_ck_info = dict(calkit.load_calkit_info(wdir=project))
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")

@@ -192,9 +192,23 @@ function FigureThumbnail({
           )}
         </Flex>
         {figure.description && (
-          <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-            {figure.description}
-          </Text>
+          <Box
+            fontSize="xs"
+            color="gray.500"
+            mt={0.5}
+            sx={{
+              "& p": {
+                my: 0,
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 2,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              },
+            }}
+          >
+            <Markdown inline>{figure.description}</Markdown>
+          </Box>
         )}
       </Box>
     </Box>

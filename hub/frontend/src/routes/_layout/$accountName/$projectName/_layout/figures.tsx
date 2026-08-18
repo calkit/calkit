@@ -165,22 +165,10 @@ function FigureThumbnail({
       </Box>
       <Box p={3}>
         <Flex align="center" justify="space-between" gap={1}>
-          <Box
-            fontWeight="semibold"
-            fontSize="sm"
-            flex={1}
-            sx={{
-              "& p": {
-                my: 0,
-                display: "-webkit-box",
-                WebkitBoxOrient: "vertical",
-                WebkitLineClamp: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              },
-            }}
-          >
-            <Markdown inline>{figure.title}</Markdown>
+          <Box fontWeight="semibold" fontSize="sm" flex={1} minW={0}>
+            <Markdown inline noOfLines={1}>
+              {figure.title}
+            </Markdown>
           </Box>
           {(figure.comment_count ?? 0) > 0 && (
             <Flex align="center" gap={1} color="gray.500" flexShrink={0}>
@@ -192,22 +180,10 @@ function FigureThumbnail({
           )}
         </Flex>
         {figure.description && (
-          <Box
-            fontSize="xs"
-            color="gray.500"
-            mt={0.5}
-            sx={{
-              "& p": {
-                my: 0,
-                display: "-webkit-box",
-                WebkitBoxOrient: "vertical",
-                WebkitLineClamp: 2,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              },
-            }}
-          >
-            <Markdown inline>{figure.description}</Markdown>
+          <Box fontSize="xs" color="gray.500" mt={0.5}>
+            <Markdown inline noOfLines={2}>
+              {figure.description}
+            </Markdown>
           </Box>
         )}
       </Box>

@@ -3,11 +3,15 @@ import { describe, expect, it } from "vitest"
 import {
   filterRows,
   firstHighlightedRow,
+  formatHiddenColumns,
   formatHighlight,
+  formatSort,
   indexRows,
   isCellHighlighted,
   isNumericColumn,
+  parseHiddenColumns,
   parseHighlight,
+  parseSort,
   parseTable,
   sortRows,
 } from "./tables"
@@ -230,5 +234,53 @@ describe("highlights", () => {
     expect(firstHighlightedRow(parseHighlight("r8c1,r3c2"))).toBe(3)
     expect(firstHighlightedRow(parseHighlight("c2"))).toBeNull()
     expect(firstHighlightedRow([])).toBeNull()
+  })
+})
+
+describe("parseSort", () => {
+  it("parses a column with and without a direction", () => {
+    expect(parseSort("2")).toEqual({ column: 2, direction: "asc" })
+    expect(parseSort("2:desc")).toEqual({ column: 2, direction: "desc" })
+  })
+
+  it("returns null for anything unusable", () => {
+    expect(parseSort(undefined)).toBeNull()
+    expect(parseSort("")).toBeNull()
+    expect(parseSort("0")).toBeNull()
+    expect(parseSort("2:sideways")).toBeNull()
+    expect(parseSort("name")).toBeNull()
+  })
+
+  it("round trips through formatSort", () => {
+    expect(formatSort(parseSort("3:desc"))).toBe("3:desc")
+    expect(formatSort(null)).toBeUndefined()
+  })
+})
+
+describe("parseHiddenColumns", () => {
+  it("parses numbers and spans, deduped and sorted", () => {
+    expect(parseHiddenColumns("5,2-4,2")).toEqual([2, 3, 4, 5])
+  })
+
+  it("drops parts that don't parse", () => {
+    expect(parseHiddenColumns("2,nope,4")).toEqual([2, 4])
+    expect(parseHiddenColumns(undefined)).toEqual([])
+  })
+
+  it("collapses back into spans", () => {
+    expect(formatHiddenColumns([2, 3, 4, 7])).toBe("2-4,7")
+    expect(formatHiddenColumns([])).toBeUndefined()
+  })
+})
+
+describe("filterRows with hidden columns", () => {
+  it("only matches columns still on screen", () => {
+    const rows = indexRows([
+      ["alpha", "one"],
+      ["beta", "two"],
+    ])
+    expect(filterRows(rows, "one").length).toBe(1)
+    expect(filterRows(rows, "one", [0]).length).toBe(0)
+    expect(filterRows(rows, "alpha", [0]).length).toBe(1)
   })
 })

@@ -43,6 +43,12 @@ const tablesSearchSchema = z.object({
   // Cells to highlight in the open table, e.g. "r3c2" or "r2-4c1-3", so a
   // link can point at the numbers being discussed.
   highlight: z.string().optional(),
+  // How the open table is being read: rows searched for `tq`, sorted by
+  // `sort` ("2:desc"), with the columns in `hide` ("3,5-6") left out. All
+  // three ride in the URL so a link reproduces the view, not just the file.
+  tq: z.string().optional(),
+  sort: z.string().optional(),
+  hide: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -58,6 +64,12 @@ function TableModal({
   gitRef,
   highlight,
   onHighlightChange,
+  search,
+  onSearchChange,
+  sort,
+  onSortChange,
+  hide,
+  onHiddenColumnsChange,
   onClose,
   onPrev,
   onNext,
@@ -66,6 +78,12 @@ function TableModal({
   gitRef?: string
   highlight?: string
   onHighlightChange: (spec: string | undefined) => void
+  search?: string
+  onSearchChange: (value: string | undefined) => void
+  sort?: string
+  onSortChange: (spec: string | undefined) => void
+  hide?: string
+  onHiddenColumnsChange: (spec: string | undefined) => void
   onClose: () => void
   onPrev?: () => void
   onNext?: () => void
@@ -179,13 +197,19 @@ function TableModal({
             </Box>
           ) : null}
           <TableView
-            // Remount per table so search and sort don't carry over from the
-            // one being left, where they meant something else.
+            // Remount per table so the search box picks up the new table's
+            // query rather than keeping the one being left behind.
             key={table.path}
             table={table}
             maxHeight="calc(100vh - 260px)"
             highlight={highlight}
             onHighlightChange={onHighlightChange}
+            search={search}
+            onSearchChange={onSearchChange}
+            sort={sort}
+            onSortChange={onSortChange}
+            hiddenColumns={hide}
+            onHiddenColumnsChange={onHiddenColumnsChange}
           />
         </ModalBody>
       </ModalContent>
@@ -202,7 +226,7 @@ function Tables() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }) as any
   const ref: string | undefined = layoutSearch?.ref
-  const { path: selectedPath, q, highlight } = Route.useSearch()
+  const { path: selectedPath, q, highlight, tq, sort, hide } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { tablesRequest } = useProjectTables(accountName, projectName, ref)
   // Seeded from the URL so a shared link opens on the same results, then kept
@@ -229,17 +253,31 @@ function Tables() {
     : tables
   // A highlight belongs to the table it was made in, so opening another one
   // drops it rather than pointing at unrelated cells.
+  // Search, sort and hidden columns mean something only in the table they
+  // were set in, so they're dropped alongside the highlight.
+  const perTable = {
+    highlight: undefined,
+    tq: undefined,
+    sort: undefined,
+    hide: undefined,
+  }
   const openTable = (path: string) =>
-    navigate({ search: (prev) => ({ ...prev, path, highlight: undefined }) })
+    navigate({ search: (prev) => ({ ...prev, path, ...perTable }) })
   const closeTable = () =>
-    navigate({
-      search: (prev) => ({ ...prev, path: undefined, highlight: undefined }),
-    })
+    navigate({ search: (prev) => ({ ...prev, path: undefined, ...perTable }) })
   const setHighlight = (spec: string | undefined) =>
     navigate({
       search: (prev) => ({ ...prev, highlight: spec }),
       replace: true,
     })
+  // Replaced rather than pushed: reading a table is a lot of small
+  // adjustments, and each one shouldn't need its own press of Back.
+  const setTableSearchParam =
+    (key: "tq" | "sort" | "hide") => (value: string | undefined) =>
+      navigate({
+        search: (prev) => ({ ...prev, [key]: value || undefined }),
+        replace: true,
+      })
   // Stepping moves through what's on screen, so a filtered gallery steps
   // through its matches rather than the tables it just hid.
   const selectedIndex = matched.findIndex((t) => t.path === selectedPath)
@@ -304,6 +342,12 @@ function Tables() {
           gitRef={ref}
           highlight={highlight}
           onHighlightChange={setHighlight}
+          search={tq}
+          onSearchChange={setTableSearchParam("tq")}
+          sort={sort}
+          onSortChange={setTableSearchParam("sort")}
+          hide={hide}
+          onHiddenColumnsChange={setTableSearchParam("hide")}
           onClose={closeTable}
           onPrev={
             selectedIndex > 0

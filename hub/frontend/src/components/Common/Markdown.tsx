@@ -34,6 +34,8 @@ interface MarkdownProps {
   children: string
   /** Render user-controlled short text without block elements or links. */
   inline?: boolean
+  /** Truncate with an ellipsis after this many lines. */
+  noOfLines?: number
 }
 
 interface codeProps extends React.HTMLAttributes<HTMLElement> {
@@ -74,7 +76,7 @@ const code = ({ insidePre = false, ...props }: codeProps) => {
   return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
 }
 
-const Markdown = ({ children, inline = false }: MarkdownProps) => {
+const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
   const tableHeaderText = useColorModeValue("gray.700", "gray.100")
@@ -169,7 +171,12 @@ const Markdown = ({ children, inline = false }: MarkdownProps) => {
       // Inline rendering must not introduce a block-level wrapper, or short text
       // like a title or description would break onto its own line.
       as={inline ? "span" : "div"}
-      display={inline ? "inline" : undefined}
+      // Clamping needs the block-level -webkit-box display that noOfLines sets,
+      // so don't also ask for an inline one and rely on which of the two wins.
+      display={inline && !noOfLines ? "inline" : undefined}
+      // The clamp has to live on this wrapper rather than on a descendant `p`,
+      // since inline rendering emits paragraphs as spans.
+      noOfLines={noOfLines}
       /*
        * Chakra's CSS reset sets img { display: block }, which makes README badges
        * stack vertically. Override within markdown so images (and linked images)

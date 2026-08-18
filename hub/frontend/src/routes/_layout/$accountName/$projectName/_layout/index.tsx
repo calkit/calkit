@@ -159,22 +159,10 @@ function EvidenceItem({
             {thumb}
           </Box>
           {fig?.title ? (
-            <Box
-              fontSize="xs"
-              px={2}
-              py={1}
-              sx={{
-                "& p": {
-                  my: 0,
-                  display: "-webkit-box",
-                  WebkitBoxOrient: "vertical",
-                  WebkitLineClamp: 1,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                },
-              }}
-            >
-              <Markdown inline>{fig.title}</Markdown>
+            <Box fontSize="xs" px={2} py={1}>
+              <Markdown inline noOfLines={1}>
+                {fig.title}
+              </Markdown>
             </Box>
           ) : (
             <Text fontSize="xs" noOfLines={1} px={2} py={1}>

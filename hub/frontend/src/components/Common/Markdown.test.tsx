@@ -28,5 +28,33 @@ describe("Markdown", () => {
     expect(html).toContain("linked")
     expect(html).toContain("bold")
     expect(html).toContain("heading")
+    // Unclamped inline text keeps an inline wrapper, or a title would break
+    // onto its own line
+    expect(html).toMatch(/\.css-[a-z0-9]+\{display:inline;\}/)
+  })
+
+  it("clamps inline text on the element that holds it", () => {
+    const html = renderToStaticMarkup(
+      <ChakraProvider>
+        <Markdown inline noOfLines={2}>
+          {"Drag coefficient $C_d$ measured over a rather long sweep"}
+        </Markdown>
+      </ChakraProvider>,
+    )
+    // Inline rendering emits paragraphs as spans, so a clamp scoped to a
+    // descendant `p` would match nothing and never truncate
+    expect(html).not.toContain("<p")
+    const clamp = html.match(
+      /\.(css-[a-z0-9]+)\{([^}]*-webkit-line-clamp[^}]*)\}/,
+    )
+    expect(clamp).not.toBeNull()
+    const start = html.indexOf(`<span class="${clamp?.[1]}">`)
+    expect(start).toBeGreaterThan(-1)
+    expect(html.slice(start)).toContain("Drag coefficient")
+    expect(clamp?.[2]).toContain("--chakra-line-clamp:2")
+    // The clamp needs a block-level display, so it must win over the inline
+    // display the wrapper otherwise carries
+    expect(clamp?.[2]).toContain("display:-webkit-box")
+    expect(clamp?.[2]).not.toContain("display:inline")
   })
 })

@@ -171,10 +171,11 @@ const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
       // Inline rendering must not introduce a block-level wrapper, or short text
       // like a title or description would break onto its own line.
       as={inline ? "span" : "div"}
-      display={inline ? "inline" : undefined}
+      // Clamping needs the block-level -webkit-box display that noOfLines sets,
+      // so don't also ask for an inline one and rely on which of the two wins.
+      display={inline && !noOfLines ? "inline" : undefined}
       // The clamp has to live on this wrapper rather than on a descendant `p`,
-      // since inline rendering emits paragraphs as spans. Chakra resolves the
-      // block-level display noOfLines needs over the `display` prop above.
+      // since inline rendering emits paragraphs as spans.
       noOfLines={noOfLines}
       /*
        * Chakra's CSS reset sets img { display: block }, which makes README badges

@@ -28,6 +28,9 @@ describe("Markdown", () => {
     expect(html).toContain("linked")
     expect(html).toContain("bold")
     expect(html).toContain("heading")
+    // Unclamped inline text keeps an inline wrapper, or a title would break
+    // onto its own line
+    expect(html).toMatch(/\.css-[a-z0-9]+\{display:inline;\}/)
   })
 
   it("clamps inline text on the element that holds it", () => {

@@ -100,21 +100,39 @@ export default function TableView({
   // Filtering runs over every cell in the table, so it's debounced: doing
   // that per keystroke on a big one is visibly slow.
   const [debouncedSearch] = useDebounce(search, 250)
+  // The last value written to the URL from here, which is what tells our own
+  // echo apart from a change made elsewhere (Back/Forward, or a link opened
+  // over this one). Without it, adopting every param change would overwrite
+  // what's being typed with the previous keystroke's debounced value.
+  const pushedSearch = useRef(searchParam ?? "")
   useEffect(() => {
     if (!onSearchChange) return
-    if ((searchParam ?? "") === debouncedSearch) return
+    if (debouncedSearch === pushedSearch.current) return
+    pushedSearch.current = debouncedSearch
     onSearchChange(debouncedSearch || undefined)
-  }, [debouncedSearch, searchParam, onSearchChange])
+  }, [debouncedSearch, onSearchChange])
+  useEffect(() => {
+    const next = searchParam ?? ""
+    if (next === pushedSearch.current) return
+    pushedSearch.current = next
+    setSearch(next)
+  }, [searchParam])
   const [localSort, setLocalSort] = useState<string | undefined>(undefined)
   const sortSpec = onSortChange ? sortParam : localSort
   const setSortSpec = onSortChange ?? setLocalSort
-  const sort = useMemo(() => parseSort(sortSpec), [sortSpec])
   const [localHidden, setLocalHidden] = useState<string | undefined>(undefined)
   const hiddenSpec = onHiddenColumnsChange ? hiddenColumnsParam : localHidden
   const setHiddenSpec = onHiddenColumnsChange ?? setLocalHidden
   // 1-based column numbers, matching what highlight specs use.
   const hidden = useMemo(() => parseHiddenColumns(hiddenSpec), [hiddenSpec])
   const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  // A sort by a hidden column would leave the rows in an order with nothing
+  // on screen explaining it, so it's suspended rather than dropped: the spec
+  // stays in the URL, and showing the column again brings its order back.
+  const sort = useMemo(() => {
+    const parsed = parseSort(sortSpec)
+    return parsed && hiddenSet.has(parsed.column) ? null : parsed
+  }, [sortSpec, hiddenSet])
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLTableCellElement>(null)
   // The cell a shift-click extends from, i.e. the last one clicked on its
@@ -256,14 +274,11 @@ export default function TableView({
         : undefined,
     )
   }
-  // Hiding the sorted column would leave the rows in an order with nothing
-  // on screen explaining it, so the sort goes with it.
   const setHiddenColumns = (columns: number[]) => {
     // Hiding every column would leave an empty grid with no obvious way back,
     // so the last visible one stays.
     if (columns.length >= parsed.columns.length) return
     setHiddenSpec(formatHiddenColumns(columns))
-    if (sort && columns.includes(sort.column)) setSortSpec(undefined)
   }
   // Clicking a cell highlights it, shift-clicking another covers the block
   // between them, and a row number highlights the whole row. All of it goes

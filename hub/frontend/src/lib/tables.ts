@@ -305,10 +305,15 @@ export const filterRows = (
 ): TableRow[] => {
   const query = needle.trim().toLowerCase()
   if (!query) return rows
+  // Searching every column is the common case and runs over every cell in the
+  // table, so it stays a plain scan rather than building an index list per row.
+  if (columns === undefined) {
+    return rows.filter((row) =>
+      row.cells.some((cell) => cell.toLowerCase().includes(query)),
+    )
+  }
   return rows.filter((row) =>
-    (columns ?? row.cells.map((_, i) => i)).some((i) =>
-      (row.cells[i] ?? "").toLowerCase().includes(query),
-    ),
+    columns.some((i) => (row.cells[i] ?? "").toLowerCase().includes(query)),
   )
 }
 

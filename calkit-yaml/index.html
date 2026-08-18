@@ -1,0 +1,4309 @@
+<!DOCTYPE html><html lang="en" class="no-js"><head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      
+        <link rel="prev" href="../version-control/">
+      
+      
+        <link rel="next" href="../requirements/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>The calkit.yaml file - Calkit</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+  
+
+
+  
+  
+
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-B87E6N95DH"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-B87E6N95DH",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-B87E6N95DH",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+  
+    <script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+  
+
+    
+    
+  <link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#the-calkityaml-file" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Calkit" class="md-header__button md-logo" aria-label="Calkit" data-md-component="logo">
+      
+  <img src="../img/c-to-the-k-white.svg" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Calkit
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              The calkit.yaml file
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to light mode" type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to dark mode" type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="teal" data-md-color-accent="cyan" aria-label="Switch to system preference" type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/calkit/calkit.git" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Calkit" class="md-nav__button md-logo" aria-label="Calkit" data-md-component="logo">
+      
+  <img src="../img/c-to-the-k-white.svg" alt="logo">
+
+    </a>
+    Calkit
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/calkit/calkit.git" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+  </div>
+  <div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../hub/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hub/self-hosting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running your own
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ai-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Use with AI tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../questions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Questions, hypotheses, answers, and evidence
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../version-control/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Version control
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The calkit.yaml file
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The calkit.yaml file
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#showcase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Showcase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring artifacts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schema-validation-and-autocompletion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema, validation, and autocompletion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nested-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Nested types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#derivedfromproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DerivedFromProject
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rangeiteration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RangeIteration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#figure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Figure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#presentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#software" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Software
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statichtmlapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StaticHtmlApp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasefigure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseFigure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasetext" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseText
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasemarkdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseMarkdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasemarkdownfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseMarkdownFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcaseyamlfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseYamlFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasenotebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseNotebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasepublication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcasePublication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcaseapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseApp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subproject
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Formula
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookuptable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LookupTable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overleafsync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OverleafSync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rangeiterationparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RangeIterationParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formulaparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FormulaParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linearparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LinearParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookuptableparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LookupTableParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../requirements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Requirements, configuration, and secrets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_11">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../pipeline/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The pipeline
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_11" id="__nav_11_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_11_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_11">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    The pipeline
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/running-and-logging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running and logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../pipeline/manual-steps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Manual steps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../notebooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jupyterlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    JupyterLab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../hpc/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    High performance computing (HPC)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../datasets/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Datasets
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../references/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    References
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../calculations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Calculations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../apps/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releases/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing/archiving projects and artifacts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../local-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local server (GUI interaction)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../latex/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    LaTeX documents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overleaf/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overleaf integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_23">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../browser-ext/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Browser extension
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_23" id="__nav_23_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_23_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_23">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Browser extension
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../browser-ext/privacy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../subprojects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Subprojects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_26">
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_26" id="__nav_26_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_26_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_26">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/first-project/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Creating your first project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/jupyterlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Composing a pipeline from multiple Jupyter notebooks in JupyterLab
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/existing-project/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Converting an existing project to a Calkit project
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/openfoam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    OpenFOAM, Docker, and Reviewer 2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/adding-latex-pub-docker/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Adding a new LaTeX-based publication with its own Docker build environment
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/latex-codespaces/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Collaborating on a LaTeX document with GitHub Codespaces
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/notebook-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using a Jupyter Notebook as a reproducible pipeline
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/procedures/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Defining and executing procedures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/conda-envs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Keeping track of conda environments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/office/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Using Microsoft Office
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/matlab/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    🎥 Using MATLAB
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/github-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Running Calkit in GitHub Actions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/vscode-slurm-notebook/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connect a Jupyter Notebook to a kernel in a SLURM environment in VS Code
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tutorials/ai-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Declarative, structured prompting to make AI agents work reproducibly
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reproducibility/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../governance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../acknowledgements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Acknowledgements
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#showcase" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Showcase
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#declaring-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Declaring artifacts
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#schema-validation-and-autocompletion" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Schema, validation, and autocompletion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#nested-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Nested types
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Nested types">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#derivedfromproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DerivedFromProject
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rangeiteration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RangeIteration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#figure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Figure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#result" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Result
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#publication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Publication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#presentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Presentation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Table
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#software" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Software
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#statichtmlapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        StaticHtmlApp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasefigure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseFigure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasetext" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseText
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasemarkdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseMarkdown
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasemarkdownfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseMarkdownFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcaseyamlfile" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseYamlFile
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasenotebook" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseNotebook
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcasepublication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcasePublication
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showcaseapp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ShowcaseApp
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#subproject" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Subproject
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formula" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Formula
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookuptable" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LookupTable
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#overleafsync" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OverleafSync
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rangeiterationparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        RangeIterationParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#formulaparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FormulaParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linearparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LinearParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#lookuptableparams" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LookupTableParams
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="the-calkityaml-file">The <code>calkit.yaml</code> file</h1>
+<p>The <code>calkit.yaml</code> file serves as a small "database"
+for the project's important metadata, which includes its:</p>
+<ul>
+<li>Global or system-level <a href="../requirements/">requirements</a>
+  (applications, environmental variables, or other configuration steps)</li>
+<li><a href="../questions/">Questions</a> the project seeks to answer</li>
+<li><a href="../environments/">Environments</a></li>
+<li><a href="../pipeline/">The pipeline</a></li>
+<li><a href="../datasets/">Datasets</a></li>
+<li>Figures</li>
+<li>Publications (journal articles, conference papers, and theses)</li>
+<li>Presentations (slides and posters)</li>
+<li>Tables (tabular data worth referring to by name)</li>
+<li><a href="../tutorials/procedures/">Procedures</a></li>
+<li><a href="../references/">References</a></li>
+<li>Subprojects (smaller projects executed as part of the main project)</li>
+<li>Calculations (ways to make predictions with the results)</li>
+<li>App (a way to allow users to interact with the results)</li>
+</ul>
+<p>Objects can be imported from other projects,
+which produces a chain of reference to allow tracking reuse
+and reduce redundant storage.</p>
+<h2 id="showcase">Showcase</h2>
+<p>The project showcase is a list of elements that best represent the project,
+shown on the project homepage on the hub.
+For example:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">showcase</span><span class="p">:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">text</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Here is some text.</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">figure</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">figures/my-figure.png</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">text</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">There is a figure above.</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">markdown</span><span class="p">:</span><span class="w"> </span><span class="s">"###</span><span class="nv"> </span><span class="s">This</span><span class="nv"> </span><span class="s">is</span><span class="nv"> </span><span class="s">a</span><span class="nv"> </span><span class="s">Markdown</span><span class="nv"> </span><span class="s">heading"</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">publication</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">paper/paper.pdf</span>
+</span></code></pre></div>
+<p><a href="https://calkit.io/petebachant/strava-analysis">This project</a>
+has a showcase that includes Plotly figures saved as JSON,
+which render interactively.</p>
+<h2 id="declaring-artifacts">Declaring artifacts</h2>
+<p>Figures, datasets, results, and presentations are auto-detected from the
+project's files, so <code>calkit list figures</code> shows a plot under <code>figures/</code>
+whether or not you've written it down.
+Each entry is flagged <code>detected</code> to tell the two apart.</p>
+<p>Declaring one in <code>calkit.yaml</code> anyway is how you say it has standalone
+significance: that it's worth a title and a description, that it's one of
+the things the project is <em>for</em>, rather than an incidental file that
+happens to sit in the right directory.
+Declaring it also makes its kind explicit rather than guessed from its
+path, which several commands rely on.</p>
+<p>Once something is declared, other projects can build on it.
+Datasets can be pulled into another project with
+<a href="../cli-reference/"><code>calkit import dataset</code></a>, keeping a chain of reference
+back to where they came from.</p>
+<p>An artifact can also be released on its own to get its own DOI, rather than
+only as part of a whole-project release:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>release<span class="w"> </span>figures/my-fig.png<span class="w"> </span>--name<span class="w"> </span>my-fig-v1
+</span></code></pre></div>
+<p>The release takes its kind from the declaration when there is one, and falls
+back to inferring it from the path;
+if neither works, it asks you to declare the artifact or pass <code>--kind</code>.</p>
+<h2 id="results">Results</h2>
+<p>Results are the project's findings: the things you'd point at to back up an
+answer, or to summarize what the project found.
+A result can be a single value, a table, a map, or any other shape a file
+takes.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">results</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/drag.csv</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Drag versus speed</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/summary.json</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metrics.mean</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Mean drag coefficient</span>
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mean-drag</span>
+</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/summary.json</span>
+</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="w">    </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">metrics.std</span>
+</span></code></pre></div>
+<p>Like the other artifacts, a result is identified by its path.
+Unlike them, several results can share one file: <code>key</code> addresses a single
+value within an object-like file, which is what tells the last two entries
+above apart.
+Omit <code>key</code> when the result is the whole file.</p>
+<p><code>name</code> is optional, and gives the result a short handle to refer to it by,
+which stays the same if the file is later renamed.
+<code>title</code> is optional too, and is only what gets displayed.</p>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>A result and a <a href="../datasets/">dataset</a> can be the same file, because they
+answer different questions about it. A dataset is a product the project
+exports for others to use; a result is evidence for what the project
+found.</p>
+</div>
+<p>To declare one from the command line:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>result<span class="w"> </span>results/summary.json<span class="w"> </span>--key<span class="w"> </span>metrics.mean<span class="w"> </span>--name<span class="w"> </span>mean-drag
+</span></code></pre></div>
+<h2 id="tables">Tables</h2>
+<p>A table can be cited as evidence inline, just like a result:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">evidence</span><span class="p">:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">table</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/top-kernels.csv</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">explanation</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Top 20 GPU kernels by baseline cost.</span>
+</span></code></pre></div>
+<p>Nothing has to be declared for that to work.
+Declare one under <code>tables:</code> when it's worth a title and description of its
+own, the same way you would a figure:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">tables</span><span class="p">:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/top-kernels.csv</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="nt">title</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Top 20 GPU kernels, baseline vs. mod</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">    </span><span class="nt">description</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Per-kernel Nsight Systems aggregates for the top 20 kernels.</span>
+</span></code></pre></div>
+<p>Like the other artifacts, a table is identified by its path.</p>
+<p>On the Calkit Hub, tables show up on the project's Tables page, where each
+one can be searched, sorted, and linked to by cell.
+Declaring a table isn't required to appear there: CSV, TSV, and JSON Lines
+files in a <code>tables</code> or <code>results</code> directory are detected automatically, as are
+LaTeX tables written to their own file, i.e., a <code>.tex</code> file in those
+directories holding a bare <code>tabular</code> environment, or one wrapped in a
+<code>standalone</code> document.
+A paper that happens to contain a table is not detected as one, since a table
+pulled out of a larger document is a fragment of that document rather than an
+artifact of its own.
+Declaring one only adds a title and description of your own.</p>
+<p>Columns aren't described yet, and neither is a symbolic name for a table.
+Both are expected to arrive alongside symbol metadata, which is where
+per-column types and units belong.</p>
+<!-- prettier-ignore -->
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Which collections are keyed by name and which are lists comes down to
+one question: does anything else in the file have to <em>name</em> it?
+Environments are named by stages, stages by <code>from_stage_outputs</code>,
+procedures and calculations by the commands that run them---so those are
+maps. Nothing names a figure, dataset, publication, presentation, result,
+table, or question; they're referred to by path, or not at all, so those
+are lists.</p>
+</div>
+<h2 id="schema-validation-and-autocompletion">Schema, validation, and autocompletion</h2>
+<p>Calkit publishes a <a href="https://json-schema.org/">JSON Schema</a> describing
+<code>calkit.yaml</code> at
+<a href="https://docs.calkit.org/schemas/calkit.json">docs.calkit.org/schemas/calkit.json</a>.
+Editors use it to flag mistakes as you type---invalid environment or stage
+kinds, missing required fields, misspelled keys within a pipeline
+stage---and to autocomplete keys and values with inline documentation.</p>
+<p>Top-level keys and keys inside an environment are deliberately permissive:
+an unknown one there validates rather than failing, so a project using a
+newer or experimental feature isn't reported as broken by an older schema.
+Pipeline stages are the exception, and are strict, because a misspelled key
+there silently changes what runs.</p>
+<p>Projects created with <code>calkit init</code> or <code>calkit new project</code> get a schema
+reference on the first line of their <code>calkit.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json</span>
+</span></code></pre></div>
+<p>To add it to an existing project, paste that line at the top of the file.
+Calkit preserves it when it updates the file.</p>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>In VS Code this requires the
+<a href="https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml">YAML extension</a>,
+which is installed alongside the
+<a href="https://marketplace.visualstudio.com/items?itemName=calkit.calkit-vscode">Calkit extension</a>
+and can be removed if you'd rather not have it.
+The Calkit extension also bundles a copy of the schema and applies it to
+every <code>calkit.yaml</code>, so the comment above is not strictly necessary if
+you're working in VS Code. The comment takes precedence when present,
+which keeps the file validating the same way for collaborators using
+other editors.</p>
+</div>
+<p>To generate a copy of the schema matching your installed version of Calkit,
+e.g., to check the file in CI or point an editor at it directly, run:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>calkit<span class="w"> </span>describe<span class="w"> </span>schema<span class="w"> </span>-o<span class="w"> </span>calkit-schema.json
+</span></code></pre></div>
+<h2 id="reference">Reference</h2>
+<p>Every key that can appear at the top level of <code>calkit.yaml</code>, generated from
+the same models as the schema above.
+Keys linking to another page are described in more detail there;
+the properties that go inside pipeline stages are covered under
+<a href="../pipeline/">the pipeline</a>, and those for environments under
+<a href="../environments/">environments</a>.</p>
+<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:START -->
+
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$schema</code></td>
+<td>str</td>
+<td>no</td>
+<td>URL of the JSON schema describing this file.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str</td>
+<td>no</td>
+<td>A human-readable title for the project.</td>
+</tr>
+<tr>
+<td><code>owner</code></td>
+<td>str</td>
+<td>no</td>
+<td>The account name that owns the project on Calkit.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str</td>
+<td>no</td>
+<td>A short description of the project.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>str</td>
+<td>no</td>
+<td>The project's name on Calkit, e.g., 'my-project'.</td>
+</tr>
+<tr>
+<td><code>hub</code></td>
+<td>str</td>
+<td>no</td>
+<td>Base URL of the Calkit Hub on which the project is shared, backed up, and collaborated on, e.g., 'calkit.io'. The scheme can be omitted, in which case https is inferred, or http for a local host. Each project belongs to at most one hub, which makes 'ck://' paths resolvable against a known instance. Projects with no hub set are assumed to belong to 'calkit.io'.</td>
+</tr>
+<tr>
+<td><code>git_repo_url</code></td>
+<td>str</td>
+<td>no</td>
+<td>URL of the project's Git repository.</td>
+</tr>
+<tr>
+<td><code>derived_from</code></td>
+<td>DerivedFromProject</td>
+<td>no</td>
+<td>The project this one was created as a copy of.</td>
+</tr>
+<tr>
+<td><a href="../questions/"><code>questions</code></a></td>
+<td>list[str | Question]</td>
+<td>no</td>
+<td>Questions the project seeks to answer.</td>
+</tr>
+<tr>
+<td><a href="../requirements/"><code>requirements</code></a></td>
+<td>list[str | SystemNumberRequirement | SystemValueRequirement | SetupRequirement | Requirement | dict[str, RequirementAttrs]]</td>
+<td>no</td>
+<td>What must be true of the machine before the project runs: applications that must be on PATH, environmental variables, per-machine setup steps, and constraints on machine properties like CPU count. These describe the host, which is the built-in '_system' environment; a 'system' environment declares its own.</td>
+</tr>
+<tr>
+<td><a href="../requirements/"><code>dependencies</code></a></td>
+<td>list[str | SystemNumberRequirement | SystemValueRequirement | SetupRequirement | Requirement | dict[str, RequirementAttrs]]</td>
+<td>no</td>
+<td>Deprecated alias for 'requirements', still honored so existing projects keep working. Set one or the other, not both.</td>
+</tr>
+<tr>
+<td><code>parameters</code></td>
+<td>dict[str, int | float | str | list[int | float | str | RangeIteration]]</td>
+<td>no</td>
+<td>Project-level parameters, which can be referenced from pipeline stages.</td>
+</tr>
+<tr>
+<td><a href="../pipeline/"><code>pipeline</code></a></td>
+<td>Pipeline</td>
+<td>no</td>
+<td>The project's reproducible pipeline.</td>
+</tr>
+<tr>
+<td><a href="../datasets/"><code>datasets</code></a></td>
+<td>list[Dataset]</td>
+<td>no</td>
+<td>The project's datasets.</td>
+</tr>
+<tr>
+<td><code>figures</code></td>
+<td>list[Figure]</td>
+<td>no</td>
+<td>The project's figures.</td>
+</tr>
+<tr>
+<td><code>results</code></td>
+<td>list[Result]</td>
+<td>no</td>
+<td>The project's findings, each referring to a file, or to part of one.</td>
+</tr>
+<tr>
+<td><code>publications</code></td>
+<td>list[Publication]</td>
+<td>no</td>
+<td>The project's papers, reports, and proposals.</td>
+</tr>
+<tr>
+<td><code>presentations</code></td>
+<td>list[Presentation]</td>
+<td>no</td>
+<td>The project's slides and posters.</td>
+</tr>
+<tr>
+<td><code>tables</code></td>
+<td>list[Table]</td>
+<td>no</td>
+<td>The project's tables. Only needed for tables worth a title of their own; evidence can point at one inline.</td>
+</tr>
+<tr>
+<td><a href="../references/"><code>references</code></a></td>
+<td>list[ReferenceCollection]</td>
+<td>no</td>
+<td>The project's bibliographies.</td>
+</tr>
+<tr>
+<td><a href="../environments/"><code>environments</code></a></td>
+<td>dict[str, Environment]</td>
+<td>no</td>
+<td>Environments in which pipeline stages are run, keyed by name.</td>
+</tr>
+<tr>
+<td><code>software</code></td>
+<td>list[Software]</td>
+<td>no</td>
+<td>Software created as part of the project.</td>
+</tr>
+<tr>
+<td><code>notebooks</code></td>
+<td>list[Notebook]</td>
+<td>no</td>
+<td>The project's Jupyter notebooks.</td>
+</tr>
+<tr>
+<td><a href="../tutorials/procedures/"><code>procedures</code></a></td>
+<td>dict[str, Procedure]</td>
+<td>no</td>
+<td>Procedures, typically executed by a human, keyed by name.</td>
+</tr>
+<tr>
+<td><a href="../releases/"><code>releases</code></a></td>
+<td>dict[str, Release]</td>
+<td>no</td>
+<td>Published or archived snapshots, keyed by name.</td>
+</tr>
+<tr>
+<td><code>apps</code></td>
+<td>dict[str, StaticHtmlApp]</td>
+<td>no</td>
+<td>The project's apps, keyed by name.</td>
+</tr>
+<tr>
+<td><code>showcase</code></td>
+<td>list[ShowcaseFigure | ShowcaseText | ShowcaseMarkdown | ShowcaseMarkdownFile | ShowcaseYamlFile | ShowcaseNotebook | ShowcasePublication | ShowcaseApp]</td>
+<td>no</td>
+<td>Elements that best represent the project, shown on its project homepage on Calkit.</td>
+</tr>
+<tr>
+<td><code>subprojects</code></td>
+<td>list[Subproject]</td>
+<td>no</td>
+<td>Smaller projects executed as part of this one.</td>
+</tr>
+<tr>
+<td><code>calculations</code></td>
+<td>dict[str, Formula | Linear | LookupTable]</td>
+<td>no</td>
+<td>Calculations that can be run with 'calkit calc run'.</td>
+</tr>
+<tr>
+<td><code>env_vars</code></td>
+<td>dict[str, str]</td>
+<td>no</td>
+<td>Environmental variables set when running project commands.</td>
+</tr>
+<tr>
+<td><code>overleaf_sync</code></td>
+<td>dict[str, OverleafSync]</td>
+<td>no</td>
+<td>Overleaf sync configuration, keyed by the path of the synced directory.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="nested-types">Nested types</h3>
+<p>Keys above whose type is a named object, like <code>Figure</code>, hold the properties described below.</p>
+<h4 id="derivedfromproject"><code>DerivedFromProject</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>git_repo_url</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>git_rev</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="rangeiteration"><code>RangeIteration</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>range</code></td>
+<td>RangeIterationParams</td>
+<td>yes</td>
+<td></td>
+<td>Bounds of the range over which to iterate.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="figure"><code>Figure</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the file, relative to the project root.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A human-readable title.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A longer description.</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the pipeline stage that produces this.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="result"><code>Result</code></h4>
+<p>A finding the project produced: a value, a table, a map, or a file.</p>
+<p>Like the other artifacts, a result is identified by its path, but unlike
+them several results can share one file, e.g., a mean and a standard
+deviation both read out of one summary file. <code>key</code> is what tells those
+apart, so the identity is really the <code>(path, key)</code> pair. Which part of
+a file a result refers to is left open on purpose: other forms of
+addressing can be added without reshaping what a result is.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the file, relative to the project root.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A human-readable title.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A longer description.</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the pipeline stage that produces this.</td>
+</tr>
+<tr>
+<td><code>key</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Which value within the file this result refers to, e.g., 'metrics.mean'. Omit it when the result is the whole file.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A short handle for referring to this result, which stays stable if the file is renamed. Optional, since the path and key already identify it.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="publication"><code>Publication</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the file, relative to the project root.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A human-readable title.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A longer description.</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the pipeline stage that produces this.</td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>is_published</code></td>
+<td>bool</td>
+<td>no</td>
+<td>False</td>
+<td></td>
+</tr>
+<tr>
+<td><code>doi</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="presentation"><code>Presentation</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the file, relative to the project root.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A human-readable title.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A longer description.</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the pipeline stage that produces this.</td>
+</tr>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['slides', 'poster'] | None</td>
+<td>no</td>
+<td>null</td>
+<td>What kind of presentation this is.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="table"><code>Table</code></h4>
+<p>Tabular data, whether it's the finding itself or how one is shown.</p>
+<p>Identified by path, like the other artifacts, and cited that way.</p>
+<p>Declaring one is optional: evidence says what it points at inline via
+<code>kind</code>, so an entry here is only needed when the table is worth a title
+and a description of its own.</p>
+<p>Deliberately nothing beyond the shared artifact fields yet. A <code>name</code>,
+for referring to a table symbolically, and <code>columns</code> both want to exist
+eventually, but neither has anything reading it today, and columns need
+per-column types and units that belong with symbol metadata rather than
+being invented separately here. Both are free to add later; a field
+shipped early is not free to remove.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the file, relative to the project root.</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A human-readable title.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>A longer description.</td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the pipeline stage that produces this.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="software"><code>Software</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>title</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="notebook"><code>Notebook</code></h4>
+<p>A Jupyter notebook.</p>
+<p>Unlike the other objects, a notebook entry can be created just to record
+which environment it runs in (by <code>calkit update notebook-env</code>), so
+<code>title</code> is optional here.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>environment</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>Name of the environment in which to run this notebook, if it is not part of the pipeline.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="statichtmlapp"><code>StaticHtmlApp</code></h4>
+<p>An app served as static files, with no backend.</p>
+<p><code>path</code> points at the HTML file itself rather than its directory, since
+the kind names a file type. The containing directory is the serving root,
+so sibling assets are served alongside it, and <code>index.html</code> is implied
+when a directory is served.</p>
+<p>There is no <code>url</code> field: for apps a hub serves, the URL is derived from
+the project and the app's key, and a value written here could only go
+stale.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['static-html']</td>
+<td>no</td>
+<td>'static-html'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>stage</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasefigure"><code>ShowcaseFigure</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>figure</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasetext"><code>ShowcaseText</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>text</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasemarkdown"><code>ShowcaseMarkdown</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>markdown</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasemarkdownfile"><code>ShowcaseMarkdownFile</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>markdown_file</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcaseyamlfile"><code>ShowcaseYamlFile</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>yaml_file</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>object_name</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasenotebook"><code>ShowcaseNotebook</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>notebook</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcasepublication"><code>ShowcasePublication</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>publication</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="showcaseapp"><code>ShowcaseApp</code></h4>
+<p>Show an app in the project's showcase, by its key in <code>apps</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>app</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="subproject"><code>Subproject</code></h4>
+<p>A smaller project executed as part of this one.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>path</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td>Path to the subproject directory, relative to this project's root.</td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="formula"><code>Formula</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['formula']</td>
+<td>no</td>
+<td>'formula'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>FormulaParams</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>inputs</code></td>
+<td>list[Input] | list[str]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>Output | str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="linear"><code>Linear</code></h4>
+<p>Calculation for a simple linear relationship.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['linear']</td>
+<td>no</td>
+<td>'linear'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>LinearParams</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>inputs</code></td>
+<td>list[Input] | list[str]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>Output | str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="lookuptable"><code>LookupTable</code></h4>
+<p>A 1-D lookup table.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kind</code></td>
+<td>Literal['lookup-table']</td>
+<td>no</td>
+<td>'lookup-table'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>params</code></td>
+<td>LookupTableParams</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>inputs</code></td>
+<td>list[Input] | list[str]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>output</code></td>
+<td>Output | str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="overleafsync"><code>OverleafSync</code></h4>
+<p>Configuration for syncing a directory with an Overleaf project.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td>URL of the Overleaf project.</td>
+</tr>
+<tr>
+<td><code>sync_paths</code></td>
+<td>list[str] | None</td>
+<td>no</td>
+<td>null</td>
+<td>Paths synced in both directions with Overleaf.</td>
+</tr>
+<tr>
+<td><code>push_paths</code></td>
+<td>list[str] | None</td>
+<td>no</td>
+<td>null</td>
+<td>Paths only pushed to Overleaf, never pulled back.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="rangeiterationparams"><code>RangeIterationParams</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>start</code></td>
+<td>int | float</td>
+<td>yes</td>
+<td></td>
+<td>First value in the range, which is included.</td>
+</tr>
+<tr>
+<td><code>stop</code></td>
+<td>int | float</td>
+<td>yes</td>
+<td></td>
+<td>Value at which to stop, which is not included.</td>
+</tr>
+<tr>
+<td><code>step</code></td>
+<td>int | float</td>
+<td>no</td>
+<td>1</td>
+<td>Amount by which to increment each value.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="formulaparams"><code>FormulaParams</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>formula</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="input"><code>Input</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>dtype</code></td>
+<td>Literal['int', 'float', 'str']</td>
+<td>no</td>
+<td>'float'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>min</code></td>
+<td>int | float | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>max</code></td>
+<td>int | float | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="output"><code>Output</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>str</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>description</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+<tr>
+<td><code>dtype</code></td>
+<td>Literal['int', 'float', 'str']</td>
+<td>no</td>
+<td>'float'</td>
+<td></td>
+</tr>
+<tr>
+<td><code>template</code></td>
+<td>str | None</td>
+<td>no</td>
+<td>null</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="linearparams"><code>LinearParams</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>coeffs</code></td>
+<td>dict[str, float]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>offset</code></td>
+<td>float</td>
+<td>no</td>
+<td>0.0</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<h4 id="lookuptableparams"><code>LookupTableParams</code></h4>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>x_values</code></td>
+<td>list[float]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>y_values</code></td>
+<td>list[float]</td>
+<td>yes</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><code>method</code></td>
+<td>Literal['floor', 'ceil', 'round', 'interpolate']</td>
+<td>no</td>
+<td>'interpolate'</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->
+
+
+
+
+
+
+
+
+
+  
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer">
+        
+          
+          <a href="../version-control/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Version control">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Version control
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../requirements/" class="md-footer__link md-footer__link--next" aria-label="Next: Requirements, configuration, and secrets">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Requirements, configuration, and secrets
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"></path></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.footer", "navigation.indexes", "navigation.top"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

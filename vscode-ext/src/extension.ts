@@ -1419,16 +1419,6 @@ async function ensureCalkitCliReady(): Promise<void> {
       return;
     }
 
-    const hasNotebookUpdate = await hasUpdateNotebookCommand(workspaceRoot);
-    if (!hasNotebookUpdate) {
-      await promptCalkitInstallOrUpgrade({
-        mode: "upgrade",
-        title: "Calkit CLI is too old for this extension",
-        message: `Detected Calkit ${installedVersion}, but this extension requires at least ${minimumVersion} with 'calkit update notebook'.`,
-      });
-      return;
-    }
-
     if (compareSemver(installedVersion, minimumVersion) < 0) {
       await promptCalkitInstallOrUpgrade({
         mode: "upgrade",
@@ -1481,20 +1471,6 @@ function compareSemver(a: string, b: string): number {
     }
   }
   return 0;
-}
-
-async function hasUpdateNotebookCommand(
-  workspaceRoot?: string,
-): Promise<boolean> {
-  try {
-    await execFileAsync("calkit", ["update", "notebook", "--help"], {
-      cwd: workspaceRoot,
-      timeout: 5_000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function promptCalkitInstallOrUpgrade(options: {

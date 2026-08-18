@@ -1582,6 +1582,16 @@ def to_dvc(
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
                 elif isinstance(out, PathOutput) and out.storage == "git":
                     calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    if out.path.endswith(".ipynb"):
+                        # A notebook stage's storage is declared here, in the
+                        # pipeline, so a clean filter installed in the clone
+                        # (nbstripout) must not overrule it by stripping the
+                        # outputs back out on the way into Git. That would
+                        # commit bytes that don't match what DVC hashed, with
+                        # nothing showing as modified locally.
+                        calkit.git.ensure_path_is_not_filtered(
+                            repo, path=out.path
+                        )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
                     calkit.dvc.zip.add(out.path, is_stage_output=True)

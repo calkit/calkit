@@ -13,6 +13,12 @@ from git.exc import InvalidGitRepositoryError
 
 __all__ = ["InvalidGitRepositoryError", "get_repo"]
 
+# Marks the block of exemptions ensure_path_is_not_filtered maintains, so
+# it's clear in a file Calkit shares with whatever installed the filter.
+CALKIT_ATTRIBUTES_COMMENT = (
+    "# Added by Calkit: pipeline outputs must be committed unfiltered"
+)
+
 
 def get_repo(path: str | None = None) -> git.Repo:
     """Return a git.Repo for ``path`` (or cwd), searching parent dirs.
@@ -458,6 +464,106 @@ def ensure_dvc_pointer_is_not_ignored(repo, path: str) -> None:
         if existing_lines and existing_lines[-1] != "":
             f.write("\n")
         f.write(exception + "\n")
+
+
+def get_filter_driver(repo: git.Repo, path: str | PathLike) -> str | None:
+    """The name of the clean/smudge filter Git applies to ``path``, if any.
+
+    Asks Git rather than reading attributes files, since a filter can be
+    declared in any of several places with different precedence---most
+    relevantly ``$GIT_DIR/info/attributes``, where ``nbstripout --install``
+    puts it, which is per-clone and never committed.
+    """
+    path = Path(path).as_posix()
+    try:
+        # -z gives NUL-separated <path> <attr> <value> triples, so a path
+        # containing ": " can't be mistaken for a field separator.
+        out = repo.git.check_attr("-z", "filter", "--", path)
+    except git.GitCommandError as e:
+        warnings.warn(
+            f"Failed to check Git attributes for {path}: {e}", stacklevel=2
+        )
+        return None
+    fields = out.split("\0")
+    if len(fields) < 3:
+        return None
+    value = fields[2]
+    # Git reports these two when no driver applies; anything else names one.
+    if value in ("unspecified", "unset"):
+        return None
+    return value
+
+
+def ensure_path_is_not_filtered(
+    repo: git.Repo, path: str | PathLike
+) -> bool | None:
+    """Ensure Git stores ``path`` byte-for-byte, applying no clean filter.
+
+    A clean filter rewrites content on its way into Git while leaving the
+    working tree alone, and Git compares the filtered forms, so the committed
+    bytes can differ from the file on disk with nothing showing up as
+    modified. For a pipeline output that is fatal: DVC hashes the working
+    tree file, so anything reading the repository instead---the Calkit hub,
+    a fresh clone, a collaborator---sees a hash that disagrees with
+    ``dvc.lock`` and reports the stage stale forever. ``nbstripout`` does
+    exactly this to notebooks.
+
+    The exemption is written to ``$GIT_DIR/info/attributes`` because that
+    file outranks every other source of attributes, including the
+    ``.gitattributes`` and the ``$GIT_DIR/info/attributes`` line
+    ``nbstripout --install`` writes. Returns True if a rule was added, None
+    if the path was already unfiltered.
+    """
+    path = Path(path).as_posix()
+    if get_filter_driver(repo, path) is None:
+        return
+    attributes_path = os.path.join(repo.git_dir, "info", "attributes")
+    # Quoted only when it has to be: an unquoted pattern is what a reader
+    # expects, and Git only needs the quotes for whitespace.
+    pattern = f'"{path}"' if any(c.isspace() for c in path) else path
+    # ``-filter`` unsets the attribute rather than leaving it unspecified, so
+    # no lower-precedence rule can put a driver back.
+    rule = f"{pattern} -filter"
+    existing_lines = []
+    if os.path.isfile(attributes_path):
+        with open(attributes_path, "r", encoding="utf-8") as f:
+            existing_lines = f.read().splitlines()
+    # Within one attributes file the last matching line wins, so the rule goes
+    # at the end. If it's already in there, a filter still applying means
+    # something was appended after it -- another `nbstripout --install`, most
+    # likely -- and moving ours back to the end is what fixes that. Dropping
+    # the old copy first keeps the file from growing a duplicate each time.
+    lines = [line for line in existing_lines if line != rule]
+    if CALKIT_ATTRIBUTES_COMMENT not in lines:
+        lines.append(CALKIT_ATTRIBUTES_COMMENT)
+    lines.append(rule)
+    os.makedirs(os.path.dirname(attributes_path), exist_ok=True)
+    with open(attributes_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    # Nothing higher-precedence than this file should exist, but a filter that
+    # survives the rewrite would otherwise strip content silently on the next
+    # commit, so say so rather than reporting success.
+    if get_filter_driver(repo, path) is not None:
+        warnings.warn(
+            f"{path} is still filtered by Git despite an exemption in "
+            f"{attributes_path}",
+            stacklevel=2,
+        )
+        return
+    # The rule alone doesn't fix what's already committed: Git trusts the
+    # index's cached stat info, so an unchanged file is never re-read and the
+    # filtered blob stays. Renormalizing re-hashes it through the new
+    # attributes, staging the real content so the next commit repairs the
+    # repository rather than waiting for the stage to run again.
+    if ls_files(repo, "--", path):
+        try:
+            repo.git.add("--renormalize", "--", path)
+        except git.GitCommandError as e:
+            warnings.warn(
+                f"Failed to renormalize {path} after unfiltering it: {e}",
+                stacklevel=2,
+            )
+    return True
 
 
 def resolve_ref(repo: git.Repo, ref: str) -> str | None:

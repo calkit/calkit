@@ -515,3 +515,79 @@ def test_check_branch_is_current(tmp_dir):
     msg = calkit.git.check_branch_is_current(repo)
     assert msg is not None
     assert f"'origin/{default_branch}'" in msg
+
+
+def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
+    """Configure a clean filter that mangles content, the way nbstripout does.
+
+    A stand-in for nbstripout so the test doesn't need it installed: what
+    matters is that Git rewrites content on its way into the object store,
+    not what the rewrite is.
+    """
+    # Spelled with no quotes, spaces, or backslashes in any token: Git runs
+    # filter commands through a shell---its bundled sh on Windows---which eats
+    # the backslashes in a Windows interpreter path, leaving a command that
+    # never runs. Marked required so that failure is a loud error instead of a
+    # silent pass-through that looks like the content was never filtered.
+    repo.git.config("filter.stripper.clean", "sed -e s/.*/stripped/")
+    repo.git.config("filter.stripper.required", "true")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text(f"{pattern} filter=stripper\n")
+
+
+def test_get_filter_driver(tmp_dir):
+    repo = git.Repo.init()
+    Path("nb.ipynb").write_text("real content")
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") is None
+    _install_stripping_filter(repo)
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") == "stripper"
+    # A path the pattern doesn't cover is untouched.
+    assert calkit.git.get_filter_driver(repo, "notes.txt") is None
+
+
+def test_ensure_path_is_not_filtered(tmp_dir):
+    repo = git.Repo.init()
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    path = ".calkit/notebooks/executed/nb.ipynb"
+    Path(path).parent.mkdir(parents=True)
+    Path(path).write_text("real content")
+    Path("other.ipynb").write_text("real content")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    # A repo with no filters is left completely alone.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert not attributes.exists()
+    _install_stripping_filter(repo)
+    repo.git.add("-A")
+    repo.git.commit("-m", "Init")
+    # The committed bytes don't match the working tree, and nothing shows as
+    # modified, which is what makes this worth guarding against.
+    assert repo.git.show(f"HEAD:{path}") == "stripped", (
+        "the stand-in clean filter didn't run, so there's nothing here for "
+        "the exemption to fix; check that its command works on this platform"
+    )
+    assert not repo.git.status("--porcelain")
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    # The exemption is scoped: everything else stays filtered.
+    assert calkit.git.get_filter_driver(repo, "other.ipynb") == "stripper"
+    # Already-committed content is repaired rather than left for the next run.
+    repo.git.commit("-m", "Unfilter")
+    assert repo.git.show(f"HEAD:{path}") == "real content"
+    assert repo.git.show("HEAD:other.ipynb") == "stripped"
+    # Idempotent: a second call neither re-adds the rule nor errors.
+    before = attributes.read_text()
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert attributes.read_text() == before
+    # Re-installing the filter appends a pattern after our exemption, and the
+    # last matching line in the file wins, so the notebook is filtered again.
+    with open(attributes, "a", encoding="utf-8") as f:
+        f.write("*.ipynb filter=stripper\n")
+    assert calkit.git.get_filter_driver(repo, path) == "stripper"
+    # Moving the exemption back to the end restores it, without the file
+    # accumulating a copy of the rule per call.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    rule = f"{path} -filter"
+    assert attributes.read_text().splitlines().count(rule) == 1

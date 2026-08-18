@@ -2,12 +2,16 @@
 
 import os
 import subprocess
+import sys
 import warnings
+from pathlib import Path
 
 import git
 import pytest
 
 import calkit
+import calkit.git
+import calkit.notebooks
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import LatexStage
@@ -2203,7 +2207,6 @@ def test_get_concurrent_scheduler_stages():
 
 
 def test_get_matrix_item_targets(tmp_dir):
-    import sys
 
     subprocess.check_call(["git", "init"])
     subprocess.check_call([sys.executable, "-m", "dvc", "init"])
@@ -2471,3 +2474,49 @@ def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
         finally:
             os.chdir(cwd)
     assert shas["one"] != shas["two"]
+
+
+def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
+    # Notebook output storage is declared in the pipeline, so a filter
+    # installed in the clone (nbstripout) must not overrule it by stripping
+    # the outputs back out on the way into Git---that commits bytes that
+    # disagree with what DVC hashed, with nothing showing as modified locally.
+    repo = git.Repo.init()
+    # Spelled with no quotes, spaces, or backslashes in any token: Git runs
+    # filter commands through a shell---its bundled sh on Windows---which eats
+    # the backslashes in a Windows interpreter path, leaving a command that
+    # never runs. Marked required so that failure is a loud error instead of a
+    # silent pass-through that looks like the content was never filtered.
+    repo.git.config("filter.stripper.clean", "sed -e s/.*/stripped/")
+    repo.git.config("filter.stripper.required", "true")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text("*.ipynb filter=stripper\n")
+    nb_path = "notebooks/my-notebook.ipynb"
+    os.makedirs("notebooks")
+    with open(nb_path, "w") as f:
+        f.write("{}")
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "notebook-1": {
+                    "kind": "jupyter-notebook",
+                    "environment": "py",
+                    "notebook_path": nb_path,
+                    "html_storage": "git",
+                    "executed_ipynb_storage": "git",
+                },
+            }
+        },
+    }
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    executed_path = calkit.notebooks.get_executed_notebook_path(
+        notebook_path=nb_path, to="notebook", as_posix=True
+    )
+    assert calkit.git.get_filter_driver(repo, executed_path) is None
+    # Scoped to what the pipeline declares: the source notebook a user cleans
+    # on purpose keeps its filter.
+    assert calkit.git.get_filter_driver(repo, nb_path) == "stripper"

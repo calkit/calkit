@@ -515,3 +515,70 @@ def test_check_branch_is_current(tmp_dir):
     msg = calkit.git.check_branch_is_current(repo)
     assert msg is not None
     assert f"'origin/{default_branch}'" in msg
+
+
+def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
+    """Configure a clean filter that mangles content, the way nbstripout does.
+
+    A stand-in for nbstripout so the test doesn't need it installed: what
+    matters is that Git rewrites content on its way into the object store,
+    not what the rewrite is.
+    """
+    repo.git.config(
+        "filter.stripper.clean",
+        f"{sys.executable} -c \"import sys; sys.stdout.write('stripped')\"",
+    )
+    repo.git.config("filter.stripper.smudge", "cat")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text(f"{pattern} filter=stripper\n")
+
+
+def test_get_filter_driver(tmp_dir):
+    repo = git.Repo.init()
+    Path("nb.ipynb").write_text("real content")
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") is None
+    _install_stripping_filter(repo)
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") == "stripper"
+    # A path the pattern doesn't cover is untouched.
+    assert calkit.git.get_filter_driver(repo, "notes.txt") is None
+
+
+def test_ensure_path_is_not_filtered(tmp_dir):
+    repo = git.Repo.init()
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    _install_stripping_filter(repo)
+    path = ".calkit/notebooks/executed/nb.ipynb"
+    Path(path).parent.mkdir(parents=True)
+    Path(path).write_text("real content")
+    Path("other.ipynb").write_text("real content")
+    repo.git.add("-A")
+    repo.git.commit("-m", "Init")
+    # The committed bytes don't match the working tree, and nothing shows as
+    # modified, which is what makes this worth guarding against.
+    assert repo.git.show(f"HEAD:{path}") == "stripped"
+    assert not repo.git.status("--porcelain")
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    # The exemption is scoped: everything else stays filtered.
+    assert calkit.git.get_filter_driver(repo, "other.ipynb") == "stripper"
+    # Already-committed content is repaired rather than left for the next run.
+    repo.git.commit("-m", "Unfilter")
+    assert repo.git.show(f"HEAD:{path}") == "real content"
+    assert repo.git.show("HEAD:other.ipynb") == "stripped"
+    # Idempotent: a second call neither re-adds the rule nor errors.
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    before = attributes.read_text()
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert attributes.read_text() == before
+
+
+def test_ensure_path_is_not_filtered_no_filter(tmp_dir):
+    """A repo with no filters is left completely alone."""
+    repo = git.Repo.init()
+    Path("nb.ipynb").write_text("real content")
+    assert (
+        calkit.git.ensure_path_is_not_filtered(repo, path="nb.ipynb") is None
+    )
+    assert not os.path.exists(Path(repo.git_dir) / "info" / "attributes")

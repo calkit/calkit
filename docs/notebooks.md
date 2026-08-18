@@ -36,6 +36,10 @@ we can focus on three rules:
    Git commits.
    This can be done by installing `nbstripout` and running
    `nbstripout --install` in the project directory.
+   Note that the notebooks Calkit generates as pipeline outputs (those under
+   `.calkit/notebooks`) are exempted from stripping automatically when the
+   pipeline is compiled, since their outputs are the pipeline's results and
+   stripping them would commit content that doesn't match what DVC hashed.
 1. A notebook must run in one of the project's [environments](environments.md).
 1. Notebooks should be incorporated into the project's
    [pipeline](pipeline/index.md).

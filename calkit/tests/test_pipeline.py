@@ -2477,13 +2477,10 @@ def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
 
 
 def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
-    """Compiling exempts git-stored notebook outputs from a clean filter.
-
-    Their storage is declared in the pipeline, so a filter installed in the
-    clone (nbstripout) must not overrule it by stripping the outputs back out
-    on the way into Git---that commits bytes that disagree with what DVC
-    hashed, with nothing showing as modified locally.
-    """
+    # Notebook output storage is declared in the pipeline, so a filter
+    # installed in the clone (nbstripout) must not overrule it by stripping
+    # the outputs back out on the way into Git---that commits bytes that
+    # disagree with what DVC hashed, with nothing showing as modified locally.
     repo = git.Repo.init()
     # Spelled with no quotes, spaces, or backslashes in any token: Git runs
     # filter commands through a shell---its bundled sh on Windows---which eats

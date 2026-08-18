@@ -528,22 +528,28 @@ def ensure_path_is_not_filtered(
     if os.path.isfile(attributes_path):
         with open(attributes_path, "r", encoding="utf-8") as f:
             existing_lines = f.read().splitlines()
-    if rule in existing_lines:
-        # Already exempted, but a filter still applies, which means something
-        # outranks us. Nothing more we can do from here.
+    # Within one attributes file the last matching line wins, so the rule goes
+    # at the end. If it's already in there, a filter still applying means
+    # something was appended after it -- another `nbstripout --install`, most
+    # likely -- and moving ours back to the end is what fixes that. Dropping
+    # the old copy first keeps the file from growing a duplicate each time.
+    lines = [line for line in existing_lines if line != rule]
+    if CALKIT_ATTRIBUTES_COMMENT not in lines:
+        lines.append(CALKIT_ATTRIBUTES_COMMENT)
+    lines.append(rule)
+    os.makedirs(os.path.dirname(attributes_path), exist_ok=True)
+    with open(attributes_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    # Nothing higher-precedence than this file should exist, but a filter that
+    # survives the rewrite would otherwise strip content silently on the next
+    # commit, so say so rather than reporting success.
+    if get_filter_driver(repo, path) is not None:
         warnings.warn(
             f"{path} is still filtered by Git despite an exemption in "
             f"{attributes_path}",
             stacklevel=2,
         )
         return
-    os.makedirs(os.path.dirname(attributes_path), exist_ok=True)
-    with open(attributes_path, "a", encoding="utf-8") as f:
-        if existing_lines and existing_lines[-1] != "":
-            f.write("\n")
-        if CALKIT_ATTRIBUTES_COMMENT not in existing_lines:
-            f.write(CALKIT_ATTRIBUTES_COMMENT + "\n")
-        f.write(rule + "\n")
     # The rule alone doesn't fix what's already committed: Git trusts the
     # index's cached stat info, so an unchanged file is never re-read and the
     # filtered blob stays. Renormalizing re-hashes it through the new

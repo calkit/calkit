@@ -550,11 +550,15 @@ def test_ensure_path_is_not_filtered(tmp_dir):
     repo = git.Repo.init()
     repo.git.config("user.email", "test@example.com")
     repo.git.config("user.name", "Test")
-    _install_stripping_filter(repo)
     path = ".calkit/notebooks/executed/nb.ipynb"
     Path(path).parent.mkdir(parents=True)
     Path(path).write_text("real content")
     Path("other.ipynb").write_text("real content")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    # A repo with no filters is left completely alone.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert not attributes.exists()
+    _install_stripping_filter(repo)
     repo.git.add("-A")
     repo.git.commit("-m", "Init")
     # The committed bytes don't match the working tree, and nothing shows as
@@ -573,17 +577,17 @@ def test_ensure_path_is_not_filtered(tmp_dir):
     assert repo.git.show(f"HEAD:{path}") == "real content"
     assert repo.git.show("HEAD:other.ipynb") == "stripped"
     # Idempotent: a second call neither re-adds the rule nor errors.
-    attributes = Path(repo.git_dir) / "info" / "attributes"
     before = attributes.read_text()
     assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
     assert attributes.read_text() == before
-
-
-def test_ensure_path_is_not_filtered_no_filter(tmp_dir):
-    """A repo with no filters is left completely alone."""
-    repo = git.Repo.init()
-    Path("nb.ipynb").write_text("real content")
-    assert (
-        calkit.git.ensure_path_is_not_filtered(repo, path="nb.ipynb") is None
-    )
-    assert not os.path.exists(Path(repo.git_dir) / "info" / "attributes")
+    # Re-installing the filter appends a pattern after our exemption, and the
+    # last matching line in the file wins, so the notebook is filtered again.
+    with open(attributes, "a", encoding="utf-8") as f:
+        f.write("*.ipynb filter=stripper\n")
+    assert calkit.git.get_filter_driver(repo, path) == "stripper"
+    # Moving the exemption back to the end restores it, without the file
+    # accumulating a copy of the rule per call.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    rule = f"{path} -filter"
+    assert attributes.read_text().splitlines().count(rule) == 1

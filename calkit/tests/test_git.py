@@ -524,11 +524,13 @@ def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
     matters is that Git rewrites content on its way into the object store,
     not what the rewrite is.
     """
-    repo.git.config(
-        "filter.stripper.clean",
-        f"{sys.executable} -c \"import sys; sys.stdout.write('stripped')\"",
-    )
-    repo.git.config("filter.stripper.smudge", "cat")
+    # Spelled with no quotes, spaces, or backslashes in any token: Git runs
+    # filter commands through a shell---its bundled sh on Windows---which eats
+    # the backslashes in a Windows interpreter path, leaving a command that
+    # never runs. Marked required so that failure is a loud error instead of a
+    # silent pass-through that looks like the content was never filtered.
+    repo.git.config("filter.stripper.clean", "sed -e s/.*/stripped/")
+    repo.git.config("filter.stripper.required", "true")
     attributes = Path(repo.git_dir) / "info" / "attributes"
     attributes.parent.mkdir(parents=True, exist_ok=True)
     attributes.write_text(f"{pattern} filter=stripper\n")
@@ -557,7 +559,10 @@ def test_ensure_path_is_not_filtered(tmp_dir):
     repo.git.commit("-m", "Init")
     # The committed bytes don't match the working tree, and nothing shows as
     # modified, which is what makes this worth guarding against.
-    assert repo.git.show(f"HEAD:{path}") == "stripped"
+    assert repo.git.show(f"HEAD:{path}") == "stripped", (
+        "the stand-in clean filter didn't run, so there's nothing here for "
+        "the exemption to fix; check that its command works on this platform"
+    )
     assert not repo.git.status("--porcelain")
     assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
     assert calkit.git.get_filter_driver(repo, path) is None

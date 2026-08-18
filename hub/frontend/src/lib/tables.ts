@@ -154,7 +154,26 @@ const cleanTexCell = (cell: string): string => {
   return out.trim()
 }
 
+/**
+ * Whether a .tex file is a table in its own file, rather than a document
+ * that happens to contain one.
+ *
+ * A paper is not a table: pulling the first tabular out of one would show a
+ * fragment of a document as though it were the whole artifact. What counts
+ * is a bare fragment -- what `to_latex` and friends write, with no preamble
+ * -- or a document whose class is `standalone`, which exists for this. The
+ * backend applies the same rule when auto-detecting tables.
+ */
+const isStandaloneTexTable = (text: string): boolean => {
+  const documentClass = text.match(
+    /\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}/,
+  )
+  if (!documentClass) return !text.includes("\\begin{document}")
+  return documentClass[1].trim() === "standalone"
+}
+
 const fromTex = (text: string): ParsedTable | null => {
+  if (!isStandaloneTexTable(text)) return null
   const envMatch = text.match(
     /\\begin\{(tabular\*?|tabularx|longtable|tabu)\}([\s\S]*?)\\end\{\1\}/,
   )

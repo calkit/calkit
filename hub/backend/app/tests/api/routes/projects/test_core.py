@@ -3286,22 +3286,39 @@ def test_get_project_tables_declares_detects_and_resolves(
         "tables/deep/nested/counts.tsv",
         "results/events.jsonl",
         "table/one.ndjson",
-        "tables/summary.tex",  # holds a tabular environment
+        "tables/summary.tex",  # a bare tabular fragment
+        "tables/standalone.tex",  # one table in its own standalone document
     ]
     ignored_paths = [
         "data/output.csv",  # not under a tables or results directory
         "tables/notes.md",  # not a tabular format
         ".tables/hidden.csv",  # hidden directory
-        "tables/paper.tex",  # TeX without a tabular environment
+        "tables/notes.tex",  # TeX with no tabular environment
+        "tables/float.tex",  # a table float holding no tabular
+        "results/paper.tex",  # a whole document that contains a table
         "paper/main.tex",  # TeX outside a tables or results directory
     ]
+    # What a .tex file holds is what decides whether it's a table: a bare
+    # tabular fragment or a standalone-class document is one, a paper that
+    # happens to contain a table is not.
+    tabular = "\\begin{tabular}{ll}a & b \\\\\\end{tabular}"
+    tex_by_path = {
+        "tables/summary.tex": tabular,
+        "tables/standalone.tex": (
+            "\\documentclass[border=2pt]{standalone}\n"
+            f"\\begin{{document}}\n{tabular}\n\\end{{document}}"
+        ),
+        "tables/float.tex": "\\begin{table}\\includegraphics{p.pdf}"
+        "\\end{table}",
+        "results/paper.tex": (
+            "\\documentclass{article}\n"
+            f"\\begin{{document}}\n\\section{{Results}}\n{tabular}\n"
+            "\\end{document}"
+        ),
+    }
 
     def _blob(path: str) -> SimpleNamespace:
-        tex = (
-            "\\begin{tabular}{ll}a & b \\\\\\end{tabular}"
-            if path == "tables/summary.tex"
-            else "\\section{Results}"
-        )
+        tex = tex_by_path.get(path, "\\section{Results}")
         return SimpleNamespace(
             type="blob",
             path=path,

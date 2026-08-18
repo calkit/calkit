@@ -241,15 +241,38 @@ TABLE_EXTS = {".csv", ".tsv", ".jsonl", ".ndjson"}
 TABLE_DIRS = {"tables", "table"}
 # A .tex file only counts if it actually contains a tabular environment, so
 # unlike the extensions above it's detected by content rather than name.
+# ``\begin{table}`` is deliberately not here: a table float can hold a
+# figure, a listing, or nothing tabular at all, and only the environments
+# below are ones the reader can be shown as rows and columns.
 TEX_TABLE_ENVS = (
+    # Covers tabular, tabular*, and tabularx
     "\\begin{tabular",
     "\\begin{longtable",
     "\\begin{tabu}",
-    "\\begin{table",
 )
 # Reading a .tex blob to look for one of those is only worth it for files
 # small enough to be a table rather than a whole paper.
 TEX_TABLE_SIZE_LIMIT = 1_000_000
+
+
+def _is_standalone_tex_table(text: str) -> bool:
+    """Whether a .tex file is a table in its own file, rather than a
+    document that happens to contain one.
+
+    A paper is not a table. Pulling the first tabular out of one would
+    present a fragment of a document nobody declared as a table, under a
+    title invented from its file name. What counts is a bare fragment --
+    what ``to_latex`` and friends write, with no preamble -- or a document
+    whose class is ``standalone``, which exists for exactly this.
+    """
+    if not any(env in text for env in TEX_TABLE_ENVS):
+        return False
+    match = re.search(r"\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]*)\}", text)
+    if match is None:
+        # No preamble at all: a fragment, unless it somehow opens a document
+        return "\\begin{document}" not in text
+    return match.group(1).strip() == "standalone"
+
 
 PRESENTATION_EXTS = {".pdf", ".pptx", ".ppt", ".key", ".odp"}
 PRESENTATION_DIRS = {
@@ -2651,9 +2674,7 @@ def _build_tables(
             # Only Git-tracked TeX is checked; reading a DVC-tracked one
             # means a storage round trip per candidate file, which isn't
             # worth it when declaring the table says so directly.
-            if tex_text is None or not any(
-                env in tex_text for env in TEX_TABLE_ENVS
-            ):
+            if tex_text is None or not _is_standalone_tex_table(tex_text):
                 return
             parts = path.split("/")
             if any(p.startswith(".") for p in parts):

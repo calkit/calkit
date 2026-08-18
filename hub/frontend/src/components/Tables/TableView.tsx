@@ -84,12 +84,22 @@ export default function TableView({
   // content, so fetch the text ourselves in that case.
   const urlQuery = useQuery({
     queryKey: ["table-content", table.url],
-    queryFn: () => fetch(String(table.url)).then((response) => response.text()),
-    enabled: !table.content && !!table.url,
+    queryFn: () =>
+      fetch(String(table.url)).then((response) => {
+        // Without this an error page's body would be parsed as the table.
+        if (!response.ok) {
+          throw new Error(`Fetching table content failed: ${response.status}`)
+        }
+        return response.text()
+      }),
+    // Checked against null rather than for truthiness: an empty file has
+    // empty content, which is present, not missing.
+    enabled: table.content == null && !!table.url,
   })
-  const text = table.content
-    ? decodeBase64Utf8(table.content)
-    : urlQuery.data ?? null
+  const text =
+    table.content != null
+      ? decodeBase64Utf8(table.content)
+      : urlQuery.data ?? null
   const parsed = useMemo(
     () => (text === null ? null : parseTable(table.path, text)),
     [text, table.path],
@@ -145,7 +155,7 @@ export default function TableView({
     )
   }, [highlight])
   if (text === null) {
-    if (!table.content && !table.url) {
+    if (table.content == null && !table.url) {
       // Nothing to read: a DVC-tracked table whose data was never pushed.
       return (
         <Text color="gray.500">

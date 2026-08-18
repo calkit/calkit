@@ -97,6 +97,27 @@ describe("parseTable", () => {
     ).toEqual(["R & D", "b"])
     // Nothing tabular in the file means nothing to render as a grid
     expect(parseTable("t.tex", "\\section{Results}")).toBeNull()
+    // A paper is not a table: pulling its first tabular out would present a
+    // fragment of a document as though it were the whole artifact
+    const paper = [
+      "\\documentclass{article}",
+      "\\begin{document}",
+      "\\section{Results}",
+      "\\begin{tabular}{ll}a & b \\\\\\end{tabular}",
+      "\\end{document}",
+    ].join("\n")
+    expect(parseTable("tables/paper.tex", paper)).toBeNull()
+    // ...but the standalone class exists to put one table in one file
+    const standalone = [
+      "\\documentclass[border=2pt]{standalone}",
+      "\\begin{document}",
+      "\\begin{tabular}{ll}a & b \\\\\\end{tabular}",
+      "\\end{document}",
+    ].join("\n")
+    expect(parseTable("tables/one.tex", standalone)?.columns).toEqual([
+      "a",
+      "b",
+    ])
   })
 
   it("returns null for formats it doesn't know", () => {

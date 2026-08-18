@@ -43,9 +43,10 @@ export default function TableThumbnail({
   const previewBg = useColorModeValue("white", "gray.800")
   // Only content already inlined by the API is previewed: a table big enough
   // to come back as a URL isn't worth a fetch per card.
-  const parsed = table.content
-    ? parseTable(table.path, decodeBase64Utf8(table.content))
-    : null
+  const parsed =
+    table.content != null
+      ? parseTable(table.path, decodeBase64Utf8(table.content))
+      : null
 
   return (
     <Box

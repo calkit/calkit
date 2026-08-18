@@ -3253,6 +3253,156 @@ def test_get_project_notebooks_respects_ref(
     ]
 
 
+def test_get_project_tables_declares_detects_and_resolves(
+    client: TestClient,
+) -> None:
+    fake_project = SimpleNamespace(
+        id="00000000-0000-0000-0000-000000000003",
+        owner_account_name="test-owner",
+        name="test-project",
+        file_locks=[],
+    )
+    ck_info = {
+        "tables": [
+            {
+                "path": "results/top-kernels.csv",
+                "title": "Top kernels",
+                "description": "Per-kernel aggregates.",
+            },
+            {"title": "no path, skipped"},
+        ],
+        "questions": [
+            {
+                "question": "Did it get faster?",
+                "evidence": [
+                    {"kind": "table", "path": "data/cited.csv"},
+                    {"kind": "figure", "path": "figures/x.png"},
+                ],
+            }
+        ],
+    }
+    detected_paths = [
+        "tables/sample-sizes.csv",
+        "tables/deep/nested/counts.tsv",
+        "results/events.jsonl",
+        "table/one.ndjson",
+        "tables/summary.tex",  # a bare tabular fragment
+        "tables/standalone.tex",  # one table in its own standalone document
+    ]
+    ignored_paths = [
+        "data/output.csv",  # not under a tables or results directory
+        "tables/notes.md",  # not a tabular format
+        ".tables/hidden.csv",  # hidden directory
+        "tables/notes.tex",  # TeX with no tabular environment
+        "tables/float.tex",  # a table float holding no tabular
+        "results/paper.tex",  # a whole document that contains a table
+        "paper/main.tex",  # TeX outside a tables or results directory
+    ]
+    # What a .tex file holds is what decides whether it's a table: a bare
+    # tabular fragment or a standalone-class document is one, a paper that
+    # happens to contain a table is not.
+    tabular = "\\begin{tabular}{ll}a & b \\\\\\end{tabular}"
+    tex_by_path = {
+        "tables/summary.tex": tabular,
+        "tables/standalone.tex": (
+            "\\documentclass[border=2pt]{standalone}\n"
+            f"\\begin{{document}}\n{tabular}\n\\end{{document}}"
+        ),
+        "tables/float.tex": "\\begin{table}\\includegraphics{p.pdf}"
+        "\\end{table}",
+        "results/paper.tex": (
+            "\\documentclass{article}\n"
+            f"\\begin{{document}}\n\\section{{Results}}\n{tabular}\n"
+            "\\end{document}"
+        ),
+    }
+
+    def _blob(path: str) -> SimpleNamespace:
+        tex = tex_by_path.get(path, "\\section{Results}")
+        return SimpleNamespace(
+            type="blob",
+            path=path,
+            size=len(tex),
+            data_stream=SimpleNamespace(read=lambda: tex.encode()),
+        )
+
+    blobs = [_blob(p) for p in detected_paths + ignored_paths]
+    fake_commit = SimpleNamespace(
+        tree=SimpleNamespace(traverse=lambda: iter(blobs))
+    )
+    fake_repo = SimpleNamespace(
+        commit=lambda _ref: fake_commit,
+        head=SimpleNamespace(commit=fake_commit),
+    )
+    fake_contents = ContentsItem(
+        name="t.csv",
+        path="t.csv",
+        type="file",
+        size=1,
+        in_repo=True,
+        content="Y29sCjEK",
+        url=None,
+        storage="git",
+    )
+    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/tables"
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo",
+            return_value=fake_repo,
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value=ck_info,
+        ),
+        patch(
+            "app.api.routes.projects.core.get_repo_tree_for_ref",
+            return_value=SimpleNamespace(),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects"
+            ".get_ck_info_and_dvc_outs_from_tree",
+            return_value=CkInfoAndOuts(
+                {}, {"results/dvc-tracked.csv": {"type": "file"}}, {}, {}
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_contents_from_tree",
+            return_value=fake_contents,
+        ) as mock_contents,
+    ):
+        response = client.get(url)
+        resolved_calls = mock_contents.call_count
+        mock_contents.reset_mock()
+        metadata_only = client.get(f"{url}?include_content=false")
+        assert mock_contents.call_count == 0
+    assert response.status_code == 200, response.text
+    tables = response.json()
+    paths = [tbl["path"] for tbl in tables]
+    # The tables somebody described lead, then ones only cited as evidence,
+    # then auto-detected ones, so the listing opens on the annotated tables
+    assert paths[0] == "results/top-kernels.csv"
+    assert paths[1] == "data/cited.csv"
+    assert tables[0]["description"] == "Per-kernel aggregates."
+    # A table cited by a question but never declared still gets a readable
+    # title rather than rendering as nothing
+    assert tables[1]["title"]
+    for path in detected_paths + ["results/dvc-tracked.csv"]:
+        assert path in paths, f"Expected {path!r} to be detected"
+    for path in ignored_paths:
+        assert path not in paths, f"Expected {path!r} to be ignored"
+    # Nothing is listed twice, however many ways it was found
+    assert len(paths) == len(set(paths))
+    assert all(tbl["content"] == "Y29sCjEK" for tbl in tables)
+    assert resolved_calls == len(paths)
+    # Metadata-only listings cover the same tables without touching storage
+    assert [tbl["path"] for tbl in metadata_only.json()] == paths
+    assert all(tbl["content"] is None for tbl in metadata_only.json())
+
+
 def test_build_question_evidence_keyed_results_and_tables() -> None:
     from app.api.routes.projects.core import _build_question_evidence
     from app.models.core import Result

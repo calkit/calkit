@@ -250,6 +250,32 @@ const useProjectPresentations = (
   return { presentationsRequest }
 }
 
+const useProjectTables = (
+  accountName: string,
+  projectName: string,
+  ref?: string,
+  includeContent = true,
+) => {
+  const tablesRequest = useQuery({
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "tables",
+      ref,
+      includeContent,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectTables({
+        owner_name: accountName,
+        project_name: projectName,
+        ref,
+        include_content: includeContent,
+      }).then((response) => response.data),
+  })
+  return { tablesRequest }
+}
+
 const useProjectIssues = (accountName: string, projectName: string) => {
   const queryClient = useQueryClient()
 
@@ -411,6 +437,7 @@ export {
   useProjectResults,
   useProjectPublications,
   useProjectPresentations,
+  useProjectTables,
   useProjectReadme,
   useProjectDatasets,
   useProjectEnvironments,

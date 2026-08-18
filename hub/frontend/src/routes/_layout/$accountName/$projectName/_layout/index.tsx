@@ -35,6 +35,7 @@ import {
 } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 import { FaPlus, FaRegFileAlt } from "react-icons/fa"
+import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
@@ -169,6 +170,46 @@ function EvidenceItem({
               {evidence.path}
             </Text>
           )}
+        </Box>
+      </Link>
+    )
+  }
+  if (evidence.kind === "table") {
+    // The table's own page is where its rows are; this card carries what
+    // identifies it and why it was cited.
+    const table = evidence.result
+    return (
+      <Link
+        as={RouterLink}
+        to={`/${accountName}/${projectName}/tables`}
+        search={{ path: evidence.path, ref: gitRef } as any}
+        _hover={{ textDecoration: "none" }}
+      >
+        <Box
+          borderWidth={1}
+          borderColor={borderColor}
+          borderRadius="md"
+          bg={bg}
+          px={3}
+          py={2}
+          minW="130px"
+          maxW="100%"
+          _hover={{ shadow: "md" }}
+        >
+          <Flex align="center" gap={1.5}>
+            <Icon as={FiGrid} color="gray.500" flexShrink={0} />
+            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
+              {table?.title ?? evidence.path}
+            </Text>
+          </Flex>
+          <Text fontSize="xs" color="gray.500" noOfLines={1}>
+            {evidence.path}
+          </Text>
+          {evidence.explanation ? (
+            <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
+              {evidence.explanation}
+            </Text>
+          ) : null}
         </Box>
       </Link>
     )

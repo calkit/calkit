@@ -138,6 +138,18 @@ tables:
 
 Like the other artifacts, a table is identified by its path.
 
+On the Calkit Hub, tables show up on the project's Tables page, where each
+one can be searched, sorted, and linked to by cell.
+Declaring a table isn't required to appear there: CSV, TSV, and JSON Lines
+files in a `tables` or `results` directory are detected automatically, as are
+LaTeX tables written to their own file, i.e., a `.tex` file in those
+directories holding a bare `tabular` environment, or one wrapped in a
+`standalone` document.
+A paper that happens to contain a table is not detected as one, since a table
+pulled out of a larger document is a fragment of that document rather than an
+artifact of its own.
+Declaring one only adds a title and description of your own.
+
 Columns aren't described yet, and neither is a symbolic name for a table.
 Both are expected to arrive alongside symbol metadata, which is where
 per-column types and units belong.

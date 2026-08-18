@@ -2,6 +2,7 @@ import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
 import axios from "axios"
+import type { IconType } from "react-icons"
 import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
 import {
@@ -9,6 +10,7 @@ import {
   FiDatabase,
   FiFolder,
   FiGitBranch,
+  FiGrid,
   FiHardDrive,
   FiHome,
   FiImage,
@@ -20,7 +22,6 @@ import { IoLibraryOutline } from "react-icons/io5"
 import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
-import type { IconType } from "react-icons"
 import useAuth from "../../hooks/useAuth"
 
 export interface ProjectNavItem {
@@ -39,6 +40,7 @@ export const projectNavItems: ProjectNavItem[] = [
   { icon: FaCubes, title: "Environments", path: "/environments" },
   { icon: FiDatabase, title: "Datasets", path: "/datasets" },
   { icon: FiImage, title: "Figures", path: "/figures" },
+  { icon: FiGrid, title: "Tables", path: "/tables" },
   { icon: FiBookOpen, title: "Publications", path: "/publications" },
   { icon: FiMonitor, title: "Presentations", path: "/presentations" },
   { icon: SiJupyter, title: "Notebooks", path: "/notebooks" },

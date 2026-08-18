@@ -292,12 +292,23 @@ export const sortRows = (
   })
 }
 
-/** Rows holding `needle` in any cell, matched case-insensitively. */
-export const filterRows = (rows: TableRow[], needle: string): TableRow[] => {
+/**
+ * Rows holding `needle` in any cell, matched case-insensitively.
+ *
+ * `columns` limits the search to those 0-based column indexes, so a hidden
+ * column doesn't leave rows on screen with no visible reason for matching.
+ */
+export const filterRows = (
+  rows: TableRow[],
+  needle: string,
+  columns?: number[],
+): TableRow[] => {
   const query = needle.trim().toLowerCase()
   if (!query) return rows
   return rows.filter((row) =>
-    row.cells.some((cell) => cell.toLowerCase().includes(query)),
+    (columns ?? row.cells.map((_, i) => i)).some((i) =>
+      (row.cells[i] ?? "").toLowerCase().includes(query),
+    ),
   )
 }
 
@@ -391,4 +402,71 @@ export const firstHighlightedRow = (
     .map((range) => range.rowStart)
     .filter((row): row is number => row !== undefined)
   return rows.length > 0 ? Math.min(...rows) : null
+}
+
+/** A column sort, in the 1-based column numbers a URL carries. */
+export interface TableSort {
+  column: number
+  direction: "asc" | "desc"
+}
+
+/**
+ * Parse a sort spec from a URL, e.g. "2" or "2:desc".
+ *
+ * The column is 1-based, matching the numbers highlight specs use, and an
+ * omitted direction means ascending. Anything that doesn't parse means no
+ * sort rather than a broken page.
+ */
+export const parseSort = (spec: string | undefined): TableSort | null => {
+  if (!spec) return null
+  const match = spec.trim().match(/^(\d+)(?::(asc|desc))?$/i)
+  if (!match) return null
+  const column = Number(match[1])
+  if (column < 1) return null
+  return {
+    column,
+    direction: match[2]?.toLowerCase() === "desc" ? "desc" : "asc",
+  }
+}
+
+/** Render a sort back into the spec a link carries. */
+export const formatSort = (sort: TableSort | null): string | undefined =>
+  sort ? `${sort.column}:${sort.direction}` : undefined
+
+/**
+ * Parse a hidden-column spec from a URL, e.g. "2,5-7".
+ *
+ * Columns are 1-based and may be given as spans, so hiding a long run of
+ * them doesn't blow the URL up. Parts that don't parse are dropped.
+ */
+export const parseHiddenColumns = (spec: string | undefined): number[] => {
+  if (!spec) return []
+  const hidden = new Set<number>()
+  for (const part of spec.split(",")) {
+    const span = parseSpan(part.trim())
+    if (!span) continue
+    for (let column = span[0]; column <= span[1]; column++) hidden.add(column)
+  }
+  return [...hidden].sort((a, b) => a - b)
+}
+
+/** Render hidden columns back into the spec a link carries, spans collapsed. */
+export const formatHiddenColumns = (columns: number[]): string | undefined => {
+  const sorted = [...new Set(columns)].sort((a, b) => a - b)
+  if (sorted.length === 0) return undefined
+  const parts: string[] = []
+  let start = sorted[0]
+  let end = sorted[0]
+  const flush = () => parts.push(start === end ? `${start}` : `${start}-${end}`)
+  for (const column of sorted.slice(1)) {
+    if (column === end + 1) {
+      end = column
+      continue
+    }
+    flush()
+    start = column
+    end = column
+  }
+  flush()
+  return parts.join(",")
 }

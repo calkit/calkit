@@ -89,6 +89,7 @@ from app.git import (
     get_file_history,
     get_overleaf_repo,
     get_repo,
+    get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
     resolve_commit_sha,
     search_refs,
@@ -132,6 +133,7 @@ from app.models import (
     QuestionPut,
     Result,
     StageStatus,
+    Table,
     User,
     UserOrgMembership,
     UserProjectAccess,
@@ -229,6 +231,25 @@ def _normalize_artifact_file_path(path: str) -> str:
         raise HTTPException(400, "Path traversal is not allowed")
     return path
 
+
+# Table auto-detection. A table is recognized by living in a tables- or
+# results-style directory with a tabular file format, mirroring how figures
+# and results are detected. HTML tables (great_tables and friends) are
+# deliberately left out for now: they are a rendered document rather than
+# data, so they need a different viewer than the row/column one.
+TABLE_EXTS = {".csv", ".tsv", ".jsonl", ".ndjson"}
+TABLE_DIRS = {"tables", "table"}
+# A .tex file only counts if it actually contains a tabular environment, so
+# unlike the extensions above it's detected by content rather than name.
+TEX_TABLE_ENVS = (
+    "\\begin{tabular",
+    "\\begin{longtable",
+    "\\begin{tabu}",
+    "\\begin{table",
+)
+# Reading a .tex blob to look for one of those is only worth it for files
+# small enough to be a table rather than a whole paper.
+TEX_TABLE_SIZE_LIMIT = 1_000_000
 
 PRESENTATION_EXTS = {".pdf", ".pptx", ".ppt", ".key", ".odp"}
 PRESENTATION_DIRS = {
@@ -2555,6 +2576,234 @@ def _build_declared_tables(
             )
         )
     return tables
+
+
+def _is_table_path(path: str) -> bool:
+    """Whether ``path`` looks like a table by name alone.
+
+    TeX tables aren't decided here: a .tex file is only a table if it
+    contains a tabular environment, which takes reading it.
+    """
+    parts = path.split("/")
+    if any(p.startswith(".") for p in parts):
+        return False
+    if PurePosixPath(path).suffix.lower() not in TABLE_EXTS:
+        return False
+    dir_parts = [p.lower() for p in parts[:-1]]
+    return any(d in TABLE_DIRS or d in RESULT_DIRS for d in dir_parts)
+
+
+def _build_tables(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+    resolve_content: bool = True,
+) -> list[Table]:
+    """Build the list of project tables, declared and auto-detected.
+
+    Declared tables come first, then ones only cited as question evidence,
+    then whatever auto-detection finds, so the tables somebody took the
+    trouble to describe lead the listing.
+
+    Content is inlined like a figure's, since a table is unreadable without
+    its rows. ``resolve_content=False`` skips the object-storage work for
+    callers that only need paths and titles.
+    """
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project,
+        repo=repo,
+        ref=ref,
+        read_only=True,
+    )
+    tables: list[dict[str, Any]] = []
+    known_paths: set[str] = set()
+    for tbl in ck_info.get("tables") or []:
+        if not isinstance(tbl, dict) or not tbl.get("path"):
+            continue
+        tbl = {
+            k: v
+            for k, v in tbl.items()
+            if k in {"path", "title", "description", "stage"}
+        }
+        if not tbl.get("title"):
+            tbl["title"] = _title_from_path(tbl["path"])
+        tables.append(tbl)
+        known_paths.add(tbl["path"])
+    # Evidence declares what it points at inline, so a question can cite a
+    # table nobody listed up top. That's still a table, and this page is
+    # where a reader goes looking for it.
+    for question in ck_info.get("questions") or []:
+        if not isinstance(question, dict):
+            continue
+        for ev in question.get("evidence") or []:
+            if not isinstance(ev, dict) or ev.get("kind") != "table":
+                continue
+            path = ev.get("path")
+            if path and path not in known_paths:
+                tables.append({"path": path, "title": _title_from_path(path)})
+                known_paths.add(path)
+    auto: list[dict[str, Any]] = []
+
+    def _maybe_add_table(path: str, tex_text: str | None = None) -> None:
+        if path in known_paths:
+            return
+        if PurePosixPath(path).suffix.lower() == ".tex":
+            # Only Git-tracked TeX is checked; reading a DVC-tracked one
+            # means a storage round trip per candidate file, which isn't
+            # worth it when declaring the table says so directly.
+            if tex_text is None or not any(
+                env in tex_text for env in TEX_TABLE_ENVS
+            ):
+                return
+            parts = path.split("/")
+            if any(p.startswith(".") for p in parts):
+                return
+            dir_parts = [p.lower() for p in parts[:-1]]
+            if not any(d in TABLE_DIRS or d in RESULT_DIRS for d in dir_parts):
+                return
+        elif not _is_table_path(path):
+            return
+        auto.append({"path": path, "title": _title_from_path(path)})
+        known_paths.add(path)
+
+    # Auto-detect from the repo tree
+    try:
+        commit = repo.commit(ref) if ref else repo.head.commit
+        for blob in commit.tree.traverse():
+            if blob.type != "blob":  # type: ignore[union-attr]
+                continue
+            blob_path = str(blob.path)  # type: ignore[union-attr]
+            tex_text = None
+            if (
+                blob_path.lower().endswith(".tex")
+                and blob.size <= TEX_TABLE_SIZE_LIMIT  # type: ignore[union-attr]
+            ):
+                try:
+                    tex_text = blob.data_stream.read().decode(  # type: ignore[union-attr]
+                        "utf-8", errors="ignore"
+                    )
+                except Exception:
+                    tex_text = None
+            _maybe_add_table(blob_path, tex_text=tex_text)
+    except Exception as e:
+        logger.warning(f"Failed to auto-detect tables from the tree: {e}")
+    tree = get_repo_tree_for_ref(repo, ref)
+    (
+        ck_info_full,
+        dvc_lock_outs,
+        zip_path_map,
+        _,
+    ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
+    # Also auto-detect tables from DVC lock outs (files stored with DVC)
+    for dvc_path, dvc_out in dvc_lock_outs.items():
+        if dvc_out.get("type") == "dir":
+            continue
+        _maybe_add_table(dvc_path)
+    tables += sorted(auto, key=lambda t: t["path"])
+    if not tables:
+        return []
+    # Staleness is best-effort: never let it block the listing.
+    dvc_lock: dict[str, Any] = {}
+    stage_statuses = {}
+    try:
+        if tree.is_file("dvc.lock"):
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        dvc_yaml: dict[str, Any] = {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+        stage_statuses = compute_stage_statuses(
+            dvc_yaml=dvc_yaml,
+            dvc_lock=dvc_lock,
+            tree=tree,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            fs=get_object_fs(),
+            cache_token=resolve_commit_sha(repo, ref),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to compute pipeline status for tables: {e}")
+    # See ``_resolve_figures``: these lazy-loading attributes are warmed on
+    # the calling thread, since the Session behind them isn't safe to touch
+    # from the pool below.
+    _ = project.owner_account_name
+    _ = len(project.file_locks)
+
+    def _resolve(tbl: dict[str, Any]) -> dict[str, Any]:
+        if not tbl.get("stage"):
+            auto_stage = find_stage_for_path(
+                tbl["path"], dvc_lock, valid_stages=set(stage_statuses)
+            )
+            if auto_stage is not None:
+                tbl["stage"] = auto_stage
+        if tbl.get("stage") and tbl["stage"] in stage_statuses:
+            tbl["stage_status"] = stage_statuses[tbl["stage"]].model_dump()
+        if not resolve_content:
+            return tbl
+        try:
+            item = app.projects.get_contents_from_tree(
+                project=project,
+                tree=tree,
+                path=tbl["path"],
+                ck_info=ck_info_full,
+                dvc_lock_outs=dvc_lock_outs,
+                zip_path_map=zip_path_map,
+            )
+        except Exception as e:
+            # A declared table can point at a path that no longer exists at
+            # this ref. It still belongs in the listing, just without rows.
+            logger.warning(f"Failed to read table {tbl['path']}: {e}")
+            return tbl
+        tbl["content"] = item.content
+        tbl["url"] = item.url
+        tbl["storage"] = item.storage
+        return tbl
+
+    if resolve_content and len(tables) > 1:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(8, len(tables))
+        ) as pool:
+            resolved = list(pool.map(_resolve, tables))
+    else:
+        resolved = [_resolve(tbl) for tbl in tables]
+    return [Table.model_validate(tbl) for tbl in resolved]
+
+
+@router.get("/projects/{owner_name}/{project_name}/tables")
+def get_project_tables(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    ref: str | None = None,
+    include_content: bool = Query(
+        True,
+        description=(
+            "Inline each table's content. Set false for a metadata-only "
+            "listing that skips object storage entirely."
+        ),
+    ),
+) -> list[Table]:
+    """Get the project's tables, declared and auto-detected."""
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    return _build_tables(
+        project=project,
+        repo=repo,
+        ref=ref,
+        resolve_content=include_content,
+    )
 
 
 def _build_publications(

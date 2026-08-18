@@ -31,6 +31,7 @@ import {
   useProjectFigures,
   useProjectPublications,
   useProjectResults,
+  useProjectTables,
 } from "../../hooks/useProject"
 import { handleError } from "../../lib/errors"
 import { submitOnCmdEnter } from "../../lib/keyboard"
@@ -66,7 +67,11 @@ const parseSelection = (selection: string) => {
     return null
   }
   return {
-    kind: selection.slice(0, idx) as "figure" | "result" | "publication",
+    kind: selection.slice(0, idx) as
+      | "figure"
+      | "result"
+      | "table"
+      | "publication",
     path: selection.slice(idx + 1),
   }
 }
@@ -87,6 +92,13 @@ const EditQuestion = ({
     accountName,
     projectName,
     gitRef,
+  )
+  // Metadata only: the dropdown needs paths, not the rows themselves.
+  const { tablesRequest } = useProjectTables(
+    accountName,
+    projectName,
+    gitRef,
+    false,
   )
   const {
     register,
@@ -230,6 +242,7 @@ const EditQuestion = ({
               const figures = figuresRequest.data ?? []
               const results = resultsRequest.data ?? []
               const publications = publicationsRequest.data ?? []
+              const tables = tablesRequest.data ?? []
               // Always keep the current selection as an available option, even
               // if it isn't in the fetched lists (still loading, or the file
               // was renamed/removed), so the dropdown never blanks out.
@@ -238,6 +251,8 @@ const EditQuestion = ({
                   figures.some((f) => f.path === parsed.path)) ||
                 (parsed?.kind === "result" &&
                   results.some((r) => r.path === parsed.path)) ||
+                (parsed?.kind === "table" &&
+                  tables.some((t) => t.path === parsed.path)) ||
                 (parsed?.kind === "publication" &&
                   publications.some((p) => p.path === parsed.path))
               return (
@@ -259,12 +274,12 @@ const EditQuestion = ({
                   </Flex>
                   <FormControl mb={2}>
                     <FormLabel fontSize="xs" mb={1}>
-                      Figure, result, or publication
+                      Figure, result, table, or publication
                     </FormLabel>
                     <Select
                       {...register(`evidence.${index}.selection`)}
                       value={selection}
-                      placeholder="Select a figure, result, or publication"
+                      placeholder="Select a figure, result, table, or publication"
                       size="sm"
                     >
                       {parsed && !selectionInList ? (
@@ -290,6 +305,18 @@ const EditQuestion = ({
                               value={rowToSelection("result", res.path)}
                             >
                               {res.path}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ) : null}
+                      {tables.length > 0 ? (
+                        <optgroup label="Tables">
+                          {tables.map((table) => (
+                            <option
+                              key={`table:${table.path}`}
+                              value={rowToSelection("table", table.path)}
+                            >
+                              {table.path}
                             </option>
                           ))}
                         </optgroup>

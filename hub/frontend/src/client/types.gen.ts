@@ -4517,6 +4517,48 @@ export type SubscriptionUpdate = {
 }
 
 /**
+ * Table
+ *
+ * Tabular data the project publishes, resolved for display.
+ *
+ * Carries content like a figure does rather than metadata alone: a table
+ * is only useful once its rows can be read, and the files are small
+ * enough to inline. Large or DVC-tracked ones come back as a ``url``
+ * instead, exactly as figures do.
+ */
+export type Table = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | "dvc-zip" | null
+}
+
+/**
  * TextDiff
  */
 export type TextDiff = {
@@ -8147,6 +8189,55 @@ export type PostProjectFigureResponses = {
 
 export type PostProjectFigureResponse =
   PostProjectFigureResponses[keyof PostProjectFigureResponses]
+
+export type GetProjectTablesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each table's content. Set false for a metadata-only listing that skips object storage entirely.
+     */
+    include_content?: boolean
+  }
+  url: "/projects/{owner_name}/{project_name}/tables"
+}
+
+export type GetProjectTablesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectTablesError =
+  GetProjectTablesErrors[keyof GetProjectTablesErrors]
+
+export type GetProjectTablesResponses = {
+  /**
+   * Response Projects-Get Project Tables
+   *
+   * Successful Response
+   */
+  200: Array<Table>
+}
+
+export type GetProjectTablesResponse =
+  GetProjectTablesResponses[keyof GetProjectTablesResponses]
 
 export type GetProjectResultsData = {
   body?: never

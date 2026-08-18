@@ -178,6 +178,8 @@ import type {
   GetProjectSoftwareErrors,
   GetProjectSoftwareResponses,
   GetProjectsResponses,
+  GetProjectTablesErrors,
+  GetProjectTablesResponses,
   GetProjectZoteroCollectionsErrors,
   GetProjectZoteroCollectionsResponses,
   GetProjectZoteroItemPdfErrors,
@@ -3357,6 +3359,50 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Tables
+   *
+   * Get the project's tables, declared and auto-detected.
+   */
+  public static getProjectTables<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      include_content?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectTablesResponses,
+    GetProjectTablesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "include_content" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectTablesResponses,
+      GetProjectTablesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/tables",
+      ...options,
+      ...params,
     })
   }
 

@@ -896,6 +896,25 @@ class Result(SQLModel):
     key: str | None = None
 
 
+class Table(SQLModel):
+    """Tabular data the project publishes, resolved for display.
+
+    Carries content like a figure does rather than metadata alone: a table
+    is only useful once its rows can be read, and the files are small
+    enough to inline. Large or DVC-tracked ones come back as a ``url``
+    instead, exactly as figures do.
+    """
+
+    path: str
+    title: str
+    description: str | None = None
+    stage: str | None = None
+    stage_status: "StageStatus | None" = None
+    content: str | None = None  # Base64 encoded
+    url: str | None = None
+    storage: Literal["git", "dvc", "dvc-zip"] | None = None
+
+
 class CommentHighlight(BaseModel):
     """Portable anchor for a highlighted region within an artifact.
 

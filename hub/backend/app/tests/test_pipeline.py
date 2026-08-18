@@ -491,6 +491,63 @@ def test_committed_dep_beats_stale_producer_out_md5(tmp_path):
     assert "cleaned.ipynb" not in statuses["consume"].modified_inputs
 
 
+def test_dead_lock_stage_does_not_resolve_a_dep(tmp_path):
+    """A removed stage's leftover out entry doesn't define a dep's current md5.
+
+    dvc.lock keeps entries for stages dropped from dvc.yaml, and one often
+    claims the same out path as the stage that replaced it, holding whatever
+    md5 it last produced. That entry must not win when resolving a gitignored
+    dep's current hash, or every consumer of that path reads a hash nothing
+    has produced lately and is reported stale while dvc/calkit call the
+    pipeline clean.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    _commit(repo, {"script.py": "x\n"}, "init")
+    tree = get_repo_tree_for_ref(repo, None)
+    current = _md5("current-data\n")
+    dvc_yaml = {
+        "stages": {
+            "produce": {
+                "cmd": "python script.py",
+                "deps": ["script.py"],
+                "outs": ["data.db"],
+            },
+            "consume": {
+                "cmd": "python script.py",
+                "deps": ["data.db"],
+                "outs": ["out.txt"],
+            },
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "produce": {
+                "cmd": "python script.py",
+                "deps": [{"path": "script.py", "md5": _md5("x\n")}],
+                "outs": [{"path": "data.db", "md5": current}],
+            },
+            # Renamed away in dvc.yaml, but still in the lock, claiming the
+            # same out with the md5 from the last time it ran. It comes after
+            # the live producer, so it used to win the outs index.
+            "produce-old": {
+                "cmd": "python old.py",
+                "outs": [{"path": "data.db", "md5": "oldproducermd5"}],
+            },
+            "consume": {
+                "cmd": "python script.py",
+                "deps": [{"path": "data.db", "md5": current}],
+                "outs": [{"path": "out.txt", "md5": _md5("r\n")}],
+            },
+        }
+    }
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS({current, _md5("r\n")})
+    )
+    assert "produce-old" not in statuses
+    assert statuses["consume"].modified_inputs == []
+    assert statuses["consume"].status == "up-to-date"
+
+
 def test_not_run_stage(tmp_path):
     repo = _init_repo(tmp_path / "repo")
     _commit(repo, {"script.py": "x\n"}, "init")

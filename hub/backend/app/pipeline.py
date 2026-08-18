@@ -270,15 +270,57 @@ def _stage_status_cache_put(
             _stage_status_cache.popitem(last=False)
 
 
-def _build_outs_index(dvc_lock: dict) -> dict[str, str | None]:
-    """Map out path -> md5 across all stages in the lock."""
+def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:
+    """Map out path -> md5 across the given lock stages.
+
+    Pass only the stages that belong to the current pipeline (see
+    ``_get_live_lock_stages``). A dead entry left in the lock often claims the
+    same out path as the stage that replaced it, with the md5 from whenever it
+    last ran, and later entries win here -- so including them resolves a dep to
+    a hash nothing has produced in a while and flags its consumers stale.
+    """
     out_map: dict[str, str | None] = {}
-    for stage in (dvc_lock.get("stages") or {}).values():
+    for stage in lock_stages.values():
         for out in stage.get("outs") or []:
             p = out.get("path")
             if p:
                 out_map[p] = out.get("md5")
     return out_map
+
+
+def _get_live_lock_stages(
+    lock_stages: dict, yaml_stages: dict, current_expansions: dict
+) -> dict:
+    """The lock entries that are stages of the current pipeline.
+
+    dvc.lock accumulates entries that no longer correspond to anything
+    runnable: stages renamed or removed from dvc.yaml, a bare ``name`` left
+    from before that stage became a matrix, and expansions of matrix
+    combinations that have since changed. dvc/calkit status ignore all of
+    them, so the hub does too -- both when reporting status and when reading
+    the lock for what a dep's current hash should be.
+    """
+    live: dict = {}
+    for stage_name, lock_stage in lock_stages.items():
+        base = _get_base_stage_name(stage_name)
+        if base.startswith("_"):
+            continue
+        yaml_stage = yaml_stages.get(base)
+        if yaml_stage is None:
+            continue
+        if (
+            isinstance(yaml_stage, dict)
+            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
+            and "@" not in stage_name
+        ):
+            continue
+        if (
+            base in current_expansions
+            and stage_name not in current_expansions[base]
+        ):
+            continue
+        live[stage_name] = lock_stage
+    return live
 
 
 def _resolve_current_dep_md5(
@@ -427,9 +469,13 @@ def compute_stage_statuses(
         fs = get_object_fs()
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
-    outs_index = _build_outs_index(dvc_lock)
+    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
+    live_lock_stages = _get_live_lock_stages(
+        lock_stages, yaml_stages, current_expansions
+    )
+    outs_index = _build_outs_index(live_lock_stages)
     presence = _precompute_storage_presence(
-        dvc_lock, owner_name, project_name, fs
+        {"stages": live_lock_stages}, owner_name, project_name, fs
     )
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
     # the standard files/md5 object path, so the md5 presence check above can't
@@ -445,7 +491,6 @@ def compute_stage_statuses(
             zip_workspace_paths = {k.rstrip("/") for k in zip_map}
     except Exception as e:
         logger.warning(f"Failed to read .calkit/zip/paths.json: {e}")
-    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
     result: dict[str, StageStatus] = {}
     locked_bases = {_get_base_stage_name(n) for n in lock_stages.keys()}
     for stage_name in yaml_stages.keys():
@@ -453,38 +498,9 @@ def compute_stage_statuses(
             continue
         if stage_name not in locked_bases:
             result[stage_name] = StageStatus(status="not-run")
-    for stage_name, lock_stage in lock_stages.items():
+    for stage_name, lock_stage in live_lock_stages.items():
         base = _get_base_stage_name(stage_name)
-        if base.startswith("_"):
-            continue
-        yaml_stage = yaml_stages.get(base)
-        if yaml_stage is None:
-            # Stale lock entry for a stage no longer in dvc.yaml (renamed or
-            # removed, or a bare entry left from before a stage became a
-            # matrix). It's not part of the current pipeline, so don't report
-            # it -- dvc/calkit status ignore it too.
-            continue
-        if (
-            isinstance(yaml_stage, dict)
-            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
-            and "@" not in stage_name
-        ):
-            # A matrix/foreach stage exists in dvc.lock only as ``name@...``
-            # expansions; a bare ``name`` entry is stale cruft from before it
-            # was expanded, often with outdated deps. Only the expansions are
-            # real stages.
-            continue
-        if (
-            base in current_expansions
-            and stage_name not in current_expansions[base]
-        ):
-            # Drop leftover matrix/foreach expansions: ``base@...`` entries from
-            # old matrix combinations (or an older DVC naming scheme, e.g.
-            # ``@1-3-1`` vs the current ``@_arg01``) that aren't in the current
-            # pipeline. Their objects are often gc'd, so the hub would wrongly
-            # flag them stale even though a current entry produces the same
-            # output. lock files drift into this state easily, so guard for it.
-            continue
+        yaml_stage = yaml_stages[base]
         modified_command = False
         modified_inputs: list[str] = []
         modified_outputs: list[str] = []

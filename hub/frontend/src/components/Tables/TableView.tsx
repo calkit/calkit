@@ -5,6 +5,14 @@ import {
   Code,
   Flex,
   Icon,
+  IconButton,
+  Menu,
+  MenuButton,
+  MenuDivider,
+  MenuItem,
+  MenuItemOption,
+  MenuList,
+  MenuOptionGroup,
   Tbody,
   Td,
   Text,
@@ -16,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { FaLink, FaSort, FaSortDown, FaSortUp } from "react-icons/fa"
+import { FiSettings } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 
 import type { Table } from "../../client"
@@ -25,11 +34,15 @@ import {
   type HighlightRange,
   filterRows,
   firstHighlightedRow,
+  formatHiddenColumns,
   formatHighlight,
+  formatSort,
   indexRows,
   isCellHighlighted,
   isNumericColumn,
+  parseHiddenColumns,
   parseHighlight,
+  parseSort,
   parseTable,
   sortRows,
 } from "../../lib/tables"
@@ -48,6 +61,15 @@ interface TableViewProps {
   // at the cells being talked about.
   highlight?: string
   onHighlightChange?: (spec: string | undefined) => void
+  // Search, sort and hidden columns come from the URL too, for the same
+  // reason: what you're looking at is what a copied link shows. Each falls
+  // back to local state when its callback isn't given.
+  search?: string
+  onSearchChange?: (value: string | undefined) => void
+  sort?: string
+  onSortChange?: (spec: string | undefined) => void
+  hiddenColumns?: string
+  onHiddenColumnsChange?: (spec: string | undefined) => void
 }
 
 /** A project table, rendered as a searchable, sortable grid. */
@@ -56,6 +78,12 @@ export default function TableView({
   maxHeight = "70vh",
   highlight,
   onHighlightChange,
+  search: searchParam,
+  onSearchChange,
+  sort: sortParam,
+  onSortChange,
+  hiddenColumns: hiddenColumnsParam,
+  onHiddenColumnsChange,
 }: TableViewProps) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const headBg = useColorModeValue("gray.50", "gray.700")
@@ -66,14 +94,45 @@ export default function TableView({
   const cellHighlightBg = useColorModeValue("yellow.200", "yellow.700")
   const numberColor = useColorModeValue("gray.400", "gray.500")
   const showToast = useCustomToast()
-  const [search, setSearch] = useState("")
+  // The box stays local while typing; the URL catches up with the debounce,
+  // so a keystroke doesn't push a history entry or re-render the route.
+  const [search, setSearch] = useState(searchParam ?? "")
   // Filtering runs over every cell in the table, so it's debounced: doing
   // that per keystroke on a big one is visibly slow.
   const [debouncedSearch] = useDebounce(search, 250)
-  const [sort, setSort] = useState<{
-    index: number
-    direction: "asc" | "desc"
-  } | null>(null)
+  // The last value written to the URL from here, which is what tells our own
+  // echo apart from a change made elsewhere (Back/Forward, or a link opened
+  // over this one). Without it, adopting every param change would overwrite
+  // what's being typed with the previous keystroke's debounced value.
+  const pushedSearch = useRef(searchParam ?? "")
+  useEffect(() => {
+    if (!onSearchChange) return
+    if (debouncedSearch === pushedSearch.current) return
+    pushedSearch.current = debouncedSearch
+    onSearchChange(debouncedSearch || undefined)
+  }, [debouncedSearch, onSearchChange])
+  useEffect(() => {
+    const next = searchParam ?? ""
+    if (next === pushedSearch.current) return
+    pushedSearch.current = next
+    setSearch(next)
+  }, [searchParam])
+  const [localSort, setLocalSort] = useState<string | undefined>(undefined)
+  const sortSpec = onSortChange ? sortParam : localSort
+  const setSortSpec = onSortChange ?? setLocalSort
+  const [localHidden, setLocalHidden] = useState<string | undefined>(undefined)
+  const hiddenSpec = onHiddenColumnsChange ? hiddenColumnsParam : localHidden
+  const setHiddenSpec = onHiddenColumnsChange ?? setLocalHidden
+  // 1-based column numbers, matching what highlight specs use.
+  const hidden = useMemo(() => parseHiddenColumns(hiddenSpec), [hiddenSpec])
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden])
+  // A sort by a hidden column would leave the rows in an order with nothing
+  // on screen explaining it, so it's suspended rather than dropped: the spec
+  // stays in the URL, and showing the column again brings its order back.
+  const sort = useMemo(() => {
+    const parsed = parseSort(sortSpec)
+    return parsed && hiddenSet.has(parsed.column) ? null : parsed
+  }, [sortSpec, hiddenSet])
   const scrollRef = useRef<HTMLDivElement>(null)
   const highlightRef = useRef<HTMLTableCellElement>(null)
   // The cell a shift-click extends from, i.e. the last one clicked on its
@@ -113,12 +172,20 @@ export default function TableView({
       parsed ? parsed.columns.map((_, i) => isNumericColumn(allRows, i)) : [],
     [parsed, allRows],
   )
+  // 0-based indexes of the columns still on screen, kept in file order.
+  const visibleColumns = useMemo(
+    () =>
+      (parsed?.columns ?? [])
+        .map((_, i) => i)
+        .filter((i) => !hiddenSet.has(i + 1)),
+    [parsed, hiddenSet],
+  )
   // Filter before sorting so the sort only orders what's on screen, and do
   // both over every row rather than the rendered slice.
   const rows = useMemo(() => {
-    const matched = filterRows(allRows, debouncedSearch)
-    return sort ? sortRows(matched, sort.index, sort.direction) : matched
-  }, [allRows, debouncedSearch, sort])
+    const matched = filterRows(allRows, debouncedSearch, visibleColumns)
+    return sort ? sortRows(matched, sort.column - 1, sort.direction) : matched
+  }, [allRows, debouncedSearch, sort, visibleColumns])
   const ranges: HighlightRange[] = useMemo(
     () => parseHighlight(highlight),
     [highlight],
@@ -193,13 +260,26 @@ export default function TableView({
       </Box>
     )
   }
-  const toggleSort = (index: number) =>
-    setSort((prev) => {
-      if (prev?.index !== index) return { index, direction: "asc" }
-      // Third click on the same column drops back to the file's own order,
-      // which is often meaningful (a table is usually written sorted).
-      return prev.direction === "asc" ? { index, direction: "desc" } : null
-    })
+  const toggleSort = (index: number) => {
+    const column = index + 1
+    if (sort?.column !== column) {
+      setSortSpec(formatSort({ column, direction: "asc" }))
+      return
+    }
+    // Third click on the same column drops back to the file's own order,
+    // which is often meaningful (a table is usually written sorted).
+    setSortSpec(
+      sort.direction === "asc"
+        ? formatSort({ column, direction: "desc" })
+        : undefined,
+    )
+  }
+  const setHiddenColumns = (columns: number[]) => {
+    // Hiding every column would leave an empty grid with no obvious way back,
+    // so the last visible one stays.
+    if (columns.length >= parsed.columns.length) return
+    setHiddenSpec(formatHiddenColumns(columns))
+  }
   // Clicking a cell highlights it, shift-clicking another covers the block
   // between them, and a row number highlights the whole row. All of it goes
   // through the URL, so what you're looking at is what a copied link shows.
@@ -267,7 +347,8 @@ export default function TableView({
         <Text fontSize="sm" color="gray.500">
           {debouncedSearch
             ? `${rows.length} of ${parsed.rows.length} rows`
-            : `${parsed.rows.length} rows × ${parsed.columns.length} columns`}
+            : `${parsed.rows.length} rows × ${visibleColumns.length} columns`}
+          {hidden.length > 0 ? ` (${hidden.length} hidden)` : ""}
         </Text>
         {ranges.length > 0 ? (
           <Flex align="center" gap={1}>
@@ -295,6 +376,54 @@ export default function TableView({
             Click a cell to highlight it; shift-click for a block.
           </Text>
         ) : null}
+        <Menu closeOnSelect={false}>
+          <MenuButton
+            as={IconButton}
+            aria-label="Column settings"
+            title="Show or hide columns"
+            icon={<FiSettings />}
+            size="sm"
+            variant="ghost"
+            ml="auto"
+          />
+          <MenuList maxHeight="60vh" overflowY="auto" zIndex={2}>
+            <MenuOptionGroup
+              title="Columns"
+              type="checkbox"
+              // Chakra hands back the values that are still checked, i.e. the
+              // visible columns, so hiding is what's left over.
+              value={visibleColumns.map((i) => String(i + 1))}
+              onChange={(value) => {
+                const shown = new Set(
+                  (Array.isArray(value) ? value : [value]).map(Number),
+                )
+                setHiddenColumns(
+                  parsed.columns
+                    .map((_, i) => i + 1)
+                    .filter((column) => !shown.has(column)),
+                )
+              }}
+            >
+              {parsed.columns.map((column, i) => (
+                <MenuItemOption
+                  key={`${column}-${i}`}
+                  value={String(i + 1)}
+                  fontSize="sm"
+                >
+                  {column || `Column ${i + 1}`}
+                </MenuItemOption>
+              ))}
+            </MenuOptionGroup>
+            {hidden.length > 0 ? (
+              <>
+                <MenuDivider />
+                <MenuItem fontSize="sm" onClick={() => setHiddenColumns([])}>
+                  Show all columns
+                </MenuItem>
+              </>
+            ) : null}
+          </MenuList>
+        </Menu>
       </Flex>
       <Box
         ref={scrollRef}
@@ -311,36 +440,39 @@ export default function TableView({
               <Th bg={headBg} px={2} color={numberColor}>
                 #
               </Th>
-              {parsed.columns.map((column, i) => (
-                <Th
-                  // Column names repeat in plenty of real tables, so the
-                  // position is what identifies one.
-                  key={`${column}-${i}`}
-                  onClick={() => toggleSort(i)}
-                  cursor="pointer"
-                  userSelect="none"
-                  whiteSpace="nowrap"
-                  isNumeric={numericColumns[i]}
-                  bg={headBg}
-                  _hover={{ color: "blue.500" }}
-                  title={`Sort by ${column || `column ${i + 1}`}`}
-                >
-                  {column}
-                  <Icon
-                    as={
-                      sort?.index !== i
-                        ? FaSort
-                        : sort.direction === "asc"
-                          ? FaSortUp
-                          : FaSortDown
-                    }
-                    ml={1}
-                    fontSize="2xs"
-                    opacity={sort?.index === i ? 1 : 0.35}
-                    verticalAlign="middle"
-                  />
-                </Th>
-              ))}
+              {visibleColumns.map((i) => {
+                const column = parsed.columns[i]
+                return (
+                  <Th
+                    // Column names repeat in plenty of real tables, so the
+                    // position is what identifies one.
+                    key={`${column}-${i}`}
+                    onClick={() => toggleSort(i)}
+                    cursor="pointer"
+                    userSelect="none"
+                    whiteSpace="nowrap"
+                    isNumeric={numericColumns[i]}
+                    bg={headBg}
+                    _hover={{ color: "blue.500" }}
+                    title={`Sort by ${column || `column ${i + 1}`}`}
+                  >
+                    {column}
+                    <Icon
+                      as={
+                        sort?.column !== i + 1
+                          ? FaSort
+                          : sort.direction === "asc"
+                            ? FaSortUp
+                            : FaSortDown
+                      }
+                      ml={1}
+                      fontSize="2xs"
+                      opacity={sort?.column === i + 1 ? 1 : 0.35}
+                      verticalAlign="middle"
+                    />
+                  </Th>
+                )
+              })}
             </Tr>
           </Thead>
           <Tbody>
@@ -361,7 +493,8 @@ export default function TableView({
                 >
                   {row.index}
                 </Td>
-                {row.cells.map((cell, cellIndex) => {
+                {visibleColumns.map((cellIndex) => {
+                  const cell = row.cells[cellIndex] ?? ""
                   const isHighlighted = isCellHighlighted(
                     ranges,
                     row.index,

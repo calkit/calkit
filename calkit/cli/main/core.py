@@ -1305,7 +1305,7 @@ def pull(
             lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
         )
         if result != 0:
-            raise_error("DVC pull failed")
+            calkit.cli.warn("DVC pull failed")
         calkit.dvc.zip.sync_all(direction="to-workspace")
         if not no_recursive:
             # Pull DVC in isolated subprojects (those with their own .dvc folder)
@@ -1323,7 +1323,9 @@ def pull(
                     lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
                 )
                 if sp_result != 0:
-                    raise_error(f"DVC pull failed in subproject: {sp_path}")
+                    calkit.cli.warn(
+                        f"DVC pull failed in subproject: {sp_path}"
+                    )
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 

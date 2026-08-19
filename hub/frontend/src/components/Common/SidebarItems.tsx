@@ -97,6 +97,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
       return null
     }
 
+    // The Apps section has sub-routes (/apps/<appName>), so it should stay
+    // highlighted on any of them, not just the exact /apps path.
+    const isApps = path === "/apps"
+
     const item = (
       <Flex
         key={title}
@@ -106,7 +110,7 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
         search={currentRef ? ({ ref: currentRef } as any) : undefined}
         w="100%"
         p={2}
-        activeOptions={{ exact: true, includeSearch: false }}
+        activeOptions={{ exact: !isApps, includeSearch: false }}
         activeProps={{
           style: {
             background: bgActive,

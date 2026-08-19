@@ -830,6 +830,7 @@ class Release(BaseModel):
     # ".calkit/releases/v0/my-project-slides-v0.pdf". Only set for internal
     # releases, which store the artifact in the repo rather than ignoring it.
     stored_path: str | None = None
+    target: str | None = None
 
 
 class StaticHtmlApp(BaseModel):

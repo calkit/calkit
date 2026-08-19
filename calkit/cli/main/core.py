@@ -1073,7 +1073,21 @@ def commit(
         cmd += ["-m", message]
     subprocess.call(cmd)
     if push_commit:
-        push()
+        # Only push to DVC if the commit actually touched DVC-tracked files
+        # (a .dvc pointer, dvc.yaml, dvc.lock, or a dvc-zip pointer). If the
+        # commit only changed Git-tracked files, skip the DVC push so we
+        # don't waste time pushing nothing.
+        repo = calkit.git.get_repo()
+        committed_files = repo.git.show(
+            "--name-only", "--format=", "HEAD"
+        ).split()
+        touched_dvc = any(
+            f.endswith(".dvc")
+            or f in ("dvc.yaml", "dvc.lock")
+            or f.startswith(".calkit/zip/")
+            for f in committed_files
+        )
+        push(no_dvc=not touched_dvc)
 
 
 @app.command(name="save|sv")

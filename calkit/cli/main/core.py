@@ -1304,27 +1304,34 @@ def pull(
             ["pull"] + dvc_args,
             lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
         )
-        if result != 0:
-            raise_error("DVC pull failed")
         calkit.dvc.zip.sync_all(direction="to-workspace")
         if not no_recursive:
             # Pull DVC in isolated subprojects (those with their own .dvc folder)
             ck_info = calkit.load_calkit_info()
-            for sp in ck_info.get("subprojects", []):
+            sp_results = {}
+            sp_paths = {}
+            for sp, idx in enumerate(ck_info.get("subprojects", [])):
                 if not isinstance(sp, dict) or not sp.get("path"):
                     continue
                 sp_path = sp["path"]
+                sp_paths[idx] = sp_path
                 if not os.path.isdir(os.path.join(sp_path, ".dvc")):
                     continue
                 typer.echo(f"DVC pulling subproject: {sp_path}")
-                sp_result = calkit.dvc.run_dvc_command(
+                sp_results[idx] = calkit.dvc.run_dvc_command(
                     ["pull"] + dvc_args,
                     cwd=sp_path,
                     lock_timeout=calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
                 )
-                if sp_result != 0:
-                    raise_error(f"DVC pull failed in subproject: {sp_path}")
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
+        if result != 0:
+            raise_error("DVC pull failed")
+        if not no_recursive:
+            sp_failed_idx = [idx for idx, rc in sp_results.items() if rc != 0]
+            if any(sp_failed_idx):
+                raise_error(
+                    f"DVC pull failed in subproject(s): {[sp_paths[idx] for idx in sp_failed_idx]}"
+                )
 
 
 @app.command(name="push")

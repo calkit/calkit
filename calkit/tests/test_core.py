@@ -4,6 +4,7 @@ import os
 import subprocess
 from unittest import mock
 
+import click
 import git
 import pytest
 
@@ -86,6 +87,60 @@ def test_load_calkit_info(tmp_dir, monkeypatch):
     # A project with no calkit.yaml loads as an empty dict
     os.remove("calkit.yaml")
     assert calkit.load_calkit_info() == {}
+
+
+def test_pull_recurses_into_subprojects(tmp_path, monkeypatch):
+    from calkit.cli.main.core import pull
+
+    root = tmp_path / "project"
+    root.mkdir()
+    monkeypatch.chdir(root)
+
+    recursive_subproject = root / "recursive"
+    recursive_subproject.mkdir()
+    (recursive_subproject / ".dvc").mkdir()
+
+    skipped_subproject = root / "skipped"
+    skipped_subproject.mkdir()
+
+    ck_info = {
+        "subprojects": [
+            ({"path": "recursive"}, "recursive"),
+            ({"path": "skipped"}, "skipped"),
+        ]
+    }
+
+    dvc_calls = []
+    zip_calls = []
+
+    def fake_run_dvc_command(args, cwd=None, lock_timeout=None):
+        dvc_calls.append((args, cwd, lock_timeout))
+        # Make the parent project's pull fail, but let recursive subproject
+        # pulls succeed so we can verify they still run after the failure.
+        return 1 if cwd is None else 0
+
+    def fake_sync_all(direction, wdir=None):
+        zip_calls.append((direction, wdir))
+
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: ck_info)
+    monkeypatch.setattr(calkit.dvc, "run_dvc_command", fake_run_dvc_command)
+    monkeypatch.setattr(calkit.dvc.zip, "sync_all", fake_sync_all)
+
+    with pytest.raises(click.exceptions.Exit):
+        pull(no_git=True, no_check_auth=True)
+
+    # The root pull runs first and fails, but the recursive subproject pull is
+    # still attempted afterward.
+    assert dvc_calls == [
+        (["pull", "--recursive"], None, calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT),
+        (
+            ["pull", "--recursive"],
+            "recursive",
+            calkit.dvc.DEFAULT_RUN_LOCK_TIMEOUT,
+        ),
+    ]
+    # Each pull syncs its workspace from DVC after the command returns.
+    assert zip_calls == [("to-workspace", None), ("to-workspace", "recursive")]
 
 
 def test_get_env_var_dep_names():

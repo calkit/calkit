@@ -418,7 +418,11 @@ def list_stages(
             raise_error(
                 "Failed to determine stale stages: " + "; ".join(status.errors)
             )
-        stale_stage_names = status.stale_stage_names
+        # DVC reports iterated stages as ``name@param``, while Calkit's
+        # configured stages use their base names.
+        stale_stage_names = {
+            name.split("@", 1)[0] for name in status.stale_stage_names
+        }
     result = {}
     for name, stage in stages.items():
         if kinds is not None and stage.get("kind") not in kinds:

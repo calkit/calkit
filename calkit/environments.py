@@ -979,11 +979,22 @@ def check_all_in_pipeline(
     # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    import calkit.markdown
+
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
-        stages = {k: v for k, v in stages.items() if k in targets}
+        sep = calkit.markdown.STAGE_NAME_SEPARATOR
+        stages = {
+            k: v
+            for k, v in stages.items()
+            # A target naming a Markdown file covers every stage it declares
+            if k in targets or k.split(sep)[0] in targets
+        }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")

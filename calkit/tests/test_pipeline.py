@@ -2553,8 +2553,8 @@ def test_to_dvc_markdown_stage(tmp_dir):
     with open("requirements.txt", "w") as f:
         f.write("matplotlib\n")
     dvc_stages = to_dvc(ck_info=ck_info)
-    assert list(dvc_stages) == ["README.md@example"]
-    stage = dvc_stages["README.md@example"]
+    assert list(dvc_stages) == ["README.md/example"]
+    stage = dvc_stages["README.md/example"]
     script_path = ".calkit/markdown/README/example.py"
     assert script_path in stage["cmd"]
     assert script_path in stage["deps"]
@@ -2583,3 +2583,114 @@ def test_to_dvc_markdown_stage_errors(tmp_dir):
         f.write("Just prose.\n\n```python\nprint(1)\n```\n")
     with pytest.raises(ValueError, match="declares no stages"):
         to_dvc(ck_info=ck_info)
+
+
+def test_to_dvc_markdown_scripts_are_gitignored(tmp_dir):
+    """Extracted scripts are derived, so they're kept out of Git.
+
+    Like cleaned notebooks, they're rewritten on every compile rather than
+    committed, so a stale copy can never be what runs.
+    """
+    import git
+
+    import calkit
+    from calkit.pipeline import to_dvc
+
+    repo = git.Repo.init()
+    with open("README.md", "w") as f:
+        f.write(
+            "```python calkit stage name=example environment=main\n"
+            "print('hi')\n"
+            "```\n"
+        )
+    ck_info = {
+        "environments": {
+            "main": {"kind": "uv-venv", "path": "requirements.txt"}
+        },
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("matplotlib\n")
+    to_dvc(ck_info=ck_info, write=True)
+    with open(".gitignore") as f:
+        assert "/.calkit/markdown/" in f.read()
+    assert repo.ignored(".calkit/markdown/README/example.py")
+
+
+def test_translate_run_targets_markdown(tmp_dir):
+    """Naming a Markdown file runs every stage it declares."""
+    from calkit.pipeline import translate_run_targets
+
+    with open("README.md", "w") as f:
+        f.write(
+            "```python calkit stage name=one environment=main\n"
+            "pass\n```\n\n"
+            "```python calkit stage name=two environment=main\n"
+            "pass\n```\n"
+        )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    targets, isolated = translate_run_targets(["README.md"], ck_info=ck_info)
+    assert targets == ["README.md/one", "README.md/two"]
+    assert isolated == []
+    # Naming one of the declared stages passes straight through
+    targets, _ = translate_run_targets(["README.md/two"], ck_info=ck_info)
+    assert targets == ["README.md/two"]
+    # So does anything unrelated
+    targets, _ = translate_run_targets(["other-stage"], ck_info=ck_info)
+    assert targets == ["other-stage"]
+
+
+def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
+    """A markdown stage keyed by a name can be targeted either way."""
+    from calkit.pipeline import translate_run_targets
+
+    with open("guide.md", "w") as f:
+        f.write(
+            "```python calkit stage name=one environment=main\npass\n```\n"
+        )
+    ck_info = {
+        "pipeline": {
+            "stages": {"docs": {"kind": "markdown", "path": "guide.md"}}
+        }
+    }
+    for target in ["docs", "guide.md"]:
+        targets, _ = translate_run_targets([target], ck_info=ck_info)
+        assert targets == ["docs/one"]
+
+
+def test_sync_markdown_writes_environments(tmp_dir):
+    """Markdown environments must reach calkit.yaml to be usable.
+
+    A stage's command runs ``calkit xenv`` as a subprocess, which reads
+    environments back off disk.
+    """
+    import calkit
+    from calkit.pipeline import sync_markdown
+
+    with open("README.md", "w") as f:
+        f.write(
+            "<!-- calkit environment name=main python=3.12 -->\n"
+            "- numpy\n\n"
+            "```python calkit stage name=demo\npass\n```\n"
+        )
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}, f
+        )
+    sync_markdown()
+    written = calkit.load_calkit_info()
+    assert written["environments"]["main"] == {
+        "kind": "uv-venv",
+        "path": ".calkit/envs/main/requirements.txt",
+        "python": "3.12",
+    }
+    # The markdown stage itself stays; only the environment is written back
+    assert list(written["pipeline"]["stages"]) == ["README.md"]
+    # Running again changes nothing
+    with open("calkit.yaml") as f:
+        before = f.read()
+    sync_markdown()
+    with open("calkit.yaml") as f:
+        assert f.read() == before

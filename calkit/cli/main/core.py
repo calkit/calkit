@@ -2069,6 +2069,14 @@ def run(
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
+    # Extract anything the project's Markdown files declare before the
+    # environments are checked, since an environment declared there must be
+    # in calkit.yaml before it can be created or entered.
+    try:
+        calkit.pipeline.sync_markdown(ck_info=ck_info)
+    except Exception as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(f"Failed to read markdown stages: {e}")
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")

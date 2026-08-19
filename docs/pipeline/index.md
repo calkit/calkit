@@ -469,6 +469,22 @@ than inferred from the dependency graph. They are dependencies too.
 | `output_storage`        | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the exported app.                                                                             |
 | `validate_notebook`     | bool                          | no       | True    | Run the notebook before exporting, to catch one that would fail in the browser.                              |
 
+### `markdown`
+
+Model class: `MarkdownStage`
+
+A stage sourced from a Markdown file's annotated code blocks.
+
+This stands in for however many stages the file declares. It is
+replaced by them at compile time (see
+`Pipeline.expand_markdown_stages`), so nothing downstream needs to
+know Markdown was involved.
+
+| Kind-specific parameter | Type        | Required | Default    | Description                                                                                                      |
+| ----------------------- | ----------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str         | no       | '\_system' | Environment used by blocks that don't name one.                                                                  |
+| `path`                  | str \| None | no       | null       | Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path. |
+
 ### `matlab-command`
 
 Model class: `MatlabCommandStage`

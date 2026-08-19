@@ -11,6 +11,7 @@ import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
+import calkit.markdown
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
@@ -675,6 +676,16 @@ def get_status(
         }
         if not has_pipeline and not has_subprojects:
             return PipelineStatus.model_validate(result)
+        # Environment checking and status filtering both read stages and
+        # environments straight off this dict, so markdown stages have to
+        # become ordinary ones before either runs.
+        try:
+            ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
+        except Exception as e:
+            result["errors"].append(
+                f"Failed to read markdown stages: {e.__class__.__name__}: {e}"
+            )
+            return PipelineStatus.model_validate(result)
         if check_environments:
             try:
                 env_checks = calkit.environments.check_all_in_pipeline(
@@ -1176,6 +1187,76 @@ def _ensure_latex_aux_gitignore(
     )
 
 
+def sync_markdown(
+    ck_info: dict | None = None, wdir: str | None = None
+) -> "calkit.markdown.MarkdownExpansion":
+    """Extract what the project's Markdown files declare, and persist envs.
+
+    Run as preprocessing, before environments are checked, because an
+    environment declared in Markdown has to be in ``calkit.yaml`` before
+    anything tries to create or enter it.
+    """
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
+    if markdown.environments:
+        _write_markdown_environments(markdown, wdir=wdir)
+    return markdown
+
+
+def _write_markdown_environments(
+    markdown: "calkit.markdown.MarkdownExpansion", wdir: str | None = None
+) -> bool:
+    """Persist Markdown-declared environments into ``calkit.yaml``.
+
+    A stage's command runs ``calkit xenv -n <env>`` as a subprocess, which
+    reads environments back off disk, so an environment that lives only in
+    memory can't be entered. Writing it here keeps every existing
+    environment code path working unchanged.
+
+    The Markdown stays authoritative: these entries are rewritten from it
+    on every compile, so editing them in ``calkit.yaml`` has no effect.
+
+    Returns True if ``calkit.yaml`` was modified.
+    """
+    ck_yaml_path = os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
+    if not os.path.isfile(ck_yaml_path):
+        return False
+    with open(ck_yaml_path) as f:
+        data = calkit.ryaml.load(f) or {}
+    if "environments" not in data or data["environments"] is None:
+        # A plain dict would lose the generated-from comment below, since
+        # only ruamel's mapping carries comments.
+        from ruamel.yaml.comments import CommentedMap
+
+        data["environments"] = CommentedMap()
+    envs = data["environments"]
+    changed = False
+    for env_name, env in markdown.environments.items():
+        if envs.get(env_name) == env:
+            continue
+        envs[env_name] = env
+        changed = True
+        source = markdown.environment_sources.get(env_name)
+        if source is not None and hasattr(
+            envs, "yaml_set_comment_before_after_key"
+        ):
+            try:
+                envs.yaml_set_comment_before_after_key(
+                    env_name,
+                    before=(
+                        f"Generated from {source}; edits here are overwritten"
+                    ),
+                    indent=2,
+                )
+            except Exception:
+                # A comment is a nicety; never fail a compile over one
+                pass
+    if changed:
+        _dump_yaml_if_changed(data, ck_yaml_path)
+    return changed
+
+
 def _write_managed_gitignore_block(
     gitignore_path: str, marker: str, lines: list[str]
 ) -> bool:
@@ -1274,6 +1355,22 @@ def to_dvc(
         ck_info = calkit.load_calkit_info(wdir=wdir)
     if "pipeline" not in ck_info and "subprojects" not in ck_info:
         return {}
+    # Replace markdown stages with the stages and environments their blocks
+    # declare, before anything else reads this, so env locks, scheduler
+    # options and iteration need no knowledge of Markdown.
+    markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
+    ck_info = markdown.ck_info
+    if write and markdown.environments:
+        _write_markdown_environments(markdown, wdir=wdir)
+    # Extracted scripts are derived from the Markdown and rewritten on every
+    # compile, so they stay out of Git. One managed block covers them all,
+    # which avoids a git check-ignore subprocess per script.
+    if write and manage_gitignore and markdown.script_paths:
+        _write_managed_gitignore_block(
+            os.path.join(wdir or ".", ".gitignore"),
+            marker="calkit markdown stage scripts",
+            lines=["/.calkit/markdown/"],
+        )
     # Compile subproject pipelines recursively.
     # For isolated subprojects (those with their own .dvc/ directory), DVC
     # won't cross the .dvc/ boundary during --all-pipelines discovery, so we
@@ -1349,10 +1446,6 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
-    # Replace markdown stages with the stages their blocks declare, before
-    # anything downstream (env locks, scheduler options, iteration) looks at
-    # the stage list, so those need no knowledge of Markdown.
-    pipeline.expand_markdown_stages(wdir=wdir)
     conflicts = set(wrapper_stages) & set(pipeline.stages)
     if conflicts:
         raise ValueError(
@@ -1808,6 +1901,21 @@ def translate_run_targets(
         sp = Path(sp_cfg["path"]).as_posix()
         sp_map[sp] = sp_cfg
         sp_map[Path(sp).name] = sp_cfg
+    # A markdown stage stands in for the stages its blocks declare, so a
+    # target naming the file has to become the stages DVC actually knows
+    # about. Done before subproject handling because a Markdown path
+    # contains no ':' and so can't be a subproject shorthand.
+    md_targets = calkit.markdown.get_markdown_stage_targets(ck_info)
+    if md_targets:
+        expanded: list[str] = []
+        for target in targets:
+            match = md_targets.get(target)
+            if match is None:
+                expanded.append(target)
+                continue
+            md_stage_name, md_path = match
+            expanded += calkit.markdown.get_stage_names(md_path, md_stage_name)
+        targets = expanded
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []
     for target in targets:

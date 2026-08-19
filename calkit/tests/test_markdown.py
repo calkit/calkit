@@ -318,3 +318,119 @@ def test_write_stage_scripts_only_rewrites_on_change(tmp_path):
     mtime = fpath.stat().st_mtime_ns
     assert write_stage_scripts(specs, wdir=str(tmp_path)) == []
     assert fpath.stat().st_mtime_ns == mtime
+
+
+def test_extract_environments():
+    from calkit.markdown import extract_environments
+
+    text = """
+The `main` environment needs:
+
+<!-- calkit environment name=main python=3.13 -->
+- numpy
+- matplotlib
+
+And a second one, with pins the list form would make awkward:
+
+<!-- calkit environment name=pinned -->
+```
+pandas==2.0.0
+-e .
+```
+"""
+    envs = extract_environments(parse_markdown(text), "README.md")
+    assert envs["main"]["kind"] == "uv-venv"
+    assert envs["main"]["path"] == ".calkit/envs/main/requirements.txt"
+    assert envs["main"]["python"] == "3.13"
+    assert envs["main"]["_spec_content"] == "numpy\nmatplotlib"
+    assert "python" not in envs["pinned"]
+    assert envs["pinned"]["_spec_content"] == "pandas==2.0.0\n-e ."
+
+
+def test_extract_environments_errors():
+    from calkit.markdown import extract_environments
+
+    with pytest.raises(MarkdownParseError, match="must declare a name"):
+        extract_environments(
+            parse_markdown("<!-- calkit environment -->\n- numpy\n"),
+            "README.md",
+        )
+    with pytest.raises(MarkdownParseError, match="more than once"):
+        extract_environments(
+            parse_markdown(
+                "<!-- calkit environment name=a -->\n- numpy\n\n"
+                "<!-- calkit environment name=a -->\n- scipy\n"
+            ),
+            "README.md",
+        )
+    with pytest.raises(MarkdownParseError, match="only 'uv-venv'"):
+        extract_environments(
+            parse_markdown(
+                "<!-- calkit environment name=a kind=conda -->\n- numpy\n"
+            ),
+            "README.md",
+        )
+    with pytest.raises(MarkdownParseError, match="unrecognized attribute"):
+        extract_environments(
+            parse_markdown(
+                "<!-- calkit environment name=a nope=1 -->\n- numpy\n"
+            ),
+            "README.md",
+        )
+
+
+def test_expand_ck_info(tmp_path, monkeypatch):
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "<!-- calkit environment name=main python=3.12 -->\n"
+        "- numpy\n\n"
+        "```python calkit stage name=demo outputs=[out.txt]\n"
+        "pass\n```\n"
+    )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    result = expand_ck_info(ck_info)
+    # The input is untouched, so a caller that writes calkit.yaml back can't
+    # persist derived entries by accident
+    assert ck_info == {
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}}
+    }
+    stages = result.ck_info["pipeline"]["stages"]
+    assert list(stages) == ["README.md/demo"]
+    stage = stages["README.md/demo"]
+    assert stage["kind"] == "python-script"
+    assert stage["script_path"] == ".calkit/markdown/README/demo.py"
+    assert stage["outputs"] == ["out.txt"]
+    # A file declaring exactly one environment doesn't have to name it on
+    # every block
+    assert stage["environment"] == "main"
+    assert result.ck_info["environments"]["main"]["kind"] == "uv-venv"
+    assert result.environments["main"]["python"] == "3.12"
+    assert result.environment_sources["main"] == "README.md"
+    assert (tmp_path / ".calkit/envs/main/requirements.txt").read_text() == (
+        "numpy\n"
+    )
+
+
+def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "<!-- calkit environment name=main -->\n- numpy\n\n"
+        "```python calkit stage name=demo\npass\n```\n"
+    )
+    ck_info = {
+        "environments": {"main": {"kind": "conda", "path": "environment.yml"}},
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+    }
+    with pytest.raises(ValueError, match="only be defined in one place"):
+        expand_ck_info(ck_info)
+    # An identical entry is this definition written back on an earlier
+    # compile, not a competing one
+    ck_info["environments"]["main"] = {
+        "kind": "uv-venv",
+        "path": ".calkit/envs/main/requirements.txt",
+    }
+    assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv-venv"

@@ -381,6 +381,14 @@ def parse_markdown_file(path: str) -> list[MarkdownBlock]:
         return parse_markdown(f.read(), path=Path(path).as_posix())
 
 
+# Separator between a Markdown stage's own name and the name of a stage it
+# declares, e.g. ``README.md/example``. DVC reserves ``@`` for the names it
+# generates from a matrix, and a hand-written one is unaddressable: even
+# ``dvc stage list`` refuses the file. ``:`` is no good either, since DVC
+# splits a target on the first colon to find the dvc.yaml it belongs to.
+STAGE_NAME_SEPARATOR = "/"
+
+
 # Fence languages Calkit knows how to run, and the extension its extracted
 # script needs so the ordinary script-stage machinery can execute it.
 LANGUAGE_EXTENSIONS: dict[str, str] = {
@@ -536,3 +544,232 @@ def write_stage_scripts(
             f.write(content)
         changed.append(spec.script_path)
     return changed
+
+
+def get_stage_names(markdown_path: str, stage_name: str) -> list[str]:
+    """Return the names of the pipeline stages a Markdown file declares.
+
+    Used to resolve a target naming the file as a whole (``calkit run
+    README.md``) into the stages it stands for, since those are what DVC
+    knows about.
+    """
+    blocks = parse_markdown_file(markdown_path)
+    specs = extract_stages(blocks, Path(markdown_path).as_posix())
+    return [stage_name + STAGE_NAME_SEPARATOR + name for name in specs]
+
+
+def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
+    """Map what a user might type at a markdown stage to that stage.
+
+    Keys are both the stage's name and the Markdown file's path, so a
+    stage keyed by something other than its path can be named either way.
+    Values are ``(stage_name, markdown_path)``.
+    """
+    targets: dict[str, tuple[str, str]] = {}
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if not isinstance(stages, dict):
+        return targets
+    for name, cfg in stages.items():
+        if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
+            continue
+        path = Path(str(cfg.get("path") or name)).as_posix()
+        targets[name] = (name, path)
+        targets[path] = (name, path)
+    return targets
+
+
+def get_env_spec_path(env_name: str, as_posix: bool = True) -> str:
+    """Return the path of the spec file written for a Markdown environment.
+
+    This lives alongside the specs Calkit already generates when it
+    detects an environment for a stage, so the environment is an ordinary
+    one by the time anything else looks at it.
+    """
+    p = os.path.join(".calkit", "envs", env_name, "requirements.txt")
+    if as_posix:
+        p = Path(p).as_posix()
+    return p
+
+
+def extract_environments(
+    blocks: list[MarkdownBlock], markdown_path: str
+) -> dict[str, dict]:
+    """Build environment definitions from a Markdown file's env blocks.
+
+    A bulleted list of packages is the common case, so its items become
+    the requirements; a fenced block's body is used verbatim, which is
+    what makes room for pins, extras and ``-e .``.
+    """
+    path = Path(markdown_path).as_posix()
+    envs: dict[str, dict] = {}
+    for block in blocks:
+        if block.kind != "environment":
+            continue
+        name = block.name
+        if not name:
+            raise MarkdownParseError(
+                "An environment block must declare a name",
+                path=path,
+                line=block.line,
+            )
+        if name in envs:
+            raise MarkdownParseError(
+                f"Environment '{name}' is declared more than once",
+                path=path,
+                line=block.line,
+            )
+        attrs = {k: v for k, v in block.attrs.items() if k != "name"}
+        kind = str(attrs.pop("kind", "uv-venv"))
+        if kind != "uv-venv":
+            raise MarkdownParseError(
+                f"Environment '{name}' has kind '{kind}'; only 'uv-venv' "
+                "environments can currently be declared in Markdown",
+                path=path,
+                line=block.line,
+            )
+        env: dict = {"kind": kind, "path": get_env_spec_path(name)}
+        python = attrs.pop("python", None)
+        if python is not None:
+            env["python"] = str(python)
+        if attrs:
+            raise MarkdownParseError(
+                f"Environment '{name}' has unrecognized attribute(s): "
+                f"{', '.join(sorted(attrs))}",
+                path=path,
+                line=block.line,
+            )
+        env["_spec_content"] = block.content
+        envs[name] = env
+    return envs
+
+
+def write_env_specs(envs: dict[str, dict], wdir: str | None = None) -> None:
+    """Write each Markdown environment's spec file, if it changed.
+
+    The spec is derived, but it is what ``uv`` reads and what the lock is
+    resolved from, so it must be byte-stable or the lock churns on every
+    compile.
+    """
+    for env in envs.values():
+        content = env["_spec_content"]
+        if not content.endswith("\n"):
+            content += "\n"
+        fpath = env["path"]
+        if wdir is not None:
+            fpath = os.path.join(wdir, fpath)
+        if os.path.isfile(fpath):
+            with open(fpath, encoding="utf-8") as f:
+                if f.read() == content:
+                    continue
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+
+
+@dataclass
+class MarkdownExpansion:
+    """What a project's Markdown files contributed to its pipeline."""
+
+    ck_info: dict
+    script_paths: list[str] = field(default_factory=list)
+    # Environment name -> definition, and the file that declared it
+    environments: dict[str, dict] = field(default_factory=dict)
+    environment_sources: dict[str, str] = field(default_factory=dict)
+
+
+def expand_ck_info(
+    ck_info: dict, wdir: str | None = None
+) -> MarkdownExpansion:
+    """Return project info with markdown stages replaced by what they declare.
+
+    A markdown stage stands in for however many stages and environments
+    its file declares. Expanding here rather than at compile time means
+    everything that reads project info---environment checking, lock file
+    paths, status filtering---sees ordinary stages and environments and
+    needs no knowledge of Markdown.
+
+    The input is not modified, so callers that go on to write
+    ``calkit.yaml`` can't accidentally persist derived entries.
+
+    Environments are returned as well as merged, because they have to be
+    persisted to ``calkit.yaml``: a stage's command runs ``calkit xenv``
+    as a subprocess, which reads the environment back off disk.
+    """
+    from copy import deepcopy
+
+    stages = ck_info.get("pipeline", {}).get("stages", {})
+    if not isinstance(stages, dict):
+        return MarkdownExpansion(ck_info=ck_info)
+    md_stage_names = [
+        name
+        for name, cfg in stages.items()
+        if isinstance(cfg, dict) and cfg.get("kind") == "markdown"
+    ]
+    if not md_stage_names:
+        return MarkdownExpansion(ck_info=ck_info)
+    out = deepcopy(ck_info)
+    out_stages = out["pipeline"]["stages"]
+    out_envs = out.setdefault("environments", {})
+    if not isinstance(out_envs, dict):
+        raise ValueError("Project 'environments' must be a mapping")
+    result = MarkdownExpansion(ck_info=out)
+    for stage_name in md_stage_names:
+        md_cfg = out_stages.pop(stage_name)
+        md_path = Path(str(md_cfg.get("path") or stage_name)).as_posix()
+        read_path = os.path.join(wdir, md_path) if wdir else md_path
+        if not os.path.isfile(read_path):
+            raise ValueError(
+                f"Markdown stage '{stage_name}' points at '{md_path}', "
+                "which does not exist"
+            )
+        blocks = parse_markdown_file(read_path)
+        envs = extract_environments(blocks, md_path)
+        for env_name, env in envs.items():
+            public = {k: v for k, v in env.items() if not k.startswith("_")}
+            existing = out_envs.get(env_name)
+            # An identical entry is this same definition written back on an
+            # earlier compile, not a competing one.
+            if existing is not None and dict(existing) != public:
+                raise ValueError(
+                    f"Environment '{env_name}' is declared in '{md_path}' "
+                    "and differently in calkit.yaml; it can only be defined "
+                    "in one place"
+                )
+            out_envs[env_name] = public
+            result.environments[env_name] = public
+            result.environment_sources[env_name] = md_path
+        write_env_specs(envs, wdir=wdir)
+        specs = extract_stages(blocks, md_path)
+        if not specs:
+            raise ValueError(
+                f"Markdown stage '{stage_name}' declares no stages; "
+                "annotate a code block with 'calkit stage name=<name>' "
+                "to define one"
+            )
+        write_stage_scripts(specs, wdir=wdir)
+        result.script_paths += [s.script_path for s in specs.values()]
+        # A file declaring exactly one environment shouldn't have to name
+        # it on every block.
+        default_env = md_cfg.get("environment")
+        if default_env is None and len(envs) == 1:
+            default_env = next(iter(envs))
+        for spec in specs.values():
+            sub_name = stage_name + STAGE_NAME_SEPARATOR + spec.name
+            if sub_name in out_stages:
+                raise ValueError(
+                    f"Stage '{sub_name}' from '{md_path}' conflicts with an "
+                    "existing pipeline stage"
+                )
+            sub: dict = {
+                "kind": spec.stage_kind,
+                "script_path": spec.script_path,
+            }
+            if md_cfg.get("wdir") is not None:
+                sub["wdir"] = md_cfg["wdir"]
+            sub.update(spec.attrs)
+            if "environment" not in sub:
+                sub["environment"] = default_env or "_system"
+            if spec.stage_kind == "shell-script" and "shell" not in sub:
+                sub["shell"] = "sh" if spec.language == "sh" else spec.language
+            out_stages[sub_name] = sub
+    return result

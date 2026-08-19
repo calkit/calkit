@@ -563,3 +563,54 @@ def test_detect_environments_skips_declared_and_avoids_collisions():
         specs, "README.md", default_env="main"
     )
     assert envs == {} and assignments == {}
+
+
+def test_output_blocks_are_never_extracted():
+    """An output block must not become part of its stage's script.
+
+    If it did, injecting output would change the script, which would make
+    the stage stale, which would rerun it, which would inject again.
+    """
+    from calkit.markdown import extract_stages
+
+    text = (
+        "```python calkit stage name=a\nprint('hi')\n```\n\n"
+        "```text calkit output stage=a\nhi\n```\n"
+    )
+    specs = extract_stages(parse_markdown(text), "README.md")
+    assert list(specs) == ["a"]
+    assert specs["a"].content == "print('hi')"
+
+
+def test_set_output_blocks():
+    from calkit.markdown import set_output_blocks
+
+    text = (
+        "# Demo\n\n"
+        "```python calkit stage name=a\nprint('x')\n```\n\n"
+        "```text calkit output stage=a\nstale\n```\n\n"
+        "```text\nan ordinary block\n```\n"
+    )
+    out, changed = set_output_blocks(text, {"a": "x\ny"})
+    assert changed
+    assert "```text calkit output stage=a\nx\ny\n```" in out
+    # Blocks that aren't outputs are untouched
+    assert "```text\nan ordinary block\n```" in out
+    # Writing the same output again changes nothing
+    assert set_output_blocks(out, {"a": "x\ny"}) == (out, False)
+    # A stage that ran but printed nothing empties its block rather than
+    # leaving a stale value behind
+    emptied, changed = set_output_blocks(out, {"a": ""})
+    assert changed
+    assert "```text calkit output stage=a\n```" in emptied
+    # A stage with no output block is simply not shown
+    assert set_output_blocks(text, {"nonexistent": "z"}) == (text, False)
+
+
+def test_set_output_blocks_ignores_nested_fences():
+    from calkit.markdown import set_output_blocks
+
+    text = (
+        "````md\n```text calkit output stage=a\nnot a real block\n```\n````\n"
+    )
+    assert set_output_blocks(text, {"a": "new"}) == (text, False)

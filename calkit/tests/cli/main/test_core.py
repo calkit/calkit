@@ -2341,3 +2341,35 @@ def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
         os.environ["CALKIT_ENV"] = "test"
         _warn_on_stale_calkit_env()
         assert capsys.readouterr().err == ""
+
+
+def test_stage_stdout_from_log_content():
+    """Stage output is read back out of the run log, not captured twice."""
+    from calkit.cli.main.core import (
+        STAGE_OUTPUT_END,
+        STAGE_OUTPUT_START,
+        _stage_stdout_from_log_content,
+    )
+
+    log = "\n".join(
+        [
+            "2025-01-01T00:00:00 - INFO - Running stage 'README.md/a':",
+            STAGE_OUTPUT_START,
+            "hello",
+            "world" + STAGE_OUTPUT_END,
+            "2025-01-01T00:00:01 - INFO - Running stage 'README.md/b':",
+            STAGE_OUTPUT_START,
+            STAGE_OUTPUT_END,
+            "2025-01-01T00:00:02 - INFO - Stage 'other' didn't change, "
+            "skipping",
+        ]
+    )
+    res = _stage_stdout_from_log_content(log)
+    # Output lacking a final newline shares its line with the end marker
+    assert res["README.md/a"] == "hello\nworld"
+    # A stage that ran but printed nothing is still recorded, so its block
+    # can be emptied rather than left stale
+    assert res["README.md/b"] == ""
+    # A skipped stage produced no output this run, so it must not be
+    # listed---its block should keep what it has
+    assert "other" not in res

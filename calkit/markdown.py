@@ -29,8 +29,11 @@ from typing import Any, Literal
 
 import ruamel.yaml
 
-DirectiveKind = Literal["stage", "environment"]
-DIRECTIVE_KINDS: tuple[str, ...] = ("stage", "environment")
+DirectiveKind = Literal["stage", "environment", "output"]
+# ``output`` blocks are written to, never read: a stage's extracted script
+# must not include what that stage printed, or injecting output would make
+# the stage stale, which would rerun it, which would inject again.
+DIRECTIVE_KINDS: tuple[str, ...] = ("stage", "environment", "output")
 BlockSource = Literal["fence", "list"]
 
 # A fence is at least three backticks or tildes, optionally indented. Only
@@ -175,7 +178,13 @@ def parse_annotation(text: str) -> tuple[DirectiveKind, dict[str, Any]] | None:
             "Calkit annotation must name a directive "
             f"({', '.join(DIRECTIVE_KINDS)}), got: {rest or '(nothing)'}"
         )
-    kind: DirectiveKind = "stage" if parts[0] == "stage" else "environment"
+    kind: DirectiveKind
+    if parts[0] == "stage":
+        kind = "stage"
+    elif parts[0] == "environment":
+        kind = "environment"
+    else:
+        kind = "output"
     return kind, parse_attrs(parts[1] if len(parts) > 1 else "")
 
 
@@ -1056,3 +1065,65 @@ def set_stage_attrs(
         lines[i] = m.group("indent") + m.group("fence") + info + ending
         return "".join(lines), True
     return text, False
+
+
+def set_output_blocks(text: str, outputs: dict[str, str]) -> tuple[str, bool]:
+    """Replace the bodies of ``calkit output`` blocks with what ran.
+
+    ``outputs`` maps a stage name to its captured standard output. Only
+    the body of a block already annotated as an output for that stage is
+    replaced; a stage with no output block is simply not shown, and a
+    block whose stage produced nothing is emptied rather than left stale.
+
+    Returns the new text and whether anything changed.
+    """
+    if not outputs:
+        return text, False
+    lines = text.splitlines(keepends=True)
+    out_lines: list[str] = []
+    changed = False
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _FENCE_RE.match(line.rstrip("\r\n"))
+        if m is None:
+            out_lines.append(line)
+            i += 1
+            continue
+        fence = m.group("fence")
+        try:
+            _, annotation = _parse_fence_info(m.group("info"))
+        except ValueError:
+            annotation = None
+        # Find this fence's closing line either way, so a block we don't
+        # touch is copied through without its contents being rescanned
+        j = i + 1
+        while j < len(lines):
+            close = _FENCE_RE.match(lines[j].rstrip("\r\n"))
+            if (
+                close is not None
+                and close.group("fence")[0] == fence[0]
+                and len(close.group("fence")) >= len(fence)
+                and not close.group("info").strip()
+            ):
+                break
+            j += 1
+        stage_name = (
+            str(annotation[1].get("name") or annotation[1].get("stage"))
+            if annotation is not None and annotation[0] == "output"
+            else None
+        )
+        if stage_name is None or stage_name not in outputs:
+            out_lines += lines[i : j + 1]
+            i = j + 1
+            continue
+        body = outputs[stage_name]
+        new_body = [line + "\n" for line in body.splitlines()] if body else []
+        if lines[i + 1 : j] != new_body:
+            changed = True
+        out_lines.append(line)
+        out_lines += new_body
+        if j < len(lines):
+            out_lines.append(lines[j])
+        i = j + 1
+    return "".join(out_lines), changed

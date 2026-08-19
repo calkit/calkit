@@ -1427,6 +1427,91 @@ STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
 
 
+def _inject_markdown_stage_output(log_content: str) -> list[str]:
+    """Write each stage's output into its Markdown file's output blocks.
+
+    This is post-processing rather than a stage output: two stages in one
+    file would both claim the Markdown, and DVC forbids two stages
+    producing the same path. Output blocks are never read back when
+    extracting scripts, so writing one can't make its stage stale.
+
+    Returns the paths of the Markdown files that changed.
+    """
+    import calkit.markdown
+
+    stdout_by_stage = _stage_stdout_from_log_content(log_content)
+    if not stdout_by_stage:
+        return []
+    ck_info = calkit.load_calkit_info()
+    md_targets = calkit.markdown.get_markdown_stage_targets(ck_info)
+    if not md_targets:
+        return []
+    sep = calkit.markdown.STAGE_NAME_SEPARATOR
+    # Group by Markdown file so each is read and written once
+    by_path: dict[str, dict[str, str]] = {}
+    for dvc_stage_name, output in stdout_by_stage.items():
+        if sep not in dvc_stage_name:
+            continue
+        md_stage_name, block_name = dvc_stage_name.rsplit(sep, 1)
+        match = md_targets.get(md_stage_name)
+        if match is None:
+            continue
+        by_path.setdefault(match[1], {})[block_name] = output
+    changed_paths = []
+    for md_path, outputs in by_path.items():
+        if not os.path.isfile(md_path):
+            continue
+        with open(md_path, encoding="utf-8") as f:
+            text = f.read()
+        new_text, changed = calkit.markdown.set_output_blocks(text, outputs)
+        if changed:
+            with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(new_text)
+            changed_paths.append(md_path)
+    return changed_paths
+
+
+def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
+    """Collect each stage's captured standard output from a run log.
+
+    The run log already brackets stage output with the markers above, so
+    this reads what a stage printed without capturing it a second time.
+    Stages that ran but printed nothing map to an empty string, which is
+    what lets a stale output block be emptied rather than left wrong.
+    """
+    res: dict[str, list[str]] = {}
+    current_stage_name: str | None = None
+    in_stage_output = False
+    for line in log_content.splitlines():
+        if line == STAGE_OUTPUT_START:
+            in_stage_output = True
+            continue
+        if line.endswith(STAGE_OUTPUT_END):
+            # The marker shares its line with output that lacked a final
+            # newline, so keep whatever came before it
+            remainder = line.removesuffix(STAGE_OUTPUT_END)
+            if remainder and current_stage_name is not None:
+                res.setdefault(current_stage_name, []).append(remainder)
+            in_stage_output = False
+            continue
+        if in_stage_output:
+            if current_stage_name is not None:
+                res.setdefault(current_stage_name, []).append(line)
+            continue
+        ls = line.split(" -", maxsplit=2)
+        if len(ls) < 3:
+            continue
+        message = ls[2].strip()
+        if message.startswith("Running stage "):
+            current_stage_name = (
+                message.removeprefix("Running stage ").rstrip(":").strip("'")
+            )
+            # Recorded now so a stage that printed nothing is still known
+            # to have run
+            res.setdefault(current_stage_name, [])
+    return {name: "\n".join(lines) for name, lines in res.items()}
+
+
 def _stage_run_info_from_log_content(
     log_content: str, run_finished: bool = False
 ) -> dict:
@@ -2451,6 +2536,12 @@ def run(
         )
     else:
         failed = failed or res != 0
+    # Write what each stage printed back into any 'calkit output' blocks
+    # in the Markdown that declared it
+    try:
+        _inject_markdown_stage_output(log_content)
+    except Exception as e:
+        warn(f"Failed to write stage output into markdown: {e}")
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

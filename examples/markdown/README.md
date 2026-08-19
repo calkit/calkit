@@ -111,17 +111,26 @@ print("hello")
 Attribute values are YAML, so an output needing more than a path is
 written like `outputs=[{path: out.png, storage: git}]`.
 
-Longer declarations can go in an HTML comment just above the block, which
-is invisible when the file is rendered:
+When a declaration gets too long to sit comfortably on the fence, it can
+go in an HTML comment just above the block instead, which is invisible
+when the file is rendered.
+The comment attaches to the block directly below it, so this declares one
+stage, exactly as the version above does:
 
 ````md
-<!-- calkit stage
-     inputs=[data/one.csv, data/two.csv, data/three.csv] -->
+<!-- calkit stage name=example environment=main
+     inputs=[data/one.csv, data/two.csv, data/three.csv]
+     outputs=[out.png] -->
 
-```python calkit stage name=example environment=main
+```python
 print("hello")
 ```
 ````
+
+Note the fence carries no annotation there at all.
+Attributes can also be spread across both places, in which case they are
+simply combined; setting the same one twice is an error rather than one
+quietly winning.
 
 Note that the two blocks above are inside a longer fence, so they are
 shown rather than run.

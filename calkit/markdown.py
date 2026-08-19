@@ -453,11 +453,128 @@ def get_stage_script_path(
     """
     ext = LANGUAGE_EXTENSIONS[language]
     md_dir = os.path.dirname(markdown_path)
-    md_stem = os.path.basename(markdown_path).removesuffix(".md")
-    p = os.path.join(".calkit", "markdown", md_dir, md_stem, stage_name + ext)
+    # The extension is kept, so 'README.md' and 'README.markdown' don't
+    # both derive into a directory named 'README'
+    md_name = os.path.basename(markdown_path)
+    p = os.path.join(".calkit", "markdown", md_dir, md_name, stage_name + ext)
     if as_posix:
         p = Path(p).as_posix()
     return p
+
+
+def get_output_cache_path(
+    markdown_path: str, stage_name: str, as_posix: bool = True
+) -> str:
+    """Return the path caching what a stage's output block claims.
+
+    Stages depend on this rather than on it being an output, because
+    output is injected after the pipeline has already run---nothing the
+    stage command itself writes could satisfy an output declaration. As a
+    dependency, an output block edited by hand makes its stage stale,
+    which is what stops the file from quietly claiming something untrue.
+    """
+    md_dir = os.path.dirname(markdown_path)
+    md_name = os.path.basename(markdown_path)
+    p = os.path.join(
+        ".calkit", "markdown", "outputs", md_dir, md_name, stage_name + ".txt"
+    )
+    if as_posix:
+        p = Path(p).as_posix()
+    return p
+
+
+def extract_outputs(
+    blocks: list[MarkdownBlock], markdown_path: str
+) -> dict[str, str]:
+    """Collect the output blocks in a Markdown file, keyed by stage name."""
+    path = Path(markdown_path).as_posix()
+    outputs: dict[str, str] = {}
+    for block in blocks:
+        if block.kind != "output":
+            continue
+        # 'stage' reads better on an output block than 'name' would, since
+        # the block is not itself the stage
+        name = block.attrs.get("stage") or block.attrs.get("name")
+        if not name:
+            raise MarkdownParseError(
+                "An output block must name the stage it belongs to, e.g. "
+                "'calkit output stage=my-stage'",
+                path=path,
+                line=block.line,
+            )
+        if str(name) in outputs:
+            raise MarkdownParseError(
+                f"Stage '{name}' has more than one output block",
+                path=path,
+                line=block.line,
+            )
+        outputs[str(name)] = block.content
+    return outputs
+
+
+def write_output_caches(
+    outputs: dict[str, str], markdown_path: str, wdir: str | None = None
+) -> dict[str, str]:
+    """Write each output block's content to its cache file.
+
+    Returns a map of stage name -> cache path.
+    """
+    paths = {}
+    for stage_name, content in outputs.items():
+        rel = get_output_cache_path(markdown_path, stage_name)
+        paths[stage_name] = rel
+        fpath = os.path.join(wdir, rel) if wdir is not None else rel
+        text = (
+            content
+            if content.endswith("\n") or not content
+            else (content + "\n")
+        )
+        if os.path.isfile(fpath):
+            with open(fpath, encoding="utf-8") as f:
+                if f.read() == text:
+                    continue
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        with open(fpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    return paths
+
+
+def prune_derived_files(
+    markdown_path: str,
+    stage_names: list[str],
+    output_stage_names: list[str],
+    wdir: str | None = None,
+) -> list[str]:
+    """Delete derived files for stages the Markdown no longer declares.
+
+    Renaming or removing a stage would otherwise leave its extracted
+    script and cached output behind, where they look like part of the
+    project.
+    """
+    md_dir = os.path.dirname(markdown_path)
+    md_name = os.path.basename(markdown_path)
+    expected = {
+        os.path.join(".calkit", "markdown", md_dir, md_name): {
+            name + ext
+            for name in stage_names
+            for ext in set(LANGUAGE_EXTENSIONS.values())
+        },
+        os.path.join(".calkit", "markdown", "outputs", md_dir, md_name): {
+            name + ".txt" for name in output_stage_names
+        },
+    }
+    removed = []
+    for rel_dir, keep in expected.items():
+        dpath = os.path.join(wdir, rel_dir) if wdir is not None else rel_dir
+        if not os.path.isdir(dpath):
+            continue
+        for fname in sorted(os.listdir(dpath)):
+            fpath = os.path.join(dpath, fname)
+            if not os.path.isfile(fpath) or fname in keep:
+                continue
+            os.remove(fpath)
+            removed.append(Path(os.path.join(rel_dir, fname)).as_posix())
+    return removed
 
 
 def extract_stages(
@@ -600,12 +717,24 @@ ENV_SPEC_FILENAMES: dict[str, str] = {
 # Which environment kind a stage's language implies, so a Markdown file
 # declaring one environment for R or Julia code needn't spell it out.
 LANGUAGE_ENV_KINDS: dict[str, str] = {
-    "python": "uv-venv",
-    "py": "uv-venv",
+    # uv over uv-venv for Python: near enough the same interface, with a
+    # better lock file
+    "python": "uv",
+    "py": "uv",
     "r": "renv",
     "julia": "julia",
     "jl": "julia",
 }
+
+
+def _env_definition(env: dict) -> dict:
+    """Return the parts of an environment that define it.
+
+    The description is a generated annotation saying where the
+    environment came from, so two entries differing only there are the
+    same environment.
+    """
+    return {k: v for k, v in dict(env).items() if k != "description"}
 
 
 def get_env_spec_path(
@@ -623,7 +752,9 @@ def get_env_spec_path(
     return p
 
 
-def render_env_spec(kind: str, content: str, env_name: str) -> str:
+def render_env_spec(
+    kind: str, content: str, env_name: str, python: str | None = None
+) -> str:
     """Render a Markdown environment block into its spec file's content.
 
     A fenced block is taken verbatim, since that's the escape hatch for
@@ -638,8 +769,9 @@ def render_env_spec(kind: str, content: str, env_name: str) -> str:
         return content
     deps = [line.strip() for line in content.splitlines() if line.strip()]
     if kind == "uv":
+        kwargs = {} if python is None else {"python_version": python}
         return calkit.environments.create_uv_pyproject_content(
-            deps, project_name=env_name
+            deps, project_name=env_name, **kwargs
         )
     if kind == "renv":
         return calkit.environments.create_r_description_content(
@@ -694,6 +826,12 @@ def extract_environments(
         python = attrs.pop("python", None)
         if python is not None:
             env["python"] = str(python)
+        julia = attrs.pop("julia", None)
+        if julia is not None:
+            env["_julia"] = str(julia)
+        description = attrs.pop("description", None)
+        if description is not None:
+            env["description"] = str(description)
         if attrs:
             raise MarkdownParseError(
                 f"Environment '{name}' has unrecognized attribute(s): "
@@ -746,21 +884,53 @@ def resolve_environments(
                     path=path,
                     line=env["_line"],
                 )
-            kind = kinds.pop() if kinds else "uv-venv"
+            kind = kinds.pop() if kinds else "uv"
             env["_kind"] = kind
-        if env.get("python") is not None and kind not in ("uv-venv", "uv"):
+        python = env.pop("python", None)
+        if python is not None and kind not in ("uv-venv", "uv"):
             raise MarkdownParseError(
                 f"Environment '{name}' is a '{kind}' environment, which "
                 "takes no 'python' version",
                 path=path,
                 line=env["_line"],
             )
+        # A uv environment has no 'python' field; its version is declared
+        # by the pyproject.toml the spec is rendered into.
+        if python is not None and kind == "uv-venv":
+            env["python"] = python
+        if python is not None and kind == "uv":
+            env["_python"] = python
+        julia = env.pop("_julia", None)
+        if julia is not None and kind != "julia":
+            raise MarkdownParseError(
+                f"Environment '{name}' is a '{kind}' environment, which "
+                "takes no 'julia' version",
+                path=path,
+                line=env["_line"],
+            )
+        if kind == "julia":
+            if julia is None:
+                raise MarkdownParseError(
+                    f"Environment '{name}' is a Julia environment, which "
+                    "needs a version, e.g. 'calkit environment "
+                    f"name={name} julia=1.12'",
+                    path=path,
+                    line=env["_line"],
+                )
+            env["julia"] = julia
         env["kind"] = kind
         env["path"] = get_env_spec_path(name, kind=kind)
+        # Say where this came from in the environment itself rather than a
+        # YAML comment, which a user could delete without the notice being
+        # restored. This mirrors the 'desc' Calkit writes on DVC stages.
+        env.setdefault(
+            "description",
+            f"Generated from {path}. Changes made here will be overwritten.",
+        )
         env["_spec_content"] = (
             env["_content"]
             if env["_verbatim"]
-            else render_env_spec(kind, env["_content"], name)
+            else render_env_spec(kind, env["_content"], name, python=python)
         )
     return envs
 
@@ -773,6 +943,23 @@ def write_env_specs(envs: dict[str, dict], wdir: str | None = None) -> None:
     compile.
     """
     for env in envs.values():
+        # uv resolves its interpreter from a .python-version in the project
+        # directory. Without one the version only floats above the
+        # requires-python floor, so the environment isn't really pinned.
+        python = env.get("_python")
+        if python is not None:
+            pv_path = os.path.join(
+                os.path.dirname(env["path"]), ".python-version"
+            )
+            if wdir is not None:
+                pv_path = os.path.join(wdir, pv_path)
+            pv_content = str(python) + "\n"
+            if not os.path.isfile(pv_path) or (
+                open(pv_path, encoding="utf-8").read() != pv_content
+            ):
+                os.makedirs(os.path.dirname(pv_path), exist_ok=True)
+                with open(pv_path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(pv_content)
         content = env["_spec_content"]
         if not content.endswith("\n"):
             content += "\n"
@@ -797,6 +984,10 @@ class MarkdownExpansion:
     # Environment name -> definition, and the file that declared it
     environments: dict[str, dict] = field(default_factory=dict)
     environment_sources: dict[str, str] = field(default_factory=dict)
+    # Pipeline stage name -> path caching that stage's output block
+    output_cache_paths: dict[str, str] = field(default_factory=dict)
+    # Derived files deleted because the Markdown no longer declares them
+    removed_paths: list[str] = field(default_factory=list)
 
 
 def expand_ck_info(
@@ -866,9 +1057,11 @@ def expand_ck_info(
         for env_name, env in envs.items():
             public = {k: v for k, v in env.items() if not k.startswith("_")}
             existing = out_envs.get(env_name)
-            # An identical entry is this same definition written back on an
-            # earlier compile, not a competing one.
-            if existing is not None and dict(existing) != public:
+            # An identical entry is this same definition written back on
+            # an earlier compile, not a competing one.
+            if existing is not None and _env_definition(
+                existing
+            ) != _env_definition(public):
                 raise ValueError(
                     f"Environment '{env_name}' is declared in '{md_path}' "
                     "and differently in calkit.yaml; it can only be defined "
@@ -880,6 +1073,29 @@ def expand_ck_info(
         write_env_specs(envs, wdir=wdir)
         write_stage_scripts(specs, wdir=wdir)
         result.script_paths += [s.script_path for s in specs.values()]
+        # An output block is cached to a file the stage depends on, so
+        # editing the block by hand makes the stage stale rather than
+        # leaving the file quietly claiming something untrue.
+        outputs = extract_outputs(blocks, md_path)
+        unknown = set(outputs) - set(specs)
+        if unknown:
+            raise ValueError(
+                f"{md_path} has output block(s) for stage(s) that it does "
+                f"not declare: {', '.join(sorted(unknown))}"
+            )
+        output_cache_paths = write_output_caches(outputs, md_path, wdir=wdir)
+        result.output_cache_paths.update(
+            {
+                stage_name + STAGE_NAME_SEPARATOR + name: path
+                for name, path in output_cache_paths.items()
+            }
+        )
+        result.removed_paths += prune_derived_files(
+            md_path,
+            stage_names=list(specs),
+            output_stage_names=list(outputs),
+            wdir=wdir,
+        )
         for spec in specs.values():
             sub_name = stage_name + STAGE_NAME_SEPARATOR + spec.name
             if sub_name in out_stages:
@@ -894,6 +1110,9 @@ def expand_ck_info(
             if md_cfg.get("wdir") is not None:
                 sub["wdir"] = md_cfg["wdir"]
             sub.update(spec.attrs)
+            cache_path = output_cache_paths.get(spec.name)
+            if cache_path is not None:
+                sub["inputs"] = list(sub.get("inputs", [])) + [cache_path]
             if "environment" not in sub:
                 sub["environment"] = default_env or "_system"
             if spec.stage_kind == "shell-script" and "shell" not in sub:

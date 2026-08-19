@@ -245,7 +245,7 @@ pass
     assert ex.content == "import os\n\nprint(os.getcwd())"
     # Attributes union across the stage's blocks
     assert ex.attrs == {"environment": "main", "outputs": ["fig.png"]}
-    assert ex.script_path == ".calkit/markdown/README/ex.py"
+    assert ex.script_path == ".calkit/markdown/README.md/ex.py"
     assert ex.stage_kind == "python-script"
 
 
@@ -254,7 +254,7 @@ def test_extract_stages_nested_markdown_path():
 
     text = "```python calkit stage name=ex environment=main\npass\n```\n"
     specs = extract_stages(parse_markdown(text), "docs/guide.md")
-    assert specs["ex"].script_path == ".calkit/markdown/docs/guide/ex.py"
+    assert specs["ex"].script_path == ".calkit/markdown/docs/guide.md/ex.py"
 
 
 def test_extract_stages_rejects_mixed_languages():
@@ -309,9 +309,9 @@ def test_write_stage_scripts_only_rewrites_on_change(tmp_path):
     text = "```python calkit stage name=ex environment=main\nprint(1)\n```\n"
     specs = extract_stages(parse_markdown(text), "README.md")
     assert write_stage_scripts(specs, wdir=str(tmp_path)) == [
-        ".calkit/markdown/README/ex.py"
+        ".calkit/markdown/README.md/ex.py"
     ]
-    fpath = tmp_path / ".calkit" / "markdown" / "README" / "ex.py"
+    fpath = tmp_path / ".calkit" / "markdown" / "README.md" / "ex.py"
     assert fpath.read_text() == "print(1)\n"
     # A stage script is a dependency, so an unchanged one must not be
     # touched or the stage would rerun for nothing
@@ -336,7 +336,7 @@ The `main` environment needs:
 
 And a second one, with pins the list form would make awkward:
 
-<!-- calkit environment name=pinned -->
+<!-- calkit environment name=pinned kind=uv-venv -->
 ```
 pandas==2.0.0
 -e .
@@ -352,10 +352,18 @@ pass
         extract_stages(blocks, "README.md"),
         "README.md",
     )
-    assert envs["main"]["kind"] == "uv-venv"
-    assert envs["main"]["path"] == ".calkit/envs/main/requirements.txt"
-    assert envs["main"]["python"] == "3.13"
-    assert envs["main"]["_spec_content"] == "numpy\nmatplotlib"
+    # Python defaults to uv, whose lock is nicer than uv-venv's
+    assert envs["main"]["kind"] == "uv"
+    assert envs["main"]["path"] == ".calkit/envs/main/pyproject.toml"
+    # A uv environment has no 'python' field; the version goes into the
+    # pyproject.toml the spec is rendered into
+    assert "python" not in envs["main"]
+    assert "3.13" in envs["main"]["_spec_content"]
+    assert "numpy" in envs["main"]["_spec_content"]
+    assert "matplotlib" in envs["main"]["_spec_content"]
+    # A fence is written verbatim, so a requirements-style list has to say
+    # which kind it is
+    assert envs["pinned"]["kind"] == "uv-venv"
     # A fence is kept verbatim, since it's the escape hatch for whatever
     # the list form can't say
     assert envs["pinned"]["_spec_content"] == "pandas==2.0.0\n-e ."
@@ -369,13 +377,14 @@ def test_resolve_environments_infers_kind_from_language():
         resolve_environments,
     )
 
-    for language, kind, filename in [
-        ("r", "renv", "DESCRIPTION"),
-        ("julia", "julia", "Project.toml"),
-        ("python", "uv-venv", "requirements.txt"),
+    for language, kind, filename, extra in [
+        ("r", "renv", "DESCRIPTION", ""),
+        # Calkit requires a version for Julia environments
+        ("julia", "julia", "Project.toml", " julia=1.12"),
+        ("python", "uv", "pyproject.toml", ""),
     ]:
         text = (
-            "<!-- calkit environment name=main -->\n"
+            f"<!-- calkit environment name=main{extra} -->\n"
             "- somepkg\n\n"
             f"```{language} calkit stage name=demo\n"
             "x\n```\n"
@@ -467,17 +476,15 @@ def test_expand_ck_info(tmp_path, monkeypatch):
     assert list(stages) == ["README.md/demo"]
     stage = stages["README.md/demo"]
     assert stage["kind"] == "python-script"
-    assert stage["script_path"] == ".calkit/markdown/README/demo.py"
+    assert stage["script_path"] == ".calkit/markdown/README.md/demo.py"
     assert stage["outputs"] == ["out.txt"]
     # A file declaring exactly one environment doesn't have to name it on
     # every block
     assert stage["environment"] == "main"
-    assert result.ck_info["environments"]["main"]["kind"] == "uv-venv"
-    assert result.environments["main"]["python"] == "3.12"
+    assert result.ck_info["environments"]["main"]["kind"] == "uv"
     assert result.environment_sources["main"] == "README.md"
-    assert (tmp_path / ".calkit/envs/main/requirements.txt").read_text() == (
-        "numpy\n"
-    )
+    spec = (tmp_path / ".calkit/envs/main/pyproject.toml").read_text()
+    assert "numpy" in spec and "3.12" in spec
 
 
 def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
@@ -497,10 +504,13 @@ def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
     # An identical entry is this definition written back on an earlier
     # compile, not a competing one
     ck_info["environments"]["main"] = {
-        "kind": "uv-venv",
-        "path": ".calkit/envs/main/requirements.txt",
+        "kind": "uv",
+        "path": ".calkit/envs/main/pyproject.toml",
+        "description": (
+            "Generated from README.md. Changes made here will be overwritten."
+        ),
     }
-    assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv-venv"
+    assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv"
 
 
 def test_detect_environments_merges_by_language():
@@ -522,12 +532,9 @@ def test_detect_environments_merges_by_language():
     # Both Python stages share one environment, with dependencies merged
     # and de-duplicated
     assert assignments == {"a": "readme-py", "b": "readme-py", "c": "readme-r"}
-    assert envs["readme-py"]["kind"] == "uv-venv"
-    assert envs["readme-py"]["_spec_content"].split() == [
-        "numpy",
-        "pandas",
-        "matplotlib",
-    ]
+    assert envs["readme-py"]["kind"] == "uv"
+    for dep in ["numpy", "pandas", "matplotlib"]:
+        assert dep in envs["readme-py"]["_spec_content"]
     assert envs["readme-r"]["kind"] == "renv"
     assert "dplyr" in envs["readme-r"]["_spec_content"]
     # Shell has no imports to read, so it keeps whatever it was given
@@ -614,3 +621,151 @@ def test_set_output_blocks_ignores_nested_fences():
         "````md\n```text calkit output stage=a\nnot a real block\n```\n````\n"
     )
     assert set_output_blocks(text, {"a": "new"}) == (text, False)
+
+
+def test_extract_outputs():
+    from calkit.markdown import extract_outputs
+
+    text = (
+        "```python calkit stage name=a\nprint('x')\n```\n\n"
+        "```text calkit output stage=a\nx\n```\n"
+    )
+    assert extract_outputs(parse_markdown(text), "README.md") == {"a": "x"}
+    with pytest.raises(MarkdownParseError, match="must name the stage"):
+        extract_outputs(
+            parse_markdown("```text calkit output\nx\n```\n"), "README.md"
+        )
+    with pytest.raises(MarkdownParseError, match="more than one output"):
+        extract_outputs(
+            parse_markdown(
+                "```text calkit output stage=a\nx\n```\n\n"
+                "```text calkit output stage=a\ny\n```\n"
+            ),
+            "README.md",
+        )
+
+
+def test_expand_ck_info_output_cache_is_an_input(tmp_path, monkeypatch):
+    """A stage depends on its output block, so editing it makes it stale.
+
+    The cache can't be an output: injection happens after the pipeline
+    runs, so nothing the stage command itself does would satisfy one.
+    """
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "```python calkit stage name=a environment=main\nprint('x')\n```\n\n"
+        "```text calkit output stage=a\nx\n```\n\n"
+        "```python calkit stage name=b environment=main\npass\n```\n"
+    )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    result = expand_ck_info(ck_info)
+    cache = ".calkit/markdown/outputs/README.md/a.txt"
+    stages = result.ck_info["pipeline"]["stages"]
+    assert stages["README.md/a"]["inputs"] == [cache]
+    assert result.output_cache_paths == {"README.md/a": cache}
+    # The cache holds exactly what the block says
+    assert (tmp_path / cache).read_text() == "x\n"
+    # A stage with no output block gets no such input
+    assert stages["README.md/b"].get("inputs", []) == []
+
+
+def test_expand_ck_info_rejects_output_for_unknown_stage(
+    tmp_path, monkeypatch
+):
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "```python calkit stage name=a environment=main\npass\n```\n\n"
+        "```text calkit output stage=typo\nx\n```\n"
+    )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    with pytest.raises(ValueError, match="does not declare"):
+        expand_ck_info(ck_info)
+
+
+def test_expand_ck_info_prunes_orphaned_derived_files(tmp_path, monkeypatch):
+    """Renaming a stage must not leave its old script and cache behind."""
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    md = tmp_path / "README.md"
+    md.write_text(
+        "```python calkit stage name=old environment=main\nprint('x')\n```\n\n"
+        "```text calkit output stage=old\nx\n```\n"
+    )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    expand_ck_info(ck_info)
+    assert (tmp_path / ".calkit/markdown/README.md/old.py").is_file()
+    assert (tmp_path / ".calkit/markdown/outputs/README.md/old.txt").is_file()
+    md.write_text(
+        "```python calkit stage name=new environment=main\nprint('x')\n```\n\n"
+        "```text calkit output stage=new\nx\n```\n"
+    )
+    result = expand_ck_info(ck_info)
+    assert not (tmp_path / ".calkit/markdown/README.md/old.py").exists()
+    assert not (
+        tmp_path / ".calkit/markdown/outputs/README.md/old.txt"
+    ).exists()
+    assert (tmp_path / ".calkit/markdown/README.md/new.py").is_file()
+    assert sorted(result.removed_paths) == [
+        ".calkit/markdown/README.md/old.py",
+        ".calkit/markdown/outputs/README.md/old.txt",
+    ]
+
+
+def test_expand_ck_info_env_description_says_it_is_generated(
+    tmp_path, monkeypatch
+):
+    """The notice lives in the environment, not a YAML comment.
+
+    A comment is easy to delete without it ever coming back; a
+    description is data, and is rewritten on every compile.
+    """
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "<!-- calkit environment name=main -->\n- numpy\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    env = expand_ck_info(ck_info).environments["main"]
+    assert env["description"] == (
+        "Generated from README.md. Changes made here will be overwritten."
+    )
+    # An author's own description wins
+    (tmp_path / "README.md").write_text(
+        '<!-- calkit environment name=main description="Mine" -->\n'
+        "- numpy\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    assert expand_ck_info(ck_info).environments["main"]["description"] == (
+        "Mine"
+    )
+
+
+def test_expand_ck_info_description_alone_is_not_a_conflict(
+    tmp_path, monkeypatch
+):
+    """A differing description must not read as a competing definition."""
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "<!-- calkit environment name=main -->\n- numpy\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    ck_info = {
+        "environments": {
+            "main": {
+                "kind": "uv",
+                "path": ".calkit/envs/main/pyproject.toml",
+                "description": "something a user typed",
+            }
+        },
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+    }
+    assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv"

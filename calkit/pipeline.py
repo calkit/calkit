@@ -1215,7 +1215,7 @@ def _write_markdown_environments(
     environment code path working unchanged.
 
     The Markdown stays authoritative: these entries are rewritten from it
-    on every compile, so editing them in ``calkit.yaml`` has no effect.
+    on every compile, and each carries a ``description`` saying so.
 
     Returns True if ``calkit.yaml`` was modified.
     """
@@ -1225,11 +1225,7 @@ def _write_markdown_environments(
     with open(ck_yaml_path) as f:
         data = calkit.ryaml.load(f) or {}
     if "environments" not in data or data["environments"] is None:
-        # A plain dict would lose the generated-from comment below, since
-        # only ruamel's mapping carries comments.
-        from ruamel.yaml.comments import CommentedMap
-
-        data["environments"] = CommentedMap()
+        data["environments"] = {}
     envs = data["environments"]
     changed = False
     for env_name, env in markdown.environments.items():
@@ -1237,21 +1233,6 @@ def _write_markdown_environments(
             continue
         envs[env_name] = env
         changed = True
-        source = markdown.environment_sources.get(env_name)
-        if source is not None and hasattr(
-            envs, "yaml_set_comment_before_after_key"
-        ):
-            try:
-                envs.yaml_set_comment_before_after_key(
-                    env_name,
-                    before=(
-                        f"Generated from {source}; edits here are overwritten"
-                    ),
-                    indent=2,
-                )
-            except Exception:
-                # A comment is a nicety; never fail a compile over one
-                pass
     if changed:
         _dump_yaml_if_changed(data, ck_yaml_path)
     return changed
@@ -1362,14 +1343,30 @@ def to_dvc(
     ck_info = markdown.ck_info
     if write and markdown.environments:
         _write_markdown_environments(markdown, wdir=wdir)
-    # Extracted scripts are derived from the Markdown and rewritten on every
-    # compile, so they stay out of Git. One managed block covers them all,
-    # which avoids a git check-ignore subprocess per script.
+    # Everything Markdown derives is rewritten on every compile, so it
+    # stays out of Git: the extracted scripts, and the spec file and
+    # virtualenv of any environment the Markdown declares. One managed
+    # block covers them all, which avoids a git check-ignore subprocess
+    # per path.
     if write and manage_gitignore and markdown.script_paths:
+        ignore_lines = ["/.calkit/markdown/"]
+        for env_name in sorted(markdown.environments):
+            env_dir = f"/.calkit/envs/{env_name}"
+            spec_name = os.path.basename(
+                markdown.environments[env_name]["path"]
+            )
+            # Ignore only what is derived. The lock file lives in here too
+            # for a uv environment, and it is the reproducibility artifact,
+            # so it must stay tracked.
+            ignore_lines += [
+                f"{env_dir}/{spec_name}",
+                f"{env_dir}/.python-version",
+                f"{env_dir}/.venv/",
+            ]
         _write_managed_gitignore_block(
             os.path.join(wdir or ".", ".gitignore"),
-            marker="calkit markdown stage scripts",
-            lines=["/.calkit/markdown/"],
+            marker="calkit markdown derived files",
+            lines=ignore_lines,
         )
     # Compile subproject pipelines recursively.
     # For isolated subprojects (those with their own .dvc/ directory), DVC

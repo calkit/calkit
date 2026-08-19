@@ -485,6 +485,37 @@ def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
     return {"pid": pid, "cmd": cmd}
 
 
+def dvc_init_needs_subdir(wdir: str | None = None) -> bool:
+    """Return whether ``dvc init`` here needs ``--subdir``.
+
+    DVC refuses to initialize inside an existing Git repository unless it
+    is told the project is a subdirectory of one, which is the case for a
+    self-contained example living inside a larger repo.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(wdir) if wdir else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        # No Git repo at all; the caller creates one here, so this becomes
+        # the root and no --subdir is needed.
+        return False
+    root = repo.working_tree_dir
+    if root is None:
+        return False
+    return os.path.realpath(root) != os.path.realpath(base)
+
+
+def dvc_init_args(wdir: str | None = None) -> list[str]:
+    """Return the arguments for initializing a DVC repo in ``wdir``."""
+    args = ["init"]
+    if dvc_init_needs_subdir(wdir=wdir):
+        args.append("--subdir")
+    return args
+
+
 def run_dvc_command(
     argv: list[str],
     cwd: str | None = None,

@@ -1,0 +1,28 @@
+owner: calkit
+name: example-markdown
+title: Runnable README Calkit example
+description: >-
+  A Calkit example project whose entire pipeline and environment are
+  declared in its README.
+
+requirements:
+  - uv
+
+pipeline:
+  stages:
+    README.md:
+      kind: markdown
+environments:
+  main:
+    kind: uv
+    path: .calkit/envs/main/pyproject.toml
+    description: Generated from README.md. Changes made here will be overwritten.
+  jl:
+    julia: '1.12'
+    kind: julia
+    path: .calkit/envs/jl/Project.toml
+    description: Generated from README.md. Changes made here will be overwritten.
+  r:
+    kind: renv
+    path: .calkit/envs/r/DESCRIPTION
+    description: Generated from README.md. Changes made here will be overwritten.

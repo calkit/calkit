@@ -1,0 +1,86 @@
+schema: '2.0'
+stages:
+  README.md/analysis:
+    cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/analysis.py
+    deps:
+    - path: .calkit/envs/main/uv.lock
+      hash: md5
+      md5: 6de2015a5eb1a5ebc51f85e4f894a238
+      size: 90981
+    - path: .calkit/markdown/README.md/analysis.py
+      hash: md5
+      md5: ef6274d4d1082f7a53ec12e7bfbc306f
+      size: 390
+    - path: .calkit/markdown/outputs/README.md/analysis.txt
+      hash: md5
+      md5: 91168b0969537d0b481356f4826a275e
+      size: 49
+    outs:
+    - path: data/data.csv
+      hash: md5
+      md5: 08fdae643712833dd7b1312e57037833
+      size: 2509
+  README.md/figure:
+    cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/figure.py
+    deps:
+    - path: .calkit/envs/main/uv.lock
+      hash: md5
+      md5: 6de2015a5eb1a5ebc51f85e4f894a238
+      size: 90981
+    - path: .calkit/markdown/README.md/figure.py
+      hash: md5
+      md5: 533ffb2a053b12bce7980402f12b23ee
+      size: 387
+    - path: data/data.csv
+      hash: md5
+      md5: 08fdae643712833dd7b1312e57037833
+      size: 2509
+    outs:
+    - path: figures/figure.png
+      hash: md5
+      md5: f1a102b0249339576dd14b183f248abf
+      size: 15541
+  README.md/julia:
+    cmd: calkit xenv -n jl --no-check -- ".calkit/markdown/README.md/julia.jl"
+    deps:
+    - path: .calkit/envs/jl/Manifest.toml
+      hash: md5
+      md5: ef8dc36217e3342a68276c5aa466e60d
+      size: 9289
+    - path: .calkit/markdown/README.md/julia.jl
+      hash: md5
+      md5: a3429d5df16d79ae8076b6472d3c6372
+      size: 176
+    - path: .calkit/markdown/outputs/README.md/julia.txt
+      hash: md5
+      md5: dfed521065704f94bc6e7e30f293fedd
+      size: 14
+    outs:
+    - path: data/data2.csv
+      hash: md5
+      md5: c01c2590da70d718a4a56e3a083bf8eb
+      size: 1008
+  README.md/r:
+    cmd: calkit xenv -n r --no-check -- Rscript .calkit/markdown/README.md/r.R
+    deps:
+    - path: .calkit/envs/r/renv.lock
+      hash: md5
+      md5: 5a12dedb93e6fd7c3cb3583db7a6b450
+      size: 39723
+    - path: .calkit/markdown/README.md/r.R
+      hash: md5
+      md5: bcef4d19723209aa568273387c316fa6
+      size: 275
+    - path: .calkit/markdown/outputs/README.md/r.txt
+      hash: md5
+      md5: 6bae8dd9a2583d26fd59432532bb47dc
+      size: 16
+    - path: data/data2.csv
+      hash: md5
+      md5: c01c2590da70d718a4a56e3a083bf8eb
+      size: 1008
+    outs:
+    - path: figures/data2.png
+      hash: md5
+      md5: 54449ad875676a734d4d9967bbd498e0
+      size: 34837

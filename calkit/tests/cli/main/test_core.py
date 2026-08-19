@@ -2373,3 +2373,35 @@ def test_stage_stdout_from_log_content():
     # A skipped stage produced no output this run, so it must not be
     # listed---its block should keep what it has
     assert "other" not in res
+
+
+def test_run_refuses_outside_a_project(tmp_dir):
+    """``calkit run`` must not initialize anything outside a project.
+
+    It initializes Git and DVC as needed, so a wrong working directory
+    would otherwise scatter a .dvc directory into an unrelated folder ---
+    and inside an existing Git repo that now succeeds, since DVC is told
+    the project is a subdirectory.
+    """
+    import subprocess
+
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "no calkit.yaml or dvc.yaml" in result.stderr.lower()
+    assert not os.path.exists(".dvc")
+    # Same inside an existing Git repo, which is the case that would now
+    # otherwise succeed rather than failing on DVC's own check
+    subprocess.check_call(["git", "init", "-q", "."])
+    os.makedirs("sub")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert not os.path.exists(os.path.join("sub", ".dvc"))
+    # A project with only a dvc.yaml is still a project
+    with open(os.path.join("sub", "dvc.yaml"), "w") as f:
+        f.write("stages: {}\n")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert "no calkit.yaml or dvc.yaml" not in result.stderr.lower()

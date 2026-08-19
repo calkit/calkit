@@ -2555,7 +2555,7 @@ def test_to_dvc_markdown_stage(tmp_dir):
     dvc_stages = to_dvc(ck_info=ck_info)
     assert list(dvc_stages) == ["README.md/example"]
     stage = dvc_stages["README.md/example"]
-    script_path = ".calkit/markdown/README/example.py"
+    script_path = ".calkit/markdown/README.md/example.py"
     assert script_path in stage["cmd"]
     assert script_path in stage["deps"]
     # The stage depends on its extracted script, not on the Markdown file,
@@ -2616,7 +2616,7 @@ def test_to_dvc_markdown_scripts_are_gitignored(tmp_dir):
     to_dvc(ck_info=ck_info, write=True)
     with open(".gitignore") as f:
         assert "/.calkit/markdown/" in f.read()
-    assert repo.ignored(".calkit/markdown/README/example.py")
+    assert repo.ignored(".calkit/markdown/README.md/example.py")
 
 
 def test_translate_run_targets_markdown(tmp_dir):
@@ -2682,10 +2682,18 @@ def test_sync_markdown_writes_environments(tmp_dir):
     sync_markdown()
     written = calkit.load_calkit_info()
     assert written["environments"]["main"] == {
-        "kind": "uv-venv",
-        "path": ".calkit/envs/main/requirements.txt",
-        "python": "3.12",
+        "kind": "uv",
+        "path": ".calkit/envs/main/pyproject.toml",
+        # Recorded as data rather than a YAML comment, which a user could
+        # delete without it ever being restored
+        "description": (
+            "Generated from README.md. Changes made here will be overwritten."
+        ),
     }
+    # uv.lock records only a requires-python floor, so the interpreter
+    # would otherwise float; .python-version is what actually pins it
+    with open(".calkit/envs/main/.python-version") as f:
+        assert f.read() == "3.12\n"
     # The markdown stage itself stays; only the environment is written back
     assert list(written["pipeline"]["stages"]) == ["README.md"]
     # Running again changes nothing
@@ -2694,3 +2702,33 @@ def test_sync_markdown_writes_environments(tmp_dir):
     sync_markdown()
     with open("calkit.yaml") as f:
         assert f.read() == before
+
+
+def test_to_dvc_markdown_ignores_derived_env_dirs(tmp_dir):
+    """A Markdown-declared environment's venv must not land in Git.
+
+    It goes under .calkit/envs/{name}/, which a stock Python .gitignore
+    doesn't cover, and calkit init doesn't seed one.
+    """
+    import git
+
+    import calkit
+    from calkit.pipeline import to_dvc
+
+    repo = git.Repo.init()
+    with open("README.md", "w") as f:
+        f.write(
+            "<!-- calkit environment name=main -->\n- numpy\n\n"
+            "```python calkit stage name=demo\npass\n```\n"
+        )
+    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    to_dvc(ck_info=ck_info, write=True)
+    assert repo.ignored(".calkit/envs/main/.venv/pyvenv.cfg")
+    assert repo.ignored(".calkit/envs/main/pyproject.toml")
+    assert repo.ignored(".calkit/markdown/README.md/demo.py")
+    # Lock files are the reproducibility artifact and must stay tracked,
+    # including uv's, which lives in the same directory as the derived spec
+    assert not repo.ignored(".calkit/envs/main/uv.lock")
+    assert not repo.ignored(".calkit/env-locks/main")

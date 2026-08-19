@@ -434,3 +434,27 @@ def test_run_dvc_command_lock_timeout(monkeypatch):
     rc = calkit.dvc.run_dvc_command(["pull"])
     assert rc == 0
     assert seen["timeout"] == base
+
+
+def test_dvc_init_args_detects_subdir(tmp_path, monkeypatch):
+    """DVC won't initialize inside a Git repo unless told it's a subdir.
+
+    A self-contained project living within a larger repo is exactly that
+    case, and getting it wrong leaves the user with a Git error.
+    """
+    import subprocess
+
+    import calkit.dvc
+
+    monkeypatch.chdir(tmp_path)
+    # No Git repo at all: the caller creates one here, so this is the root
+    assert calkit.dvc.dvc_init_args() == ["init"]
+    subprocess.check_call(["git", "init", "-q", "."])
+    assert calkit.dvc.dvc_init_args() == ["init"]
+    sub = tmp_path / "examples" / "demo"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    assert calkit.dvc.dvc_init_args() == ["init", "--subdir"]
+    # An explicit wdir is honored rather than the process's cwd
+    monkeypatch.chdir(tmp_path)
+    assert calkit.dvc.dvc_init_args(wdir=str(sub)) == ["init", "--subdir"]

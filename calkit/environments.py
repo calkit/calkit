@@ -1697,13 +1697,19 @@ if isempty(registries)
 end
 
 for pkg in packages
-    entry = nothing
     for reg in registries
-        entry = Pkg.Registry.find(reg, pkg)
-        if entry !== nothing
-            println(pkg * "=" * string(entry.uuid))
-            break
+        found = false
+        # Scan the registry's own package table rather than calling a
+        # lookup helper; Pkg.Registry.find was removed in Julia 1.12, and
+        # calling it failed for every package, silently.
+        for (uuid, entry) in reg.pkgs
+            if entry.name == pkg
+                println(pkg * "=" * string(uuid))
+                found = true
+                break
+            end
         end
+        found && break
     end
 end
 """

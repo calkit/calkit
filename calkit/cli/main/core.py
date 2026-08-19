@@ -230,8 +230,11 @@ def init(
     from git.exc import InvalidGitRepositoryError
 
     def _project_is_initialized() -> bool:
+        # Parent directories count, since a project can be a self-contained
+        # directory inside a larger repo and so has no .git of its own. What
+        # makes it initialized is its own DVC repo and calkit.yaml.
         try:
-            git.Repo(".", search_parent_directories=False)
+            git.Repo(".", search_parent_directories=True)
         except InvalidGitRepositoryError:
             return False
         return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
@@ -241,9 +244,17 @@ def init(
             "This project is already initialized. "
             "Use --force to re-initialize."
         )
-    subprocess.run(["git", "init"])
+    # Only create a Git repo if we're not already inside one; a project
+    # can be a self-contained directory within a larger repo, and nesting
+    # a second repo there hides its contents from the outer one.
+    try:
+        calkit.git.get_repo()
+    except InvalidGitRepositoryError:
+        subprocess.run(["git", "init"])
+    # DVC refuses to initialize inside an existing Git repo unless told the
+    # project is a subdirectory of one, so work out which case this is.
     result = calkit.dvc.run_dvc_command(
-        ["init"] + (["--force"] if force else [])
+        calkit.dvc.dvc_init_args() + (["--force"] if force else [])
     )
     if result != 0:
         raise_error("Failed to initialize DVC")
@@ -251,15 +262,17 @@ def init(
     result = calkit.dvc.run_dvc_command(["config", "core.autostage", "true"])
     if result != 0:
         raise_error("Failed to configure DVC autostage")
-    # Commit the newly created .dvc directory
+    # Commit the newly created .dvc directory. Paths are made absolute
+    # because Git resolves them against the repo root, which is not this
+    # directory when the project is a subdirectory of a larger repo.
     repo = calkit.git.get_repo()
-    repo.git.add(".dvc")
+    repo.git.add(os.path.abspath(".dvc"))
     if calkit.git.get_staged_files(repo=repo):
         repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         calkit.schema.ensure_modeline("calkit.yaml")
-        repo.git.add("calkit.yaml")
+        repo.git.add(os.path.abspath("calkit.yaml"))
         if calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
@@ -485,7 +498,9 @@ def get_status(
         if not os.path.isfile(os.path.join(".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                result = calkit.dvc.run_dvc_command(["init", "-q"])
+                result = calkit.dvc.run_dvc_command(
+                    calkit.dvc.dvc_init_args() + ["-q"]
+                )
                 if result != 0:
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
@@ -814,9 +829,26 @@ def add(
             typer.echo(
                 "This is not a DVC repository; would initialize DVC here"
             )
+        elif (
+            calkit.dvc.dvc_init_needs_subdir()
+            and not os.path.isfile("calkit.yaml")
+            and not os.path.isfile("dvc.yaml")
+        ):
+            # Bootstrapping a project from nothing is fine, and is what
+            # this does at the root of a new repo. What isn't fine is doing
+            # it in some subdirectory of an existing repo, which would put
+            # a .dvc directory wherever the user happened to be standing.
+            raise_error(
+                f"No calkit.yaml or dvc.yaml in {os.getcwd()}, which is a "
+                "subdirectory of an existing Git repository, so this is "
+                "not a project. Run 'calkit init' first, or change to the "
+                "project directory."
+            )
         else:
             warn("DVC not initialized yet; initializing")
-            dvc_repo = dvc.repo.Repo.init()
+            dvc_repo = dvc.repo.Repo.init(
+                subdir=calkit.dvc.dvc_init_needs_subdir()
+            )
     if not dry_run:
         # Ensure autostage is enabled for DVC
         calkit.dvc.run_dvc_command(
@@ -1468,6 +1500,16 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
             changed_paths.append(md_path)
+        # Keep each block's cache in step with the block itself. Read back
+        # from the written text rather than from what was injected, so the
+        # cache can only ever hold exactly what the file says.
+        calkit.markdown.write_output_caches(
+            calkit.markdown.extract_outputs(
+                calkit.markdown.parse_markdown(new_text, path=md_path),
+                md_path,
+            ),
+            md_path,
+        )
     return changed_paths
 
 
@@ -2110,6 +2152,17 @@ def run(
     if mock_scheduler:
         os.environ[calkit.cli.scheduler.MOCK_ENV_VAR] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    # Refuse to run anywhere that isn't a project. Everything below
+    # initializes Git and DVC as needed, so without this check a mistyped
+    # path or a wrong working directory would silently scatter a .dvc
+    # directory into an unrelated folder.
+    if not os.path.isfile("calkit.yaml") and not os.path.isfile("dvc.yaml"):
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(
+            f"No calkit.yaml or dvc.yaml in {os.getcwd()}, so there is no "
+            "pipeline to run here. Run 'calkit init' to make this a "
+            "project, or change to the project directory."
+        )
     ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.
     # Use search_parent_directories so running from a subproject folder
@@ -2256,7 +2309,7 @@ def run(
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        result = calkit.dvc.run_dvc_command(["init"])
+        result = calkit.dvc.run_dvc_command(calkit.dvc.dvc_init_args())
         if result != 0:
             raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names

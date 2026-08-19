@@ -1349,6 +1349,10 @@ def to_dvc(
         pipeline = Pipeline.model_validate(ck_info["pipeline"])
     except Exception as e:
         raise ValueError(f"Pipeline is not defined properly: {e}")
+    # Replace markdown stages with the stages their blocks declare, before
+    # anything downstream (env locks, scheduler options, iteration) looks at
+    # the stage list, so those need no knowledge of Markdown.
+    pipeline.expand_markdown_stages(wdir=wdir)
     conflicts = set(wrapper_stages) & set(pipeline.stages)
     if conflicts:
         raise ValueError(

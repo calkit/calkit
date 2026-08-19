@@ -2520,3 +2520,66 @@ def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
     # Scoped to what the pipeline declares: the source notebook a user cleans
     # on purpose keeps its filter.
     assert calkit.git.get_filter_driver(repo, nb_path) == "stripper"
+
+
+def test_to_dvc_markdown_stage(tmp_dir):
+    """A markdown stage expands into one DVC stage per named block."""
+    import calkit
+    from calkit.pipeline import to_dvc
+
+    with open("README.md", "w") as f:
+        f.write(
+            "Prose about the example.\n\n"
+            "```python calkit stage name=example environment=main "
+            "outputs=[figures/area.png]\n"
+            "import matplotlib\n"
+            "```\n\n"
+            "More prose, and an unannotated block that stays inert:\n\n"
+            "```sh\n"
+            "uv sync\n"
+            "```\n\n"
+            "```python calkit stage name=example\n"
+            "print('done')\n"
+            "```\n"
+        )
+    ck_info = {
+        "environments": {
+            "main": {"kind": "uv-venv", "path": "requirements.txt"}
+        },
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("requirements.txt", "w") as f:
+        f.write("matplotlib\n")
+    dvc_stages = to_dvc(ck_info=ck_info)
+    assert list(dvc_stages) == ["README.md@example"]
+    stage = dvc_stages["README.md@example"]
+    script_path = ".calkit/markdown/README/example.py"
+    assert script_path in stage["cmd"]
+    assert script_path in stage["deps"]
+    # The stage depends on its extracted script, not on the Markdown file,
+    # so editing prose doesn't invalidate it
+    assert "README.md" not in stage["deps"]
+    assert stage["outs"] == ["figures/area.png"]
+    # Blocks sharing a name concatenate in document order
+    with open(script_path) as f:
+        assert f.read() == "import matplotlib\n\nprint('done')\n"
+
+
+def test_to_dvc_markdown_stage_errors(tmp_dir):
+    import calkit
+    from calkit.pipeline import to_dvc
+
+    ck_info = {
+        "environments": {},
+        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with pytest.raises(ValueError, match="does not exist"):
+        to_dvc(ck_info=ck_info)
+    with open("README.md", "w") as f:
+        f.write("Just prose.\n\n```python\nprint(1)\n```\n")
+    with pytest.raises(ValueError, match="declares no stages"):
+        to_dvc(ck_info=ck_info)

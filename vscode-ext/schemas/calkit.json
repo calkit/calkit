@@ -2764,6 +2764,180 @@
       "title": "MarimoHtmlWasmStage",
       "type": "object"
     },
+    "MarkdownStage": {
+      "additionalProperties": false,
+      "description": "A stage sourced from a Markdown file's annotated code blocks.\n\nThis stands in for however many stages the file declares. It is\nreplaced by them at compile time (see\n``Pipeline.expand_markdown_stages``), so nothing downstream needs to\nknow Markdown was involved.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "description": "Environment used by blocks that don't name one.",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "markdown",
+          "default": "markdown",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path.",
+          "title": "Path"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "title": "MarkdownStage",
+      "type": "object"
+    },
     "MatlabCommandStage": {
       "additionalProperties": false,
       "properties": {
@@ -3538,6 +3712,7 @@
                 "latex": "#/$defs/LatexStage",
                 "map-paths": "#/$defs/MapPathsStage",
                 "marimo-html-wasm": "#/$defs/MarimoHtmlWasmStage",
+                "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
                 "python-script": "#/$defs/PythonScriptStage",
@@ -3604,6 +3779,9 @@
               },
               {
                 "$ref": "#/$defs/MarimoHtmlWasmStage"
+              },
+              {
+                "$ref": "#/$defs/MarkdownStage"
               }
             ]
           },

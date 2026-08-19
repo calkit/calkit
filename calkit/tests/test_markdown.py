@@ -1,0 +1,320 @@
+"""Tests for ``calkit.markdown``."""
+
+from __future__ import annotations
+
+import pytest
+
+from calkit.markdown import (
+    MarkdownParseError,
+    parse_attrs,
+    parse_markdown,
+)
+
+
+def test_parse_attrs():
+    assert parse_attrs("name=example environment=main") == {
+        "name": "example",
+        "environment": "main",
+    }
+    # Values are YAML flow scalars, so structure works without a bespoke
+    # grammar, spaces and all
+    assert parse_attrs("outputs=[{path: sup.png, storage: git}]") == {
+        "outputs": [{"path": "sup.png", "storage": "git"}]
+    }
+    assert parse_attrs("inputs=[a.csv, b.csv] name=x") == {
+        "inputs": ["a.csv", "b.csv"],
+        "name": "x",
+    }
+    # A bare key is a flag
+    assert parse_attrs("name=x always_run") == {
+        "name": "x",
+        "always_run": True,
+    }
+    assert parse_attrs('description="a thing with spaces"') == {
+        "description": "a thing with spaces"
+    }
+    assert parse_attrs("") == {}
+    with pytest.raises(ValueError, match="Duplicate"):
+        parse_attrs("name=a name=b")
+    with pytest.raises(ValueError, match="no value"):
+        parse_attrs("name= environment=main")
+    with pytest.raises(ValueError, match="Unbalanced"):
+        parse_attrs("outputs=[a.png")
+
+
+def test_unannotated_fences_are_inert():
+    text = """
+# Title
+
+```sh
+uv add something
+```
+
+```python
+print("just an example")
+```
+"""
+    assert parse_markdown(text) == []
+
+
+def test_parse_stage_fence():
+    text = """
+Some prose.
+
+```python calkit stage name=example environment=main outputs=[fig.png]
+print("hi")
+```
+"""
+    (block,) = parse_markdown(text)
+    assert block.kind == "stage"
+    assert block.language == "python"
+    assert block.name == "example"
+    assert block.attrs["outputs"] == ["fig.png"]
+    assert block.content == 'print("hi")'
+    assert block.source == "fence"
+
+
+def test_blocks_split_by_name():
+    text = """
+```python calkit stage name=ex environment=main
+import os
+```
+
+Prose in between.
+
+```python
+print("not part of it")
+```
+
+```python calkit stage name=ex
+print(os.getcwd())
+```
+"""
+    blocks = parse_markdown(text)
+    assert [b.name for b in blocks] == ["ex", "ex"]
+    assert blocks[0].content == "import os"
+    assert blocks[1].content == "print(os.getcwd())"
+
+
+def test_comment_directive_over_list():
+    text = """
+The `main` environment needs:
+
+<!-- calkit environment name=main python=3.13 -->
+- numpy
+- matplotlib
+- pandas
+
+More prose.
+"""
+    (block,) = parse_markdown(text)
+    assert block.kind == "environment"
+    assert block.attrs == {"name": "main", "python": 3.13}
+    assert block.content == "numpy\nmatplotlib\npandas"
+    assert block.source == "list"
+
+
+def test_comment_directive_over_fence():
+    text = """
+<!-- calkit environment name=main kind=uv-venv -->
+```
+numpy==1.0
+-e .
+```
+"""
+    (block,) = parse_markdown(text)
+    assert block.kind == "environment"
+    assert block.attrs == {"name": "main", "kind": "uv-venv"}
+    assert block.content == "numpy==1.0\n-e ."
+
+
+def test_comment_directive_merges_with_fence():
+    text = """
+<!-- calkit stage
+     inputs=[data/one.csv, data/two.csv, data/three.csv] -->
+```python calkit stage name=ex environment=main
+pass
+```
+"""
+    (block,) = parse_markdown(text)
+    assert block.name == "ex"
+    assert block.attrs["environment"] == "main"
+    assert block.attrs["inputs"] == [
+        "data/one.csv",
+        "data/two.csv",
+        "data/three.csv",
+    ]
+
+
+def test_comment_directive_conflict_is_an_error():
+    text = """
+<!-- calkit stage name=a -->
+```python calkit stage name=b
+pass
+```
+"""
+    with pytest.raises(MarkdownParseError, match="set in both"):
+        parse_markdown(text)
+
+
+def test_longer_fence_contains_shorter_ones():
+    # This is how a Markdown file documents the feature without declaring
+    # the examples it shows
+    text = """
+Annotate a block like this:
+
+````md
+```python calkit stage name=not-real environment=main
+print("documentation, not a stage")
+```
+````
+"""
+    assert parse_markdown(text) == []
+
+
+def test_annotated_outer_fence_keeps_inner_content():
+    text = """
+````python calkit stage name=ex environment=main
+```
+````
+"""
+    (block,) = parse_markdown(text)
+    assert block.content == "```"
+
+
+def test_ordinary_html_comments_are_ignored():
+    text = """
+<!-- just a note -->
+Some prose.
+
+<!-- a
+multiline
+note -->
+"""
+    assert parse_markdown(text) == []
+
+
+def test_unknown_directive_is_an_error():
+    text = """
+```python calkit stagg name=x
+pass
+```
+"""
+    with pytest.raises(MarkdownParseError, match="must name a directive"):
+        parse_markdown(text)
+
+
+def test_dangling_directive_is_an_error():
+    text = """
+<!-- calkit environment name=main -->
+
+Just prose, no block.
+"""
+    with pytest.raises(MarkdownParseError, match="must be followed by"):
+        parse_markdown(text)
+
+
+def test_error_reports_path_and_line():
+    text = "\n\n\n```python calkit stage name=a name=b\npass\n```\n"
+    with pytest.raises(MarkdownParseError) as exc:
+        parse_markdown(text, path="README.md")
+    assert "README.md:4" in str(exc.value)
+
+
+def test_extract_stages_concatenates_by_name():
+    from calkit.markdown import extract_stages
+
+    text = """
+```python calkit stage name=ex environment=main
+import os
+```
+
+Prose.
+
+```python calkit stage name=ex outputs=[fig.png]
+print(os.getcwd())
+```
+
+```python calkit stage name=other environment=main
+pass
+```
+"""
+    specs = extract_stages(parse_markdown(text), "README.md")
+    assert sorted(specs) == ["ex", "other"]
+    ex = specs["ex"]
+    assert ex.content == "import os\n\nprint(os.getcwd())"
+    # Attributes union across the stage's blocks
+    assert ex.attrs == {"environment": "main", "outputs": ["fig.png"]}
+    assert ex.script_path == ".calkit/markdown/README/ex.py"
+    assert ex.stage_kind == "python-script"
+
+
+def test_extract_stages_nested_markdown_path():
+    from calkit.markdown import extract_stages
+
+    text = "```python calkit stage name=ex environment=main\npass\n```\n"
+    specs = extract_stages(parse_markdown(text), "docs/guide.md")
+    assert specs["ex"].script_path == ".calkit/markdown/docs/guide/ex.py"
+
+
+def test_extract_stages_rejects_mixed_languages():
+    from calkit.markdown import extract_stages
+
+    text = """
+```python calkit stage name=ex environment=main
+pass
+```
+```sh calkit stage name=ex
+echo hi
+```
+"""
+    with pytest.raises(MarkdownParseError, match="mixes languages"):
+        extract_stages(parse_markdown(text), "README.md")
+
+
+def test_extract_stages_rejects_conflicting_attrs():
+    from calkit.markdown import extract_stages
+
+    text = """
+```python calkit stage name=ex environment=main
+pass
+```
+```python calkit stage name=ex environment=other
+pass
+```
+"""
+    with pytest.raises(MarkdownParseError, match="conflicting"):
+        extract_stages(parse_markdown(text), "README.md")
+
+
+def test_extract_stages_requires_a_name():
+    from calkit.markdown import extract_stages
+
+    text = "```python calkit stage environment=main\npass\n```\n"
+    with pytest.raises(MarkdownParseError, match="must declare a name"):
+        extract_stages(parse_markdown(text), "README.md")
+
+
+def test_extract_stages_rejects_unrunnable_language():
+    from calkit.markdown import extract_stages
+
+    text = "```yaml calkit stage name=ex environment=main\na: 1\n```\n"
+    with pytest.raises(MarkdownParseError, match="can't run"):
+        extract_stages(parse_markdown(text), "README.md")
+
+
+def test_write_stage_scripts_only_rewrites_on_change(tmp_path):
+    from calkit.markdown import extract_stages, write_stage_scripts
+
+    text = "```python calkit stage name=ex environment=main\nprint(1)\n```\n"
+    specs = extract_stages(parse_markdown(text), "README.md")
+    assert write_stage_scripts(specs, wdir=str(tmp_path)) == [
+        ".calkit/markdown/README/ex.py"
+    ]
+    fpath = tmp_path / ".calkit" / "markdown" / "README" / "ex.py"
+    assert fpath.read_text() == "print(1)\n"
+    # A stage script is a dependency, so an unchanged one must not be
+    # touched or the stage would rerun for nothing
+    mtime = fpath.stat().st_mtime_ns
+    assert write_stage_scripts(specs, wdir=str(tmp_path)) == []
+    assert fpath.stat().st_mtime_ns == mtime

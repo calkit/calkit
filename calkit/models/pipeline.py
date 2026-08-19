@@ -249,6 +249,7 @@ class Stage(BaseModel):
         "word-to-pdf",
         "map-paths",
         "marimo-html-wasm",
+        "markdown",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1752,6 +1753,36 @@ class MarimoHtmlWasmStage(Stage):
         return cmd
 
 
+class MarkdownStage(Stage):
+    """A stage sourced from a Markdown file's annotated code blocks.
+
+    This stands in for however many stages the file declares. It is
+    replaced by them at compile time (see
+    ``Pipeline.expand_markdown_stages``), so nothing downstream needs to
+    know Markdown was involved.
+    """
+
+    kind: Literal["markdown"] = "markdown"
+    path: RelativeChildPathString | None = Field(
+        default=None,
+        description="Path to the Markdown file. Defaults to the stage name, "
+        "since a Markdown stage is normally keyed by its own path.",
+    )
+    # A Markdown stage never runs as itself, so it needs no environment of
+    # its own; this is the fallback for blocks that don't name one.
+    environment: str = Field(
+        default="_system",
+        description="Environment used by blocks that don't name one.",
+    )
+
+    @property
+    def markdown_path(self) -> str:
+        path = self.path if self.path is not None else self.name
+        if path is None:
+            raise ValueError("Markdown stage has no path")
+        return Path(path).as_posix()
+
+
 class Pipeline(BaseModel):
     """The project's reproducible pipeline."""
 
@@ -1777,6 +1808,7 @@ class Pipeline(BaseModel):
                 | SBatchStage
                 | MapPathsStage
                 | MarimoHtmlWasmStage
+                | MarkdownStage
             ),
             Discriminator("kind"),
         ],
@@ -1795,6 +1827,113 @@ class Pipeline(BaseModel):
                 )
             stage.name = stage_name
         return self
+
+    @model_validator(mode="after")
+    def check_markdown_stage_paths(self) -> Pipeline:
+        """Check that markdown stages point at a Markdown file.
+
+        This runs at the pipeline level because a stage's name is only
+        filled in from its key above, and the name is where the path
+        normally comes from.
+        """
+        for stage_name, stage in self.stages.items():
+            if stage.kind != "markdown":
+                continue
+            path = stage.path if stage.path is not None else stage_name
+            if not str(path).endswith(".md"):
+                raise ValueError(
+                    f"Markdown stage '{stage_name}' needs a 'path' ending "
+                    "in .md, or a name that is one"
+                )
+        return self
+
+    def expand_markdown_stages(self, wdir: str | None = None) -> list[str]:
+        """Replace each markdown stage with the stages its blocks declare.
+
+        A file keyed ``README.md`` becomes ``README.md@<block-name>`` for
+        each stage its blocks declare, each an ordinary script stage over
+        the extracted script. Running before scheduler options and env
+        lock deps are resolved means those, and everything else
+        downstream, treat them like any other stage.
+
+        Returns the paths of extracted scripts whose content changed.
+        """
+        import calkit.markdown
+
+        kind_classes: dict[str, type[Stage]] = {
+            "python-script": PythonScriptStage,
+            "r-script": RScriptStage,
+            "julia-script": JuliaScriptStage,
+            "shell-script": ShellScriptStage,
+            "matlab-script": MatlabScriptStage,
+        }
+        markdown_stages = [
+            (name, stage)
+            for name, stage in self.stages.items()
+            if stage.kind == "markdown"
+        ]
+        if not markdown_stages:
+            return []
+        changed: list[str] = []
+        for stage_name, md_stage in markdown_stages:
+            md_path = md_stage.markdown_path
+            read_path = os.path.join(wdir, md_path) if wdir else md_path
+            if not os.path.isfile(read_path):
+                raise ValueError(
+                    f"Markdown stage '{stage_name}' points at '{md_path}', "
+                    "which does not exist"
+                )
+            blocks = calkit.markdown.parse_markdown_file(read_path)
+            specs = calkit.markdown.extract_stages(blocks, md_path)
+            if not specs:
+                raise ValueError(
+                    f"Markdown stage '{stage_name}' declares no stages; "
+                    "annotate a code block with "
+                    "'calkit stage name=<name>' to define one"
+                )
+            changed += calkit.markdown.write_stage_scripts(specs, wdir=wdir)
+            # Drop the placeholder before inserting what it stands for, so
+            # a stage sharing its name would collide loudly rather than
+            # silently overwrite.
+            del self.stages[stage_name]
+            for spec in specs.values():
+                sub_name = f"{stage_name}@{spec.name}"
+                if sub_name in self.stages:
+                    raise ValueError(
+                        f"Stage '{sub_name}' from '{md_path}' conflicts "
+                        "with an existing pipeline stage"
+                    )
+                kwargs: dict[str, Any] = {
+                    "environment": md_stage.environment,
+                    "wdir": md_stage.wdir,
+                }
+                kwargs.update(spec.attrs)
+                kwargs.update(
+                    {
+                        "kind": spec.stage_kind,
+                        "name": sub_name,
+                        "script_path": spec.script_path,
+                    }
+                )
+                if spec.stage_kind == "shell-script":
+                    kwargs.setdefault(
+                        "shell",
+                        "sh" if spec.language == "sh" else spec.language,
+                    )
+                try:
+                    # The stages dict is typed as the discriminated union,
+                    # which can't be expressed as the lookup's value type;
+                    # the model_validate call is what actually enforces it.
+                    sub_stage: Any = kind_classes[
+                        spec.stage_kind
+                    ].model_validate(kwargs)
+                    self.stages[sub_name] = sub_stage
+                except ValidationError as e:
+                    raise ValueError(
+                        f"{md_path}:{spec.line}: stage '{spec.name}' is not "
+                        f"defined properly: {e}"
+                    )
+        return changed
 
     def set_stage_scheduler_options(
         self, environments: dict[str, dict]

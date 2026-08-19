@@ -891,3 +891,168 @@ def expand_ck_info(
                 sub["shell"] = "sh" if spec.language == "sh" else spec.language
             out_stages[sub_name] = sub
     return result
+
+
+# Languages whose dependencies Calkit can read out of the code itself.
+# Shell and MATLAB have no import statements to go on, so stages in those
+# languages keep whatever environment they were given.
+LANGUAGE_DETECTORS: dict[str, str] = {
+    "python": "detect_python_dependencies",
+    "py": "detect_python_dependencies",
+    "r": "detect_r_dependencies",
+    "julia": "detect_julia_dependencies",
+    "jl": "detect_julia_dependencies",
+}
+
+# Suffix distinguishing one detected environment from another when a file
+# needs more than one.
+LANGUAGE_SUFFIXES: dict[str, str] = {
+    "python": "py",
+    "py": "py",
+    "r": "r",
+    "julia": "jl",
+    "jl": "jl",
+}
+
+
+def _env_base_name(markdown_path: str) -> str:
+    stem = Path(markdown_path).name.removesuffix(".md").lower()
+    cleaned = "".join(c if c.isalnum() else "-" for c in stem).strip("-")
+    return cleaned or "markdown"
+
+
+def detect_environments(
+    specs: dict[str, MarkdownStageSpec],
+    markdown_path: str,
+    existing_env_names: list[str] | None = None,
+    default_env: str | None = None,
+) -> tuple[dict[str, dict], dict[str, str]]:
+    """Build environments for the stages in a file that declare none.
+
+    Stages are grouped by language and given one environment each, rather
+    than one apiece: a README's examples are normally variations on the
+    same setup, and a virtualenv per code block would be a lot of disk and
+    lock churn for nothing.
+
+    Returns the environments and a map of stage name -> environment name.
+    """
+    from calkit import detect as _detect
+
+    existing = list(existing_env_names or [])
+    by_language: dict[str, list[MarkdownStageSpec]] = {}
+    for spec in specs.values():
+        if spec.attrs.get("environment") or default_env:
+            continue
+        if spec.language not in LANGUAGE_DETECTORS:
+            continue
+        by_language.setdefault(spec.language, []).append(spec)
+    if not by_language:
+        return {}, {}
+    base = _env_base_name(markdown_path)
+    envs: dict[str, dict] = {}
+    assignments: dict[str, str] = {}
+    for language, language_specs in sorted(by_language.items()):
+        detector = getattr(_detect, LANGUAGE_DETECTORS[language])
+        deps: list[str] = []
+        for spec in language_specs:
+            for dep in detector(code=spec.content):
+                if dep not in deps:
+                    deps.append(dep)
+        name = (
+            base
+            if len(by_language) == 1
+            else (f"{base}-{LANGUAGE_SUFFIXES[language]}")
+        )
+        candidate = name
+        n = 2
+        while candidate in existing or candidate in envs:
+            candidate = f"{name}-{n}"
+            n += 1
+        existing.append(candidate)
+        kind = LANGUAGE_ENV_KINDS[language]
+        envs[candidate] = {
+            "kind": kind,
+            "path": get_env_spec_path(candidate, kind=kind),
+            "_spec_content": render_env_spec(kind, "\n".join(deps), candidate),
+        }
+        for spec in language_specs:
+            assignments[spec.name] = candidate
+    return envs, assignments
+
+
+def format_attr_value(value: Any) -> str:
+    """Render an attribute value the way an annotation spells it."""
+    if value is True:
+        return ""
+    if isinstance(value, str):
+        # Quote only when the value would otherwise not survive a
+        # round-trip through the attribute scanner
+        if value and not any(c.isspace() for c in value):
+            return value
+        return '"' + value.replace('"', '\\"') + '"'
+    if isinstance(value, (list, tuple)):
+        return "[" + ", ".join(format_attr_value(v) for v in value) + "]"
+    if isinstance(value, dict):
+        return (
+            "{"
+            + ", ".join(
+                f"{k}: {format_attr_value(v)}" for k, v in value.items()
+            )
+            + "}"
+        )
+    return str(value)
+
+
+def format_attrs(attrs: dict[str, Any]) -> str:
+    """Render attributes back into an annotation's key=value form."""
+    parts = []
+    for key, value in attrs.items():
+        rendered = format_attr_value(value)
+        parts.append(key if rendered == "" else f"{key}={rendered}")
+    return " ".join(parts)
+
+
+def set_stage_attrs(
+    text: str, stage_name: str, attrs: dict[str, Any]
+) -> tuple[str, bool]:
+    """Add attributes to a stage's first annotated fence in Markdown text.
+
+    Only the info string of a block that is already annotated is touched,
+    never prose and never code, so this can record what was detected
+    without rewriting anything the author wrote. Attributes already set
+    are left alone, since the author's word beats a detected one.
+
+    Returns the new text and whether anything changed.
+    """
+    if not attrs:
+        return text, False
+    lines = text.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        m = _FENCE_RE.match(line.rstrip("\r\n"))
+        if m is None:
+            continue
+        try:
+            language, annotation = _parse_fence_info(m.group("info"))
+        except ValueError:
+            continue
+        if annotation is None or annotation[0] != "stage":
+            continue
+        if str(annotation[1].get("name")) != stage_name:
+            continue
+        new_attrs = {k: v for k, v in attrs.items() if k not in annotation[1]}
+        if not new_attrs:
+            return text, False
+        ending = line[len(line.rstrip("\r\n")) :]
+        info = " ".join(
+            part
+            for part in [
+                language or "",
+                "calkit stage",
+                format_attrs(annotation[1]),
+                format_attrs(new_attrs),
+            ]
+            if part
+        )
+        lines[i] = m.group("indent") + m.group("fence") + info + ending
+        return "".join(lines), True
+    return text, False

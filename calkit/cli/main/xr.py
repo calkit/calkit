@@ -15,6 +15,105 @@ from calkit.cli.main.core import app, run
 from calkit.core import DVC_EXTENSIONS, DVC_SIZE_THRESH_BYTES
 
 
+def _xr_markdown(
+    markdown_path: str,
+    ck_info: dict,
+    ck_info_orig: dict,
+    environment: str | None,
+    dry_run: bool,
+    force: bool,
+    verbose: bool,
+) -> None:
+    """Bootstrap a runnable Markdown file into the pipeline, then run it.
+
+    Unlike a script, a Markdown file declares however many stages its
+    annotated blocks do, so this records one ``markdown`` stage standing
+    in for them all. Environments the blocks don't name are detected from
+    the code and written back into the fences, which is the only place a
+    per-stage environment can live.
+    """
+    import io
+
+    import calkit.markdown
+
+    if not os.path.isfile(markdown_path):
+        raise_error(f"{markdown_path} does not exist")
+    with open(markdown_path, encoding="utf-8") as f:
+        original_text = f.read()
+    try:
+        blocks = calkit.markdown.parse_markdown(
+            original_text, path=markdown_path
+        )
+        specs = calkit.markdown.extract_stages(blocks, markdown_path)
+    except Exception as e:
+        raise_error(str(e))
+    if not specs:
+        raise_error(
+            f"{markdown_path} declares no stages; annotate a code block "
+            "with 'calkit stage name=<name>' to define one"
+        )
+    declared_envs = calkit.markdown.extract_environments(blocks, markdown_path)
+    existing_env_names = list(ck_info.get("environments", {}) or {})
+    existing_env_names += list(declared_envs)
+    detected_envs, assignments = calkit.markdown.detect_environments(
+        specs,
+        markdown_path,
+        existing_env_names=existing_env_names,
+        default_env=environment,
+    )
+    # Record each detected environment on the block that needs it, since
+    # the fence is the only place a per-stage environment can live.
+    text = original_text
+    for stage_name, env_name in assignments.items():
+        text, _ = calkit.markdown.set_stage_attrs(
+            text, stage_name, {"environment": env_name}
+        )
+    stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
+    stage: dict[str, Any] = {"kind": "markdown"}
+    if environment is not None:
+        stage["environment"] = environment
+    if dry_run:
+        out = io.StringIO()
+        calkit.ryaml.dump({markdown_path: stage}, out)
+        typer.echo(out.getvalue().rstrip())
+        for env_name, env in detected_envs.items():
+            env_out = io.StringIO()
+            calkit.ryaml.dump(
+                {
+                    env_name: {
+                        k: v for k, v in env.items() if not k.startswith("_")
+                    }
+                },
+                env_out,
+            )
+            typer.echo(env_out.getvalue().rstrip())
+        return
+    if detected_envs:
+        calkit.markdown.write_env_specs(detected_envs)
+        envs = ck_info.setdefault("environments", {})
+        for env_name, env in detected_envs.items():
+            envs[env_name] = {
+                k: v for k, v in env.items() if not k.startswith("_")
+            }
+    if text != original_text:
+        with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+    stages[markdown_path] = stage
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    try:
+        run(targets=[markdown_path], force=force, verbose=verbose)
+    except Exception as e:
+        # Put back everything this touched, so a failed bootstrap leaves
+        # no half-recorded pipeline behind
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info_orig, f)
+        if text != original_text:
+            with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(original_text)
+        raise_error(f"Failed to execute stages in {markdown_path}: {e}")
+
+
 @app.command(name="xr")
 def execute_and_record(
     cmd: Annotated[
@@ -215,6 +314,17 @@ def execute_and_record(
     # If the first argument is `python`, check that the second argument is a
     # script, otherwise it's a shell-command stage
     # If the first argument ends with .tex, we'll treat this as a LaTeX stage
+    if first_arg.endswith(".md"):
+        _xr_markdown(
+            markdown_path=first_arg,
+            ck_info=ck_info,
+            ck_info_orig=ck_info_orig,
+            environment=environment,
+            dry_run=dry_run,
+            force=force,
+            verbose=verbose,
+        )
+        return
     stage: dict[str, Any] = {}
     language = None
     if first_arg == "docker":

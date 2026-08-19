@@ -501,3 +501,65 @@ def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
         "path": ".calkit/envs/main/requirements.txt",
     }
     assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv-venv"
+
+
+def test_detect_environments_merges_by_language():
+    """One environment per language, not one per code block.
+
+    A README's examples are variations on the same setup, so a virtualenv
+    per block would be churn for nothing.
+    """
+    from calkit.markdown import detect_environments, extract_stages
+
+    text = (
+        "```python calkit stage name=a\nimport numpy as np\nimport pandas\n```\n\n"
+        "```python calkit stage name=b\nimport matplotlib\nimport numpy\n```\n\n"
+        "```r calkit stage name=c\nlibrary(dplyr)\n```\n\n"
+        "```sh calkit stage name=d\necho hi\n```\n"
+    )
+    specs = extract_stages(parse_markdown(text), "README.md")
+    envs, assignments = detect_environments(specs, "README.md")
+    # Both Python stages share one environment, with dependencies merged
+    # and de-duplicated
+    assert assignments == {"a": "readme-py", "b": "readme-py", "c": "readme-r"}
+    assert envs["readme-py"]["kind"] == "uv-venv"
+    assert envs["readme-py"]["_spec_content"].split() == [
+        "numpy",
+        "pandas",
+        "matplotlib",
+    ]
+    assert envs["readme-r"]["kind"] == "renv"
+    assert "dplyr" in envs["readme-r"]["_spec_content"]
+    # Shell has no imports to read, so it keeps whatever it was given
+    assert "d" not in assignments
+
+
+def test_detect_environments_single_language_is_unsuffixed():
+    from calkit.markdown import detect_environments, extract_stages
+
+    text = "```python calkit stage name=a\nimport numpy\n```\n"
+    specs = extract_stages(parse_markdown(text), "docs/guide.md")
+    envs, assignments = detect_environments(specs, "docs/guide.md")
+    assert list(envs) == ["guide"]
+    assert assignments == {"a": "guide"}
+
+
+def test_detect_environments_skips_declared_and_avoids_collisions():
+    from calkit.markdown import detect_environments, extract_stages
+
+    text = (
+        "```python calkit stage name=a environment=mine\nimport numpy\n```\n\n"
+        "```python calkit stage name=b\nimport scipy\n```\n"
+    )
+    specs = extract_stages(parse_markdown(text), "README.md")
+    envs, assignments = detect_environments(
+        specs, "README.md", existing_env_names=["readme"]
+    )
+    # The stage that named an environment is left alone
+    assert assignments == {"b": "readme-2"}
+    assert list(envs) == ["readme-2"]
+    # A file whose stages all name an environment needs nothing detected
+    envs, assignments = detect_environments(
+        specs, "README.md", default_env="main"
+    )
+    assert envs == {} and assignments == {}

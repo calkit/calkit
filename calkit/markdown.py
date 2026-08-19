@@ -578,27 +578,80 @@ def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
     return targets
 
 
-def get_env_spec_path(env_name: str, as_posix: bool = True) -> str:
+# Environment kinds that can be declared in Markdown, and the spec file
+# each one is written to. A list of packages means something different to
+# each toolchain, so the kind decides how the list is rendered.
+ENV_SPEC_FILENAMES: dict[str, str] = {
+    "uv-venv": "requirements.txt",
+    "uv": "pyproject.toml",
+    "renv": "DESCRIPTION",
+    "julia": "Project.toml",
+}
+
+# Which environment kind a stage's language implies, so a Markdown file
+# declaring one environment for R or Julia code needn't spell it out.
+LANGUAGE_ENV_KINDS: dict[str, str] = {
+    "python": "uv-venv",
+    "py": "uv-venv",
+    "r": "renv",
+    "julia": "julia",
+    "jl": "julia",
+}
+
+
+def get_env_spec_path(
+    env_name: str, kind: str = "uv-venv", as_posix: bool = True
+) -> str:
     """Return the path of the spec file written for a Markdown environment.
 
     This lives alongside the specs Calkit already generates when it
     detects an environment for a stage, so the environment is an ordinary
     one by the time anything else looks at it.
     """
-    p = os.path.join(".calkit", "envs", env_name, "requirements.txt")
+    p = os.path.join(".calkit", "envs", env_name, ENV_SPEC_FILENAMES[kind])
     if as_posix:
         p = Path(p).as_posix()
     return p
 
 
+def render_env_spec(kind: str, content: str, env_name: str) -> str:
+    """Render a Markdown environment block into its spec file's content.
+
+    A fenced block is taken verbatim, since that's the escape hatch for
+    anything the list form can't say. A bulleted list is a list of
+    package names, which each toolchain spells differently, so it's
+    rendered through the same builders Calkit uses when it detects
+    dependencies itself.
+    """
+    import calkit.environments
+
+    if kind == "uv-venv":
+        return content
+    deps = [line.strip() for line in content.splitlines() if line.strip()]
+    if kind == "uv":
+        return calkit.environments.create_uv_pyproject_content(
+            deps, project_name=env_name
+        )
+    if kind == "renv":
+        return calkit.environments.create_r_description_content(
+            deps, project_name=env_name
+        )
+    if kind == "julia":
+        return calkit.environments.create_julia_project_file_content(
+            deps, project_name=env_name
+        )
+    raise ValueError(f"Unsupported environment kind: {kind}")
+
+
 def extract_environments(
     blocks: list[MarkdownBlock], markdown_path: str
 ) -> dict[str, dict]:
-    """Build environment definitions from a Markdown file's env blocks.
+    """Collect the environment declarations in a Markdown file.
 
-    A bulleted list of packages is the common case, so its items become
-    the requirements; a fenced block's body is used verbatim, which is
-    what makes room for pins, extras and ``-e .``.
+    The result is deliberately unfinished: an environment's kind can be
+    left out and inferred from the language of the stages that use it, so
+    the spec path and content aren't known until the stages are read too.
+    Call ``resolve_environments`` to finish them.
     """
     path = Path(markdown_path).as_posix()
     envs: dict[str, dict] = {}
@@ -619,15 +672,16 @@ def extract_environments(
                 line=block.line,
             )
         attrs = {k: v for k, v in block.attrs.items() if k != "name"}
-        kind = str(attrs.pop("kind", "uv-venv"))
-        if kind != "uv-venv":
+        kind = attrs.pop("kind", None)
+        if kind is not None and str(kind) not in ENV_SPEC_FILENAMES:
             raise MarkdownParseError(
-                f"Environment '{name}' has kind '{kind}'; only 'uv-venv' "
-                "environments can currently be declared in Markdown",
+                f"Environment '{name}' has kind '{kind}'; environments "
+                "declared in Markdown must be one of "
+                f"{', '.join(sorted(ENV_SPEC_FILENAMES))}",
                 path=path,
                 line=block.line,
             )
-        env: dict = {"kind": kind, "path": get_env_spec_path(name)}
+        env: dict = {"_kind": None if kind is None else str(kind)}
         python = attrs.pop("python", None)
         if python is not None:
             env["python"] = str(python)
@@ -638,8 +692,67 @@ def extract_environments(
                 path=path,
                 line=block.line,
             )
-        env["_spec_content"] = block.content
+        # A fence is the escape hatch for anything the list form can't
+        # say, so it's kept verbatim whatever the kind.
+        env["_verbatim"] = block.source == "fence"
+        env["_content"] = block.content
+        env["_line"] = block.line
         envs[name] = env
+    return envs
+
+
+def resolve_environments(
+    envs: dict[str, dict],
+    specs: dict[str, MarkdownStageSpec],
+    markdown_path: str,
+    default_env: str | None = None,
+) -> dict[str, dict]:
+    """Finish environment declarations, inferring kinds where they're absent.
+
+    An R or Julia README shouldn't have to name its environment's kind
+    when the code blocks using it already say what language they are.
+    """
+    path = Path(markdown_path).as_posix()
+    # Which languages each environment is used by
+    langs_by_env: dict[str, set[str]] = {}
+    for spec in specs.values():
+        env_name = spec.attrs.get("environment", default_env)
+        if env_name is None:
+            continue
+        langs_by_env.setdefault(str(env_name), set()).add(spec.language)
+    for name, env in envs.items():
+        kind = env["_kind"]
+        if kind is None:
+            langs = langs_by_env.get(name, set())
+            kinds = {
+                LANGUAGE_ENV_KINDS[lang]
+                for lang in langs
+                if lang in LANGUAGE_ENV_KINDS
+            }
+            if len(kinds) > 1:
+                raise MarkdownParseError(
+                    f"Environment '{name}' is used by stages in more than "
+                    f"one language ({', '.join(sorted(langs))}); give it an "
+                    "explicit kind",
+                    path=path,
+                    line=env["_line"],
+                )
+            kind = kinds.pop() if kinds else "uv-venv"
+            env["_kind"] = kind
+        if env.get("python") is not None and kind not in ("uv-venv", "uv"):
+            raise MarkdownParseError(
+                f"Environment '{name}' is a '{kind}' environment, which "
+                "takes no 'python' version",
+                path=path,
+                line=env["_line"],
+            )
+        env["kind"] = kind
+        env["path"] = get_env_spec_path(name, kind=kind)
+        env["_spec_content"] = (
+            env["_content"]
+            if env["_verbatim"]
+            else render_env_spec(kind, env["_content"], name)
+        )
     return envs
 
 
@@ -724,6 +837,23 @@ def expand_ck_info(
             )
         blocks = parse_markdown_file(read_path)
         envs = extract_environments(blocks, md_path)
+        specs = extract_stages(blocks, md_path)
+        if not specs:
+            raise ValueError(
+                f"Markdown stage '{stage_name}' declares no stages; "
+                "annotate a code block with 'calkit stage name=<name>' "
+                "to define one"
+            )
+        # A file declaring exactly one environment shouldn't have to name
+        # it on every block.
+        default_env = md_cfg.get("environment")
+        if default_env is None and len(envs) == 1:
+            default_env = next(iter(envs))
+        # Kinds can be inferred from the languages of the stages using
+        # each environment, so this needs both halves read first.
+        envs = resolve_environments(
+            envs, specs, md_path, default_env=default_env
+        )
         for env_name, env in envs.items():
             public = {k: v for k, v in env.items() if not k.startswith("_")}
             existing = out_envs.get(env_name)
@@ -739,20 +869,8 @@ def expand_ck_info(
             result.environments[env_name] = public
             result.environment_sources[env_name] = md_path
         write_env_specs(envs, wdir=wdir)
-        specs = extract_stages(blocks, md_path)
-        if not specs:
-            raise ValueError(
-                f"Markdown stage '{stage_name}' declares no stages; "
-                "annotate a code block with 'calkit stage name=<name>' "
-                "to define one"
-            )
         write_stage_scripts(specs, wdir=wdir)
         result.script_paths += [s.script_path for s in specs.values()]
-        # A file declaring exactly one environment shouldn't have to name
-        # it on every block.
-        default_env = md_cfg.get("environment")
-        if default_env is None and len(envs) == 1:
-            default_env = next(iter(envs))
         for spec in specs.values():
             sub_name = stage_name + STAGE_NAME_SEPARATOR + spec.name
             if sub_name in out_stages:

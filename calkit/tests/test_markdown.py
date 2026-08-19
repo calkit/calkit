@@ -320,8 +320,12 @@ def test_write_stage_scripts_only_rewrites_on_change(tmp_path):
     assert fpath.stat().st_mtime_ns == mtime
 
 
-def test_extract_environments():
-    from calkit.markdown import extract_environments
+def test_extract_and_resolve_environments():
+    from calkit.markdown import (
+        extract_environments,
+        extract_stages,
+        resolve_environments,
+    )
 
     text = """
 The `main` environment needs:
@@ -337,14 +341,77 @@ And a second one, with pins the list form would make awkward:
 pandas==2.0.0
 -e .
 ```
+
+```python calkit stage name=demo environment=main
+pass
+```
 """
-    envs = extract_environments(parse_markdown(text), "README.md")
+    blocks = parse_markdown(text)
+    envs = resolve_environments(
+        extract_environments(blocks, "README.md"),
+        extract_stages(blocks, "README.md"),
+        "README.md",
+    )
     assert envs["main"]["kind"] == "uv-venv"
     assert envs["main"]["path"] == ".calkit/envs/main/requirements.txt"
     assert envs["main"]["python"] == "3.13"
     assert envs["main"]["_spec_content"] == "numpy\nmatplotlib"
-    assert "python" not in envs["pinned"]
+    # A fence is kept verbatim, since it's the escape hatch for whatever
+    # the list form can't say
     assert envs["pinned"]["_spec_content"] == "pandas==2.0.0\n-e ."
+
+
+def test_resolve_environments_infers_kind_from_language():
+    """An R or Julia README needn't spell out its environment's kind."""
+    from calkit.markdown import (
+        extract_environments,
+        extract_stages,
+        resolve_environments,
+    )
+
+    for language, kind, filename in [
+        ("r", "renv", "DESCRIPTION"),
+        ("julia", "julia", "Project.toml"),
+        ("python", "uv-venv", "requirements.txt"),
+    ]:
+        text = (
+            "<!-- calkit environment name=main -->\n"
+            "- somepkg\n\n"
+            f"```{language} calkit stage name=demo\n"
+            "x\n```\n"
+        )
+        blocks = parse_markdown(text)
+        envs = resolve_environments(
+            extract_environments(blocks, "README.md"),
+            extract_stages(blocks, "README.md"),
+            "README.md",
+            default_env="main",
+        )
+        assert envs["main"]["kind"] == kind
+        assert envs["main"]["path"] == f".calkit/envs/main/{filename}"
+        # The package list is rendered the way that toolchain spells it
+        assert "somepkg" in envs["main"]["_spec_content"]
+
+
+def test_resolve_environments_mixed_languages_needs_explicit_kind():
+    from calkit.markdown import (
+        extract_environments,
+        extract_stages,
+        resolve_environments,
+    )
+
+    text = (
+        "<!-- calkit environment name=main -->\n- pkg\n\n"
+        "```python calkit stage name=a environment=main\npass\n```\n\n"
+        "```r calkit stage name=b environment=main\nx\n```\n"
+    )
+    blocks = parse_markdown(text)
+    with pytest.raises(MarkdownParseError, match="more than one language"):
+        resolve_environments(
+            extract_environments(blocks, "README.md"),
+            extract_stages(blocks, "README.md"),
+            "README.md",
+        )
 
 
 def test_extract_environments_errors():
@@ -363,7 +430,7 @@ def test_extract_environments_errors():
             ),
             "README.md",
         )
-    with pytest.raises(MarkdownParseError, match="only 'uv-venv'"):
+    with pytest.raises(MarkdownParseError, match="must be one of"):
         extract_environments(
             parse_markdown(
                 "<!-- calkit environment name=a kind=conda -->\n- numpy\n"

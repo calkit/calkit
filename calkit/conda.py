@@ -279,10 +279,21 @@ def _check_single(
     try:
         version = Version(actual_vers)
     except InvalidVersion:
+        # An unparseable actual version (e.g. conda's "9e") can't be compared
+        # against a version constraint. If the requirement pins a specific
+        # version we can't confirm it matches, so treat it as not satisfied
+        # rather than silently passing. Only a bare package name with no
+        # version constraint is safe to accept, since any version is allowed.
+        has_specifier = any(c in req_spec for c in "=<>!~")
+        if has_specifier:
+            warnings.warn(
+                f"Cannot properly check {actual_name} version {actual_vers} "
+                f"against constraint '{req_spec}'"
+            )
+            return False
         warnings.warn(
             f"Cannot properly check {actual_name} version {actual_vers}"
         )
-        # TODO: Check exact version only
         return True
     spec = SpecifierSet(req_spec)
     return spec.contains(version, prereleases=editable)

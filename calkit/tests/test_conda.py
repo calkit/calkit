@@ -77,6 +77,16 @@ def test_check_single():
         env_spec_dir=".",
         conda=False,
     )
+    # Unparseable actual version (e.g. conda's "9e"): a bare name with no
+    # version constraint is accepted, but a pinned version is not satisfied
+    # since we can't confirm it matches.
+    assert _check_single("jpeg", "jpeg=9e", env_spec_dir=".", conda=True)
+    assert not _check_single(
+        "jpeg=1", "jpeg=9e", env_spec_dir=".", conda=True
+    )
+    assert not _check_single(
+        "jpeg>=1", "jpeg=9e", env_spec_dir=".", conda=True
+    )
 
 
 def test_enrich_pip_deps_from_freeze():

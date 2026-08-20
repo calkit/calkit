@@ -11,6 +11,7 @@ import { Link } from "@tanstack/react-router"
 import { GiFox } from "react-icons/gi"
 import { FiHelpCircle, FiLogOut, FiUser, FiUsers } from "react-icons/fi"
 import { useQueryClient } from "@tanstack/react-query"
+import mixpanel from "mixpanel-browser"
 
 import { type UserPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
@@ -62,7 +63,12 @@ const UserMenu = () => {
             </MenuItem>
             <MenuItem
               icon={<FiHelpCircle fontSize="18px" />}
-              onClick={helpModal.onOpen}
+              onClick={() => {
+                mixpanel.track("Opened help and feedback", {
+                  source: "user-menu",
+                })
+                helpModal.onOpen()
+              }}
             >
               Help and feedback
             </MenuItem>

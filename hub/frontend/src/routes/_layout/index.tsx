@@ -197,7 +197,7 @@ function EmptyState() {
         time, and every part of it works with this page closed.
       </Text>
       <Box mb={10}>
-        <StartPaths />
+        <StartPaths source="empty-state" />
       </Box>
       <FeaturedProjects heading="Or look at one that's already there" />
     </>
@@ -264,7 +264,7 @@ function LandingPage() {
           Pick the one that sounds like you. You'll sign up on the way, and come
           back to where you left off.
         </Text>
-        <StartPaths />
+        <StartPaths source="landing" />
       </Box>
       <FeaturedProjects />
     </>

@@ -13,6 +13,7 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
 
@@ -75,6 +76,11 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
                 <LinkOverlay
                   as={RouterLink}
                   to={`/${project.owner_account_name}/${project.name}`}
+                  onClick={() =>
+                    mixpanel.track("Clicked featured project", {
+                      project: `${project.owner_account_name}/${project.name}`,
+                    })
+                  }
                 >
                   {project.title}
                 </LinkOverlay>

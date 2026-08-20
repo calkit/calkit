@@ -1,5 +1,7 @@
 import { Button, Container, Heading, Text } from "@chakra-ui/react"
 
+import mixpanel from "mixpanel-browser"
+
 import useCustomToast from "../../hooks/useCustomToast"
 import useOnboardingFlags from "../../hooks/useOnboarding"
 
@@ -16,12 +18,15 @@ const OnboardingChecklists = () => {
   const { flagsQuery, flagCount, resetAllMutation } = useOnboardingFlags()
   const reset = () =>
     resetAllMutation.mutate(undefined, {
-      onSuccess: () =>
+      onSuccess: () => {
+        mixpanel.track("Reset onboarding checklists", { n_flags: flagCount })
+        return
         showToast(
           "Checklists reset",
           "Your setup checklists are back on the home and project pages.",
           "success",
-        ),
+        )
+      },
       onError: () =>
         showToast(
           "Something went wrong",

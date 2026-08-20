@@ -27,6 +27,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
+import mixpanel from "mixpanel-browser"
 import { useState } from "react"
 
 import { ProjectsService } from "../../client"
@@ -84,11 +85,18 @@ const NewEnvironment = ({
   const [pathOverride, setPathOverride] = useState("")
   const [nameTouched, setNameTouched] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [usedPreset, setUsedPreset] = useState<string | null>(null)
   const spec = ENV_KINDS.find((k) => k.kind === kind) ?? ENV_KINDS[0]
   const path = pathOverride || defaultPathFor(kind, name || "py")
   const applyPreset = (presetName: string) => {
     const preset = PRESETS.find((p) => p.name === presetName)
     if (!preset) return
+    // Whether presets carry the load, or people configure from scratch.
+    mixpanel.track("Applied environment preset", {
+      preset: preset.name,
+      kind: preset.kind,
+    })
+    setUsedPreset(preset.name)
     setKind(preset.kind)
     setPackages(preset.packages ?? [])
     setImage(preset.image ?? "")
@@ -132,6 +140,11 @@ const NewEnvironment = ({
         }),
       }).then((response) => response.data),
     onSuccess: () => {
+      mixpanel.track("Created environment", {
+        kind,
+        preset: usedPreset,
+        n_packages: packages.length,
+      })
       showToast("Success!", "Environment created.", "success")
       onClose()
       onCreated?.(name)

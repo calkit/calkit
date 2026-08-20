@@ -191,7 +191,7 @@ function ChoosePathStep({
         a plain Git repo. Nothing you set up here is trapped in Calkit, and all
         of it works offline.
       </Text>
-      <StartPaths onSelect={onSelect} selected={path} />
+      <StartPaths onSelect={onSelect} selected={path} source="wizard" />
     </>
   )
 }
@@ -298,7 +298,11 @@ function NameItStep({
       )
     },
     onSuccess: (data: ProjectPublic) => {
-      mixpanel.track("Created new project", { onboarding: true, path })
+      mixpanel.track("Created new project", {
+        onboarding: true,
+        path,
+        from_upload: isExisting && fromUpload,
+      })
       queryClient.invalidateQueries({ queryKey: ["projects"] })
       onCreated(data)
     },
@@ -629,7 +633,15 @@ function QuestionStep({
         >
           Save and continue
         </Button>
-        <Button variant="ghost" onClick={onDone}>
+        <Button
+          variant="ghost"
+          onClick={() => {
+            mixpanel.track("Skipped project wizard step", {
+              step_name: "The question",
+            })
+            onDone()
+          }}
+        >
           Skip for now
         </Button>
       </HStack>
@@ -838,15 +850,34 @@ function NewProjectWizard() {
   const { path, step: stepParam, project } = Route.useSearch()
   const step = stepParam ?? 0
   const [accountName, projectName] = (project ?? "").split("/")
-  const goTo = (next: Partial<z.infer<typeof searchSchema>>) =>
+  const goTo = (next: Partial<z.infer<typeof searchSchema>>) => {
+    if (next.step !== undefined && next.step !== step) {
+      // The whole point of the wizard is knowing where people stop, which
+      // needs an event per transition rather than only at the end.
+      mixpanel.track("Moved through project wizard", {
+        from_step: step,
+        to_step: next.step,
+        step_name: STEP_TITLES[next.step] ?? "unknown",
+        path,
+        direction: next.step > step ? "forward" : "back",
+      })
+    }
     navigate({ search: (prev) => ({ ...prev, ...next }) })
+  }
   // Closing lands on the project once there is one, so backing out of the
   // optional steps doesn't feel like abandoning what was already created.
-  const close = () =>
-    navigate({
+  const close = () => {
+    mixpanel.track("Closed project wizard", {
+      step,
+      step_name: STEP_TITLES[step] ?? "unknown",
+      path,
+      has_project: Boolean(project),
+    })
+    return navigate({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       to: (project ? `/${accountName}/${projectName}` : "/") as any,
     })
+  }
   let body
   if (step === 0 || !path) {
     body = (

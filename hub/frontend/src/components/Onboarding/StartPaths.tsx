@@ -8,6 +8,7 @@ import {
   useColorModeValue,
 } from "@chakra-ui/react"
 import { Link as RouterLink } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import type { IconType } from "react-icons"
 import { FaBroom, FaLeaf, FaSeedling } from "react-icons/fa"
 
@@ -62,6 +63,8 @@ interface StartPathsProps {
   onSelect?: (path: StartPath) => void
   selected?: StartPath
   columns?: number
+  /** Where these cards are shown, so the funnel can be split by entry point. */
+  source?: string
 }
 
 const StartPaths = ({
@@ -69,6 +72,7 @@ const StartPaths = ({
   onSelect,
   selected,
   columns = 3,
+  source = "unknown",
 }: StartPathsProps) => {
   const cardBg = useColorModeValue("white", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
@@ -78,10 +82,24 @@ const StartPaths = ({
       {START_PATHS.map((option) => {
         const isSelected = selected === option.path
         const cardProps = onSelect
-          ? { onClick: () => onSelect(option.path), cursor: "pointer" }
+          ? {
+              onClick: () => {
+                mixpanel.track("Chose project start path", {
+                  path: option.path,
+                  source,
+                })
+                onSelect(option.path)
+              },
+              cursor: "pointer",
+            }
           : {
               as: RouterLink,
               to,
+              onClick: () =>
+                mixpanel.track("Chose project start path", {
+                  path: option.path,
+                  source,
+                }),
               // Step 1 is the form; the choice this card just made is what
               // step 0 exists to ask, so don't ask it twice.
               search: { path: option.path, step: 1 },

@@ -20,6 +20,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation } from "@tanstack/react-query"
 import type { AxiosError } from "axios"
+import mixpanel from "mixpanel-browser"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import { MiscService } from "../../client"
@@ -75,7 +76,8 @@ const HelpFeedback = ({ isOpen, onClose }: HelpFeedbackProps) => {
           page: window.location.pathname + window.location.search,
         },
       }).then((response) => response.data),
-    onSuccess: (data) => {
+    onSuccess: (data, vars) => {
+      mixpanel.track("Sent feedback", { kind: vars.kind })
       showToast("Sent", data.message, "success")
       reset()
       onClose()

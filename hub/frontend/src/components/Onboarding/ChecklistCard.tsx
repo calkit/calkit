@@ -13,6 +13,7 @@ import {
   Tooltip,
   useColorModeValue,
 } from "@chakra-ui/react"
+import mixpanel from "mixpanel-browser"
 import type { ReactNode } from "react"
 import { FiCircle } from "react-icons/fi"
 
@@ -67,7 +68,13 @@ function StepMark({
             : `Mark "${step.title}" as done`
         }
         lineHeight={0}
-        onClick={() => onMarkDone?.(step.key, !step.done)}
+        onClick={() => {
+          mixpanel.track("Toggled onboarding step", {
+            step: step.key,
+            done: !step.done,
+          })
+          onMarkDone?.(step.key, !step.done)
+        }}
         _hover={{ opacity: 0.6 }}
       >
         {icon}
@@ -139,7 +146,14 @@ const ChecklistCard = ({
         <Button
           size="xs"
           variant="ghost"
-          onClick={() => onDismissedChange(true)}
+          onClick={() => {
+            mixpanel.track("Dismissed onboarding checklist", {
+              title,
+              remaining,
+              complete,
+            })
+            onDismissedChange(true)
+          }}
         >
           Dismiss
         </Button>

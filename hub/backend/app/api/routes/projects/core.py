@@ -598,10 +598,12 @@ def post_project_upload(
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Import existing project files"])
         repo.git.push(["origin", repo.active_branch.name])
-    mixpanel.track(
+    mixpanel.user_uploaded_project(
         user=current_user,
-        event_name="Created new project",
-        add_event_info={"from_upload": True},
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        n_bytes=len(zip_bytes),
+        n_dvc_objects=n_objects,
     )
     return created
 
@@ -2351,6 +2353,12 @@ def post_project_question(
     repo.git.push(["origin", repo.active_branch.name])
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
+    )
+    mixpanel.user_added_question(
+        user=current_user,
+        owner_name=owner_name,
+        project_name=project_name,
+        has_hypothesis=bool(req.hypothesis),
     )
     return project.questions[-1]
 
@@ -4217,10 +4225,10 @@ class ImportedFromPost(BaseModel):
     # lazy annotations a bare `date` here resolves to this field's default.
     date: date_type | None = None
 
-    def to_ck_dict(self) -> dict[str, Any]:
-        """Render the calkit.yaml form of this source.
+    def kind(self) -> str:
+        """Which of the four sources this is.
 
-        Raises if it doesn't name exactly one source, since a dataset whose
+        Raises if it doesn't name exactly one, since a dataset whose
         provenance is ambiguous is worse than one with none recorded.
         """
         kinds = [
@@ -4234,7 +4242,11 @@ class ImportedFromPost(BaseModel):
                 "An imported dataset must name exactly one source: a "
                 "project, a URL, a DOI, or a Git repo",
             )
-        kind = kinds[0]
+        return kinds[0]
+
+    def to_ck_dict(self) -> dict[str, Any]:
+        """Render the calkit.yaml form of this source."""
+        kind = self.kind()
         out: dict[str, Any] = {}
         if kind == "project":
             out["project"] = self.project
@@ -4373,13 +4385,17 @@ def post_project_dataset(
     repo.git.add("calkit.yaml")
     repo.git.commit(["-m", f"Add dataset {req.path}"])
     repo.git.push(["origin", repo.active_branch.name])
-    mixpanel.track(
+    if req.imported_from is not None:
+        source = req.imported_from.kind()
+    elif req.collected_by:
+        source = "collected"
+    else:
+        source = "stage" if req.stage else "existing"
+    mixpanel.user_added_dataset(
         user=current_user,
-        event_name="Added dataset",
-        add_event_info={
-            "imported": req.imported_from is not None,
-            "primary": bool(req.collected_by),
-        },
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        source=source,
     )
     # TODO: Put datasets into database
     return Dataset.model_validate(
@@ -8488,6 +8504,21 @@ def post_project_environment(
         repo.git.add(fpath)
     repo.git.commit(["-m", f"Add environment {req.name}"])
     repo.git.push(["origin", repo.active_branch])
+    mixpanel.user_created_environment(
+        user=current_user,
+        owner_name=owner_name,
+        project_name=project_name,
+        kind=req.kind,
+        # How many packages the spec file declares, which is the difference
+        # between a preset and someone starting from nothing.
+        n_packages=len(
+            [
+                line
+                for line in (req.file_content or "").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+        ),
+    )
     return Environment.model_validate(new_env | {"all_attrs": new_env})
 
 

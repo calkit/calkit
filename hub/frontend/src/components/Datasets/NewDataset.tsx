@@ -21,6 +21,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
+import mixpanel from "mixpanel-browser"
 import { useState } from "react"
 import { Controller, type SubmitHandler, useForm } from "react-hook-form"
 
@@ -181,6 +182,7 @@ const NewDataset = ({
       }).then((response) => response.data)
     },
     onSuccess: () => {
+      mixpanel.track("Added dataset", { source })
       showToast("Success!", "Dataset added.", "success")
       reset()
       setSource(defaultSource)

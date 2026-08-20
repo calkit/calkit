@@ -1043,6 +1043,12 @@ def post_user_onboarding_flag(
         )
     )
     session.commit()
+    mixpanel.user_set_onboarding_flag(
+        user=current_user,
+        step=req.step,
+        project_id=str(req.project_id) if req.project_id else None,
+        done=True,
+    )
     return Message(message="Success")
 
 
@@ -1063,6 +1069,7 @@ def delete_all_user_onboarding_flags(
     for row in rows:
         session.delete(row)
     session.commit()
+    mixpanel.user_reset_onboarding(user=current_user, n_flags=len(rows))
     return Message(message=f"Reset {len(rows)} onboarding flags")
 
 
@@ -1084,4 +1091,11 @@ def delete_user_onboarding_flag(
     for row in rows:
         session.delete(row)
     session.commit()
+    if rows:
+        mixpanel.user_set_onboarding_flag(
+            user=current_user,
+            step=step,
+            project_id=str(project_id) if project_id else None,
+            done=False,
+        )
     return Message(message="Success")

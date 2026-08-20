@@ -16,7 +16,7 @@ from sqlalchemy.exc import DataError
 from sqlmodel import and_, or_, select
 from starlette.requests import Request
 
-from app import arxiv, version
+from app import arxiv, mixpanel, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -151,6 +151,9 @@ def post_feedback(
             # notification is worth a log and nothing more.
             logger.warning(f"Failed to email feedback {feedback.id}: {e}")
     logger.info(f"Recorded {req.kind} from user {current_user.id}")
+    mixpanel.user_sent_feedback(
+        user=current_user, kind=req.kind, page=req.page
+    )
     return Message(message="Thanks! We'll get back to you.")
 
 

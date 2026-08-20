@@ -323,6 +323,9 @@ function ProjectMenu({
               <MenuItem
                 icon={<FiCheckSquare fontSize={16} />}
                 onClick={() => {
+                  mixpanel.track("Restored onboarding checklist", {
+                    source: "project-menu",
+                  })
                   setFlag(DISMISSED, false)
                   onSetRef(undefined)
                   navigate({

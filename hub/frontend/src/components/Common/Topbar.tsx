@@ -14,6 +14,7 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import { useEffect } from "react"
 import { FaGithub, FaPlus } from "react-icons/fa"
 import { FiHelpCircle } from "react-icons/fi"
@@ -192,7 +193,12 @@ export default function Topbar() {
                 <Button
                   aria-label="help"
                   size="sm"
-                  onClick={helpModal.onOpen}
+                  onClick={() => {
+                    mixpanel.track("Opened help and feedback", {
+                      source: "topbar",
+                    })
+                    helpModal.onOpen()
+                  }}
                   leftIcon={<Icon as={FiHelpCircle} />}
                 >
                   Help

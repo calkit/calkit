@@ -89,45 +89,56 @@ figures:
 
 ## Disclosing generative AI
 
-If a generative AI tool helped produce a figure or a `misc` artifact, say so:
+If a generative AI tool helped produce a figure or a `misc` artifact, the
+person who used it says so with `with_ai`:
 
 ```yaml
 figures:
   - path: figures/schematic.png
     created_by:
       email: me@myorg.edu
-    generated_with_ai: Claude Opus 5 # Can be a list too
+      with_ai: Claude Opus 5 # Can be a list too
 ```
 
-<!-- prettier-ignore -->
-!!! note
-    `generated_with_ai` has to name people in `created_by` as well. A model
-    can't answer for a file. A reader deciding whether the use was
-    appropriate needs to know who decided that it was, and disclosure that
-    names no one leaves that question open.
+The disclosure sits inside the person rather than beside them, so it can't
+exist without someone answering for it. A model can't be responsible for a
+file; `created_by` says who was, and `with_ai` says what they used. With
+several authors, it also records which of them used the tool:
+
+```yaml
+misc:
+  - path: figures/composite.drawio
+    created_by:
+      - email: me@myorg.edu
+        with_ai: Claude Opus 5
+      - orcid: 0000-0001-5109-3700
+```
 
 The point isn't that generative AI is disqualifying. It's that whether its
 use was appropriate depends entirely on what the file is, and a reader can
 only make that call if they're told. A schematic laid out by a model is
 usually unremarkable.
 
-### Why datasets and publications can't carry this
+### On a dataset, it's a question to answer
 
-`generated_with_ai` is deliberately available only on figures and `misc`.
-Datasets and publications have no such field, and that's a statement rather
-than an oversight.
+`with_ai` can be recorded anywhere a person can, datasets included. That is
+deliberate: a rule against writing it down doesn't stop anyone using a
+model, it only stops readers finding out.
 
-A dataset is either measured, or obtained from somewhere, or computed by the
-pipeline from things that were. Data a model produced is none of those: it
-has no measurement behind it and no derivation to check, so a project
-reporting it as a dataset would be reporting a finding that nothing
-supports. If a model generated data as part of the work -- synthetic
-training data, say -- then a pipeline stage made it, and the stage is the
-honest record of that.
+But it should read as a flag rather than a footnote. A schematic laid out
+with a model is usually unremarkable. Data is not. A dataset is either
+measured, or obtained from somewhere, or computed by the pipeline from
+things that were, and a model produced none of those: there is no
+measurement behind it and no derivation to check. Seeing `with_ai` on
+`collected_by` is a reason to ask exactly what the tool did, and to expect a
+specific answer.
 
-A publication is the argument the project is making. If it wasn't written by
-the people whose names are on it, the problem isn't a missing disclosure
-field.
+Often the honest answer moves the record somewhere better. If a model
+generated the data itself -- synthetic training data, say -- then a pipeline
+stage made it, and the stage records the command, the inputs, and the
+environment, which is a far stronger account than any disclosure written by
+hand. If the model only transcribed handwritten sheets or reshaped a file,
+say so in the dataset's `description`, where the reader is already looking.
 
 ## What a declaration is worth
 

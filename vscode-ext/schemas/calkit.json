@@ -819,7 +819,7 @@
             }
           ],
           "default": null,
-          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.",
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
           "title": "Created By"
         },
         "description": {
@@ -834,25 +834,6 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
-        },
-        "generated_with_ai": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was.",
-          "title": "Generated With Ai"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -3334,7 +3315,7 @@
             }
           ],
           "default": null,
-          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.",
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
           "title": "Created By"
         },
         "description": {
@@ -3349,25 +3330,6 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
-        },
-        "generated_with_ai": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was.",
-          "title": "Generated With Ai"
         },
         "imported_from": {
           "anyOf": [
@@ -7550,7 +7512,8 @@
       "type": "object"
     },
     "_Person": {
-      "description": "A person credited with producing something in the project.",
+      "additionalProperties": false,
+      "description": "A person credited with producing something in the project.\n\nExtra keys are refused rather than ignored: a mistyped ``oricd``, or a\n``with_ai`` on something that doesn't take one, should say so instead of\nvanishing and leaving the author thinking they recorded it.",
       "properties": {
         "email": {
           "anyOf": [
@@ -7590,6 +7553,25 @@
           "default": null,
           "description": "Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL.",
           "title": "Orcid"
+        },
+        "with_ai": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Generative AI tools this person used, e.g. 'Claude Opus 5'. Recorded against the person rather than the file, so a disclosure can't exist without someone answering for it.",
+          "title": "With Ai"
         }
       },
       "title": "_Person",

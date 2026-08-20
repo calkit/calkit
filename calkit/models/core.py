@@ -94,13 +94,28 @@ class _ImportedFromGit(BaseModel):
 
 
 class _Person(BaseModel):
-    """A person credited with producing something in the project."""
+    """A person credited with producing something in the project.
+
+    Extra keys are refused rather than ignored: a mistyped ``oricd``, or a
+    ``with_ai`` on something that doesn't take one, should say so instead of
+    vanishing and leaving the author thinking they recorded it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     email: str | None = Field(
         default=None, description="Email address of the person."
     )
     name: str | None = Field(
         default=None, description="Their name, if worth recording here."
+    )
+    with_ai: str | list[str] | None = Field(
+        default=None,
+        description=(
+            "Generative AI tools this person used, e.g. 'Claude Opus 5'. "
+            "Recorded against the person rather than the file, so a "
+            "disclosure can't exist without someone answering for it."
+        ),
     )
     orcid: str | None = Field(
         default=None,
@@ -204,28 +219,10 @@ class _AuthoredArtifact(_CalkitObject):
         default=None,
         description=(
             "Who made this, for something produced here rather than by the "
-            "pipeline or obtained from elsewhere."
+            "pipeline or obtained from elsewhere. Each person discloses "
+            "the generative AI tools they used via ``with_ai``."
         ),
     )
-    generated_with_ai: str | list[str] | None = Field(
-        default=None,
-        description=(
-            "Generative AI tools used to produce this, e.g. 'Claude Opus "
-            "5'. Disclosed alongside the people who made it, never instead "
-            "of them: a model can't answer for a file, and a reader "
-            "assessing whether the use was appropriate needs to know who "
-            "decided it was."
-        ),
-    )
-
-    @model_validator(mode="after")
-    def _check_ai_names_a_person(self) -> _AuthoredArtifact:
-        if self.generated_with_ai is not None and self.created_by is None:
-            raise ValueError(
-                "generated_with_ai must name who used the tool: set "
-                "created_by as well"
-            )
-        return self
 
 
 class MiscArtifact(_AuthoredArtifact):

@@ -283,14 +283,13 @@ Carries attribution for the ones that aren't: a schematic drawn by hand
 or laid out with a generative AI tool has no stage to point at, and is
 exactly the kind of thing a reader wants told.
 
-| Parameter           | Type                             | Required | Default | Description                                                                                                                                                                                                                                                  |
-| ------------------- | -------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `path`              | str                              | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                              |
-| `title`             | str \| None                      | no       | null    | A human-readable title.                                                                                                                                                                                                                                      |
-| `description`       | str \| None                      | no       | null    | A longer description.                                                                                                                                                                                                                                        |
-| `stage`             | str \| None                      | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                               |
-| `created_by`        | _Person \| list[_Person] \| None | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.                                                                                                                                                           |
-| `generated_with_ai` | str \| list[str] \| None         | no       | null    | Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was. |
+| Parameter     | Type                             | Required | Default | Description                                                                                                                                                                 |
+| ------------- | -------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`        | str                              | yes      |         | Path to the file, relative to the project root.                                                                                                                             |
+| `title`       | str \| None                      | no       | null    | A human-readable title.                                                                                                                                                     |
+| `description` | str \| None                      | no       | null    | A longer description.                                                                                                                                                       |
+| `stage`       | str \| None                      | no       | null    | Name of the pipeline stage that produces this.                                                                                                                              |
+| `created_by`  | _Person \| list[_Person] \| None | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``. |
 
 #### `Result`
 
@@ -367,15 +366,14 @@ a photograph, a slide someone drew, a config a colleague sent over. They
 still have an origin, and without somewhere to record it the honest
 answer is missing rather than merely absent.
 
-| Parameter           | Type                                                                                     | Required | Default | Description                                                                                                                                                                                                                                                  |
-| ------------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `path`              | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                              |
-| `title`             | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                                                                                                      |
-| `description`       | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                                                                                                        |
-| `stage`             | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                               |
-| `created_by`        | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.                                                                                                                                                           |
-| `generated_with_ai` | str \| list[str] \| None                                                                 | no       | null    | Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was. |
-| `imported_from`     | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                           |
+| Parameter       | Type                                                                                     | Required | Default | Description                                                                                                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`          | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                             |
+| `title`         | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                     |
+| `description`   | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                       |
+| `stage`         | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                              |
+| `created_by`    | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``. |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                          |
 
 #### `Software`
 
@@ -541,11 +539,16 @@ Configuration for syncing a directory with an Overleaf project.
 
 A person credited with producing something in the project.
 
-| Parameter | Type        | Required | Default | Description                                                                                                       |
-| --------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `email`   | str \| None | no       | null    | Email address of the person.                                                                                      |
-| `name`    | str \| None | no       | null    | Their name, if worth recording here.                                                                              |
-| `orcid`   | str \| None | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL. |
+Extra keys are refused rather than ignored: a mistyped `oricd`, or a
+`with_ai` on something that doesn't take one, should say so instead of
+vanishing and leaving the author thinking they recorded it.
+
+| Parameter | Type                     | Required | Default | Description                                                                                                                                                                 |
+| --------- | ------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email`   | str \| None              | no       | null    | Email address of the person.                                                                                                                                                |
+| `name`    | str \| None              | no       | null    | Their name, if worth recording here.                                                                                                                                        |
+| `with_ai` | str \| list[str] \| None | no       | null    | Generative AI tools this person used, e.g. 'Claude Opus 5'. Recorded against the person rather than the file, so a disclosure can't exist without someone answering for it. |
+| `orcid`   | str \| None              | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL.                                                           |
 
 #### `_ImportedFromProject`
 

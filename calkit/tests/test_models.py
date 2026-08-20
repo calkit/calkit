@@ -9,7 +9,6 @@ from calkit.models.core import (
     ImportedDataset,
     MiscArtifact,
     ProjectInfo,
-    Publication,
 )
 
 
@@ -137,18 +136,45 @@ def test_figure_attribution():
     fig = Figure.model_validate(
         {
             "path": "figures/schematic.png",
-            "created_by": {"email": "me@x.edu"},
-            "generated_with_ai": "Claude Opus 5",
+            "created_by": {"email": "me@x.edu", "with_ai": "Claude Opus 5"},
         }
     )
-    assert fig.generated_with_ai == "Claude Opus 5"
+    assert fig.created_by.with_ai == "Claude Opus 5"
+    # With several authors, which of them used the tool is recorded too.
+    fig = Figure.model_validate(
+        {
+            "path": "f.png",
+            "created_by": [
+                {"email": "a@x.edu", "with_ai": ["Claude Opus 5", "Copilot"]},
+                {"orcid": "0000-0001-5109-3700"},
+            ],
+        }
+    )
+    assert len(fig.created_by[0].with_ai) == 2
+    assert fig.created_by[1].with_ai is None
+    # The disclosure lives on the person, so there is no shape in which one
+    # exists without somebody answering for it -- no validator needed.
+    assert "generated_with_ai" not in Figure.model_fields
+    # It can be recorded anywhere a person can, datasets included: a rule
+    # against writing it down wouldn't stop anyone using a model, it would
+    # only stop readers finding out. On a dataset it's a flag rather than a
+    # footnote, which is a matter for the docs, not the schema.
+    ds = Dataset.model_validate(
+        {
+            "path": "a.csv",
+            "collected_by": {"email": "m@x.edu", "with_ai": "Claude Opus 5"},
+        }
+    )
+    assert ds.collected_by.with_ai == "Claude Opus 5"
+    # A mistyped key is refused rather than dropped, so an author can't
+    # think they recorded something they didn't.
     with pytest.raises(ValidationError):
-        Figure.model_validate({"path": "f.png", "generated_with_ai": "Claude"})
-    # Datasets and publications deliberately have no such field: data a
-    # model produced has no measurement behind it and no derivation to
-    # check, and a paper's authors are the people whose names are on it.
-    assert "generated_with_ai" not in Dataset.model_fields
-    assert "generated_with_ai" not in Publication.model_fields
+        Dataset.model_validate(
+            {
+                "path": "a.csv",
+                "collected_by": {"email": "m@x.edu", "oricd": "x"},
+            }
+        )
 
 
 def test_misc_artifact():
@@ -162,8 +188,10 @@ def test_misc_artifact():
                 },
                 {
                     "path": "figures/schematic.png",
-                    "created_by": {"email": "me@x.edu"},
-                    "generated_with_ai": "Claude Opus 5",
+                    "created_by": {
+                        "email": "me@x.edu",
+                        "with_ai": "Claude Opus 5",
+                    },
                 },
             ]
         }
@@ -173,12 +201,7 @@ def test_misc_artifact():
         "cfg/solver.toml",
         "figures/schematic.png",
     ]
-    assert info.misc[2].generated_with_ai == "Claude Opus 5"
-    # A model can't answer for a file, so the disclosure names people too.
-    with pytest.raises(ValidationError):
-        MiscArtifact.model_validate(
-            {"path": "x", "generated_with_ai": "Claude Opus 5"}
-        )
+    assert info.misc[2].created_by.with_ai == "Claude Opus 5"
     # Made here or obtained elsewhere, not both.
     with pytest.raises(ValidationError):
         MiscArtifact.model_validate(
@@ -192,11 +215,13 @@ def test_misc_artifact():
     m = MiscArtifact.model_validate(
         {
             "path": "x",
-            "created_by": [{"email": "a@x.edu"}, {"email": "b@x.edu"}],
-            "generated_with_ai": ["Claude Opus 5", "GitHub Copilot"],
+            "created_by": [
+                {"email": "a@x.edu", "with_ai": ["Claude Opus 5", "Copilot"]},
+                {"email": "b@x.edu"},
+            ],
         }
     )
-    assert len(m.generated_with_ai) == 2
+    assert len(m.created_by[0].with_ai) == 2
     # Misc artifacts can still be produced by a stage like anything else.
     assert (
         MiscArtifact.model_validate({"path": "x", "stage": "make-it"}).stage

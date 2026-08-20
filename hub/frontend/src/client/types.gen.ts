@@ -281,16 +281,26 @@ export type Collaborator = {
 
 /**
  * CollectorPost
+ *
+ * Someone credited with collecting a dataset.
+ *
+ * Everything is optional here; that a person needs an email or an ORCID
+ * is enforced by the calkit model this is validated through, so the rule
+ * lives in one place rather than being restated and left to drift.
  */
 export type CollectorPost = {
   /**
    * Email
    */
-  email: string
+  email?: string | null
   /**
    * Name
    */
   name?: string | null
+  /**
+   * Orcid
+   */
+  orcid?: string | null
 }
 
 /**

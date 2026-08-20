@@ -801,7 +801,27 @@
       "type": "object"
     },
     "Figure": {
+      "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told.",
       "properties": {
+        "created_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Person"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Person"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.",
+          "title": "Created By"
+        },
         "description": {
           "anyOf": [
             {
@@ -814,6 +834,25 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "generated_with_ai": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was.",
+          "title": "Generated With Ai"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -3277,7 +3316,7 @@
       "type": "object"
     },
     "MiscArtifact": {
-      "description": "A path worth attributing that isn't one of the typed artifacts.\n\nMost files in a project are neither a dataset nor a figure nor a paper:\na photograph, a slide someone drew, a config a colleague sent over. They\nstill have an origin, and without somewhere to record it the honest\nanswer is missing rather than merely absent.\n\nWhat's recorded here is a claim, not proof of one: calkit.yaml is\nhand-authored, so nothing in it is verified by having been written down.\nThat's worth being explicit about wherever it's shown to a reader, and\nit's why hashes and signatures aren't among these fields -- they'd read\nas evidence while being just as hand-authored as the rest.",
+      "description": "A path worth attributing that isn't one of the typed artifacts.\n\nMost files in a project are neither a dataset nor a figure nor a paper:\na photograph, a slide someone drew, a config a colleague sent over. They\nstill have an origin, and without somewhere to record it the honest\nanswer is missing rather than merely absent.",
       "properties": {
         "created_by": {
           "anyOf": [
@@ -3295,7 +3334,7 @@
             }
           ],
           "default": null,
-          "description": "Who made this, for something produced here rather than obtained from elsewhere.",
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.",
           "title": "Created By"
         },
         "description": {

@@ -190,13 +190,8 @@ class ImportedDataset(Dataset):
     )
 
 
-class MiscArtifact(_CalkitObject):
-    """A path worth attributing that isn't one of the typed artifacts.
-
-    Most files in a project are neither a dataset nor a figure nor a paper:
-    a photograph, a slide someone drew, a config a colleague sent over. They
-    still have an origin, and without somewhere to record it the honest
-    answer is missing rather than merely absent.
+class _AuthoredArtifact(_CalkitObject):
+    """An artifact that may need attributing to whoever produced it.
 
     What's recorded here is a claim, not proof of one: calkit.yaml is
     hand-authored, so nothing in it is verified by having been written down.
@@ -205,18 +200,11 @@ class MiscArtifact(_CalkitObject):
     as evidence while being just as hand-authored as the rest.
     """
 
-    imported_from: (
-        _ImportedFromProject
-        | _ImportedFromUrl
-        | _ImportedFromDoi
-        | _ImportedFromGit
-        | None
-    ) = Field(default=None, description="Where this came from, if imported.")
     created_by: _Person | list[_Person] | None = Field(
         default=None,
         description=(
-            "Who made this, for something produced here rather than "
-            "obtained from elsewhere."
+            "Who made this, for something produced here rather than by the "
+            "pipeline or obtained from elsewhere."
         ),
     )
     generated_with_ai: str | list[str] | None = Field(
@@ -231,11 +219,7 @@ class MiscArtifact(_CalkitObject):
     )
 
     @model_validator(mode="after")
-    def _check_attribution(self) -> MiscArtifact:
-        if self.created_by is not None and self.imported_from is not None:
-            raise ValueError(
-                "An artifact made here cannot also be imported from elsewhere"
-            )
+    def _check_ai_names_a_person(self) -> _AuthoredArtifact:
         if self.generated_with_ai is not None and self.created_by is None:
             raise ValueError(
                 "generated_with_ai must name who used the tool: set "
@@ -244,8 +228,39 @@ class MiscArtifact(_CalkitObject):
         return self
 
 
-class Figure(_CalkitObject):
-    pass
+class MiscArtifact(_AuthoredArtifact):
+    """A path worth attributing that isn't one of the typed artifacts.
+
+    Most files in a project are neither a dataset nor a figure nor a paper:
+    a photograph, a slide someone drew, a config a colleague sent over. They
+    still have an origin, and without somewhere to record it the honest
+    answer is missing rather than merely absent.
+    """
+
+    imported_from: (
+        _ImportedFromProject
+        | _ImportedFromUrl
+        | _ImportedFromDoi
+        | _ImportedFromGit
+        | None
+    ) = Field(default=None, description="Where this came from, if imported.")
+
+    @model_validator(mode="after")
+    def _check_not_both_made_and_imported(self) -> MiscArtifact:
+        if self.created_by is not None and self.imported_from is not None:
+            raise ValueError(
+                "An artifact made here cannot also be imported from elsewhere"
+            )
+        return self
+
+
+class Figure(_AuthoredArtifact):
+    """A figure, usually produced by a pipeline stage.
+
+    Carries attribution for the ones that aren't: a schematic drawn by hand
+    or laid out with a generative AI tool has no stage to point at, and is
+    exactly the kind of thing a reader wants told.
+    """
 
 
 class Result(_CalkitObject):

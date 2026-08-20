@@ -92,39 +92,5 @@ something resolvable. An ORCID is the better of the two, since it identifies
 someone beyond this one project, and it's stored as the full
 `https://orcid.org/...` URL whether you write it that way or not.
 
-## Attributing anything else
-
-Most files are neither a dataset nor a figure nor a paper: a photograph, a
-diagram someone drew, a config a colleague sent over. Those go in `misc`,
-which takes the same `imported_from` shapes plus who made it:
-
-```yaml
-misc:
-  - path: img/test-rig.jpg
-    title: Photo of the test rig
-    created_by:
-      email: me@myorg.edu
-  - path: cfg/solver.toml
-    imported_from:
-      url: https://someone.org/solver.toml
-      date: 2026-01-02
-```
-
-### Disclosing generative AI
-
-If a generative AI tool helped produce something, say so with
-`generated_with_ai`:
-
-```yaml
-figures:
-  - path: figures/schematic.png
-    created_by:
-      email: me@myorg.edu
-    generated_with_ai: Claude Opus 5 # Can be a list too
-```
-
-<!-- prettier-ignore -->
-!!! note
-    `generated_with_ai` has to name people in `created_by` as well. A model
-    can't answer for a file, and a reader deciding whether the use was
-    appropriate needs to know who decided that it was.
+For attributing files that aren't datasets, and for disclosing generative
+AI, see [provenance](provenance.md).

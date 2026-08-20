@@ -511,7 +511,14 @@ export const CollaboratorSchema = {
 export const CollectorPostSchema = {
   properties: {
     email: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Email",
     },
     name: {
@@ -525,10 +532,22 @@ export const CollectorPostSchema = {
       ],
       title: "Name",
     },
+    orcid: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Orcid",
+    },
   },
   type: "object",
-  required: ["email"],
   title: "CollectorPost",
+  description:
+    "Someone credited with collecting a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
 } as const
 
 export const CommentHighlightSchema = {

@@ -5,9 +5,11 @@ from pydantic import ValidationError
 
 from calkit.models.core import (
     Dataset,
+    Figure,
     ImportedDataset,
     MiscArtifact,
     ProjectInfo,
+    Publication,
 )
 
 
@@ -124,6 +126,29 @@ def test_person_orcid():
         Dataset.model_validate(
             {"path": "a", "collected_by": {"name": "Just A Name"}}
         )
+
+
+def test_figure_attribution():
+    # A figure from a stage needs nothing else; the stage is the record.
+    assert (
+        Figure.model_validate({"path": "f.png", "stage": "plot"}).created_by
+        is None
+    )
+    fig = Figure.model_validate(
+        {
+            "path": "figures/schematic.png",
+            "created_by": {"email": "me@x.edu"},
+            "generated_with_ai": "Claude Opus 5",
+        }
+    )
+    assert fig.generated_with_ai == "Claude Opus 5"
+    with pytest.raises(ValidationError):
+        Figure.model_validate({"path": "f.png", "generated_with_ai": "Claude"})
+    # Datasets and publications deliberately have no such field: data a
+    # model produced has no measurement behind it and no derivation to
+    # check, and a paper's authors are the people whose names are on it.
+    assert "generated_with_ai" not in Dataset.model_fields
+    assert "generated_with_ai" not in Publication.model_fields
 
 
 def test_misc_artifact():

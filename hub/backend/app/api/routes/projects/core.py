@@ -4201,8 +4201,16 @@ class GitSourcePost(BaseModel):
 
 
 class CollectorPost(BaseModel):
-    email: str
+    """Someone credited with collecting a dataset.
+
+    Everything is optional here; that a person needs an email or an ORCID
+    is enforced by the calkit model this is validated through, so the rule
+    lives in one place rather than being restated and left to drift.
+    """
+
+    email: str | None = None
     name: str | None = None
+    orcid: str | None = None
 
 
 class ImportedFromPost(BaseModel):

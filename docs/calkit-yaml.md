@@ -277,12 +277,20 @@ Keys above whose type is a named object, like `Figure`, hold the properties desc
 
 #### `Figure`
 
-| Parameter     | Type        | Required | Default | Description                                     |
-| ------------- | ----------- | -------- | ------- | ----------------------------------------------- |
-| `path`        | str         | yes      |         | Path to the file, relative to the project root. |
-| `title`       | str \| None | no       | null    | A human-readable title.                         |
-| `description` | str \| None | no       | null    | A longer description.                           |
-| `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+A figure, usually produced by a pipeline stage.
+
+Carries attribution for the ones that aren't: a schematic drawn by hand
+or laid out with a generative AI tool has no stage to point at, and is
+exactly the kind of thing a reader wants told.
+
+| Parameter           | Type                             | Required | Default | Description                                                                                                                                                                                                                                                  |
+| ------------------- | -------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`              | str                              | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                              |
+| `title`             | str \| None                      | no       | null    | A human-readable title.                                                                                                                                                                                                                                      |
+| `description`       | str \| None                      | no       | null    | A longer description.                                                                                                                                                                                                                                        |
+| `stage`             | str \| None                      | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                               |
+| `created_by`        | _Person \| list[_Person] \| None | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.                                                                                                                                                           |
+| `generated_with_ai` | str \| list[str] \| None         | no       | null    | Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was. |
 
 #### `Result`
 
@@ -359,21 +367,15 @@ a photograph, a slide someone drew, a config a colleague sent over. They
 still have an origin, and without somewhere to record it the honest
 answer is missing rather than merely absent.
 
-What's recorded here is a claim, not proof of one: calkit.yaml is
-hand-authored, so nothing in it is verified by having been written down.
-That's worth being explicit about wherever it's shown to a reader, and
-it's why hashes and signatures aren't among these fields -- they'd read
-as evidence while being just as hand-authored as the rest.
-
 | Parameter           | Type                                                                                     | Required | Default | Description                                                                                                                                                                                                                                                  |
 | ------------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `path`              | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                              |
 | `title`             | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                                                                                                      |
 | `description`       | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                                                                                                        |
 | `stage`             | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                               |
-| `imported_from`     | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                           |
-| `created_by`        | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than obtained from elsewhere.                                                                                                                                                                              |
+| `created_by`        | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere.                                                                                                                                                           |
 | `generated_with_ai` | str \| list[str] \| None                                                                 | no       | null    | Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was. |
+| `imported_from`     | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                           |
 
 #### `Software`
 
@@ -535,6 +537,16 @@ Configuration for syncing a directory with an Overleaf project.
 | `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
 | `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
 
+#### `_Person`
+
+A person credited with producing something in the project.
+
+| Parameter | Type        | Required | Default | Description                                                                                                       |
+| --------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `email`   | str \| None | no       | null    | Email address of the person.                                                                                      |
+| `name`    | str \| None | no       | null    | Their name, if worth recording here.                                                                              |
+| `orcid`   | str \| None | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL. |
+
 #### `_ImportedFromProject`
 
 | Parameter      | Type              | Required | Default | Description |
@@ -571,16 +583,6 @@ Data from a Git repo that isn't a Calkit project.
 | --------- | ------------ | -------- | ------- | ----------------------------- |
 | `git`     | _GitSource   | yes      |         |                               |
 | `date`    | date \| None | no       | null    | When the data was downloaded. |
-
-#### `_Person`
-
-A person credited with producing something in the project.
-
-| Parameter | Type        | Required | Default | Description                                                                                                       |
-| --------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `email`   | str \| None | no       | null    | Email address of the person.                                                                                      |
-| `name`    | str \| None | no       | null    | Their name, if worth recording here.                                                                              |
-| `orcid`   | str \| None | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL. |
 
 #### `FormulaParams`
 

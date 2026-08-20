@@ -11,6 +11,9 @@
   GitHub Actions configs, lives in `calkit/resources`; see the README there
   before editing, since some of those files are generated
 
+Be sure to read the `AGENTS.md` file in whatever subproject you're working on,
+if applicable.
+
 ## Working
 
 See `CONTRIBUTING.md` for tool usage, style guidelines, etc.

@@ -8665,6 +8665,11 @@ export const UserPublicSchema = {
       format: "uuid",
       title: "Id",
     },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
     github_username: {
       anyOf: [
         {
@@ -8688,7 +8693,7 @@ export const UserPublicSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "github_username", "subscription"],
+  required: ["email", "id", "created", "github_username", "subscription"],
   title: "UserPublic",
 } as const
 
@@ -9853,6 +9858,11 @@ export const UserPublicWritableSchema = {
       format: "uuid",
       title: "Id",
     },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
     github_username: {
       anyOf: [
         {
@@ -9876,7 +9886,7 @@ export const UserPublicWritableSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "github_username", "subscription"],
+  required: ["email", "id", "created", "github_username", "subscription"],
   title: "UserPublic",
 } as const
 

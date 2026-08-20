@@ -45,6 +45,7 @@ import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
 import { FaGithub, FaQuestion, FaRegClone } from "react-icons/fa"
+import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
@@ -64,6 +65,8 @@ import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic
 import NewProject from "../../../../components/Projects/NewProject"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
 import useAuth from "../../../../hooks/useAuth"
+import useOnboardingFlags from "../../../../hooks/useOnboarding"
+import { DISMISSED } from "../../../../lib/onboarding"
 import useProject from "../../../../hooks/useProject"
 import { isAuthenticationError } from "../../../../lib/auth"
 
@@ -278,6 +281,9 @@ function ProjectMenu({
   projectName,
 }: ProjectMenuProps) {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  // Clearing the flag is what brings the checklist back on the home page.
+  const { setFlag } = useOnboardingFlags(project.id)
   const editProjectModal = useDisclosure()
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
@@ -309,6 +315,25 @@ function ProjectMenu({
             >
               Clone to local machine
             </MenuItem>
+            {/* The checklist hides itself once it's done or dismissed, so
+                this is the way back to it. It only renders on the project
+                home at the default ref, so clearing the flag alone would
+                leave this doing nothing visible from anywhere else. */}
+            {userHasWriteAccess ? (
+              <MenuItem
+                icon={<FiCheckSquare fontSize={16} />}
+                onClick={() => {
+                  setFlag(DISMISSED, false)
+                  onSetRef(undefined)
+                  navigate({
+                    to: "/$accountName/$projectName",
+                    params: { accountName, projectName },
+                  })
+                }}
+              >
+                Show setup checklist
+              </MenuItem>
+            ) : null}
             <MenuDivider />
             <MenuItem
               icon={<FaCodeBranch fontSize={16} />}

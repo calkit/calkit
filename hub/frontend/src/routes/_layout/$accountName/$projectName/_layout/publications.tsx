@@ -28,7 +28,7 @@ import {
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
-import { FiFile } from "react-icons/fi"
+import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
@@ -42,6 +42,7 @@ import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../../../../../components/Common/CommentsPanel"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
@@ -536,14 +537,11 @@ function Publications() {
               // until a manual refresh.
               <LoadingSpinner height="300px" />
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-              >
-                <Text>No publications found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={FiBookOpen}
+                title="No publications found"
+                hint="Start one from a template, or link the Overleaf project you're already writing in."
+              />
             )}
           </Box>
 

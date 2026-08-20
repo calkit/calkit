@@ -54,21 +54,21 @@ const KINDS: {
 }[] = [
   {
     kind: "uv-venv",
-    label: "Python (uv) — fast, from a requirements file",
+    label: "Python (uv)—fast, from a requirements file",
     path: "requirements.txt",
     pathLabel: "Requirements file",
     template: () => "# One package per line, e.g.\n# pandas\n# matplotlib\n",
   },
   {
     kind: "venv",
-    label: "Python (venv) — from a requirements file",
+    label: "Python (venv)—from a requirements file",
     path: "requirements.txt",
     pathLabel: "Requirements file",
     template: () => "# One package per line, e.g.\n# pandas\n# matplotlib\n",
   },
   {
     kind: "conda",
-    label: "Conda — packages beyond Python, from an environment file",
+    label: "Conda—packages beyond Python, from an environment file",
     path: "environment.yml",
     pathLabel: "Environment file",
     template: (name) =>
@@ -76,7 +76,7 @@ const KINDS: {
   },
   {
     kind: "docker",
-    label: "Docker — a full image, for anything that isn't just packages",
+    label: "Docker—a full image, for anything that isn't just packages",
     path: "Dockerfile",
     pathLabel: "Dockerfile",
     template: () =>
@@ -84,19 +84,19 @@ const KINDS: {
   },
   {
     kind: "uv",
-    label: "uv project — you already have a pyproject.toml",
+    label: "uv project—you already have a pyproject.toml",
     path: "pyproject.toml",
     pathLabel: "Project file",
   },
   {
     kind: "pixi",
-    label: "Pixi — from a pixi.toml",
+    label: "Pixi—from a pixi.toml",
     path: "pixi.toml",
     pathLabel: "Pixi file",
   },
   {
     kind: "matlab",
-    label: "MATLAB — scripts run in batch mode",
+    label: "MATLAB—scripts run in batch mode",
     path: null,
   },
 ]

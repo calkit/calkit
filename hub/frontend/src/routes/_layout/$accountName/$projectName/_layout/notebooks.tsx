@@ -17,6 +17,7 @@ import { FaCodeBranch } from "react-icons/fa"
 import { SiJupyter, SiPython } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
 import { type Notebook, ProjectsService } from "../../../../../client"
@@ -243,17 +244,12 @@ function Notebooks() {
                 </Box>
               </>
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-                direction="column"
-                gap={3}
-              >
-                <Icon as={SiJupyter} fontSize="4xl" color="orange.300" />
-                <Text>No notebooks found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={SiJupyter}
+                iconColor="orange.300"
+                title="No notebooks found"
+                hint="Add a .ipynb to the repo, or declare one in calkit.yaml to show it here."
+              />
             )}
           </Box>
           {/* Right: info */}

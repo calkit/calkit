@@ -722,3 +722,85 @@ def test_onboarding_flags_round_trip(
     # Flags require a session at all.
     assert client.get(base).status_code == 401
     assert client.delete(f"{base}/all").status_code == 401
+
+
+def test_read_users_search_and_sort(
+    client: TestClient, db: Session, superuser_token_headers: dict[str, str]
+) -> None:
+    """Superusers can find a user and order the list by signup time."""
+    from app import users as users_mod
+
+    url = f"{settings.API_V1_STR}/users"
+    marker = uuid.uuid4().hex[:8]
+    first = users_mod.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"alpha-{marker}@example.com",
+            password="testpassword123",
+            full_name=f"Alpha {marker}",
+            github_username=f"alphagh{marker}",
+        ),
+    )
+    second = users_mod.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"beta-{marker}@example.com",
+            password="testpassword123",
+            full_name=f"Beta {marker}",
+        ),
+    )
+    # Every user carries when they signed up, which is what sorting uses.
+    assert first.created is not None
+    # Searching matches email...
+    body = client.get(
+        url, headers=superuser_token_headers, params={"search_for": marker}
+    ).json()
+    assert body["count"] == 2
+    assert {u["email"] for u in body["data"]} == {first.email, second.email}
+    # ...full name, and GitHub username, which lives on the account.
+    for term, expected in [
+        (f"Alpha {marker}", {first.email}),
+        (f"alphagh{marker}", {first.email}),
+    ]:
+        body = client.get(
+            url, headers=superuser_token_headers, params={"search_for": term}
+        ).json()
+        assert {u["email"] for u in body["data"]} == expected
+    # Newest first by default; flipping the direction reverses it.
+    body = client.get(
+        url,
+        headers=superuser_token_headers,
+        params={"search_for": marker, "sort_by": "created"},
+    ).json()
+    assert [u["email"] for u in body["data"]] == [second.email, first.email]
+    body = client.get(
+        url,
+        headers=superuser_token_headers,
+        params={
+            "search_for": marker,
+            "sort_by": "created",
+            "descending": False,
+        },
+    ).json()
+    assert [u["email"] for u in body["data"]] == [first.email, second.email]
+    # Sorting by email is available too, and the count reflects the search
+    # rather than the whole table.
+    body = client.get(
+        url,
+        headers=superuser_token_headers,
+        params={
+            "search_for": marker,
+            "sort_by": "email",
+            "descending": False,
+        },
+    ).json()
+    assert [u["email"] for u in body["data"]] == [first.email, second.email]
+    assert body["count"] == 2
+    # A search matching nothing is an empty list, not an error.
+    body = client.get(
+        url,
+        headers=superuser_token_headers,
+        params={"search_for": "no-such-user-anywhere"},
+    ).json()
+    assert body["count"] == 0
+    assert body["data"] == []

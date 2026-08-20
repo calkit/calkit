@@ -9,81 +9,65 @@ import {
 } from "@chakra-ui/react"
 import { useState } from "react"
 
-export interface GitHubRepo {
-  full_name: string
-  private?: boolean
-  description?: string | null
+import { fuzzyFilter } from "../../lib/fuzzy"
+
+export interface SelectOption {
+  value: string
+  /** Shown next to the value, e.g. "private" or a file size. */
+  hint?: string
 }
 
-/**
- * Rank repos against what's been typed, subsequence-style.
- *
- * Typing "navwake" should find "navier-wake-analysis": people remember
- * fragments of a repo name, not its exact spelling, and a substring match
- * makes them get the gaps right. Matches earlier in the name and closer
- * together score higher, so the obvious candidate lands at the top.
- *
- * Exported for its unit tests, which is where the ranking is pinned down.
- */
-export function scoreRepo(name: string, query: string): number | null {
-  const target = name.toLowerCase()
-  const q = query.toLowerCase().replace(/\s+/g, "")
-  if (!q) return 0
-  let score = 0
-  let index = -1
-  for (const char of q) {
-    const next = target.indexOf(char, index + 1)
-    if (next === -1) return null
-    // A jump means characters the user didn't type; the further the jump,
-    // the weaker the match. Consecutive characters cost nothing.
-    score += next - index - 1
-    index = next
-  }
-  // Prefer matches that start earlier, so "wake" ranks wake-study above
-  // turbine-wake when both match.
-  return score + target.indexOf(q[0])
-}
-
-export function filterRepos(
-  repos: GitHubRepo[],
-  query: string,
-  limit = 8,
-): GitHubRepo[] {
-  const scored: { repo: GitHubRepo; score: number }[] = []
-  for (const repo of repos) {
-    const score = scoreRepo(repo.full_name, query)
-    if (score !== null) {
-      scored.push({ repo, score })
-    }
-  }
-  scored.sort((a, b) => a.score - b.score)
-  return scored.slice(0, limit).map((s) => s.repo)
-}
-
-interface RepoPickerProps {
-  repos: GitHubRepo[]
+interface FilterableSelectProps {
+  options: SelectOption[]
+  onSelect: (value: string) => void
+  /** Current value, when the caller wants to control the input. */
+  value?: string
+  onChange?: (value: string) => void
+  placeholder?: string
   isLoading?: boolean
-  onSelect: (repo: GitHubRepo) => void
+  id?: string
+  /** Shown in place of the list when nothing matches what was typed. */
+  emptyMessage?: string
 }
 
 /**
- * Type-to-filter list of the user's GitHub repos.
+ * A text input that filters a list as you type.
  *
- * A plain select is unusable past a few dozen repos, which is most people
- * with an account of any age.
+ * A plain select stops working somewhere past a few dozen options, which
+ * is where both of its uses here land: a GitHub account's repos, and every
+ * file in a project. Typing is also how someone with the name half in mind
+ * finds it, which scrolling isn't.
+ *
+ * The typed text is the value: a caller can accept something that isn't in
+ * the list (a repo the API didn't return, a path that doesn't exist yet)
+ * by reading `onChange` rather than only `onSelect`.
  */
-const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
-  const [query, setQuery] = useState("")
+const FilterableSelect = ({
+  options,
+  onSelect,
+  value,
+  onChange,
+  placeholder,
+  isLoading,
+  id,
+  emptyMessage,
+}: FilterableSelectProps) => {
+  const [internal, setInternal] = useState("")
+  const query = value ?? internal
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
   const listBg = useColorModeValue("white", "gray.700")
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.100", "gray.600")
-  const matches = filterRepos(repos, query)
-  const choose = (repo: GitHubRepo) => {
-    setQuery(repo.full_name)
+  const matches = fuzzyFilter(options, query, (option) => option.value)
+  const setQuery = (next: string) => {
+    setInternal(next)
+    onChange?.(next)
+  }
+  const choose = (option: SelectOption) => {
+    setQuery(option.value)
     setOpen(false)
-    onSelect(repo)
+    onSelect(option.value)
   }
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (!open || !matches.length) return
@@ -94,7 +78,7 @@ const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
       e.preventDefault()
       setHighlighted((h) => (h - 1 + matches.length) % matches.length)
     } else if (e.key === "Enter") {
-      // The picker is inside a form, so Enter must not submit it while a
+      // This lives inside a form, so Enter must not submit it while a
       // suggestion is being chosen.
       e.preventDefault()
       choose(matches[Math.min(highlighted, matches.length - 1)])
@@ -102,12 +86,14 @@ const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
       setOpen(false)
     }
   }
+  const showEmpty =
+    open && !isLoading && !matches.length && Boolean(query) && emptyMessage
   return (
     <Box position="relative">
       <Input
-        id="existing_repo"
+        id={id}
         value={query}
-        placeholder={isLoading ? "Loading your repos…" : "Start typing…"}
+        placeholder={isLoading ? "Loading…" : placeholder}
         autoComplete="off"
         onChange={(e) => {
           setQuery(e.target.value)
@@ -142,9 +128,9 @@ const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
           maxH="240px"
           overflowY="auto"
         >
-          {matches.map((repo, index) => (
+          {matches.map((option, index) => (
             <ListItem
-              key={repo.full_name}
+              key={option.value}
               px={3}
               py={2}
               cursor="pointer"
@@ -154,14 +140,14 @@ const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
               onMouseDown={(e) => {
                 // mousedown, not click: blur would close the list first.
                 e.preventDefault()
-                choose(repo)
+                choose(option)
               }}
             >
-              <Text fontSize="sm">
-                {repo.full_name}
-                {repo.private ? (
+              <Text fontSize="sm" wordBreak="break-all">
+                {option.value}
+                {option.hint ? (
                   <Text as="span" color="ui.dim" fontSize="xs" ml={2}>
-                    private
+                    {option.hint}
                   </Text>
                 ) : null}
               </Text>
@@ -169,8 +155,13 @@ const RepoPicker = ({ repos, isLoading, onSelect }: RepoPickerProps) => {
           ))}
         </List>
       ) : null}
+      {showEmpty ? (
+        <Text fontSize="xs" color="ui.dim" mt={1}>
+          {emptyMessage}
+        </Text>
+      ) : null}
     </Box>
   )
 }
 
-export default RepoPicker
+export default FilterableSelect

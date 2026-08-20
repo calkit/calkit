@@ -7233,7 +7233,7 @@
           "title": "Path"
         },
         "rev": {
-          "description": "The commit, tag, or branch it came from. A commit hash is what makes this reproducible; a branch moves.",
+          "description": "The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent.",
           "title": "Rev",
           "type": "string"
         },

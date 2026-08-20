@@ -238,6 +238,17 @@ class User(UserBase, table=True):
 
     @computed_field
     @property
+    def created(self) -> datetime:
+        """When this user signed up.
+
+        Read off the account rather than stored again here: the two are
+        created in the same transaction, so a column on the user would be a
+        second copy of the same fact, free to drift from it.
+        """
+        return self.account.created
+
+    @computed_field
+    @property
     def github_username(self) -> str | None:
         return self.account.github_name
 
@@ -257,6 +268,7 @@ class User(UserBase, table=True):
 # Properties to return via API, id is always required
 class UserPublic(UserBase):
     id: uuid.UUID
+    created: datetime
     github_username: str | None
     subscription: Union["UserSubscription", None]
 

@@ -4966,6 +4966,10 @@ export type UserPublic = {
    */
   id: string
   /**
+   * Created
+   */
+  created: string
+  /**
    * Github Username
    */
   github_username: string | null
@@ -5650,6 +5654,10 @@ export type UserPublicWritable = {
    */
   id: string
   /**
+   * Created
+   */
+  created: string
+  /**
    * Github Username
    */
   github_username: string | null
@@ -6150,6 +6158,18 @@ export type ReadUsersData = {
      * Limit
      */
     limit?: number
+    /**
+     * Search For
+     */
+    search_for?: string | null
+    /**
+     * Sort By
+     */
+    sort_by?: "created" | "email" | "full_name"
+    /**
+     * Descending
+     */
+    descending?: boolean
   }
   url: "/users"
 }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 from datetime import date, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
@@ -57,10 +58,24 @@ class _GitRepoSource(BaseModel):
     url: str = Field(description="Clone URL of the repo the data came from.")
     rev: str = Field(
         description=(
-            "The commit, tag, or branch it came from. A commit hash is what "
-            "makes this reproducible; a branch moves."
+            "The commit hash it came from. A branch or tag would move, so "
+            "the data behind this entry could change without the entry "
+            "changing, which is the thing recording it is meant to prevent."
         )
     )
+
+    @field_validator("rev")
+    @classmethod
+    def _check_rev_is_a_hash(cls, v: str) -> str:
+        # Abbreviated hashes are fine -- Git resolves them -- but a name is
+        # not a revision, and accepting one here would quietly make the
+        # import irreproducible.
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
+            raise ValueError(
+                f"rev must be a commit hash, not a branch or tag (got {v!r})"
+            )
+        return v
+
     path: str | None = Field(
         default=None,
         description="Path within that repo, if it isn't the whole thing.",

@@ -3745,6 +3745,17 @@ def test_post_project_dataset_provenance(
     )
     assert resp.status_code == 200, resp.text
     assert written[-1]["imported_from"]["git_repo"]["rev"] == "deadbeef"
+    # A branch or tag moves, so it can't stand in for a revision. This is
+    # enforced by the model that owns calkit.yaml, not just the form.
+    resp = post(
+        {
+            "path": "data/branch.csv",
+            "imported_from": {
+                "git_repo": {"url": "https://github.com/a/b", "rev": "main"}
+            },
+        }
+    )
+    assert resp.status_code == 422
     # A plain URL.
     resp = post(
         {

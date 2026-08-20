@@ -18,21 +18,26 @@ import {
   Text,
   Textarea,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import { useState } from "react"
-import { type SubmitHandler, useForm } from "react-hook-form"
+import { Controller, type SubmitHandler, useForm } from "react-hook-form"
 
 import { type DatasetPost, ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import FilterableSelect from "../Common/FilterableSelect"
+
+type Source = "primary" | "url" | "doi" | "git_repo"
 
 interface NewDatasetProps {
   isOpen: boolean
   onClose: () => void
   ownerName?: string
   projectName?: string
+  /** Which source to open on, when the caller already knows which it is. */
+  defaultSource?: Source
 }
 
 /**
@@ -42,7 +47,6 @@ interface NewDatasetProps {
  * thing that makes a dataset reusable later. Asking it as four concrete
  * situations is what makes it answerable in a few seconds.
  */
-type Source = "primary" | "url" | "doi" | "git_repo"
 
 const SOURCES: { value: Source; label: string; help: string }[] = [
   {
@@ -90,6 +94,7 @@ const NewDataset = ({
   onClose,
   ownerName,
   projectName: projectNameProp,
+  defaultSource = "primary",
 }: NewDatasetProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -99,11 +104,24 @@ const NewDataset = ({
   }
   const accountName = ownerName ?? routeParams.accountName ?? ""
   const projectName = projectNameProp ?? routeParams.projectName ?? ""
-  const [source, setSource] = useState<Source>("primary")
+  const [source, setSource] = useState<Source>(defaultSource)
+  // Only fetched for the source that needs it: data collected here has to
+  // already be in the repo, while an import names a path that doesn't
+  // exist yet and so has nothing to pick from.
+  const pathsQuery = useQuery({
+    queryFn: () =>
+      ProjectsService.getProjectContentPaths({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    queryKey: ["projects", accountName, projectName, "contents-paths"],
+    enabled: isOpen && source === "primary",
+  })
   const {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<DatasetForm>({
     mode: "onBlur",
@@ -154,7 +172,7 @@ const NewDataset = ({
     onSuccess: () => {
       showToast("Success!", "Dataset added.", "success")
       reset()
-      setSource("primary")
+      setSource(defaultSource)
       onClose()
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -246,17 +264,23 @@ const NewDataset = ({
                 <Input
                   id="repo_rev"
                   {...register("repo_rev", {
-                    required: "A revision is required.",
+                    required: "A commit hash is required.",
+                    pattern: {
+                      value: /^[0-9a-fA-F]{7,40}$/,
+                      message:
+                        "Must be a commit hash. A branch or tag can move, " +
+                        "which would change the data under you.",
+                    },
                   })}
-                  placeholder="Commit hash, tag, or branch"
+                  placeholder="Ex: 4f2c1ab or the full 40-character hash"
                   autoComplete="off"
                 />
                 {errors.repo_rev ? (
                   <FormErrorMessage>{errors.repo_rev.message}</FormErrorMessage>
                 ) : (
                   <FormHelperText>
-                    A commit hash is what makes this reproducible — a branch
-                    moves.
+                    A hash, not a branch or tag: those move, and the point of
+                    recording this is that the data doesn't.
                   </FormHelperText>
                 )}
               </FormControl>
@@ -286,12 +310,34 @@ const NewDataset = ({
           ) : null}
           <FormControl isRequired isInvalid={!!errors.path} mb={4}>
             <FormLabel htmlFor="path">Path in this project</FormLabel>
-            <Input
-              id="path"
-              {...register("path", { required: "A path is required." })}
-              placeholder="Ex: data/raw/measurements.csv"
-              autoComplete="off"
-            />
+            {source === "primary" ? (
+              <Controller
+                control={control}
+                name="path"
+                rules={{ required: "A path is required." }}
+                render={({ field }) => (
+                  <FilterableSelect
+                    id="path"
+                    options={(pathsQuery.data ?? []).map((item) => ({
+                      value: item,
+                    }))}
+                    isLoading={pathsQuery.isPending}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onSelect={field.onChange}
+                    placeholder="Start typing a file or folder…"
+                    emptyMessage="Nothing in the repo matches that."
+                  />
+                )}
+              />
+            ) : (
+              <Input
+                id="path"
+                {...register("path", { required: "A path is required." })}
+                placeholder="Ex: data/raw/measurements.csv"
+                autoComplete="off"
+              />
+            )}
             {errors.path ? (
               <FormErrorMessage>{errors.path.message}</FormErrorMessage>
             ) : (
@@ -354,7 +400,7 @@ const NewDataset = ({
           </FormControl>
           {source === "primary" ? (
             <Text fontSize="xs" color="ui.dim" mt={4}>
-              Data your pipeline produces doesn't need declaring here — name the
+              Data your pipeline produces doesn't need declaring here—name the
               stage that makes it and it's tracked from there.
             </Text>
           ) : null}

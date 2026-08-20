@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 from typing import Literal, Sequence
 
 import requests
+import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.exc import DataError
-from sqlmodel import Field, col, func, select
+from sqlmodel import Field, col, func, or_, select
 
 import app.projects
 import app.stripe
@@ -28,6 +29,7 @@ from app.core import utcnow
 from app.github import token_resp_text_to_dict
 from app.messaging import generate_new_account_email, send_email
 from app.models import (
+    Account,
     DiscountCode,
     Message,
     OnboardingFlagPost,
@@ -67,13 +69,48 @@ router = APIRouter()
 
 @router.get("/users", dependencies=[Depends(get_current_active_superuser)])
 def read_users(
-    session: SessionDep, skip: int = 0, limit: int = 100
+    session: SessionDep,
+    skip: int = 0,
+    limit: int = 100,
+    search_for: str | None = None,
+    sort_by: Literal["created", "email", "full_name"] = "created",
+    descending: bool = True,
 ) -> UsersPublic:
-    """Retrieve users."""
+    """Retrieve users, optionally searched and sorted.
+
+    Sorted newest-first by default: the reason to open this page is usually
+    to see who just signed up, which is the one thing an unordered page of
+    a few hundred users can't tell you.
+    """
+    where_clause = None
+    if search_for:
+        pattern = f"%{search_for}%"
+        where_clause = or_(
+            User.email.ilike(pattern),  # type: ignore
+            User.full_name.ilike(pattern),  # type: ignore
+            # The GitHub username lives on the account, not the user.
+            User.account.has(Account.github_name.ilike(pattern)),  # type: ignore
+            User.account.has(Account.name.ilike(pattern)),  # type: ignore
+        )
     count_statement = select(func.count()).select_from(User)
+    # Signup time lives on the account, which is created with the user, so
+    # ordering by it needs the join.
+    statement = select(User).join(Account, Account.user_id == User.id)  # type: ignore
+    if where_clause is not None:
+        count_statement = count_statement.where(where_clause)
+        statement = statement.where(where_clause)
     count = session.exec(count_statement).one()
-    statement = select(User).offset(skip).limit(limit)
-    users = session.exec(statement).all()
+    order_column = {
+        "created": Account.created,
+        "email": User.email,
+        "full_name": User.full_name,
+    }[sort_by]
+    statement = statement.order_by(
+        sqlalchemy.desc(order_column)  # type: ignore
+        if descending
+        else sqlalchemy.asc(order_column)  # type: ignore
+    )
+    users = session.exec(statement.offset(skip).limit(limit)).all()
     return UsersPublic(data=users, count=count)
 
 

@@ -31,7 +31,7 @@ const OnboardingChecklists = () => {
     })
   return (
     <Container maxW="full">
-      <Heading size="sm" py={4}>
+      <Heading size="md" py={4}>
         Setup checklists
       </Heading>
       <Text mb={2}>

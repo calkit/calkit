@@ -990,12 +990,19 @@ export class UsersService {
   /**
    * Read Users
    *
-   * Retrieve users.
+   * Retrieve users, optionally searched and sorted.
+   *
+   * Sorted newest-first by default: the reason to open this page is usually
+   * to see who just signed up, which is the one thing an unordered page of
+   * a few hundred users can't tell you.
    */
   public static readUsers<ThrowOnError extends boolean = true>(
     parameters?: {
       skip?: number
       limit?: number
+      search_for?: string | null
+      sort_by?: "created" | "email" | "full_name"
+      descending?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<ReadUsersResponses, ReadUsersErrors, ThrowOnError> {
@@ -1006,6 +1013,9 @@ export class UsersService {
           args: [
             { in: "query", key: "skip" },
             { in: "query", key: "limit" },
+            { in: "query", key: "search_for" },
+            { in: "query", key: "sort_by" },
+            { in: "query", key: "descending" },
           ],
         },
       ],

@@ -104,11 +104,11 @@ interface ChecklistCardProps {
  * Steps stay visible after they're done rather than disappearing, since the
  * finished ones are what make the remaining ones feel finishable.
  *
- * Hiding a list that still has work left collapses it to a single line
- * rather than removing it: a card that vanishes with no way back turns one
- * misclick into a permanently missing path through the product. Once
- * nothing required is left, dismissing does remove it for good, which is
- * what "I'm finished with this" should mean.
+ * Hiding collapses it to a single line rather than removing it: a card that
+ * vanishes with no way back turns one misclick into a permanently missing
+ * path through the product. The steps stay listed once everything is done
+ * too, since "what did this check?" is a fair question to ask of a
+ * checklist that has finished.
  */
 const ChecklistCard = ({
   title,
@@ -127,9 +127,6 @@ const ChecklistCard = ({
   const percent = progressPercent(steps)
   const remaining = steps.filter((step) => !step.done).length
   if (dismissed) {
-    if (complete) {
-      return null
-    }
     return (
       <Flex
         align="center"
@@ -140,7 +137,7 @@ const ChecklistCard = ({
         bg={secBgColor}
       >
         <Text fontSize="sm" color="ui.dim">
-          {title} — {remaining} left
+          {title}: {complete ? "complete" : `${remaining} left`}
         </Text>
         <Spacer />
         <Button
@@ -167,7 +164,7 @@ const ChecklistCard = ({
         </Button>
       </Flex>
       {complete ? (
-        <Flex align="center" gap={2} mt={2}>
+        <Flex align="center" gap={2} mt={2} mb={4}>
           <Icon as={CheckCircleIcon} color="ui.success" />
           <Text fontSize="sm">{doneMessage}</Text>
         </Flex>
@@ -190,52 +187,52 @@ const ChecklistCard = ({
               {remaining} left
             </Text>
           </Flex>
-          <SimpleGrid
-            columns={{ base: 1, md: columns }}
-            spacingX={10}
-            spacingY={columns > 1 ? 5 : 0}
-          >
-            {steps.map((step, index) => (
-              <Box
-                key={step.key}
-                // In a grid the top border would run across unrelated
-                // steps, so those rows are separated by spacing instead.
-                pt={columns > 1 || index === 0 ? 0 : 3}
-                mt={columns > 1 || index === 0 ? 0 : 3}
-                borderTopWidth={columns > 1 || index === 0 ? 0 : 1}
-                borderColor={dividerColor}
-              >
-                <Flex align="flex-start" gap={2}>
-                  <StepMark step={step} onMarkDone={onMarkDone} />
-                  <Box flex="1">
-                    <Flex align="center" gap={2}>
-                      <Text
-                        fontWeight={step.done ? "normal" : "semibold"}
-                        color={step.done ? "ui.dim" : "inherit"}
-                      >
-                        {step.title}
-                      </Text>
-                      {step.optional && !step.done ? (
-                        <Text fontSize="xs" color="ui.dim">
-                          optional
-                        </Text>
-                      ) : null}
-                    </Flex>
-                    <Collapse in={!step.done} animateOpacity>
-                      <Text fontSize="sm" color="ui.dim" mt={0.5}>
-                        {step.detail}
-                      </Text>
-                      {actions?.[step.key] ? (
-                        <Box mt={2}>{actions[step.key]}</Box>
-                      ) : null}
-                    </Collapse>
-                  </Box>
-                </Flex>
-              </Box>
-            ))}
-          </SimpleGrid>
         </>
       )}
+      <SimpleGrid
+        columns={{ base: 1, md: columns }}
+        spacingX={10}
+        spacingY={columns > 1 ? 5 : 0}
+      >
+        {steps.map((step, index) => (
+          <Box
+            key={step.key}
+            // In a grid the top border would run across unrelated
+            // steps, so those rows are separated by spacing instead.
+            pt={columns > 1 || index === 0 ? 0 : 3}
+            mt={columns > 1 || index === 0 ? 0 : 3}
+            borderTopWidth={columns > 1 || index === 0 ? 0 : 1}
+            borderColor={dividerColor}
+          >
+            <Flex align="flex-start" gap={2}>
+              <StepMark step={step} onMarkDone={onMarkDone} />
+              <Box flex="1">
+                <Flex align="center" gap={2}>
+                  <Text
+                    fontWeight={step.done ? "normal" : "semibold"}
+                    color={step.done ? "ui.dim" : "inherit"}
+                  >
+                    {step.title}
+                  </Text>
+                  {step.optional && !step.done ? (
+                    <Text fontSize="xs" color="ui.dim">
+                      optional
+                    </Text>
+                  ) : null}
+                </Flex>
+                <Collapse in={!step.done} animateOpacity>
+                  <Text fontSize="sm" color="ui.dim" mt={0.5}>
+                    {step.detail}
+                  </Text>
+                  {actions?.[step.key] ? (
+                    <Box mt={2}>{actions[step.key]}</Box>
+                  ) : null}
+                </Collapse>
+              </Box>
+            </Flex>
+          </Box>
+        ))}
+      </SimpleGrid>
     </Box>
   )
 }

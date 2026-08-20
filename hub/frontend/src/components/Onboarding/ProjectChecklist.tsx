@@ -209,7 +209,7 @@ const ProjectChecklist = ({
   }
   return (
     <ChecklistCard
-      title="Get this project running"
+      title="Project setup"
       intro={
         "Each step here is checked against the project itself, so anything " +
         "you do from the CLI ticks off on its own."

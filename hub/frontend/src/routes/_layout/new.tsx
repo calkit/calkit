@@ -3,7 +3,6 @@ import {
   Box,
   Button,
   Checkbox,
-  Container,
   Flex,
   FormControl,
   FormErrorMessage,
@@ -14,6 +13,12 @@ import {
   Icon,
   Input,
   Link,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalOverlay,
   Progress,
   Select,
   SimpleGrid,
@@ -45,13 +50,11 @@ import {
   UsersService,
 } from "../../client"
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
+import FilterableSelect from "../../components/Common/FilterableSelect"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
 import StartPaths, {
   type StartPath,
 } from "../../components/Onboarding/StartPaths"
-import RepoPicker, {
-  type GitHubRepo,
-} from "../../components/Projects/RepoPicker"
 import ImportOverleaf from "../../components/Publications/ImportOverleaf"
 import ImportFromZoteroModal from "../../components/References/ImportFromZoteroModal"
 import { isLoggedIn } from "../../hooks/useAuth"
@@ -114,15 +117,15 @@ const STEP_TITLES = [
 const TEMPLATES = [
   {
     value: "calkit/example-basic",
-    label: "Basic — uv environment, Python analysis, LaTeX paper",
+    label: "Basic—uv environment, Python analysis, LaTeX paper",
   },
   {
     value: "calkit/example-matlab",
-    label: "MATLAB — scripts run in batch mode",
+    label: "MATLAB—scripts run in batch mode",
   },
   {
     value: "calkit/example-analytics",
-    label: "Analytics — data processing and interactive figures",
+    label: "Analytics—data processing and interactive figures",
   },
 ]
 
@@ -179,10 +182,10 @@ function ChoosePathStep({
         What are we starting with?
       </Heading>
       <Text color="ui.dim" mb={6}>
-        Calkit puts the pieces of a research project — the data, the code, the
-        environment it runs in, the figures, the paper — into one place that
-        stays a plain Git repo. Nothing you set up here is trapped in Calkit,
-        and all of it works offline.
+        Calkit puts the pieces of a research project—the data, the code, the
+        environment it runs in, the figures, the paper—into one place that stays
+        a plain Git repo. Nothing you set up here is trapped in Calkit, and all
+        of it works offline.
       </Text>
       <StartPaths onSelect={onSelect} selected={path} />
     </>
@@ -295,15 +298,27 @@ function NameItStep({
     )
     setValue("name", projectName)
   }
-  const selectRepo = (repo: GitHubRepo) => {
-    setValue("git_repo_url", `https://github.com/${repo.full_name}`)
-    const repoName = repo.full_name.split("/").at(-1) ?? ""
+  // The GitHub repos route is typed as raw JSON dictionaries, so the shape
+  // is narrowed here rather than pretended at the boundary.
+  const repos = (reposQuery.data ?? []) as unknown as {
+    full_name: string
+    private?: boolean
+    description?: string | null
+  }[]
+  const repoOptions = repos.map((r) => ({
+    value: r.full_name,
+    hint: r.private ? "private" : undefined,
+  }))
+  const selectRepo = (fullName: string) => {
+    const repo = repos.find((r) => r.full_name === fullName)
+    setValue("git_repo_url", `https://github.com/${fullName}`)
+    const repoName = fullName.split("/").at(-1) ?? ""
     setValue("name", repoName.toLowerCase())
     const spaced = repoName.replace(/[-_]+/g, " ").trim()
     if (spaced) {
       setValue("title", spaced.charAt(0).toUpperCase() + spaced.slice(1))
     }
-    if (repo.description) {
+    if (repo?.description) {
       setValue("description", repo.description)
     }
   }
@@ -329,7 +344,7 @@ function NameItStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         {isExisting
-          ? "Point Calkit at the repo. Nothing in it is moved or rewritten — " +
+          ? "Point Calkit at the repo. Nothing in it is moved or rewritten—" +
             "we read what's there and show you what it would take to " +
             "reproduce."
           : path === "overleaf"
@@ -344,12 +359,12 @@ function NameItStep({
       {isExisting ? (
         <FormControl mb={4}>
           <FormLabel htmlFor="existing_repo">Your GitHub repos</FormLabel>
-          <RepoPicker
-            // The GitHub repos route is typed as raw JSON dictionaries, so
-            // the shape this needs is asserted here rather than pretended
-            // at the boundary.
-            repos={(reposQuery.data ?? []) as unknown as GitHubRepo[]}
+          <FilterableSelect
+            id="existing_repo"
+            options={repoOptions}
             isLoading={reposQuery.isPending}
+            placeholder="Start typing…"
+            emptyMessage="No repo matches that."
             onSelect={selectRepo}
           />
           <FormHelperText>
@@ -388,7 +403,7 @@ function NameItStep({
                 {template.label}
               </option>
             ))}
-            <option value="">Empty repo — I'll set it up myself</option>
+            <option value="">Empty repo—I'll set it up myself</option>
           </Select>
         </FormControl>
       ) : null}
@@ -668,8 +683,8 @@ function MachineStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         This is where the work happens. The CLI runs the pipeline, manages
-        environments, and moves results between your machine and here — and
-        every bit of it works with the hub closed.
+        environments, and moves results between your machine and here—and every
+        bit of it works with the hub closed.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>
@@ -718,7 +733,7 @@ function MachineStep({
         <Icon as={cliRunning ? CheckCircleIcon : FiCircle} />
         {cliRunning
           ? "Calkit is running on this machine."
-          : "Waiting to see Calkit running locally — this check is optional."}
+          : "Waiting to see Calkit running locally—this check is optional."}
       </Flex>
       <Box mb={8}>
         <Text fontWeight="semibold" mb={2}>
@@ -760,6 +775,13 @@ function NewProjectWizard() {
   const [accountName, projectName] = (project ?? "").split("/")
   const goTo = (next: Partial<z.infer<typeof searchSchema>>) =>
     navigate({ search: (prev) => ({ ...prev, ...next }) })
+  // Closing lands on the project once there is one, so backing out of the
+  // optional steps doesn't feel like abandoning what was already created.
+  const close = () =>
+    navigate({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      to: (project ? `/${accountName}/${projectName}` : "/") as any,
+    })
   let body
   if (step === 0 || !path) {
     body = (
@@ -814,32 +836,51 @@ function NewProjectWizard() {
     body = <MachineStep accountName={accountName} projectName={projectName} />
   }
   return (
-    <Container maxW="720px" pt={12} pb={16}>
-      <StepHeader step={Math.min(step, STEP_TITLES.length - 1)} />
-      {body}
-      <Flex mt={10} align="center">
-        {step > 0 && step !== 2 ? (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => goTo({ step: step - 1 })}
-          >
-            ← Back
-          </Button>
-        ) : null}
-        <Spacer />
-        {project ? (
-          <Link
-            as={RouterLink}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            to={`/${accountName}/${projectName}` as any}
-            fontSize="sm"
-            color="ui.dim"
-          >
-            Skip the rest and open the project →
-          </Link>
-        ) : null}
-      </Flex>
-    </Container>
+    // A modal rather than a page, since starting a project is something you
+    // step into and back out of. The route stays real so each step keeps its
+    // URL: a refresh, the back button, and the trips out to GitHub, Zotero,
+    // and Overleaf all come back to the step they left.
+    <Modal
+      isOpen
+      onClose={close}
+      size="3xl"
+      scrollBehavior="inside"
+      closeOnOverlayClick={false}
+      isCentered
+    >
+      <ModalOverlay />
+      <ModalContent>
+        <ModalCloseButton />
+        <ModalBody px={{ base: 6, md: 10 }} py={8}>
+          <StepHeader step={Math.min(step, STEP_TITLES.length - 1)} />
+          {body}
+        </ModalBody>
+        <ModalFooter>
+          <Flex width="100%" align="center">
+            {step > 0 && step !== 2 ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => goTo({ step: step - 1 })}
+              >
+                ← Back
+              </Button>
+            ) : null}
+            <Spacer />
+            {project ? (
+              <Link
+                as={RouterLink}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                to={`/${accountName}/${projectName}` as any}
+                fontSize="sm"
+                color="ui.dim"
+              >
+                Skip the rest and open the project →
+              </Link>
+            ) : null}
+          </Flex>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   )
 }

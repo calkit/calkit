@@ -1,4 +1,5 @@
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import {
   Box,
   Heading,
@@ -23,6 +24,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import { FaPlus } from "react-icons/fa"
+import { FiDatabase } from "react-icons/fi"
 
 import NewDataset from "../../../../../components/Datasets/NewDataset"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
@@ -46,6 +48,8 @@ function ProjectDataView() {
   const { isPending: dataPending, data: datasets } = datasetsRequest
   const uploadDataModal = useDisclosure()
   const labelDataModal = useDisclosure()
+  const importDataModal = useDisclosure()
+  const gitDataModal = useDisclosure()
 
   return (
     <>
@@ -69,13 +73,30 @@ function ProjectDataView() {
                   Upload new dataset
                 </MenuItem>
                 <MenuItem onClick={labelDataModal.onOpen}>
-                  Add existing or imported dataset
+                  Label an existing file or folder
+                </MenuItem>
+                <MenuItem onClick={importDataModal.onOpen}>
+                  Import from a URL or DOI
+                </MenuItem>
+                <MenuItem onClick={gitDataModal.onOpen}>
+                  Fetch from a Git repo
                 </MenuItem>
               </MenuList>
             </Menu>
             <NewDataset
               onClose={labelDataModal.onClose}
               isOpen={labelDataModal.isOpen}
+              defaultSource="primary"
+            />
+            <NewDataset
+              onClose={importDataModal.onClose}
+              isOpen={importDataModal.isOpen}
+              defaultSource="url"
+            />
+            <NewDataset
+              onClose={gitDataModal.onClose}
+              isOpen={gitDataModal.isOpen}
+              defaultSource="git_repo"
             />
             <UploadDataset
               onClose={uploadDataModal.onClose}
@@ -90,6 +111,20 @@ function ProjectDataView() {
         <LoadingSpinner height="100vh" />
       ) : (
         <Box>
+          {!datasets || datasets.length === 0 ? (
+            // Passed as a string rather than JSX text: a dash in a text node
+            // picks up the surrounding line breaks as spaces, and an entity
+            // isn't decoded here.
+            <NoArtifactFound
+              icon={FiDatabase}
+              title="No datasets found"
+              hint={
+                "Declaring one records where the data came from\u2014" +
+                "collected here, downloaded, from a DOI, or from a Git " +
+                "repo\u2014which is what lets a figure be traced back to it."
+              }
+            />
+          ) : null}
           <SimpleGrid columns={[3, null, 4]} gap={6}>
             {datasets?.map((dataset) => (
               <Card key={dataset.path} p={6} variant="elevated">

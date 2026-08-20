@@ -1,3 +1,4 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Badge,
   Box,
@@ -5,27 +6,34 @@ import {
   Container,
   Flex,
   Heading,
+  Icon,
+  Link,
   SkeletonText,
   Table,
   TableContainer,
   Tbody,
   Td,
+  Text,
   Th,
   Thead,
   Tr,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
+import { FaPlus } from "react-icons/fa"
+import { useDebounce } from "use-debounce"
 import { z } from "zod"
 
 import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
+import ClearableInput from "../../components/Common/ClearableInput"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
-import Navbar from "../../components/Common/Navbar"
 import { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
+import { formatTimestamp } from "../../lib/strings"
 
 const usersSearchSchema = z.object({
   page: z.number().catch(1),
@@ -45,14 +53,29 @@ export const Route = createFileRoute("/_layout/admin")({
 
 const PER_PAGE = 5
 
-function getUsersQueryOptions({ page }: { page: number }) {
+type SortBy = "created" | "email" | "full_name"
+
+function getUsersQueryOptions({
+  page,
+  searchFor,
+  sortBy,
+  descending,
+}: {
+  page: number
+  searchFor?: string
+  sortBy: SortBy
+  descending: boolean
+}) {
   return {
     queryFn: () =>
       UsersService.readUsers({
         skip: (page - 1) * PER_PAGE,
         limit: PER_PAGE,
+        search_for: searchFor || undefined,
+        sort_by: sortBy,
+        descending,
       }).then((response) => response.data),
-    queryKey: ["users", { page }],
+    queryKey: ["users", { page, searchFor, sortBy, descending }],
   }
 }
 
@@ -63,13 +86,31 @@ function UsersTable() {
   const navigate = useNavigate({ from: Route.fullPath })
   const setPage = (page: number) =>
     navigate({ search: (prev) => ({ ...prev, page }) })
+  const addUserModal = useDisclosure()
+  const [searchText, setSearchText] = useState("")
+  const [searchFor] = useDebounce(searchText, 400)
+  const [sortBy, setSortBy] = useState<SortBy>("created")
+  const [descending, setDescending] = useState(true)
+  // Clicking the column already sorted by flips the direction, which is
+  // what a header that shows an arrow implies it will do.
+  const toggleSort = (column: SortBy) => {
+    if (column === sortBy) {
+      setDescending((d) => !d)
+    } else {
+      setSortBy(column)
+      setDescending(true)
+    }
+    setPage(1)
+  }
+  const sortIndicator = (column: SortBy) =>
+    column === sortBy ? (descending ? " ↓" : " ↑") : ""
 
   const {
     data: users,
     isPending,
     isPlaceholderData,
   } = useQuery({
-    ...getUsersQueryOptions({ page }),
+    ...getUsersQueryOptions({ page, searchFor, sortBy, descending }),
     placeholderData: (prevData) => prevData,
   })
 
@@ -78,19 +119,65 @@ function UsersTable() {
 
   useEffect(() => {
     if (hasNextPage) {
-      queryClient.prefetchQuery(getUsersQueryOptions({ page: page + 1 }))
+      queryClient.prefetchQuery(
+        getUsersQueryOptions({
+          page: page + 1,
+          searchFor,
+          sortBy,
+          descending,
+        }),
+      )
     }
-  }, [page, queryClient, hasNextPage])
+  }, [page, queryClient, hasNextPage, searchFor, sortBy, descending])
 
   return (
     <>
+      <Flex py={4} gap={4} align="center">
+        <Button variant="primary" gap={1} onClick={addUserModal.onOpen}>
+          <Icon as={FaPlus} /> Add user
+        </Button>
+        <AddUser isOpen={addUserModal.isOpen} onClose={addUserModal.onClose} />
+        <ClearableInput
+          placeholder="Search by name, email, or GitHub username…"
+          width="33%"
+          value={searchText}
+          onValueChange={(value) => {
+            setSearchText(value)
+            setPage(1)
+          }}
+        />
+        {users ? (
+          <Text fontSize="sm" color="ui.dim" ml="auto" alignSelf="center">
+            {users.count} {users.count === 1 ? "user" : "users"}
+          </Text>
+        ) : null}
+      </Flex>
       <TableContainer>
         <Table size={{ base: "sm", md: "md" }}>
           <Thead>
             <Tr>
-              <Th width="20%">Full name</Th>
-              <Th width="20%">GitHub username</Th>
-              <Th width="50%">Email</Th>
+              <Th
+                width="18%"
+                cursor="pointer"
+                onClick={() => toggleSort("full_name")}
+              >
+                Full name{sortIndicator("full_name")}
+              </Th>
+              <Th width="16%">GitHub username</Th>
+              <Th
+                width="30%"
+                cursor="pointer"
+                onClick={() => toggleSort("email")}
+              >
+                Email{sortIndicator("email")}
+              </Th>
+              <Th
+                width="16%"
+                cursor="pointer"
+                onClick={() => toggleSort("created")}
+              >
+                Signed up{sortIndicator("created")}
+              </Th>
               <Th width="10%">Role</Th>
               <Th width="10%">Status</Th>
               <Th width="10%">Actions</Th>
@@ -123,10 +210,23 @@ function UsersTable() {
                     )}
                   </Td>
                   <Td isTruncated maxWidth="150px">
-                    {user.github_username}
+                    {user.github_username ? (
+                      <Link
+                        href={`https://github.com/${user.github_username}`}
+                        isExternal
+                        variant="blue"
+                      >
+                        {user.github_username} <ExternalLinkIcon mb={0.5} />
+                      </Link>
+                    ) : (
+                      <Text color="ui.dim">N/A</Text>
+                    )}
                   </Td>
                   <Td isTruncated maxWidth="150px">
                     {user.email}
+                  </Td>
+                  <Td fontSize="sm" whiteSpace="nowrap">
+                    {formatTimestamp(user.created)}
                   </Td>
                   <Td>{user.is_superuser ? "Superuser" : "User"}</Td>
                   <Td>
@@ -179,7 +279,6 @@ function Admin() {
       <Heading size="lg" textAlign={{ base: "center", md: "left" }} pt={12}>
         User management
       </Heading>
-      <Navbar type={"user"} addModalAs={AddUser} />
       <UsersTable />
       <FeedbackTable />
     </Container>

@@ -33,6 +33,7 @@ import { useDebounce } from "use-debounce"
 import { z } from "zod"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 
 import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
@@ -438,25 +439,17 @@ function ProjectFigures() {
           <LoadingSpinner height="300px" />
         ) : pageSize === 0 ? (
           debouncedSearch ? (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title={`No figures match "${debouncedSearch}"`}
               height="200px"
-              color="gray.500"
-            >
-              <Text>No figures match "{debouncedSearch}"</Text>
-            </Flex>
+            />
           ) : (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
-              height="300px"
-              color="gray.500"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title="No figures found"
+              hint="Declare one in calkit.yaml, or add a pipeline stage that produces an image."
             >
-              <Icon as={FaRegFileImage} fontSize="4xl" mb={3} />
-              <Text>No figures found</Text>
               {ref && (
                 <Button
                   mt={3}
@@ -467,7 +460,7 @@ function ProjectFigures() {
                   Clear ref filter
                 </Button>
               )}
-            </Flex>
+            </NoArtifactFound>
           )
         ) : (
           // The previous page stays mounted while the next one loads so the

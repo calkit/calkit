@@ -215,7 +215,7 @@ function LandingPage() {
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
           Scripts on a laptop, data on a shared drive, a paper in Overleaf, a
           library in Zotero, and no one sure which figure came from which run.
-          Calkit connects those pieces into one reproducible project — without
+          Calkit connects those pieces into one reproducible project—without
           asking you to leave any of them behind.
         </Text>
         <HStack spacing={4} justify={{ base: "center", md: "flex-start" }}>
@@ -243,7 +243,7 @@ function LandingPage() {
           },
           {
             title: "Best practice, without the setup",
-            body: "Environments, a DAG, versioned data, and a paper that rebuilds itself — the things a careful researcher wires together by hand, ready to go.",
+            body: "Environments, a DAG, versioned data, and a paper that rebuilds itself—the things a careful researcher wires together by hand, ready to go.",
           },
         ].map((item) => (
           <Box key={item.title}>

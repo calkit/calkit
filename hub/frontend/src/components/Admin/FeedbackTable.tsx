@@ -52,13 +52,17 @@ const FeedbackTable = () => {
   const openCount = all.filter((f) => !f.resolved).length
   return (
     <Box mt={12}>
-      <Flex align="center" gap={3} mb={4}>
-        <Heading size="lg">User feedback</Heading>
+      {/* Centered, not baseline-aligned: a small button's baseline sits well
+          below the optical middle of a heading this size. */}
+      <Flex align="center" gap={3} mb={4} minH="40px">
+        <Heading size="lg" lineHeight="1">
+          User feedback
+        </Heading>
         {openCount > 0 ? (
           <Badge colorScheme="teal">{openCount} open</Badge>
         ) : null}
         <Button
-          size="xs"
+          size="sm"
           variant="ghost"
           onClick={() => setShowResolved((v) => !v)}
         >

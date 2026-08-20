@@ -91,7 +91,7 @@ test("markdownStageNameForFile only matches declared markdown stages", () => {
     pipeline: {
       stages: {
         "README.md": { kind: "markdown" },
-        docs: { kind: "markdown", path: "docs/guide.md" },
+        docs: { kind: "markdown", target_path: "docs/guide.md" },
         other: { kind: "python-script", script_path: "x.py" },
       },
     },

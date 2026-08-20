@@ -5,6 +5,7 @@ stages:
       - .calkit/markdown/README.md/analysis.py
       - .calkit/markdown/outputs/README.md/analysis.txt
       - .calkit/envs/main/uv.lock
+      - .calkit/envs/main/.python-version
     outs:
       - data/data.csv:
           cache: false
@@ -17,6 +18,7 @@ stages:
       - .calkit/markdown/README.md/figure.py
       - data/data.csv
       - .calkit/envs/main/uv.lock
+      - .calkit/envs/main/.python-version
     outs:
       - figures/figure.png:
           cache: false

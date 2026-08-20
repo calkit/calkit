@@ -58,7 +58,7 @@ def _readme_sources_pipeline(ck_info: dict) -> bool:
     for stage_name, cfg in stages.items():
         if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
             continue
-        if str(cfg.get("path") or stage_name) == "README.md":
+        if str(cfg.get("target_path") or stage_name) == "README.md":
             return True
     return False
 

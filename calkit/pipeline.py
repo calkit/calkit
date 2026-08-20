@@ -1474,7 +1474,7 @@ def to_dvc(
     for stage in pipeline.stages.values():
         used_envs.add(stage.inner_environment)
         used_envs.add(stage.outer_environment)
-    env_lock_fpaths = {}
+    env_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
         if env_name not in used_envs:
@@ -1493,7 +1493,19 @@ def to_dvc(
                 lock_fpath = Path(lock_fpath).relative_to(wdir).as_posix()
             except ValueError:
                 pass
-        env_lock_fpaths[env_name] = lock_fpath
+        env_fpaths.setdefault(env_name, []).append(lock_fpath)
+        # A uv environment's interpreter comes from a .python-version next
+        # to its spec, not from the lock, which records only a
+        # requires-python floor. Without it as a dependency, changing the
+        # pin would leave every stage in this environment looking current.
+        if env.get("kind") == "uv":
+            spec_dir = os.path.dirname(env.get("path", ""))
+            pv_path = Path(
+                os.path.join(spec_dir, ".python-version")
+            ).as_posix()
+            pv_full = os.path.join(wdir, pv_path) if wdir else pv_path
+            if os.path.isfile(pv_full):
+                env_fpaths[env_name].append(pv_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
@@ -1531,7 +1543,7 @@ def to_dvc(
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
     # Ensure environment lock files are set as stage inputs if necessary
-    pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
+    pipeline.ensure_env_paths_are_inputs(env_fpaths=env_fpaths)
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its

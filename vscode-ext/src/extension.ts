@@ -3680,7 +3680,7 @@ async function findStageForFile(
     // normally keyed by the path of the file itself
     if (
       stage.kind === "markdown" &&
-      (stage.path ?? stageName).replace(/\\/g, "/") === relPath
+      (stage.target_path ?? stageName).replace(/\\/g, "/") === relPath
     ) {
       return stageName;
     }

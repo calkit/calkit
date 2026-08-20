@@ -3,6 +3,10 @@ stages:
   README.md/analysis:
     cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/analysis.py
     deps:
+    - path: .calkit/envs/main/.python-version
+      hash: md5
+      md5: 789ee353b44223a8ed8031aa190631dd
+      size: 5
     - path: .calkit/envs/main/uv.lock
       hash: md5
       md5: 6de2015a5eb1a5ebc51f85e4f894a238
@@ -23,6 +27,10 @@ stages:
   README.md/figure:
     cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/figure.py
     deps:
+    - path: .calkit/envs/main/.python-version
+      hash: md5
+      md5: 789ee353b44223a8ed8031aa190631dd
+      size: 5
     - path: .calkit/envs/main/uv.lock
       hash: md5
       md5: 6de2015a5eb1a5ebc51f85e4f894a238

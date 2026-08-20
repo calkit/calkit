@@ -2652,7 +2652,7 @@ def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
         )
     ck_info = {
         "pipeline": {
-            "stages": {"docs": {"kind": "markdown", "path": "guide.md"}}
+            "stages": {"docs": {"kind": "markdown", "target_path": "guide.md"}}
         }
     }
     for target in ["docs", "guide.md"]:
@@ -2732,3 +2732,46 @@ def test_to_dvc_markdown_ignores_derived_env_dirs(tmp_dir):
     # including uv's, which lives in the same directory as the derived spec
     assert not repo.ignored(".calkit/envs/main/uv.lock")
     assert not repo.ignored(".calkit/env-locks/main")
+
+
+def test_to_dvc_uv_python_version_is_a_stage_input(tmp_dir):
+    """A uv environment's interpreter pin has to invalidate its stages.
+
+    ``uv.lock`` records only a ``requires-python`` floor, so without this
+    a changed pin would leave every stage in that environment looking up
+    to date.
+    """
+    import calkit
+    from calkit.pipeline import to_dvc
+
+    os.makedirs(".calkit/envs/main")
+    with open(".calkit/envs/main/pyproject.toml", "w") as f:
+        f.write('[project]\nname = "main"\nrequires-python = ">=3.13"\n')
+    with open(".calkit/envs/main/.python-version", "w") as f:
+        f.write("3.13\n")
+    with open("script.py", "w") as f:
+        f.write("pass\n")
+    ck_info = {
+        "environments": {
+            "main": {"kind": "uv", "path": ".calkit/envs/main/pyproject.toml"}
+        },
+        "pipeline": {
+            "stages": {
+                "s": {
+                    "kind": "python-script",
+                    "script_path": "script.py",
+                    "environment": "main",
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    deps = to_dvc(ck_info=ck_info)["s"]["deps"]
+    assert ".calkit/envs/main/.python-version" in deps
+    assert ".calkit/envs/main/uv.lock" in deps
+    # An environment with no pin contributes nothing extra, rather than a
+    # dependency on a file that isn't there
+    os.remove(".calkit/envs/main/.python-version")
+    deps = to_dvc(ck_info=ck_info)["s"]["deps"]
+    assert ".calkit/envs/main/.python-version" not in deps

@@ -698,7 +698,7 @@ def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
     for name, cfg in stages.items():
         if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
             continue
-        path = Path(str(cfg.get("path") or name)).as_posix()
+        path = Path(str(cfg.get("target_path") or name)).as_posix()
         targets[name] = (name, path)
         targets[path] = (name, path)
     return targets
@@ -1028,7 +1028,17 @@ def expand_ck_info(
     result = MarkdownExpansion(ck_info=out)
     for stage_name in md_stage_names:
         md_cfg = out_stages.pop(stage_name)
-        md_path = Path(str(md_cfg.get("path") or stage_name)).as_posix()
+        # Markdown stages are removed here, before the pipeline is
+        # validated, so nothing else would catch a typo'd key in one.
+        from calkit.models.pipeline import MarkdownStage
+
+        try:
+            MarkdownStage.model_validate(dict(md_cfg) | {"name": stage_name})
+        except Exception as e:
+            raise ValueError(
+                f"Markdown stage '{stage_name}' is not defined properly: {e}"
+            )
+        md_path = Path(str(md_cfg.get("target_path") or stage_name)).as_posix()
         read_path = os.path.join(wdir, md_path) if wdir else md_path
         if not os.path.isfile(read_path):
             raise ValueError(

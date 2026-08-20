@@ -2883,19 +2883,6 @@
           "description": "Paths this stage produces.",
           "title": "Outputs"
         },
-        "path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path.",
-          "title": "Path"
-        },
         "scheduler": {
           "anyOf": [
             {
@@ -2920,6 +2907,19 @@
           "default": null,
           "deprecated": true,
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "target_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path.",
+          "title": "Target Path"
         },
         "wdir": {
           "anyOf": [

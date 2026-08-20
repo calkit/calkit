@@ -1864,14 +1864,18 @@ def test_readme_sources_pipeline():
     assert _readme_sources_pipeline(
         {
             "pipeline": {
-                "stages": {"docs": {"kind": "markdown", "path": "README.md"}}
+                "stages": {
+                    "docs": {"kind": "markdown", "target_path": "README.md"}
+                }
             }
         }
     )
     assert not _readme_sources_pipeline(
         {
             "pipeline": {
-                "stages": {"guide": {"kind": "markdown", "path": "guide.md"}}
+                "stages": {
+                    "guide": {"kind": "markdown", "target_path": "guide.md"}
+                }
             }
         }
     )

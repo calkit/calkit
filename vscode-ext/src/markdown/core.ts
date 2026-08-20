@@ -153,7 +153,7 @@ export function markdownStageNameForFile(
     if (stage?.kind !== "markdown") {
       continue;
     }
-    const stagePath = (stage.path ?? stageName).replace(/\\/g, "/");
+    const stagePath = (stage.target_path ?? stageName).replace(/\\/g, "/");
     if (stagePath === relPath) {
       return stageName;
     }

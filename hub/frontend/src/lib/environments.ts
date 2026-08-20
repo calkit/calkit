@@ -153,7 +153,7 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     name: "pydata",
-    label: "🐍 PyData — pandas, matplotlib, scikit-learn",
+    label: "🐍 PyData—pandas, matplotlib, scikit-learn",
     kind: "uv",
     envName: "py",
     packages: [...PACKAGE_GROUPS.PyData],
@@ -167,21 +167,21 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "tidyverse",
-    label: "📊 R analysis — tidyverse, knitr",
+    label: "📊 R analysis—tidyverse, knitr",
     kind: "renv",
     envName: "r",
     packages: [...PACKAGE_GROUPS.Tidyverse, ...PACKAGE_GROUPS.RMarkdown],
   },
   {
     name: "latex",
-    label: "📄 LaTeX — full TeX Live in Docker",
+    label: "📄 LaTeX—full TeX Live in Docker",
     kind: "docker",
     envName: "latex",
     image: "texlive/texlive:latest-full",
   },
   {
     name: "julia",
-    label: "🔬 Julia — DataFrames, Plots",
+    label: "🔬 Julia—DataFrames, Plots",
     kind: "julia",
     envName: "jl",
     packages: [...PACKAGE_GROUPS.JuliaData],

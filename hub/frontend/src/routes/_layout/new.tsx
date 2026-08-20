@@ -394,7 +394,7 @@ function NameItStep({
               It's in a GitHub repo
             </Radio>
             <Radio value="upload" colorScheme="teal">
-              It's only on my machine — upload a zip of the folder
+              It's only on my machine—upload a zip of the folder
             </Radio>
           </Stack>
         </RadioGroup>

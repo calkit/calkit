@@ -3909,3 +3909,62 @@ def test_extract_project_zip(tmp_path) -> None:
     with pytest.raises(HTTPException) as excinfo:
         _extract_project_zip(b"not a zip at all", str(escape))
     assert excinfo.value.status_code == 400
+
+
+def test_push_dvc_cache_to_storage(tmp_path) -> None:
+    """Every cached object is copied, directory outputs included."""
+    import io as _io
+
+    from app.api.routes.projects.core import _push_dvc_cache_to_storage
+
+    repo_dir = tmp_path / "repo"
+    cache = repo_dir / ".dvc" / "cache" / "files" / "md5"
+    (cache / "ab").mkdir(parents=True)
+    (cache / "cd").mkdir(parents=True)
+    (cache / "ab" / "cdef0123").write_bytes(b"file contents")
+    # A directory output's listing is an object too, and a pointer to it
+    # dangles without this.
+    (cache / "cd" / "ef456789.dir").write_bytes(b'[{"md5": "abcdef0123"}]')
+    written: dict[str, bytes] = {}
+
+    class FakeFS:
+        def open(self, path, mode="rb"):
+            buf = _io.BytesIO()
+            original_close = buf.close
+
+            def close():
+                written[path] = buf.getvalue()
+                original_close()
+
+            buf.close = close  # type: ignore[method-assign]
+            return buf
+
+    with (
+        patch(
+            "app.api.routes.projects.core.get_object_fs",
+            return_value=FakeFS(),
+        ),
+        patch("app.config.settings.ENVIRONMENT", "local"),
+    ):
+        count = _push_dvc_cache_to_storage(
+            repo_dir=str(repo_dir),
+            owner_name="someone",
+            project_name="a-project",
+        )
+    assert count == 2
+    assert sorted(p.split("/")[-2:] for p in written) == [
+        ["ab", "cdef0123"],
+        ["cd", "ef456789.dir"],
+    ]
+    assert list(written.values())[0] == b"file contents"
+    # A repo with nothing in DVC has nothing to push, and that isn't an error.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with patch("app.api.routes.projects.core.get_object_fs") as fs:
+        assert (
+            _push_dvc_cache_to_storage(
+                repo_dir=str(empty), owner_name="a", project_name="b"
+            )
+            == 0
+        )
+    fs.assert_not_called()

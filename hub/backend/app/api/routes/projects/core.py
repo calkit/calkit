@@ -469,6 +469,43 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
     return extracted
 
 
+def _push_dvc_cache_to_storage(
+    repo_dir: str, owner_name: str, project_name: str
+) -> int:
+    """Copy a repo's local DVC cache into this project's object storage.
+
+    Walking the cache rather than reading each .dvc file covers directory
+    outputs and their .dir objects the same way single files are covered,
+    which is the difference between a pointer that resolves and one that
+    dangles. Returns how many objects were written.
+    """
+    cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
+    if not os.path.isdir(cache_dir):
+        return 0
+    fs = get_object_fs()
+    count = 0
+    for idx in sorted(os.listdir(cache_dir)):
+        idx_dir = os.path.join(cache_dir, idx)
+        if not os.path.isdir(idx_dir):
+            continue
+        for rest in sorted(os.listdir(idx_dir)):
+            src = os.path.join(idx_dir, rest)
+            if not os.path.isfile(src):
+                continue
+            fpath = make_data_fpath(
+                owner_name=owner_name,
+                project_name=project_name,
+                idx=idx,
+                md5=rest,
+            )
+            with open(src, "rb") as f_in, fs.open(fpath, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            if settings.ENVIRONMENT != "local":
+                remove_gcs_content_type(fpath)
+            count += 1
+    return count
+
+
 @router.post(
     "/projects/upload", dependencies=[Depends(_valid_project_upload_size)]
 )
@@ -536,6 +573,27 @@ def post_project_upload(
     }
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
+    # Which files belong in Git and which in DVC is a real decision (size,
+    # extension, directories of many small files), and calkit already makes
+    # it. Shelling out keeps that judgment in one place rather than growing
+    # a second copy here that drifts.
+    try:
+        subprocess.check_call(
+            ["calkit", "add", "."], cwd=str(repo.working_dir)
+        )
+    except subprocess.CalledProcessError as e:
+        logger.exception(f"calkit add failed for uploaded project: {e}")
+        raise HTTPException(
+            500, "Failed to sort the uploaded files into Git and DVC"
+        )
+    # Everything DVC took is now in the local cache; copying it into object
+    # storage is what `dvc push` would do, and the server is the remote.
+    n_objects = _push_dvc_cache_to_storage(
+        repo_dir=str(repo.working_dir),
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+    )
+    logger.info(f"Uploaded {n_objects} DVC objects for {project.name}")
     repo.git.add(["-A"])
     if repo.git.diff("--staged"):
         repo.git.commit(["-m", "Import existing project files"])

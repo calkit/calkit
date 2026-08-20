@@ -125,6 +125,17 @@ def main(
         bool,
         typer.Option("--version", help="Show version and exit."),
     ] = False,
+    directory: Annotated[
+        Optional[str],
+        typer.Option(
+            "-C",
+            "--directory",
+            help=(
+                "Change to this directory before doing anything else, so a "
+                "project can be worked with from outside it."
+            ),
+        ),
+    ] = None,
     use_version: Annotated[
         Optional[str],
         typer.Option(
@@ -139,6 +150,13 @@ def main(
     if version:
         typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
+    # Change directory first, so everything below---the project's .env, the
+    # config it reads, and whatever command runs next---sees the project
+    # rather than wherever the user happened to be standing.
+    if directory is not None:
+        if not os.path.isdir(directory):
+            raise_error(f"Directory does not exist: {directory}")
+        os.chdir(directory)
     if use_version:
         _exec_with_version(use_version)
     # Load the project's .env here rather than in the handful of commands

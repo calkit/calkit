@@ -2405,3 +2405,33 @@ def test_run_refuses_outside_a_project(tmp_dir):
         ["calkit", "run"], cwd="sub", capture_output=True, text=True
     )
     assert "no calkit.yaml or dvc.yaml" not in result.stderr.lower()
+
+
+def test_project_dir_option(tmp_dir):
+    """``-C`` changes directory before anything reads the filesystem."""
+    import subprocess
+
+    os.makedirs("proj")
+    with open(os.path.join("proj", "calkit.yaml"), "w") as f:
+        f.write("name: from-subdir\n")
+    subprocess.check_call(["git", "init", "-q", "."])
+    # The project is initialized inside proj, not wherever we were standing
+    result = subprocess.run(
+        ["calkit", "-C", "proj", "init"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.path.isdir(os.path.join("proj", ".dvc"))
+    assert not os.path.isdir(".dvc")
+    # The long spelling matches make/tar/git/uv, which all mean chdir
+    result = subprocess.run(
+        ["calkit", "--directory", "proj", "status"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    # A missing directory is reported rather than silently ignored
+    result = subprocess.run(
+        ["calkit", "-C", "nope", "status"], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "does not exist" in result.stderr

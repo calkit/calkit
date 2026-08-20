@@ -312,6 +312,10 @@ export type ConnectedAccounts = {
    * Zotero
    */
   zotero: boolean
+  /**
+   * Cli
+   */
+  cli?: boolean
 }
 
 /**

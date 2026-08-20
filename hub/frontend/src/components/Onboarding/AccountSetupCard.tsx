@@ -8,7 +8,7 @@ import { SiOverleaf, SiZotero } from "react-icons/si"
 
 import { UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
-import useOnboardingFlags, { useLocalServer } from "../../hooks/useOnboarding"
+import useOnboardingFlags from "../../hooks/useOnboarding"
 import { handleError } from "../../lib/errors"
 import { startGitHubOAuth } from "../../lib/github"
 import { DISMISSED, buildAccountSteps } from "../../lib/onboarding"
@@ -30,7 +30,6 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   const showToast = useCustomToast()
   const overleafModal = useDisclosure()
   const { accountFlags, setFlag } = useOnboardingFlags()
-  const { cliRunning } = useLocalServer()
   const connectedAccountsQuery = useQuery({
     queryKey: ["user", "connected-accounts"],
     queryFn: () =>
@@ -52,7 +51,9 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
     githubConnected: Boolean(connected?.github),
     zoteroConnected: Boolean(connected?.zotero),
     overleafConnected: Boolean(connected?.overleaf),
-    cliRunning,
+    // A CLI that has ever authenticated against the hub, rather than one
+    // that happens to be serving on localhost right now.
+    cliRunning: Boolean(connected?.cli),
     projectCount,
     flags: accountFlags,
   })

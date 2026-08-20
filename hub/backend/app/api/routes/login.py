@@ -367,10 +367,11 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
             logger.info(
                 f"Linking GitHub account {github_username} to existing user"
             )
-            existing.account.github_name = github_username
-            session.add(existing.account)
-            session.commit()
-            session.refresh(existing)
+            users.link_github_account(
+                session=session,
+                user=existing,
+                github_username=github_username,
+            )
             user = existing
         else:
             logger.info("Creating new user")
@@ -719,6 +720,10 @@ def login_with_github_token(
 
 
 # Device authorization flow (RFC 8628-inspired)
+# Refresh tokens minted this way are labeled with this prefix, which is how
+# "this account has a CLI talking to it" is told apart from a browser
+# session later on.
+CLI_LOGIN_DESCRIPTION = "CLI login"
 CLI_AUTH_EXPIRES_MINUTES = 15
 CLI_AUTH_POLL_INTERVAL_SECONDS = 5
 
@@ -843,9 +848,9 @@ def post_login_device_token(
     # Authorization confirmed — issue short-lived access + refresh token pair
     user_id = auth_request.user_id
     hostname = auth_request.hostname
-    description = "CLI login"
+    description = CLI_LOGIN_DESCRIPTION
     if hostname:
-        description = f"CLI login from {hostname}"
+        description = f"{CLI_LOGIN_DESCRIPTION} from {hostname}"
     access_token, raw_refresh, refresh_db = _make_tokens(
         user_id, description=description
     )

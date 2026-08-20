@@ -525,6 +525,11 @@ export const ConnectedAccountsSchema = {
       type: "boolean",
       title: "Zotero",
     },
+    cli: {
+      type: "boolean",
+      title: "Cli",
+      default: false,
+    },
   },
   type: "object",
   required: ["github", "zenodo", "overleaf", "google", "zotero"],

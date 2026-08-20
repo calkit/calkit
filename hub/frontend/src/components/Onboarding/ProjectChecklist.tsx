@@ -7,6 +7,7 @@ import { ProjectsService } from "../../client"
 import useOnboardingFlags, { useLocalServer } from "../../hooks/useOnboarding"
 import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
+import NewEnvironment from "../Environments/NewEnvironment"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
 import CreateQuestion from "../Projects/CreateQuestion"
@@ -66,6 +67,7 @@ const ProjectChecklist = ({
     refetchOnWindowFocus: false,
   })
   const newQuestionModal = useDisclosure()
+  const newEnvironmentModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
   const steps = buildProjectSteps({
@@ -107,18 +109,31 @@ const ProjectChecklist = ({
       </>
     ),
     environment: (
-      <HStack spacing={3}>
-        <Button
-          size="xs"
-          as={RouterLink}
-          to={`/${accountName}/${projectName}/environments`}
-        >
-          Environments
-        </Button>
-        <Link fontSize="xs" variant="blue" href={ENV_DOCS_URL} isExternal>
-          How environments work <ExternalLinkIcon mb={0.5} />
-        </Link>
-      </HStack>
+      <>
+        <HStack spacing={3}>
+          <Button
+            size="xs"
+            variant="primary"
+            onClick={newEnvironmentModal.onOpen}
+          >
+            Create an environment
+          </Button>
+          <Button
+            size="xs"
+            as={RouterLink}
+            to={`/${accountName}/${projectName}/environments`}
+          >
+            View all
+          </Button>
+          <Link fontSize="xs" variant="blue" href={ENV_DOCS_URL} isExternal>
+            How environments work <ExternalLinkIcon mb={0.5} />
+          </Link>
+        </HStack>
+        <NewEnvironment
+          isOpen={newEnvironmentModal.isOpen}
+          onClose={newEnvironmentModal.onClose}
+        />
+      </>
     ),
     figure: (
       <HStack spacing={3}>
@@ -129,14 +144,17 @@ const ProjectChecklist = ({
         >
           Open the pipeline
         </Button>
+        {/* A stage needs an environment to run in, and this is usually
+            where someone finds that out. */}
+        <Button size="xs" onClick={newEnvironmentModal.onOpen}>
+          New environment
+        </Button>
         <Link fontSize="xs" variant="blue" href={PIPELINE_DOCS_URL} isExternal>
           Writing a stage <ExternalLinkIcon mb={0.5} />
         </Link>
       </HStack>
     ),
-    run: (
-      <CommandBlock command='calkit run && calkit save -am "Run pipeline"' />
-    ),
+    run: <CommandBlock command='calkit run -m "Run pipeline"' />,
     publication: (
       <>
         <HStack spacing={3}>

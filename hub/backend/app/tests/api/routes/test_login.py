@@ -508,6 +508,9 @@ def test_login_with_github_links_to_existing_account(
     assert r.json()["access_token"]
     db.refresh(existing)
     assert existing.account.github_name == username
+    # The account had no projects, so it takes the GitHub name too and
+    # `calkit clone owner/project` matches the GitHub URL.
+    assert existing.account.name == username.lower()
     # Exactly one user still holds that email -- the duplicate insert this
     # guards against used to surface as a 500.
     assert len(db.exec(select(User).where(User.email == email)).all()) == 1
@@ -550,3 +553,36 @@ def test_login_with_github_creates_user_for_a_new_email(
     # in as the first user rather than making another.
     assert r.status_code == 200, r.text
     assert users.get_user_by_email(session=db, email=other_email) is None
+
+
+def test_login_with_github_keeps_account_name_when_projects_exist(
+    client: TestClient, db: Session
+) -> None:
+    """A rename would break every URL and DVC remote pointing at the old name."""
+    from app.models import Project
+
+    email = f"named-{uuid.uuid4().hex[:8]}@example.com"
+    existing = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="testpassword123"),
+    )
+    original_name = existing.account.name
+    db.add(
+        Project(
+            name=f"proj-{uuid.uuid4().hex[:8]}",
+            title="An existing project",
+            git_repo_url="https://github.com/someone/thing",
+            owner_account_id=existing.account.id,
+            owner_account=existing.account,
+        )
+    )
+    db.commit()
+    username = f"ghkeep{uuid.uuid4().hex[:6]}"
+    r = _github_login(
+        client, username, [{"email": email, "primary": True, "verified": True}]
+    )
+    assert r.status_code == 200, r.text
+    db.refresh(existing)
+    # Linked, but the name the project's URL uses is left alone.
+    assert existing.account.github_name == username
+    assert existing.account.name == original_name

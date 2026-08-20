@@ -690,23 +690,22 @@ function MachineStep({
       </Box>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>
-          2. Connect it to the hub and clone the project
+          2. Clone the project
         </Text>
-        <CommandBlock command="calkit hub login" />
-        <Box mt={2}>
-          <CommandBlock
-            command={`calkit clone ${accountName}/${projectName}`}
-          />
-        </Box>
+        <CommandBlock command={`calkit clone ${accountName}/${projectName}`} />
+        <Text fontSize="sm" color="ui.dim" mt={2}>
+          The first run opens a browser to sign you in, so there's no separate
+          login step.
+        </Text>
       </Box>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>
           3. Run it
         </Text>
-        <CommandBlock command="calkit run" />
+        <CommandBlock command='calkit run -m "Run pipeline"' />
         <Text fontSize="sm" color="ui.dim" mt={2}>
-          Then <code>calkit save -am "Run pipeline"</code> pushes the results
-          back here, where the project page picks them up.
+          The message tells it to push what the run produced back here, where
+          the project page picks it up.
         </Text>
       </Box>
       <Flex

@@ -36,6 +36,27 @@ PAT_VERIFIER_LENGTH_BYTES = 24
 PAT_SELECTOR_END_CHAR_IDX = 4 + PAT_SELECTOR_LENGTH_BYTES * 2
 
 
+# How stale a token's last_used may get before a request rewrites it. The
+# field answers "is this token still in use", which nothing needs to the
+# second, and without a floor every authenticated request would carry a
+# write to the same row.
+TOKEN_LAST_USED_RESOLUTION_SECONDS = 300
+
+
+def touch_token(session: Session, token: UserToken) -> None:
+    """Record that a token was just used to authenticate."""
+    now = utcnow()
+    if (
+        token.last_used is not None
+        and (now - token.last_used).total_seconds()
+        < TOKEN_LAST_USED_RESOLUTION_SECONDS
+    ):
+        return
+    token.last_used = now
+    session.add(token)
+    session.commit()
+
+
 def get_db() -> Generator[Session, None, None]:
     with Session(engine) as session:
         yield session
@@ -69,6 +90,7 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                 raise HTTPException(403, "Invalid token")
             if not verify_password(verifier, token_in_db.hashed_verifier):
                 raise HTTPException(403, "Invalid token")
+            touch_token(session, token_in_db)
             user = token_in_db.user
     else:
         # This is a regular JWT
@@ -87,6 +109,7 @@ def get_current_user(session: SessionDep, token: TokenDep) -> User:
                     raise HTTPException(403, "Token invalid")
                 if not token_in_db.is_active:
                     raise HTTPException(403, "Token has been deactivated")
+                touch_token(session, token_in_db)
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)
@@ -174,6 +197,7 @@ def get_current_user_with_token_scope(
                 raise HTTPException(403, "Invalid token scope")
             if not verify_password(verifier, token_in_db.hashed_verifier):
                 raise HTTPException(403, "Invalid token")
+            touch_token(session, token_in_db)
             user = token_in_db.user
     else:
         # This is a regular JWT
@@ -194,6 +218,7 @@ def get_current_user_with_token_scope(
                     raise HTTPException(403, "Token has been deactivated")
                 if token_in_db.expired:
                     raise HTTPException(403, "Token has expired")
+                touch_token(session, token_in_db)
                 user = token_in_db.user
             else:
                 user = session.get(User, token_data.sub)

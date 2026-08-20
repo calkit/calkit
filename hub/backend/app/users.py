@@ -192,6 +192,46 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     return session_user
 
 
+def link_github_account(
+    *, session: Session, user: User, github_username: str
+) -> bool:
+    """Attach a GitHub identity to an account, taking its name if free.
+
+    Account name and GitHub username are separate fields, but everything a
+    user types by hand -- ``calkit clone owner/project``, the project URL --
+    goes through the account name, so two different names to remember is a
+    papercut and a source of "why doesn't this work". Adopting the GitHub
+    name at link time keeps them the same for accounts created some other
+    way first.
+
+    Only when the new name is free and the account owns no projects, since
+    renaming is what every existing project URL and configured DVC remote
+    points at. Returns whether the account was renamed.
+    """
+    user.account.github_name = github_username
+    renamed = False
+    desired = github_username.lower()
+    if (
+        user.account.name != desired
+        and not user.account.owned_projects
+        and desired not in (INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES)
+        and session.exec(
+            select(Account).where(Account.name == desired)
+        ).first()
+        is None
+    ):
+        logger.info(
+            f"Renaming account {user.account.name} to {desired} on GitHub link"
+        )
+        user.account.name = desired
+        user.account.display_name = github_username
+        renamed = True
+    session.add(user.account)
+    session.commit()
+    session.refresh(user)
+    return renamed
+
+
 def get_user_by_github_username(
     *, session: Session, github_username: str
 ) -> User | None:

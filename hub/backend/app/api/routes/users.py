@@ -10,7 +10,7 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.exc import DataError
-from sqlmodel import Field, func, select
+from sqlmodel import Field, col, func, select
 
 import app.projects
 import app.stripe
@@ -22,6 +22,7 @@ from app.api.deps import (
     SessionDep,
     get_current_active_superuser,
 )
+from app.api.routes.login import CLI_LOGIN_DESCRIPTION
 from app.config import settings
 from app.core import utcnow
 from app.github import token_resp_text_to_dict
@@ -32,6 +33,7 @@ from app.models import (
     OnboardingFlagPost,
     OnboardingFlags,
     Project,
+    RefreshToken,
     StorageUsage,
     SubscriptionUpdate,
     Token,
@@ -524,6 +526,10 @@ class ConnectedAccounts(BaseModel):
     overleaf: bool
     google: bool
     zotero: bool
+    # Whether a Calkit CLI has ever authenticated as this user, which is the
+    # only reliable way to know the CLI is installed: the local server it
+    # would otherwise be detected by is usually not running.
+    cli: bool = False
 
 
 @router.get("/user/connected-accounts")
@@ -557,12 +563,38 @@ def get_user_connected_accounts(
     )
     # Zotero API keys don't expire, so there's nothing to refresh
     zotero_cred = current_user.get_external_credential(provider="zotero")
+    # Two ways a CLI can be authenticated: the device flow, which leaves a
+    # labeled refresh token, and a personal access token, which only counts
+    # once something has actually authenticated with it.
+    cli_connected = (
+        session.exec(
+            select(func.count())
+            .select_from(RefreshToken)
+            .where(
+                RefreshToken.user_id == current_user.id,
+                col(RefreshToken.description).startswith(
+                    CLI_LOGIN_DESCRIPTION
+                ),
+            )
+        ).one()
+        > 0
+        or session.exec(
+            select(func.count())
+            .select_from(UserToken)
+            .where(
+                UserToken.user_id == current_user.id,
+                col(UserToken.last_used).is_not(None),
+            )
+        ).one()
+        > 0
+    )
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
         overleaf=overleaf_connected,
         google=google_connected,
         zotero=zotero_cred is not None,
+        cli=cli_connected,
     )
 
 
@@ -754,13 +786,15 @@ def post_user_github_auth(
                 f"'{current_github_username}'"
             ),
         )
-    # The account name is left alone; it identifies the account in URLs and
-    # need not match the GitHub username
-    current_user.account.github_name = github_username
-    session.add(current_user.account)
-    session.commit()
-    session.refresh(current_user)
-    logger.info(f"Linked GitHub account {github_username}")
+    # The account takes the GitHub name too when nothing points at the old
+    # one yet, so `calkit clone owner/project` and the GitHub URL agree.
+    renamed = users.link_github_account(
+        session=session, user=current_user, github_username=github_username
+    )
+    logger.info(
+        f"Linked GitHub account {github_username}"
+        + (" and renamed the account to match" if renamed else "")
+    )
     users.save_github_token(
         session=session, user=current_user, github_resp=github_resp
     )

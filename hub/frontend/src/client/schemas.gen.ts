@@ -1714,6 +1714,38 @@ export const FeatureVoteStatusSchema = {
     "Vote tally for a feature plus whether the current user has voted.",
 } as const
 
+export const FeedbackPostSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["feedback", "bug", "help"],
+      title: "Kind",
+      default: "feedback",
+    },
+    message: {
+      type: "string",
+      maxLength: 5000,
+      minLength: 1,
+      title: "Message",
+    },
+    page: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Page",
+    },
+  },
+  type: "object",
+  required: ["message"],
+  title: "FeedbackPost",
+} as const
+
 export const FigureSchema = {
   properties: {
     path: {

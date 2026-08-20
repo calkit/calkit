@@ -3594,3 +3594,67 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
         response = client.get(f"{settings.API_V1_STR}/projects/featured")
     assert response.status_code == 200
     assert response.json() == {"data": [], "count": 0}
+
+
+def test_post_project_when_account_name_differs_from_github(
+    client: TestClient, db: Session
+) -> None:
+    """A private project for yourself isn't mistaken for one for an org.
+
+    Linking GitHub to an account created through Google or email leaves the
+    Calkit account name alone, so the two names routinely differ. Deciding
+    ownership from the account name sent those users down the org path,
+    where creating a project for themselves failed on an org lookup.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"mismatch-{suffix}@example.com",
+            password="testpassword123",
+            # The two names deliberately differ, as they do after linking.
+            account_name=f"account{suffix}",
+            github_username=f"ghname{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    repo = f"https://github.com/ghname{suffix}/proj-{suffix}"
+    with (
+        patch(
+            "app.api.routes.projects.core.users.get_github_token",
+            return_value="gh-token",
+        ),
+        patch(
+            "app.api.routes.projects.core.orgs.get_org_by_github_name"
+        ) as get_org,
+        # A 404 from GitHub means "repo doesn't exist yet", and the create
+        # that follows is where this test stops caring.
+        patch(
+            "app.api.routes.projects.core.requests.get",
+            return_value=SimpleNamespace(
+                status_code=404, json=lambda: {}, text=""
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.requests.post",
+            return_value=SimpleNamespace(
+                status_code=500, json=lambda: {}, text="stop here"
+            ),
+        ),
+    ):
+        resp = client.post(
+            f"{settings.API_V1_STR}/projects",
+            headers=headers,
+            json={
+                "name": f"proj-{suffix}",
+                "title": "A private project for myself",
+                "is_public": False,
+                "git_repo_url": repo,
+            },
+        )
+    # The org path is never taken, so no org lookup and no "Could not fetch
+    # org from GitHub". What it fails on instead is the stubbed repo create.
+    get_org.assert_not_called()
+    assert "org" not in resp.text.lower()

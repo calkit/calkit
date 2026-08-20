@@ -84,3 +84,51 @@ def test_get_version_needs_no_auth(client: TestClient) -> None:
     resp = client.get(f"{settings.API_V1_STR}/version")
     assert resp.status_code == 200
     assert resp.json()["version"]
+
+
+def test_post_feedback(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    """Feedback is emailed to the operator, with the sender escaped."""
+    url = f"{settings.API_V1_STR}/feedback"
+    assert client.post(url, json={"message": "hi"}).status_code == 401
+    # A hub with no SMTP says so instead of silently dropping the message.
+    with patch("app.config.settings.SMTP_HOST", None):
+        resp = client.post(
+            url, headers=normal_user_token_headers, json={"message": "hi"}
+        )
+    assert resp.status_code == 503
+    with (
+        patch("app.config.settings.SMTP_HOST", "smtp.example.com"),
+        patch("app.config.settings.EMAILS_FROM_EMAIL", "hub@example.com"),
+        patch("app.config.settings.FEEDBACK_EMAIL", "ops@example.com"),
+        patch("app.api.routes.misc.send_email") as send,
+    ):
+        resp = client.post(
+            url,
+            headers=normal_user_token_headers,
+            json={
+                "kind": "bug",
+                "message": "It broke <script>alert(1)</script>",
+                "page": "/some/project",
+            },
+        )
+    assert resp.status_code == 200
+    send.assert_called_once()
+    kwargs = send.call_args.kwargs
+    assert kwargs["email_to"] == "ops@example.com"
+    assert "Bug report" in kwargs["subject"]
+    body = kwargs["html_content"]
+    # The page the user was on rides along so a report doesn't need a
+    # follow-up question.
+    assert "/some/project" in body
+    assert settings.EMAIL_TEST_USER in body
+    # A message is user-controlled text, so it can't carry markup into the
+    # email we send ourselves.
+    assert "<script>" not in body
+    assert "&lt;script&gt;" in body
+    # An empty message has nothing to send, and one over the cap is rejected
+    # rather than truncated.
+    for bad in [{"message": ""}, {"message": "x" * 5001}]:
+        resp = client.post(url, headers=normal_user_token_headers, json=bad)
+        assert resp.status_code == 422

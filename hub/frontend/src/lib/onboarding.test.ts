@@ -102,6 +102,53 @@ describe("buildProjectSteps", () => {
     expect(stepByKey(flagged, "environment")?.done).toBe(false)
   })
 
+  it("distinguishes a mark the user made from something we detected", () => {
+    const steps = buildProjectSteps({
+      questionCount: 1,
+      localConnected: false,
+      reproCheck: emptyReproCheck,
+      pipelineStatus: null,
+      flags: ["editor"],
+    })
+    // Detected: nothing to take back, so the mark isn't the user's to undo.
+    expect(steps.find((s) => s.key === "question")?.manuallyDone).toBe(false)
+    // Marked by hand: un-marking it would actually change something.
+    expect(steps.find((s) => s.key === "editor")?.manuallyDone).toBe(true)
+    // A step that's neither is undone and unmarked.
+    expect(steps.find((s) => s.key === "run")?.manuallyDone).toBe(false)
+    const account = buildAccountSteps({
+      githubConnected: true,
+      zoteroConnected: false,
+      overleafConnected: false,
+      cliRunning: false,
+      projectCount: 0,
+      flags: ["cli"],
+    })
+    expect(account.find((s) => s.key === "github")?.manuallyDone).toBe(false)
+    expect(account.find((s) => s.key === "cli")?.manuallyDone).toBe(true)
+  })
+
+  it("won't let a flag tick off a step our own records answer", () => {
+    // Marking "start your first project" done can't make a project exist,
+    // and the projects table on the same page would contradict it.
+    const steps = buildAccountSteps({
+      githubConnected: false,
+      zoteroConnected: false,
+      overleafConnected: false,
+      cliRunning: false,
+      projectCount: 0,
+      flags: ["project", "github", "zotero", "overleaf", "cli"],
+    })
+    for (const key of ["project", "github", "zotero", "overleaf"]) {
+      const step = steps.find((s) => s.key === key)
+      expect(step?.detectedOnly).toBe(true)
+      expect(step?.done).toBe(false)
+      expect(step?.manuallyDone).toBe(false)
+    }
+    // The CLI check can be a false negative, so that one still takes a mark.
+    expect(steps.find((s) => s.key === "cli")?.done).toBe(true)
+  })
+
   it("treats a missing repro check as nothing done rather than crashing", () => {
     const steps = buildProjectSteps({
       questionCount: 1,

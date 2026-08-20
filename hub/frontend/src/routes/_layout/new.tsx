@@ -412,7 +412,8 @@ function NameItStep({
             Make it public
           </Checkbox>
           <FormHelperText>
-            You can change this any time from the project's settings.
+            A private project can be made public later. Going the other way
+            isn't possible, so leave it private if you're unsure.
           </FormHelperText>
         </FormControl>
       ) : null}

@@ -6,10 +6,11 @@ import {
   Flex,
   Heading,
   Icon,
-  Link,
   Progress,
+  SimpleGrid,
   Spacer,
   Text,
+  Tooltip,
   useColorModeValue,
 } from "@chakra-ui/react"
 import type { ReactNode } from "react"
@@ -20,6 +21,60 @@ import {
   isComplete,
   progressPercent,
 } from "../../lib/onboarding"
+
+/**
+ * A step's status icon, which is also how a step gets ticked off.
+ *
+ * Clicking an empty circle is the obvious gesture on a checklist, so it's
+ * the one that marks a step done. A step we detected as done has nothing to
+ * undo -- un-marking it would leave it done and look broken -- so only a
+ * mark the user made themselves is clickable in the other direction.
+ */
+function StepMark({
+  step,
+  onMarkDone,
+}: {
+  step: OnboardingStep
+  onMarkDone?: (step: string, done: boolean) => void
+}) {
+  const canToggle =
+    Boolean(onMarkDone) &&
+    !step.detectedOnly &&
+    (!step.done || step.manuallyDone)
+  const icon = (
+    <Icon
+      as={step.done ? CheckCircleIcon : FiCircle}
+      color={step.done ? "ui.success" : "ui.dim"}
+      mt={1}
+      flexShrink={0}
+      aria-hidden
+    />
+  )
+  if (!canToggle) {
+    return icon
+  }
+  return (
+    <Tooltip
+      label={step.done ? "Not done after all?" : "Mark as done"}
+      openDelay={400}
+    >
+      <Box
+        as="button"
+        type="button"
+        aria-label={
+          step.done
+            ? `Mark "${step.title}" as not done`
+            : `Mark "${step.title}" as done`
+        }
+        lineHeight={0}
+        onClick={() => onMarkDone?.(step.key, !step.done)}
+        _hover={{ opacity: 0.6 }}
+      >
+        {icon}
+      </Box>
+    </Tooltip>
+  )
+}
 
 interface ChecklistCardProps {
   title: string
@@ -35,6 +90,12 @@ interface ChecklistCardProps {
   onDismissedChange: (dismissed: boolean) => void
   /** Shown in place of the list once nothing required is left. */
   doneMessage: string
+  /**
+   * Columns to lay the steps out in on a wide screen. Two suits a card that
+   * spans the page and a list whose steps can be done in any order; one
+   * suits a narrow column and a sequence that has to happen in order.
+   */
+  columns?: number
 }
 
 /**
@@ -58,6 +119,7 @@ const ChecklistCard = ({
   dismissed,
   onDismissedChange,
   doneMessage,
+  columns = 1,
 }: ChecklistCardProps) => {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const dividerColor = useColorModeValue("gray.200", "gray.600")
@@ -128,58 +190,50 @@ const ChecklistCard = ({
               {remaining} left
             </Text>
           </Flex>
-          {steps.map((step, index) => (
-            <Box
-              key={step.key}
-              pt={index === 0 ? 0 : 3}
-              mt={index === 0 ? 0 : 3}
-              borderTopWidth={index === 0 ? 0 : 1}
-              borderColor={dividerColor}
-            >
-              <Flex align="flex-start" gap={2}>
-                <Icon
-                  as={step.done ? CheckCircleIcon : FiCircle}
-                  color={step.done ? "ui.success" : "ui.dim"}
-                  mt={1}
-                  flexShrink={0}
-                />
-                <Box flex="1">
-                  <Flex align="center" gap={2}>
-                    <Text
-                      fontWeight={step.done ? "normal" : "semibold"}
-                      color={step.done ? "ui.dim" : "inherit"}
-                    >
-                      {step.title}
-                    </Text>
-                    {step.optional && !step.done ? (
-                      <Text fontSize="xs" color="ui.dim">
-                        optional
-                      </Text>
-                    ) : null}
-                  </Flex>
-                  <Collapse in={!step.done} animateOpacity>
-                    <Text fontSize="sm" color="ui.dim" mt={0.5}>
-                      {step.detail}
-                    </Text>
-                    {actions?.[step.key] ? (
-                      <Box mt={2}>{actions[step.key]}</Box>
-                    ) : null}
-                    {onMarkDone ? (
-                      <Link
-                        fontSize="xs"
-                        color="ui.dim"
-                        mt={2}
-                        display="inline-block"
-                        onClick={() => onMarkDone(step.key, true)}
+          <SimpleGrid
+            columns={{ base: 1, md: columns }}
+            spacingX={10}
+            spacingY={columns > 1 ? 5 : 0}
+          >
+            {steps.map((step, index) => (
+              <Box
+                key={step.key}
+                // In a grid the top border would run across unrelated
+                // steps, so those rows are separated by spacing instead.
+                pt={columns > 1 || index === 0 ? 0 : 3}
+                mt={columns > 1 || index === 0 ? 0 : 3}
+                borderTopWidth={columns > 1 || index === 0 ? 0 : 1}
+                borderColor={dividerColor}
+              >
+                <Flex align="flex-start" gap={2}>
+                  <StepMark step={step} onMarkDone={onMarkDone} />
+                  <Box flex="1">
+                    <Flex align="center" gap={2}>
+                      <Text
+                        fontWeight={step.done ? "normal" : "semibold"}
+                        color={step.done ? "ui.dim" : "inherit"}
                       >
-                        Already done this? Mark it off
-                      </Link>
-                    ) : null}
-                  </Collapse>
-                </Box>
-              </Flex>
-            </Box>
-          ))}
+                        {step.title}
+                      </Text>
+                      {step.optional && !step.done ? (
+                        <Text fontSize="xs" color="ui.dim">
+                          optional
+                        </Text>
+                      ) : null}
+                    </Flex>
+                    <Collapse in={!step.done} animateOpacity>
+                      <Text fontSize="sm" color="ui.dim" mt={0.5}>
+                        {step.detail}
+                      </Text>
+                      {actions?.[step.key] ? (
+                        <Box mt={2}>{actions[step.key]}</Box>
+                      ) : null}
+                    </Collapse>
+                  </Box>
+                </Flex>
+              </Box>
+            ))}
+          </SimpleGrid>
         </>
       )}
     </Box>

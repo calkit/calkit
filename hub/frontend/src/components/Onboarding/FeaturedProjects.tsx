@@ -4,6 +4,8 @@ import {
   Flex,
   Heading,
   Link,
+  LinkBox,
+  LinkOverlay,
   SimpleGrid,
   Skeleton,
   Text,
@@ -55,11 +57,9 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
       ) : (
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           {projects.map((project) => (
-            <Box
+            <LinkBox
               key={project.id}
-              as={RouterLink}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              to={`/${project.owner_account_name}/${project.name}` as any}
+              as="article"
               borderWidth={1}
               borderColor={borderColor}
               borderRadius="lg"
@@ -72,12 +72,17 @@ const FeaturedProjects = ({ heading }: { heading?: string }) => {
                 {project.owner_account_display_name}
               </Badge>
               <Heading size="sm" mb={1} noOfLines={2}>
-                {project.title}
+                <LinkOverlay
+                  as={RouterLink}
+                  to={`/${project.owner_account_name}/${project.name}`}
+                >
+                  {project.title}
+                </LinkOverlay>
               </Heading>
               <Text fontSize="sm" color="ui.dim" noOfLines={3}>
                 {project.description || "No description."}
               </Text>
-            </Box>
+            </LinkBox>
           ))}
         </SimpleGrid>
       )}

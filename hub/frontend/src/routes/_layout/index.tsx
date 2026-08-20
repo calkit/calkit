@@ -307,7 +307,7 @@ function Home() {
           <ProjectsTable />
         </>
       )}
-      <Box mt={8} maxW="720px">
+      <Box mt={8}>
         <AccountSetupCard projectCount={projectCount} />
       </Box>
     </Container>

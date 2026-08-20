@@ -433,3 +433,120 @@ def test_login_with_google_requires_verified_email(client: TestClient) -> None:
             json={"code": "c", "redirect_uri": "http://localhost:5173/x"},
         )
     assert r.status_code == 400
+
+
+class _FakeGitHubResp:
+    """Stands in for both the token exchange (.text) and the API (.json())."""
+
+    def __init__(self, status_code: int, payload=None, text: str = ""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        return self._payload
+
+
+def _github_login(
+    client: TestClient, username: str, emails: list[dict]
+) -> "object":
+    """Drive POST /login/github with GitHub's responses stubbed out."""
+
+    # One dispatcher for every GitHub call the flow makes. The route module
+    # and app.github share the same imported `requests`, so patching it in
+    # two places would just leave the last patch standing.
+    def api_get(url, *args, **kwargs):
+        if "login/oauth/access_token" in url:
+            return _FakeGitHubResp(200, text="access_token=gho_fake&scope=")
+        if url.endswith("/user/emails"):
+            return _FakeGitHubResp(200, emails)
+        if url.endswith("/user"):
+            return _FakeGitHubResp(
+                200, {"login": username, "email": None, "name": "GH User"}
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with (
+        patch("app.api.routes.login.requests.get", side_effect=api_get),
+        patch("app.api.routes.login.users.save_github_token"),
+    ):
+        return client.post(
+            f"{settings.API_V1_STR}/login/github",
+            json={
+                "code": "auth-code",
+                "redirect_uri": "http://localhost:5173/login",
+            },
+        )
+
+
+def test_login_with_github_links_to_existing_account(
+    client: TestClient, db: Session
+) -> None:
+    """A Google-first user signing in with GitHub gets one account, not two."""
+    email = f"gh-{uuid.uuid4().hex[:8]}@example.com"
+    existing = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="testpassword123"),
+    )
+    assert existing.account.github_name is None
+    username = f"ghuser{uuid.uuid4().hex[:6]}"
+    # An unverified address proves nothing about who owns it, so it can't be
+    # what attaches a GitHub identity to an account that already exists.
+    r = _github_login(
+        client,
+        username,
+        [{"email": email, "primary": True, "verified": False}],
+    )
+    assert r.status_code == 400, r.text
+    db.refresh(existing)
+    assert existing.account.github_name is None
+    # Verified, and the account is claimed rather than duplicated.
+    r = _github_login(
+        client, username, [{"email": email, "primary": True, "verified": True}]
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["access_token"]
+    db.refresh(existing)
+    assert existing.account.github_name == username
+    # Exactly one user still holds that email -- the duplicate insert this
+    # guards against used to surface as a 500.
+    assert len(db.exec(select(User).where(User.email == email)).all()) == 1
+    # Signing in again resolves by GitHub username and changes nothing.
+    r = _github_login(
+        client, username, [{"email": email, "primary": True, "verified": True}]
+    )
+    assert r.status_code == 200, r.text
+    # A different GitHub identity claiming the same email is refused, since
+    # joining them would move the account's repos to another GitHub owner.
+    r = _github_login(
+        client,
+        f"other{uuid.uuid4().hex[:6]}",
+        [{"email": email, "primary": True, "verified": True}],
+    )
+    assert r.status_code == 400, r.text
+
+
+def test_login_with_github_creates_user_for_a_new_email(
+    client: TestClient, db: Session
+) -> None:
+    email = f"new-{uuid.uuid4().hex[:8]}@example.com"
+    username = f"ghnew{uuid.uuid4().hex[:6]}"
+    r = _github_login(
+        client, username, [{"email": email, "primary": True, "verified": True}]
+    )
+    assert r.status_code == 200, r.text
+    user = users.get_user_by_email(session=db, email=email)
+    assert user is not None
+    assert user.account.github_name == username
+    # A GitHub username already taken as an account name doesn't block the
+    # signup; the account name gets a suffix instead.
+    other_email = f"new2-{uuid.uuid4().hex[:8]}@example.com"
+    r = _github_login(
+        client,
+        username,
+        [{"email": other_email, "primary": True, "verified": True}],
+    )
+    # Same GitHub username, different email: resolved by username, so it logs
+    # in as the first user rather than making another.
+    assert r.status_code == 200, r.text
+    assert users.get_user_by_email(session=db, email=other_email) is None

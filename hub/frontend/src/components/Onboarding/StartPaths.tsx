@@ -82,7 +82,9 @@ const StartPaths = ({
           : {
               as: RouterLink,
               to,
-              search: { path: option.path },
+              // Step 1 is the form; the choice this card just made is what
+              // step 0 exists to ask, so don't ask it twice.
+              search: { path: option.path, step: 1 },
             }
         return (
           <Box

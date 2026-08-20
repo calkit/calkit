@@ -70,6 +70,7 @@ import type {
   DiscountCodePost,
   Environment,
   ExternalReleasePost,
+  FeedbackPost,
   FileLockPost,
   FsOpBatchRequest,
   FsOpRequest,
@@ -271,6 +272,8 @@ import type {
   PostExternalReleaseResponses,
   PostFeatureVoteErrors,
   PostFeatureVoteResponses,
+  PostFeedbackErrors,
+  PostFeedbackResponses,
   PostLoginDeviceAuthorizeErrors,
   PostLoginDeviceAuthorizeResponses,
   PostLoginDeviceErrors,
@@ -2035,6 +2038,39 @@ export class MiscService {
       url: "/test-email/",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Feedback
+   *
+   * Email a user's feedback, bug report, or question to the operator.
+   */
+  public static postFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedbackPost: FeedbackPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostFeedbackResponses, PostFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "feedbackPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostFeedbackResponses,
+      PostFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

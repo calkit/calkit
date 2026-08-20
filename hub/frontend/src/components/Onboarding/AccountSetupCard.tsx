@@ -1,5 +1,5 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
-import { Button, HStack, Link } from "@chakra-ui/react"
+import { Button, Link, useDisclosure } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
@@ -13,6 +13,7 @@ import { handleError } from "../../lib/errors"
 import { startGitHubOAuth } from "../../lib/github"
 import { DISMISSED, buildAccountSteps } from "../../lib/onboarding"
 import { stashZoteroReturn } from "../../lib/zotero"
+import UpdateOverleafToken from "../UserSettings/UpdateOverleafToken"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
 
@@ -27,6 +28,7 @@ import CommandBlock from "./CommandBlock"
  */
 const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   const showToast = useCustomToast()
+  const overleafModal = useDisclosure()
   const { accountFlags, setFlag } = useOnboardingFlags()
   const { cliRunning } = useLocalServer()
   const connectedAccountsQuery = useQuery({
@@ -90,18 +92,19 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
       </>
     ),
     overleaf: (
-      <HStack spacing={3}>
+      <>
         <Button
           size="xs"
           leftIcon={<SiOverleaf />}
-          as={RouterLink}
-          to="/settings"
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          search={{ tab: "connected-accounts" } as any}
+          onClick={overleafModal.onOpen}
         >
           Connect Overleaf
         </Button>
-      </HStack>
+        <UpdateOverleafToken
+          isOpen={overleafModal.isOpen}
+          onClose={overleafModal.onClose}
+        />
+      </>
     ),
     zotero: (
       <Button
@@ -124,6 +127,9 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
       }
       steps={steps}
       actions={actions}
+      // These can be done in any order and the card spans the page, so two
+      // columns keep it from being a tall ribbon of mostly empty space.
+      columns={2}
       onMarkDone={setFlag}
       dismissed={accountFlags.includes(DISMISSED)}
       onDismissedChange={(dismissed) => setFlag(DISMISSED, dismissed)}

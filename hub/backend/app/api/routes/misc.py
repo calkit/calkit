@@ -1,5 +1,6 @@
 """Miscellaneous routes."""
 
+import html
 import logging
 import os
 import uuid
@@ -8,7 +9,7 @@ from typing import Literal
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic.networks import EmailStr
 from sqlalchemy.exc import DataError
 from sqlmodel import and_, or_, select
@@ -21,6 +22,7 @@ from app.api.deps import (
     SessionDep,
     get_current_active_superuser,
 )
+from app.config import settings
 from app.core import utcnow
 from app.messaging import generate_test_email, send_email
 from app.models import (
@@ -83,6 +85,56 @@ class DiscountCodePublic(BaseModel):
     price: float | None = None
     months: int | None = None
     plan_name: str | None = None
+
+
+class FeedbackPost(BaseModel):
+    kind: Literal["feedback", "bug", "help"] = "feedback"
+    message: str = Field(min_length=1, max_length=5000)
+    # Where the user was when they opened the form. A bug report without it
+    # usually costs a round trip to ask "which page?".
+    page: str | None = Field(default=None, max_length=2048)
+
+
+@router.post("/feedback")
+def post_feedback(req: FeedbackPost, current_user: CurrentUser) -> Message:
+    """Email a user's feedback, bug report, or question to the operator."""
+    if not settings.emails_enabled:
+        # The form offers Discord and the issue tracker alongside it, so
+        # saying so plainly leaves the user somewhere to go.
+        raise HTTPException(
+            503,
+            "This hub isn't configured to send email. Please use the "
+            "Discord server or issue tracker instead.",
+        )
+    labels = {
+        "feedback": "Feedback",
+        "bug": "Bug report",
+        "help": "Help request",
+    }
+    label = labels[req.kind]
+    # Composed here rather than from a template, since the built templates
+    # come out of the MJML sources and this has no styling worth the round
+    # trip. The message is user-controlled, so every interpolated value is
+    # escaped -- render_email_template's autoescape doesn't apply here.
+    lines = [
+        f"<p><strong>{html.escape(label)}</strong> from "
+        f"{html.escape(current_user.full_name or 'a user')} "
+        f'(<a href="mailto:{html.escape(current_user.email)}">'
+        f"{html.escape(current_user.email)}</a>, account "
+        f"{html.escape(current_user.account.name)})</p>",
+    ]
+    if req.page:
+        lines.append(f"<p>Sent from: {html.escape(req.page)}</p>")
+    lines.append(
+        f'<pre style="white-space: pre-wrap">{html.escape(req.message)}</pre>'
+    )
+    send_email(
+        email_to=settings.feedback_email,
+        subject=f"{settings.PROJECT_NAME} - {label}",
+        html_content="\n".join(lines),
+    )
+    logger.info(f"Sent {req.kind} from user {current_user.id}")
+    return Message(message="Thanks! We'll get back to you.")
 
 
 @router.get("/discount-codes/{discount_code}")

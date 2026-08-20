@@ -18,8 +18,20 @@ export interface OnboardingStep {
   /** One line on why the step is worth doing. */
   detail: string
   done: boolean
+  /**
+   * Done because the user said so rather than because we detected it, which
+   * is the only case where un-marking would change anything.
+   */
+  manuallyDone?: boolean
   /** True when only the user can say it's done, so we offer a "Mark done". */
   manual?: boolean
+  /**
+   * Our own records answer this one, so there's nothing a hand-mark could
+   * add. Marking "start your first project" done wouldn't make a project
+   * exist, and a checkbox that lies about the thing sitting on the same
+   * page is worse than no checkbox.
+   */
+  detectedOnly?: boolean
   /** Nice to have, but doesn't hold the checklist open. */
   optional?: boolean
 }
@@ -117,10 +129,15 @@ export function buildProjectSteps({
   // A user can mark any step done by hand, not just the manual ones -- a
   // project can satisfy a step in a way we don't detect, and arguing with
   // the person who set it up is not a good use of a checklist.
-  return steps.map((step) => ({
-    ...step,
-    done: step.done || flags.includes(step.key),
-  }))
+  return steps.map((step) => applyFlags(step, flags))
+}
+
+/** Fold a user's marks into a step, recording which ones they made. */
+function applyFlags(step: OnboardingStep, flags: string[]): OnboardingStep {
+  // A step we can see the answer to ignores flags outright, so a mark left
+  // over from before it became detectable can't hold it checked.
+  const marked = !step.detectedOnly && flags.includes(step.key)
+  return { ...step, done: step.done || marked, manuallyDone: marked }
 }
 
 export interface AccountOnboardingInput {
@@ -145,12 +162,14 @@ export function buildAccountSteps({
   const steps: OnboardingStep[] = [
     {
       key: "github",
+      detectedOnly: true,
       title: "Connect your GitHub account",
       detail: "Calkit keeps a project's code and text in a Git repo there.",
       done: githubConnected,
     },
     {
       key: "project",
+      detectedOnly: true,
       title: "Start your first project",
       detail:
         "Clean up something you're already working on, or start fresh from " +
@@ -174,6 +193,7 @@ export function buildAccountSteps({
       detail: "Link papers you're already writing to the projects behind them.",
       done: overleafConnected,
       optional: true,
+      detectedOnly: true,
     },
     {
       key: "zotero",
@@ -181,12 +201,10 @@ export function buildAccountSteps({
       detail: "Import a collection and keep the project's .bib file in step.",
       done: zoteroConnected,
       optional: true,
+      detectedOnly: true,
     },
   ]
-  return steps.map((step) => ({
-    ...step,
-    done: step.done || flags.includes(step.key),
-  }))
+  return steps.map((step) => applyFlags(step, flags))
 }
 
 /**

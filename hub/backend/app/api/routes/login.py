@@ -14,9 +14,9 @@ from jwt.algorithms import RSAAlgorithm
 from jwt.exceptions import InvalidTokenError
 from pydantic import BaseModel
 from sqlalchemy import delete
-from sqlmodel import select
+from sqlmodel import Session, select
 
-from app import mixpanel, security, users
+from app import github, mixpanel, security, users
 from app.api.deps import (
     CurrentUser,
     SessionDep,
@@ -237,6 +237,36 @@ class OAuthCodeExchange(BaseModel):
     redirect_uri: str
 
 
+def _create_github_user(
+    *,
+    session: Session,
+    email: str,
+    full_name: str | None,
+    github_username: str,
+) -> User:
+    """Create a user from a GitHub identity, working around a name clash.
+
+    The account name defaults to the GitHub username, which may already be
+    taken here by an account that has nothing to do with this person. That's
+    no reason to refuse the signup, so retry once with a suffix, the same way
+    signing up through Google does.
+    """
+    user_create = UserCreate(
+        email=email,
+        full_name=full_name,
+        github_username=github_username,
+        # Generate a random password for this user, which they can reset later
+        password=secrets.token_urlsafe(16),
+    )
+    try:
+        return users.create_user(session=session, user_create=user_create)
+    except HTTPException as e:
+        if e.status_code != 422:
+            raise
+        user_create.account_name = f"{github_username}-{secrets.token_hex(3)}"
+        return users.create_user(session=session, user_create=user_create)
+
+
 @router.post("/login/github")
 def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     """Log in a user from GitHub authentication, creating a new account if
@@ -285,32 +315,72 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
     logger.info(
         f"Received GitHub user {github_username} with email: {github_email}"
     )
-    if github_email is None:
-        logger.info("Looking up private GitHub email")
-        github_email = requests.get(
-            "https://api.github.com/user/emails",
-            headers={"Authorization": f"Bearer {out['access_token']}"},
-        ).json()[0]["email"]
-        logger.info(f"Found GitHub email: {github_email}")
+    # The profile email is whatever the user made public, which is often
+    # nothing, and never says whether it's verified. The email list does.
+    github_email, email_verified = github.resolve_email(out["access_token"])
+    logger.info(
+        f"Using GitHub email {github_email} (verified: {email_verified})"
+    )
     users.check_email_allowed(github_email)
     # First check to find user based on their GitHub username
     user = users.get_user_by_github_username(
         session=session, github_username=github_username
     )
     if user is None:
-        logger.info("Creating new user")
-        user = users.create_user(
-            session=session,
-            user_create=UserCreate(
+        # An account may already exist under this email from a Google or
+        # email signup, which leaves github_name null. Without this, signing
+        # in through GitHub would try to create a second user with an email
+        # the database won't take twice.
+        existing = users.get_user_by_email(session=session, email=github_email)
+        if existing is not None:
+            if existing.github_username is not None:
+                # Two GitHub identities claiming one account: joining them
+                # would silently move the account's repos to a different
+                # GitHub owner.
+                logger.info(
+                    f"Account for {github_email} is already linked to "
+                    f"GitHub as {existing.github_username}"
+                )
+                raise HTTPException(
+                    400,
+                    (
+                        f"This email is already used by an account linked to "
+                        f"GitHub as '{existing.github_username}'. Sign in "
+                        "that way instead."
+                    ),
+                )
+            if not email_verified:
+                # Anyone can put someone else's address on a GitHub account;
+                # only GitHub having verified it makes the match evidence of
+                # the same person.
+                logger.info(
+                    f"Refusing to link unverified email for {github_username}"
+                )
+                raise HTTPException(
+                    400,
+                    (
+                        "An account already exists for this email. Verify "
+                        "the address on GitHub, then sign in again to link "
+                        "the two."
+                    ),
+                )
+            logger.info(
+                f"Linking GitHub account {github_username} to existing user"
+            )
+            existing.account.github_name = github_username
+            session.add(existing.account)
+            session.commit()
+            session.refresh(existing)
+            user = existing
+        else:
+            logger.info("Creating new user")
+            user = _create_github_user(
+                session=session,
                 email=github_email,
                 full_name=gh_user["name"],
                 github_username=github_username,
-                # Generate random password for this user, which they can reset
-                # later
-                password=secrets.token_urlsafe(16),
-            ),
-        )
-        mixpanel.user_signed_up(user)
+            )
+            mixpanel.user_signed_up(user)
     else:
         logger.info(f"Found existing user with email: {user.email}")
     if user.github_username != github_username:

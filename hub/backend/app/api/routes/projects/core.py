@@ -542,7 +542,14 @@ def post_project(
     # is private
     if not project_in.git_repo_exists and not project_in.is_public:
         logger.info(f"Checking private project count for {owner_name}")
-        if current_user.account.name == owner_name.lower():
+        # is_user_org is the answer already worked out above, from the
+        # GitHub username. Re-deriving it from the Calkit account name would
+        # be wrong for anyone whose two names differ -- which is everyone
+        # who linked GitHub to an account created some other way, since
+        # linking deliberately leaves the account name alone. For them this
+        # took the org branch and failed with "Could not fetch org from
+        # GitHub" while creating a project for themselves.
+        if not is_user_org:
             # Count private projects for user
             account_id = current_user.account.id
             subscription = current_user.subscription

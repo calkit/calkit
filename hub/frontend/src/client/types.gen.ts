@@ -982,6 +982,24 @@ export type FeatureVoteStatus = {
 }
 
 /**
+ * FeedbackPost
+ */
+export type FeedbackPost = {
+  /**
+   * Kind
+   */
+  kind?: "feedback" | "bug" | "help"
+  /**
+   * Message
+   */
+  message: string
+  /**
+   * Page
+   */
+  page?: string | null
+}
+
+/**
  * Figure
  */
 export type Figure = {
@@ -6893,6 +6911,32 @@ export type TestEmailResponses = {
 }
 
 export type TestEmailResponse = TestEmailResponses[keyof TestEmailResponses]
+
+export type PostFeedbackData = {
+  body: FeedbackPost
+  path?: never
+  query?: never
+  url: "/feedback"
+}
+
+export type PostFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostFeedbackError = PostFeedbackErrors[keyof PostFeedbackErrors]
+
+export type PostFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostFeedbackResponse =
+  PostFeedbackResponses[keyof PostFeedbackResponses]
 
 export type GetDiscountCodeData = {
   body?: never

@@ -28,6 +28,7 @@ import type {
   CreateReleaseShareResponses,
   CreateUserErrors,
   CreateUserResponses,
+  DatasetPost,
   DeleteAllUserOnboardingFlagsResponses,
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
@@ -70,6 +71,7 @@ import type {
   DiscountCodePost,
   Environment,
   ExternalReleasePost,
+  FeedbackPatch,
   FeedbackPost,
   FileLockPost,
   FsOpBatchRequest,
@@ -86,6 +88,8 @@ import type {
   GetFeaturedProjectsResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
+  GetFeedbackErrors,
+  GetFeedbackResponses,
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -227,7 +231,6 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
-  LabelDatasetPost,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -254,6 +257,8 @@ import type {
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
+  PatchFeedbackErrors,
+  PatchFeedbackResponses,
   PatchProjectCommentErrors,
   PatchProjectCommentResponses,
   PatchProjectContentsErrors,
@@ -288,8 +293,8 @@ import type {
   PostProjectCommentReplyErrors,
   PostProjectCommentReplyResponses,
   PostProjectCommentResponses,
-  PostProjectDatasetLabelErrors,
-  PostProjectDatasetLabelResponses,
+  PostProjectDatasetErrors,
+  PostProjectDatasetResponses,
   PostProjectDatasetUploadErrors,
   PostProjectDatasetUploadResponses,
   PostProjectDvcFileErrors,
@@ -2042,9 +2047,49 @@ export class MiscService {
   }
 
   /**
+   * Get Feedback
+   *
+   * List what users have sent in, newest first.
+   */
+  public static getFeedback<ThrowOnError extends boolean = true>(
+    parameters?: {
+      limit?: number
+      offset?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeedbackResponses, GetFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetFeedbackResponses,
+      GetFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Post Feedback
    *
-   * Email a user's feedback, bug report, or question to the operator.
+   * Record a user's feedback, bug report, or question.
+   *
+   * The row is written first and the email is best-effort after it: a relay
+   * that's down is a notification problem, not a reason to tell someone
+   * their feedback didn't go through and lose what they typed.
    */
   public static postFeedback<ThrowOnError extends boolean = true>(
     parameters: {
@@ -2064,6 +2109,47 @@ export class MiscService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/feedback",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Patch Feedback
+   *
+   * Mark a piece of feedback dealt with, or put it back.
+   */
+  public static patchFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedback_id: string
+      feedbackPatch: FeedbackPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PatchFeedbackResponses, PatchFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "feedback_id" },
+            { key: "feedbackPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchFeedbackResponses,
+      PatchFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback/{feedback_id}",
       ...options,
       ...params,
       headers: {
@@ -3957,6 +4043,58 @@ export class ProjectsService {
   }
 
   /**
+   * Post Project Dataset
+   *
+   * Declare a dataset, imported or already in the repo.
+   *
+   * One route for every way a dataset joins a project: pick a path that's
+   * already there (collected, or produced by a stage), or name where it was
+   * imported from. Which one it is decides whether the path has to exist
+   * yet -- an import names data that hasn't been fetched.
+   */
+  public static postProjectDataset<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      datasetPost: DatasetPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectDatasetResponses,
+    PostProjectDatasetErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "datasetPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectDatasetResponses,
+      PostProjectDatasetErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/datasets",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Get Project Dataset
    */
   public static getProjectDataset<ThrowOnError extends boolean = true>(
@@ -3997,51 +4135,6 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/datasets/{path}",
       ...options,
       ...params,
-    })
-  }
-
-  /**
-   * Post Project Dataset Label
-   */
-  public static postProjectDatasetLabel<ThrowOnError extends boolean = true>(
-    parameters: {
-      owner_name: string
-      project_name: string
-      labelDatasetPost: LabelDatasetPost
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    PostProjectDatasetLabelResponses,
-    PostProjectDatasetLabelErrors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "owner_name" },
-            { in: "path", key: "project_name" },
-            { key: "labelDatasetPost", map: "body" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).post<
-      PostProjectDatasetLabelResponses,
-      PostProjectDatasetLabelErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/datasets/label",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 

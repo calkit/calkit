@@ -14,7 +14,7 @@ import subprocess
 import uuid
 import zipfile
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
@@ -170,6 +170,8 @@ from app.storage import (
 )
 from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
+from calkit.models.core import Dataset as CkDataset
+from calkit.models.core import ImportedDataset as CkImportedDataset
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
@@ -3962,23 +3964,99 @@ def get_project_dataset(
         return DatasetForImport.model_validate(ds)
 
 
-class LabelDatasetPost(BaseModel):
-    imported_from: str | None = None
+class GitRepoSourcePost(BaseModel):
+    url: str
+    rev: str
+    path: str | None = None
+
+
+class ImportedFromPost(BaseModel):
+    """Where a dataset came from, as one of four mutually exclusive kinds.
+
+    Sent flat rather than as a tagged union so the generated client has one
+    shape to build; exactly which kind it is falls out of which field is
+    set, and that's checked below rather than trusted.
+    """
+
+    # Another Calkit project, by "owner/name".
+    project: str | None = None
+    # For a project import: which path within it, and at which revision.
+    path: str | None = None
+    git_rev: str | None = None
+    url: str | None = None
+    doi: str | None = None
+    git_repo: GitRepoSourcePost | None = None
+    date_retrieved: date | None = None
+
+    def to_ck_dict(self) -> dict[str, Any]:
+        """Render the calkit.yaml form of this source.
+
+        Raises if it doesn't name exactly one source, since a dataset whose
+        provenance is ambiguous is worse than one with none recorded.
+        """
+        kinds = [
+            k
+            for k in ["project", "url", "doi", "git_repo"]
+            if getattr(self, k) is not None
+        ]
+        if len(kinds) != 1:
+            raise HTTPException(
+                422,
+                "An imported dataset must name exactly one source: a "
+                "project, a URL, a DOI, or a Git repo",
+            )
+        kind = kinds[0]
+        out: dict[str, Any] = {}
+        if kind == "project":
+            out["project"] = self.project
+            if self.path:
+                out["path"] = self.path
+            if self.git_rev:
+                out["git_rev"] = self.git_rev
+            # A project import is pinned by git_rev, so a retrieval date
+            # would be a second, weaker answer to the same question.
+            return out
+        if kind == "url":
+            out["url"] = self.url
+        elif kind == "doi":
+            out["doi"] = self.doi
+        else:
+            assert self.git_repo is not None
+            out["git_repo"] = self.git_repo.model_dump(exclude_none=True)
+        if self.date_retrieved is not None:
+            out["date_retrieved"] = self.date_retrieved.isoformat()
+        return out
+
+
+class DatasetPost(BaseModel):
+    """A dataset to declare, however it came to be part of the project."""
+
     path: str
     title: str | None = None
-    tabular: bool | None = None
-    stage: str | None = None
     description: str | None = None
+    tabular: bool | None = None
+    # The pipeline stage that produces it, for data the project generates.
+    stage: str | None = None
+    # Collected or measured for this project, so there's no upstream source.
+    primary: bool | None = None
+    imported_from: ImportedFromPost | None = None
 
 
-@router.post("/projects/{owner_name}/{project_name}/datasets/label")
-def post_project_dataset_label(
+@router.post("/projects/{owner_name}/{project_name}/datasets")
+def post_project_dataset(
     owner_name: str,
     project_name: str,
     current_user: CurrentUser,
     session: SessionDep,
-    req: LabelDatasetPost,
+    req: DatasetPost,
 ) -> Dataset:
+    """Declare a dataset, imported or already in the repo.
+
+    One route for every way a dataset joins a project: pick a path that's
+    already there (collected, or produced by a stage), or name where it was
+    imported from. Which one it is decides whether the path has to exist
+    yet -- an import names data that hasn't been fetched.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -3986,45 +4064,80 @@ def post_project_dataset_label(
         current_user=current_user,
         min_access_level="write",
     )
-    if not req.imported_from:
-        if not req.title or not req.description:
-            raise HTTPException(
-                400, "Non-imported datasets must have titles and descriptions"
-            )
+    if req.primary and req.imported_from is not None:
+        raise HTTPException(
+            422, "A dataset can be collected here or imported, not both"
+        )
+    if req.imported_from is None and not (req.title and req.description):
+        raise HTTPException(
+            400, "Non-imported datasets must have titles and descriptions"
+        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     datasets = ck_info.get("datasets", [])
-    ds_paths = [ds.get("path") for ds in datasets]
-    if req.path in ds_paths:
+    if req.path in [ds.get("path") for ds in datasets]:
         raise HTTPException(400, "Dataset already exists")
     local_path = os.path.join(repo.working_dir, req.path)
     zip_path_map = get_zip_path_map_from_repo(repo=repo)
-    if not req.imported_from and not (
-        os.path.isfile(local_path)
-        or os.path.isdir(local_path)
-        or os.path.isfile(local_path + ".dvc")
-        or req.path in zip_path_map
+    # An import names data that isn't here yet, and a stage names data that
+    # doesn't exist until the pipeline runs. Everything else should already
+    # be in the repo, or the entry points at nothing.
+    if (
+        req.imported_from is None
+        and not req.stage
+        and not (
+            os.path.isfile(local_path)
+            or os.path.isdir(local_path)
+            or os.path.isfile(local_path + ".dvc")
+            or req.path in zip_path_map
+        )
     ):
         raise HTTPException(400, "Path does not exist in the repo")
-    ds = dict(path=req.path)
-    for k, v in req.model_dump().items():
-        if k == "path":
-            continue
-        if v is not None:
-            ds[k] = v
+    ds: dict[str, Any] = {"path": req.path}
+    for key in ["title", "description", "tabular", "stage", "primary"]:
+        value = getattr(req, key)
+        if value is not None:
+            ds[key] = value
+    if req.imported_from is not None:
+        ds["imported_from"] = req.imported_from.to_ck_dict()
+    # Validated against the models that own calkit.yaml, so this route can't
+    # write a shape the CLI would later reject.
+    try:
+        if req.imported_from is not None:
+            CkImportedDataset.model_validate(ds)
+        else:
+            CkDataset.model_validate(ds)
+    except ValidationError as e:
+        raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    # Make a commit
     repo.git.commit(["-m", f"Add dataset {req.path}"])
     repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Added dataset",
+        add_event_info={
+            "imported": req.imported_from is not None,
+            "primary": bool(req.primary),
+        },
+    )
     # TODO: Put datasets into database
     return Dataset.model_validate(
-        ds | dict(project_id=project.id, id=uuid.uuid4())
+        ds
+        | dict(
+            project_id=project.id,
+            id=uuid.uuid4(),
+            # The DB model still stores this as a string; the structured
+            # form is what lives in calkit.yaml.
+            imported_from=(
+                str(ds["imported_from"]) if "imported_from" in ds else None
+            ),
+        )
     )
 
 

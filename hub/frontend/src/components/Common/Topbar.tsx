@@ -16,6 +16,7 @@ import {
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { FaGithub, FaPlus } from "react-icons/fa"
+import { FiHelpCircle } from "react-icons/fi"
 
 import { useQuery } from "@tanstack/react-query"
 
@@ -25,6 +26,7 @@ import NewOrg from "../Orgs/NewOrg"
 import NewProject from "../Projects/NewProject"
 import UserMenu from "./UserMenu"
 import GlobalSearch from "./GlobalSearch"
+import HelpFeedback from "./HelpFeedback"
 import NotificationBell from "./NotificationBell"
 
 // "Docs" leaves the app entirely rather than going to a page that only
@@ -95,6 +97,7 @@ export default function Topbar() {
   // GitHub and comes back with ?newProject=1 to be reopened.
   const newProjectModal = useDisclosure()
   const newOrgModal = useDisclosure()
+  const helpModal = useDisclosure()
   // Reopen whichever creation modal sent the user off to connect GitHub,
   // and drop the marker so a refresh doesn't reopen it again
   useEffect(() => {
@@ -184,6 +187,22 @@ export default function Topbar() {
               <Icon as={FaPlus} mr={1} />
               New project
             </Button>
+            {user ? (
+              <>
+                <Button
+                  aria-label="help"
+                  size="sm"
+                  onClick={helpModal.onOpen}
+                  leftIcon={<Icon as={FiHelpCircle} />}
+                >
+                  Help
+                </Button>
+                <HelpFeedback
+                  isOpen={helpModal.isOpen}
+                  onClose={helpModal.onClose}
+                />
+              </>
+            ) : null}
             <NewProject
               onClose={newProjectModal.onClose}
               isOpen={newProjectModal.isOpen}

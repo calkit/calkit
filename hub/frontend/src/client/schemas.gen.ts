@@ -943,6 +943,85 @@ export const DatasetForImportSchema = {
   title: "DatasetForImport",
 } as const
 
+export const DatasetPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    tabular: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Tabular",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    primary: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Primary",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/ImportedFromPost",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "DatasetPost",
+  description:
+    "A dataset to declare, however it came to be part of the project.",
+} as const
+
 export const DatasetResponseSchema = {
   properties: {
     project: {
@@ -1719,6 +1798,18 @@ export const FeatureVoteStatusSchema = {
     "Vote tally for a feature plus whether the current user has voted.",
 } as const
 
+export const FeedbackPatchSchema = {
+  properties: {
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+  },
+  type: "object",
+  required: ["resolved"],
+  title: "FeedbackPatch",
+} as const
+
 export const FeedbackPostSchema = {
   properties: {
     kind: {
@@ -1749,6 +1840,71 @@ export const FeedbackPostSchema = {
   type: "object",
   required: ["message"],
   title: "FeedbackPost",
+} as const
+
+export const FeedbackPublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    message: {
+      type: "string",
+      title: "Message",
+    },
+    page: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Page",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+    user_email: {
+      type: "string",
+      title: "User Email",
+    },
+    user_full_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "User Full Name",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "kind",
+    "message",
+    "page",
+    "created",
+    "resolved",
+    "user_email",
+    "user_full_name",
+  ],
+  title: "FeedbackPublic",
 } as const
 
 export const FigureSchema = {
@@ -2530,6 +2686,33 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
+export const GitRepoSourcePostSchema = {
+  properties: {
+    url: {
+      type: "string",
+      title: "Url",
+    },
+    rev: {
+      type: "string",
+      title: "Rev",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+  },
+  type: "object",
+  required: ["url", "rev"],
+  title: "GitRepoSourcePost",
+} as const
+
 export const GithubPullRequestSchema = {
   properties: {
     number: {
@@ -2676,6 +2859,92 @@ export const ImportInfoSchema = {
   type: "object",
   required: ["project_owner", "project_name", "path"],
   title: "ImportInfo",
+} as const
+
+export const ImportedFromPostSchema = {
+  properties: {
+    project: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    doi: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Doi",
+    },
+    git_repo: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/GitRepoSourcePost",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    date_retrieved: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date Retrieved",
+    },
+  },
+  type: "object",
+  title: "ImportedFromPost",
+  description:
+    "Where a dataset came from, as one of four mutually exclusive kinds.\n\nSent flat rather than as a tagged union so the generated client has one\nshape to build; exactly which kind it is falls out of which field is\nset, and that's checked below rather than trusted.",
 } as const
 
 export const InfoResultSchema = {
@@ -2843,73 +3112,6 @@ export const ItemLockSchema = {
   type: "object",
   required: ["created", "user_id", "user_email", "user_github_username"],
   title: "ItemLock",
-} as const
-
-export const LabelDatasetPostSchema = {
-  properties: {
-    imported_from: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Imported From",
-    },
-    path: {
-      type: "string",
-      title: "Path",
-    },
-    title: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Title",
-    },
-    tabular: {
-      anyOf: [
-        {
-          type: "boolean",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Tabular",
-    },
-    stage: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Stage",
-    },
-    description: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Description",
-    },
-  },
-  type: "object",
-  required: ["path"],
-  title: "LabelDatasetPost",
 } as const
 
 export const MessageSchema = {

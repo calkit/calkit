@@ -290,6 +290,19 @@
           "title": "Path",
           "type": "string"
         },
+        "primary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether this data was collected or measured for this project, rather than obtained from somewhere else. Primary data has no upstream source to point at, so saying so is the only way to tell it apart from data whose provenance was never recorded.",
+          "title": "Primary"
+        },
         "stage": {
           "anyOf": [
             {
@@ -949,6 +962,90 @@
         "formula"
       ],
       "title": "FormulaParams",
+      "type": "object"
+    },
+    "ImportedDataset": {
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGitRepo"
+            }
+          ],
+          "title": "Imported From"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "primary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether this data was collected or measured for this project, rather than obtained from somewhere else. Primary data has no upstream source to point at, so saying so is the only way to tell it apart from data whose provenance was never recorded.",
+          "title": "Primary"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A human-readable title.",
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path",
+        "imported_from"
+      ],
+      "title": "ImportedDataset",
       "type": "object"
     },
     "Input": {
@@ -7119,6 +7216,173 @@
       ],
       "title": "WordToPdfStage",
       "type": "object"
+    },
+    "_GitRepoSource": {
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path within that repo, if it isn't the whole thing.",
+          "title": "Path"
+        },
+        "rev": {
+          "description": "The commit, tag, or branch it came from. A commit hash is what makes this reproducible; a branch moves.",
+          "title": "Rev",
+          "type": "string"
+        },
+        "url": {
+          "description": "Clone URL of the repo the data came from.",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "rev"
+      ],
+      "title": "_GitRepoSource",
+      "type": "object"
+    },
+    "_ImportedFromDoi": {
+      "description": "Data published under a DOI, which is a citation, not just a link.\n\nKept apart from a URL so it can be cited and resolved as a DOI rather\nthan being one more address that happens to start with https.",
+      "properties": {
+        "date_retrieved": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded.",
+          "title": "Date Retrieved"
+        },
+        "doi": {
+          "title": "Doi",
+          "type": "string"
+        }
+      },
+      "required": [
+        "doi"
+      ],
+      "title": "_ImportedFromDoi",
+      "type": "object"
+    },
+    "_ImportedFromGitRepo": {
+      "description": "Data from a Git repo that isn't a Calkit project.",
+      "properties": {
+        "date_retrieved": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded.",
+          "title": "Date Retrieved"
+        },
+        "git_repo": {
+          "$ref": "#/$defs/_GitRepoSource"
+        }
+      },
+      "required": [
+        "git_repo"
+      ],
+      "title": "_ImportedFromGitRepo",
+      "type": "object"
+    },
+    "_ImportedFromProject": {
+      "properties": {
+        "filter_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filter Paths"
+        },
+        "git_rev": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Rev"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "title": "_ImportedFromProject",
+      "type": "object"
+    },
+    "_ImportedFromUrl": {
+      "properties": {
+        "date_retrieved": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit.",
+          "title": "Date Retrieved"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "_ImportedFromUrl",
+      "type": "object"
     }
   },
   "$id": "https://docs.calkit.org/schemas/calkit.json",
@@ -7178,7 +7442,14 @@
       "default": [],
       "description": "The project's datasets.",
       "items": {
-        "$ref": "#/$defs/Dataset"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ImportedDataset"
+          },
+          {
+            "$ref": "#/$defs/Dataset"
+          }
+        ]
       },
       "title": "Datasets",
       "type": "array"

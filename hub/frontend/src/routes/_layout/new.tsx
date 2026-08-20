@@ -49,6 +49,9 @@ import CommandBlock from "../../components/Onboarding/CommandBlock"
 import StartPaths, {
   type StartPath,
 } from "../../components/Onboarding/StartPaths"
+import RepoPicker, {
+  type GitHubRepo,
+} from "../../components/Projects/RepoPicker"
 import ImportOverleaf from "../../components/Publications/ImportOverleaf"
 import ImportFromZoteroModal from "../../components/References/ImportFromZoteroModal"
 import { isLoggedIn } from "../../hooks/useAuth"
@@ -111,7 +114,7 @@ const STEP_TITLES = [
 const TEMPLATES = [
   {
     value: "calkit/example-basic",
-    label: "Basic — Conda environment, Python analysis, LaTeX paper",
+    label: "Basic — uv environment, Python analysis, LaTeX paper",
   },
   {
     value: "calkit/example-matlab",
@@ -292,15 +295,16 @@ function NameItStep({
     )
     setValue("name", projectName)
   }
-  const onExistingRepoChange = (e: any) => {
-    const repo = String(e.target.value)
-    if (!repo) return
-    setValue("git_repo_url", `https://github.com/${repo}`)
-    const repoName = repo.split("/").at(-1) ?? ""
+  const selectRepo = (repo: GitHubRepo) => {
+    setValue("git_repo_url", `https://github.com/${repo.full_name}`)
+    const repoName = repo.full_name.split("/").at(-1) ?? ""
     setValue("name", repoName.toLowerCase())
     const spaced = repoName.replace(/[-_]+/g, " ").trim()
     if (spaced) {
       setValue("title", spaced.charAt(0).toUpperCase() + spaced.slice(1))
+    }
+    if (repo.description) {
+      setValue("description", repo.description)
     }
   }
   const onSubmit: SubmitHandler<ProjectFormValues> = (data) =>
@@ -340,18 +344,14 @@ function NameItStep({
       {isExisting ? (
         <FormControl mb={4}>
           <FormLabel htmlFor="existing_repo">Your GitHub repos</FormLabel>
-          <Select
-            id="existing_repo"
-            placeholder={reposQuery.isPending ? "Loading…" : "Pick a repo…"}
-            {...register("existing_repo", { onChange: onExistingRepoChange })}
-          >
-            {(reposQuery.data ?? []).map((repo: any) => (
-              <option key={repo.full_name} value={repo.full_name}>
-                {repo.full_name}
-                {repo.private ? " (private)" : ""}
-              </option>
-            ))}
-          </Select>
+          <RepoPicker
+            // The GitHub repos route is typed as raw JSON dictionaries, so
+            // the shape this needs is asserted here rather than pretended
+            // at the boundary.
+            repos={(reposQuery.data ?? []) as unknown as GitHubRepo[]}
+            isLoading={reposQuery.isPending}
+            onSelect={selectRepo}
+          />
           <FormHelperText>
             Not listed? Paste the URL below instead.
           </FormHelperText>

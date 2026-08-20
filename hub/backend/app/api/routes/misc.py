@@ -7,6 +7,7 @@ import uuid
 from typing import Literal
 
 import requests
+import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -31,6 +32,9 @@ from app.models import (
     Dataset,
     DiscountCode,
     DiscountCodePost,
+    Feedback,
+    FeedbackPatch,
+    FeedbackPublic,
     Message,
     Notification,
     Org,
@@ -96,16 +100,23 @@ class FeedbackPost(BaseModel):
 
 
 @router.post("/feedback")
-def post_feedback(req: FeedbackPost, current_user: CurrentUser) -> Message:
-    """Email a user's feedback, bug report, or question to the operator."""
-    if not settings.emails_enabled:
-        # The form offers Discord and the issue tracker alongside it, so
-        # saying so plainly leaves the user somewhere to go.
-        raise HTTPException(
-            503,
-            "This hub isn't configured to send email. Please use the "
-            "Discord server or issue tracker instead.",
-        )
+def post_feedback(
+    req: FeedbackPost, session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Record a user's feedback, bug report, or question.
+
+    The row is written first and the email is best-effort after it: a relay
+    that's down is a notification problem, not a reason to tell someone
+    their feedback didn't go through and lose what they typed.
+    """
+    feedback = Feedback(
+        user_id=current_user.id,
+        kind=req.kind,
+        message=req.message,
+        page=req.page,
+    )
+    session.add(feedback)
+    session.commit()
     labels = {
         "feedback": "Feedback",
         "bug": "Bug report",
@@ -128,13 +139,62 @@ def post_feedback(req: FeedbackPost, current_user: CurrentUser) -> Message:
     lines.append(
         f'<pre style="white-space: pre-wrap">{html.escape(req.message)}</pre>'
     )
-    send_email(
-        email_to=settings.feedback_email,
-        subject=f"{settings.PROJECT_NAME} - {label}",
-        html_content="\n".join(lines),
-    )
-    logger.info(f"Sent {req.kind} from user {current_user.id}")
+    if settings.emails_enabled:
+        try:
+            send_email(
+                email_to=settings.feedback_email,
+                subject=f"{settings.PROJECT_NAME} - {label}",
+                html_content="\n".join(lines),
+            )
+        except Exception as e:
+            # Already saved, and visible on the admin page, so a failed
+            # notification is worth a log and nothing more.
+            logger.warning(f"Failed to email feedback {feedback.id}: {e}")
+    logger.info(f"Recorded {req.kind} from user {current_user.id}")
     return Message(message="Thanks! We'll get back to you.")
+
+
+@router.get("/feedback", dependencies=[Depends(get_current_active_superuser)])
+def get_feedback(
+    session: SessionDep, limit: int = 100, offset: int = 0
+) -> list[FeedbackPublic]:
+    """List what users have sent in, newest first."""
+    rows = session.exec(
+        select(Feedback)
+        .order_by(sqlalchemy.desc(Feedback.created))  # type: ignore
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return [
+        FeedbackPublic(
+            id=row.id,
+            kind=row.kind,
+            message=row.message,
+            page=row.page,
+            created=row.created,
+            resolved=row.resolved,
+            user_email=row.user.email,
+            user_full_name=row.user.full_name,
+        )
+        for row in rows
+    ]
+
+
+@router.patch(
+    "/feedback/{feedback_id}",
+    dependencies=[Depends(get_current_active_superuser)],
+)
+def patch_feedback(
+    feedback_id: uuid.UUID, req: FeedbackPatch, session: SessionDep
+) -> Message:
+    """Mark a piece of feedback dealt with, or put it back."""
+    row = session.get(Feedback, feedback_id)
+    if row is None:
+        raise HTTPException(404, "Feedback not found")
+    row.resolved = req.resolved
+    session.add(row)
+    session.commit()
+    return Message(message="Success")
 
 
 @router.get("/discount-codes/{discount_code}")

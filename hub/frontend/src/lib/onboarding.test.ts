@@ -77,6 +77,7 @@ describe("buildProjectSteps", () => {
     expect(stepByKey(withEnvAndFigure, "environment")?.done).toBe(true)
     expect(stepByKey(withEnvAndFigure, "figure")?.done).toBe(true)
     expect(stepByKey(withEnvAndFigure, "publication")?.done).toBe(true)
+    expect(stepByKey(withEnvAndFigure, "dataset")?.done).toBe(false)
     // A stale pipeline has run but doesn't reflect the current code, so the
     // "run it" step stays open.
     expect(stepByKey(withEnvAndFigure, "run")?.done).toBe(false)
@@ -168,6 +169,7 @@ describe("buildProjectSteps", () => {
       reproCheck: {
         ...emptyReproCheck,
         n_environments: 1,
+        n_datasets: 1,
         n_figures_with_import_or_stage: 1,
         n_publications: 1,
       },

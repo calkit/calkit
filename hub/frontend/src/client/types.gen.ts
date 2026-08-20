@@ -537,6 +537,39 @@ export type DatasetForImport = {
 }
 
 /**
+ * DatasetPost
+ *
+ * A dataset to declare, however it came to be part of the project.
+ */
+export type DatasetPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Primary
+   */
+  primary?: boolean | null
+  imported_from?: ImportedFromPost | null
+}
+
+/**
  * DatasetResponse
  */
 export type DatasetResponse = {
@@ -986,6 +1019,16 @@ export type FeatureVoteStatus = {
 }
 
 /**
+ * FeedbackPatch
+ */
+export type FeedbackPatch = {
+  /**
+   * Resolved
+   */
+  resolved: boolean
+}
+
+/**
  * FeedbackPost
  */
 export type FeedbackPost = {
@@ -1001,6 +1044,44 @@ export type FeedbackPost = {
    * Page
    */
   page?: string | null
+}
+
+/**
+ * FeedbackPublic
+ */
+export type FeedbackPublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Message
+   */
+  message: string
+  /**
+   * Page
+   */
+  page: string | null
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Resolved
+   */
+  resolved: boolean
+  /**
+   * User Email
+   */
+  user_email: string
+  /**
+   * User Full Name
+   */
+  user_full_name: string | null
 }
 
 /**
@@ -1480,6 +1561,24 @@ export type GitRemoteHead = {
 }
 
 /**
+ * GitRepoSourcePost
+ */
+export type GitRepoSourcePost = {
+  /**
+   * Url
+   */
+  url: string
+  /**
+   * Rev
+   */
+  rev: string
+  /**
+   * Path
+   */
+  path?: string | null
+}
+
+/**
  * GithubPullRequest
  */
 export type GithubPullRequest = {
@@ -1583,6 +1682,43 @@ export type ImportInfo = {
    * Path
    */
   path: string
+}
+
+/**
+ * ImportedFromPost
+ *
+ * Where a dataset came from, as one of four mutually exclusive kinds.
+ *
+ * Sent flat rather than as a tagged union so the generated client has one
+ * shape to build; exactly which kind it is falls out of which field is
+ * set, and that's checked below rather than trusted.
+ */
+export type ImportedFromPost = {
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Path
+   */
+  path?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Doi
+   */
+  doi?: string | null
+  git_repo?: GitRepoSourcePost | null
+  /**
+   * Date Retrieved
+   */
+  date_retrieved?: string | null
 }
 
 /**
@@ -1693,36 +1829,6 @@ export type ItemLock = {
    * User Github Username
    */
   user_github_username: string
-}
-
-/**
- * LabelDatasetPost
- */
-export type LabelDatasetPost = {
-  /**
-   * Imported From
-   */
-  imported_from?: string | null
-  /**
-   * Path
-   */
-  path: string
-  /**
-   * Title
-   */
-  title?: string | null
-  /**
-   * Tabular
-   */
-  tabular?: boolean | null
-  /**
-   * Stage
-   */
-  stage?: string | null
-  /**
-   * Description
-   */
-  description?: string | null
 }
 
 /**
@@ -6916,6 +7022,43 @@ export type TestEmailResponses = {
 
 export type TestEmailResponse = TestEmailResponses[keyof TestEmailResponses]
 
+export type GetFeedbackData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/feedback"
+}
+
+export type GetFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetFeedbackError = GetFeedbackErrors[keyof GetFeedbackErrors]
+
+export type GetFeedbackResponses = {
+  /**
+   * Response Misc-Get Feedback
+   *
+   * Successful Response
+   */
+  200: Array<FeedbackPublic>
+}
+
+export type GetFeedbackResponse =
+  GetFeedbackResponses[keyof GetFeedbackResponses]
+
 export type PostFeedbackData = {
   body: FeedbackPost
   path?: never
@@ -6941,6 +7084,37 @@ export type PostFeedbackResponses = {
 
 export type PostFeedbackResponse =
   PostFeedbackResponses[keyof PostFeedbackResponses]
+
+export type PatchFeedbackData = {
+  body: FeedbackPatch
+  path: {
+    /**
+     * Feedback Id
+     */
+    feedback_id: string
+  }
+  query?: never
+  url: "/feedback/{feedback_id}"
+}
+
+export type PatchFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchFeedbackError = PatchFeedbackErrors[keyof PatchFeedbackErrors]
+
+export type PatchFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PatchFeedbackResponse =
+  PatchFeedbackResponses[keyof PatchFeedbackResponses]
 
 export type GetDiscountCodeData = {
   body?: never
@@ -8777,6 +8951,42 @@ export type GetProjectDatasetsResponses = {
 export type GetProjectDatasetsResponse =
   GetProjectDatasetsResponses[keyof GetProjectDatasetsResponses]
 
+export type PostProjectDatasetData = {
+  body: DatasetPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/datasets"
+}
+
+export type PostProjectDatasetErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectDatasetError =
+  PostProjectDatasetErrors[keyof PostProjectDatasetErrors]
+
+export type PostProjectDatasetResponses = {
+  /**
+   * Successful Response
+   */
+  200: Dataset
+}
+
+export type PostProjectDatasetResponse =
+  PostProjectDatasetResponses[keyof PostProjectDatasetResponses]
+
 export type GetProjectDatasetData = {
   body?: never
   path: {
@@ -8825,42 +9035,6 @@ export type GetProjectDatasetResponses = {
 
 export type GetProjectDatasetResponse =
   GetProjectDatasetResponses[keyof GetProjectDatasetResponses]
-
-export type PostProjectDatasetLabelData = {
-  body: LabelDatasetPost
-  path: {
-    /**
-     * Owner Name
-     */
-    owner_name: string
-    /**
-     * Project Name
-     */
-    project_name: string
-  }
-  query?: never
-  url: "/projects/{owner_name}/{project_name}/datasets/label"
-}
-
-export type PostProjectDatasetLabelErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type PostProjectDatasetLabelError =
-  PostProjectDatasetLabelErrors[keyof PostProjectDatasetLabelErrors]
-
-export type PostProjectDatasetLabelResponses = {
-  /**
-   * Successful Response
-   */
-  200: Dataset
-}
-
-export type PostProjectDatasetLabelResponse =
-  PostProjectDatasetLabelResponses[keyof PostProjectDatasetLabelResponses]
 
 export type PostProjectDatasetUploadData = {
   body: BodyProjectsPostProjectDatasetUpload

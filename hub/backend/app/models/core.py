@@ -231,6 +231,10 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    feedback: list["Feedback"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
 
     @computed_field
     @property
@@ -710,6 +714,43 @@ class UserProjectAccess(SQLModel, table=True):
     @property
     def role_name(self) -> str | None:
         return ROLE_NAMES[self.role_id] if self.role_id is not None else None
+
+
+class Feedback(SQLModel, table=True):
+    """A message a user sent from the in-app help form.
+
+    Stored rather than only emailed: email is fire-and-forget, and a relay
+    that's misconfigured or down would otherwise lose the message and tell
+    the user their feedback failed. The row is the record; the email is a
+    notification about it.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    kind: str = Field(default="feedback", max_length=32)
+    message: str = Field(max_length=5000)
+    # Where the user was when they sent it, so a bug report doesn't cost a
+    # round trip to ask which page.
+    page: str | None = Field(default=None, max_length=2048)
+    created: datetime = Field(default_factory=utcnow)
+    resolved: bool = Field(default=False)
+    # Relationships
+    user: User = Relationship(back_populates="feedback")
+
+
+class FeedbackPublic(SQLModel):
+    id: uuid.UUID
+    kind: str
+    message: str
+    page: str | None
+    created: datetime
+    resolved: bool
+    user_email: str
+    user_full_name: str | None
+
+
+class FeedbackPatch(SQLModel):
+    resolved: bool
 
 
 class UserOnboardingFlag(SQLModel, table=True):

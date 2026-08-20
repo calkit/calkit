@@ -1,9 +1,11 @@
 """Tests for app.api.routes.misc endpoints."""
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from app.config import settings
 
@@ -87,17 +89,14 @@ def test_get_version_needs_no_auth(client: TestClient) -> None:
 
 
 def test_post_feedback(
-    client: TestClient, normal_user_token_headers: dict[str, str]
+    client: TestClient,
+    db: Session,
+    normal_user_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
 ) -> None:
-    """Feedback is emailed to the operator, with the sender escaped."""
+    """Feedback is stored, listed for superusers, and emailed best-effort."""
     url = f"{settings.API_V1_STR}/feedback"
     assert client.post(url, json={"message": "hi"}).status_code == 401
-    # A hub with no SMTP says so instead of silently dropping the message.
-    with patch("app.config.settings.SMTP_HOST", None):
-        resp = client.post(
-            url, headers=normal_user_token_headers, json={"message": "hi"}
-        )
-    assert resp.status_code == 503
     with (
         patch("app.config.settings.SMTP_HOST", "smtp.example.com"),
         patch("app.config.settings.EMAILS_FROM_EMAIL", "hub@example.com"),
@@ -119,14 +118,72 @@ def test_post_feedback(
     assert kwargs["email_to"] == "ops@example.com"
     assert "Bug report" in kwargs["subject"]
     body = kwargs["html_content"]
-    # The page the user was on rides along so a report doesn't need a
-    # follow-up question.
     assert "/some/project" in body
     assert settings.EMAIL_TEST_USER in body
     # A message is user-controlled text, so it can't carry markup into the
     # email we send ourselves.
     assert "<script>" not in body
     assert "&lt;script&gt;" in body
+    # A relay that's down loses the notification, not the feedback.
+    with (
+        patch("app.config.settings.SMTP_HOST", "smtp.example.com"),
+        patch("app.config.settings.EMAILS_FROM_EMAIL", "hub@example.com"),
+        patch(
+            "app.api.routes.misc.send_email",
+            side_effect=RuntimeError("relay down"),
+        ),
+    ):
+        resp = client.post(
+            url,
+            headers=normal_user_token_headers,
+            json={"message": "Sent while the relay was down"},
+        )
+    assert resp.status_code == 200
+    # A hub with no SMTP at all still accepts it.
+    with patch("app.config.settings.SMTP_HOST", None):
+        resp = client.post(
+            url, headers=normal_user_token_headers, json={"message": "no smtp"}
+        )
+    assert resp.status_code == 200
+    # Listing is superuser-only, newest first.
+    assert client.get(url).status_code == 401
+    assert (
+        client.get(url, headers=normal_user_token_headers).status_code == 403
+    )
+    listed = client.get(url, headers=superuser_token_headers).json()
+    messages = [f["message"] for f in listed]
+    assert "no smtp" in messages
+    assert "Sent while the relay was down" in messages
+    assert listed[0]["message"] == "no smtp"
+    assert listed[0]["user_email"] == settings.EMAIL_TEST_USER
+    assert listed[0]["resolved"] is False
+    # Resolving, and putting it back.
+    item_id = listed[0]["id"]
+    patch_url = f"{url}/{item_id}"
+    assert (
+        client.patch(
+            patch_url,
+            headers=normal_user_token_headers,
+            json={"resolved": True},
+        ).status_code
+        == 403
+    )
+    assert (
+        client.patch(
+            patch_url, headers=superuser_token_headers, json={"resolved": True}
+        ).status_code
+        == 200
+    )
+    listed = client.get(url, headers=superuser_token_headers).json()
+    assert next(f for f in listed if f["id"] == item_id)["resolved"] is True
+    assert (
+        client.patch(
+            f"{url}/{uuid.uuid4()}",
+            headers=superuser_token_headers,
+            json={"resolved": True},
+        ).status_code
+        == 404
+    )
     # An empty message has nothing to send, and one over the cap is rejected
     # rather than truncated.
     for bad in [{"message": ""}, {"message": "x" * 5001}]:

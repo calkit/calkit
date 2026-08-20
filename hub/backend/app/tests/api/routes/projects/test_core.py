@@ -3658,3 +3658,162 @@ def test_post_project_when_account_name_differs_from_github(
     # org from GitHub". What it fails on instead is the stubbed repo create.
     get_org.assert_not_called()
     assert "org" not in resp.text.lower()
+
+
+def test_post_project_dataset_provenance(
+    client: TestClient, db: Session
+) -> None:
+    """Each way a dataset joins a project writes the right calkit.yaml."""
+    project, headers = _make_owner_with_project(db, client)
+    url = (
+        f"{settings.API_V1_STR}/projects/{project.owner_account.name}/"
+        f"{project.name}/datasets"
+    )
+    written: list[dict] = []
+
+    class FakeRepo:
+        working_dir = "/tmp/does-not-matter"
+        git = SimpleNamespace(
+            add=lambda *a, **k: None,
+            commit=lambda *a, **k: None,
+            push=lambda *a, **k: None,
+        )
+        active_branch = SimpleNamespace(name="main")
+
+    def post(body: dict, existing_path: bool = False):
+        ck_info: dict = {"datasets": list(written)}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=FakeRepo(),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            patch(
+                "app.api.routes.projects.core.get_zip_path_map_from_repo",
+                return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.os.path.isfile",
+                return_value=existing_path,
+            ),
+            patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("app.api.routes.projects.core.mixpanel.track"),
+        ):
+            resp = client.post(url, headers=headers, json=body)
+        if resp.status_code == 200:
+            written[:] = ck_info["datasets"]
+        return resp
+
+    import contextlib
+    import io
+
+    @contextlib.contextmanager
+    def _fake_open(*args, **kwargs):
+        yield io.StringIO()
+
+    # A DOI, the most durable provenance there is.
+    resp = post(
+        {
+            "path": "data/doi.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1",
+                "date_retrieved": "2026-01-02",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {
+        "doi": "10.5281/zenodo.1",
+        "date_retrieved": "2026-01-02",
+    }
+    # A Git repo pinned to a revision.
+    resp = post(
+        {
+            "path": "data/repo.csv",
+            "imported_from": {
+                "git_repo": {
+                    "url": "https://github.com/a/b",
+                    "rev": "deadbeef",
+                    "path": "out.csv",
+                }
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"]["git_repo"]["rev"] == "deadbeef"
+    # A plain URL.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/d.csv"},
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {"url": "https://example.org/d.csv"}
+    # Data collected here: needs a title and description, and the path has
+    # to already exist, since nothing will fetch it.
+    resp = post({"path": "data/mine.csv", "primary": True})
+    assert resp.status_code == 400
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "primary": True,
+            "title": "Mine",
+            "description": "Collected in the lab",
+        }
+    )
+    assert resp.status_code == 400  # path isn't in the repo
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "primary": True,
+            "title": "Mine",
+            "description": "Collected in the lab",
+        },
+        existing_path=True,
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["primary"] is True
+    assert "imported_from" not in written[-1]
+    # Produced by a stage: doesn't exist until the pipeline runs.
+    resp = post(
+        {
+            "path": "data/derived.csv",
+            "stage": "collect",
+            "title": "Derived",
+            "description": "From the pipeline",
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    # Two sources at once is ambiguous provenance, which is worse than none.
+    resp = post(
+        {
+            "path": "data/ambiguous.csv",
+            "imported_from": {
+                "doi": "10.1/x",
+                "url": "https://example.org/x",
+            },
+        }
+    )
+    assert resp.status_code == 422
+    # Collected here and imported from elsewhere can't both be true.
+    resp = post(
+        {
+            "path": "data/both.csv",
+            "primary": True,
+            "imported_from": {"doi": "10.1/x"},
+        }
+    )
+    assert resp.status_code == 422
+    # The same path twice would make the entry ambiguous.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/again.csv"},
+        }
+    )
+    assert resp.status_code == 400

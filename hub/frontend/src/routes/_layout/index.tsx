@@ -34,7 +34,7 @@ import ClearableInput from "../../components/Common/ClearableInput"
 import AccountSetupCard from "../../components/Onboarding/AccountSetupCard"
 import FeaturedProjects from "../../components/Onboarding/FeaturedProjects"
 import StartPaths from "../../components/Onboarding/StartPaths"
-import useAuth from "../../hooks/useAuth"
+import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import { pageWidthNoSidebar } from "../../lib/layout"
 
 const projectsSearchSchema = z.object({
@@ -272,7 +272,7 @@ function LandingPage() {
 }
 
 function Home() {
-  const { user } = useAuth()
+  const { user, isLoading } = useAuth()
   // Only the count is needed to choose between the empty state and the
   // table, so this asks for one row rather than sharing the table's query,
   // whose key varies with the search box.
@@ -285,6 +285,12 @@ function Home() {
     enabled: Boolean(user),
   })
   const projectCount = countQuery.data?.count ?? 0
+  // A stored token means a user is on the way, and useAuth reports not-loading
+  // for the tick before the request starts. Treating that gap as "signed out"
+  // flashes the landing page at someone who is signed in.
+  if (isLoading || (!user && isLoggedIn())) {
+    return null
+  }
   if (!user) {
     return (
       <Container maxW="1000px" pb={16}>

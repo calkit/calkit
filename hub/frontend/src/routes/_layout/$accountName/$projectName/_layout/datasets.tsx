@@ -24,7 +24,7 @@ import {
 } from "@tanstack/react-router"
 import { FaPlus } from "react-icons/fa"
 
-import DatasetFromExisting from "../../../../../components/Datasets/DatasetFromExisting"
+import NewDataset from "../../../../../components/Datasets/NewDataset"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 
@@ -69,11 +69,11 @@ function ProjectDataView() {
                   Upload new dataset
                 </MenuItem>
                 <MenuItem onClick={labelDataModal.onOpen}>
-                  Label existing file or folder as dataset
+                  Add existing or imported dataset
                 </MenuItem>
               </MenuList>
             </Menu>
-            <DatasetFromExisting
+            <NewDataset
               onClose={labelDataModal.onClose}
               isOpen={labelDataModal.isOpen}
             />

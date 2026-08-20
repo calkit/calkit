@@ -7,6 +7,7 @@ import { ProjectsService } from "../../client"
 import useOnboardingFlags, { useLocalServer } from "../../hooks/useOnboarding"
 import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
+import NewDataset from "../Datasets/NewDataset"
 import NewEnvironment from "../Environments/NewEnvironment"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
@@ -68,6 +69,7 @@ const ProjectChecklist = ({
   })
   const newQuestionModal = useDisclosure()
   const newEnvironmentModal = useDisclosure()
+  const newDatasetModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
   const steps = buildProjectSteps({
@@ -132,6 +134,17 @@ const ProjectChecklist = ({
         <NewEnvironment
           isOpen={newEnvironmentModal.isOpen}
           onClose={newEnvironmentModal.onClose}
+        />
+      </>
+    ),
+    dataset: (
+      <>
+        <Button size="xs" variant="primary" onClick={newDatasetModal.onOpen}>
+          Add a dataset
+        </Button>
+        <NewDataset
+          isOpen={newDatasetModal.isOpen}
+          onClose={newDatasetModal.onClose}
         />
       </>
     ),

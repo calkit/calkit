@@ -21,6 +21,7 @@ import { z } from "zod"
 
 import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
+import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
 import Navbar from "../../components/Common/Navbar"
 import { isLoggedIn } from "../../hooks/useAuth"
@@ -180,6 +181,7 @@ function Admin() {
       </Heading>
       <Navbar type={"user"} addModalAs={AddUser} />
       <UsersTable />
+      <FeedbackTable />
     </Container>
   )
 }

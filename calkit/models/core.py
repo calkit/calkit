@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import posixpath
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -31,6 +31,49 @@ class _ImportedFromProject(BaseModel):
 
 class _ImportedFromUrl(BaseModel):
     url: str
+    date_retrieved: date | None = Field(
+        default=None,
+        description=(
+            "When the data was downloaded. Optional: without it, the commit "
+            "that added this entry says when, to within a commit."
+        ),
+    )
+
+
+class _ImportedFromDoi(BaseModel):
+    """Data published under a DOI, which is a citation, not just a link.
+
+    Kept apart from a URL so it can be cited and resolved as a DOI rather
+    than being one more address that happens to start with https.
+    """
+
+    doi: str
+    date_retrieved: date | None = Field(
+        default=None, description="When the data was downloaded."
+    )
+
+
+class _GitRepoSource(BaseModel):
+    url: str = Field(description="Clone URL of the repo the data came from.")
+    rev: str = Field(
+        description=(
+            "The commit, tag, or branch it came from. A commit hash is what "
+            "makes this reproducible; a branch moves."
+        )
+    )
+    path: str | None = Field(
+        default=None,
+        description="Path within that repo, if it isn't the whole thing.",
+    )
+
+
+class _ImportedFromGitRepo(BaseModel):
+    """Data from a Git repo that isn't a Calkit project."""
+
+    git_repo: _GitRepoSource
+    date_retrieved: date | None = Field(
+        default=None, description="When the data was downloaded."
+    )
 
 
 class _CalkitObject(BaseModel):
@@ -50,11 +93,34 @@ class _CalkitObject(BaseModel):
 
 
 class Dataset(_CalkitObject):
-    pass
+    primary: bool | None = Field(
+        default=None,
+        description=(
+            "Whether this data was collected or measured for this project, "
+            "rather than obtained from somewhere else. Primary data has no "
+            "upstream source to point at, so saying so is the only way to "
+            "tell it apart from data whose provenance was never recorded."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_primary_not_imported(self) -> Dataset:
+        # Data is either something you produced or something you got; a
+        # dataset claiming both has one of the two wrong.
+        if self.primary and getattr(self, "imported_from", None) is not None:
+            raise ValueError(
+                "A primary dataset cannot also be imported from elsewhere"
+            )
+        return self
 
 
 class ImportedDataset(Dataset):
-    imported_from: _ImportedFromProject | _ImportedFromUrl
+    imported_from: (
+        _ImportedFromProject
+        | _ImportedFromUrl
+        | _ImportedFromDoi
+        | _ImportedFromGitRepo
+    )
 
 
 class Figure(_CalkitObject):
@@ -1093,7 +1159,10 @@ class ProjectInfo(BaseModel):
     pipeline: Pipeline | None = Field(
         default=None, description="The project's reproducible pipeline."
     )
-    datasets: list[Dataset] = Field(
+    # ImportedDataset first, so an entry carrying provenance validates as
+    # one instead of being accepted as a plain Dataset with the
+    # imported_from key quietly dropped.
+    datasets: list[ImportedDataset | Dataset] = Field(
         default=[], description="The project's datasets."
     )
     figures: list[Figure] = Field(

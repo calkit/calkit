@@ -91,6 +91,15 @@ export function buildProjectSteps({
       done: (reproCheck?.n_environments ?? 0) > 0,
     },
     {
+      key: "dataset",
+      title: "Declare your data and where it came from",
+      detail:
+        "Data you collected, downloaded, or pulled from a DOI or repo. " +
+        "Recording the source now is what lets anyone trace a figure back " +
+        "to it later.",
+      done: (reproCheck?.n_datasets ?? 0) > 0,
+    },
+    {
       key: "figure",
       title: "Produce a figure from a pipeline stage",
       detail:

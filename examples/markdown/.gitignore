@@ -1,13 +1,6 @@
 # >>> calkit markdown derived files (managed by calkit) >>>
 /.calkit/markdown/
-/.calkit/envs/jl/Project.toml
-/.calkit/envs/jl/.python-version
 /.calkit/envs/jl/.venv/
-/.calkit/envs/main/pyproject.toml
-/.calkit/envs/main/.python-version
-/.calkit/envs/main/.venv/
-/.calkit/envs/r/DESCRIPTION
-/.calkit/envs/r/.python-version
+/.calkit/envs/py/.venv/
 /.calkit/envs/r/.venv/
 # <<< calkit markdown derived files <<<
-/figure.png

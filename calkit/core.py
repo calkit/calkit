@@ -80,6 +80,40 @@ class _ThreadLocalYAMLProxy:
     def __setattr__(self, name: str, value: Any) -> None:
         setattr(_yaml_local.yaml, name, value)
 
+    def dump(self, data: Any, stream: Any = None, **kwargs: Any) -> Any:
+        """Dump YAML, dropping the space ruamel leaves before a fold.
+
+        When wrapping a long value, ruamel writes the space that separates
+        two words and then breaks the line, leaving it at the end. The
+        space is redundant---a line break in a plain scalar already reads
+        as one---but every whitespace-trimming tool strips it and Calkit
+        writes it back, so the two take turns rewriting the same file.
+
+        It is not redundant in a block scalar, where trailing spaces are
+        content. Rather than trying to tell the cases apart while
+        emitting, the cleaned text is parsed back and only used if it
+        still means the same thing.
+        """
+        import io
+
+        yaml = _yaml_local.yaml
+        if stream is None:
+            return yaml.dump(data, stream, **kwargs)
+        buf = io.StringIO()
+        yaml.dump(data, buf, **kwargs)
+        text = buf.getvalue()
+        if " \n" in text:
+            cleaned = "".join(
+                line.rstrip() + "\n" for line in text.splitlines()
+            )
+            try:
+                if yaml.load(cleaned) == yaml.load(text):
+                    text = cleaned
+            except Exception:
+                pass
+        stream.write(text)
+        return None
+
 
 ryaml = _ThreadLocalYAMLProxy()
 

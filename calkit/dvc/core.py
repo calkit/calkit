@@ -505,7 +505,36 @@ def dvc_init_needs_subdir(wdir: str | None = None) -> bool:
     root = repo.working_tree_dir
     if root is None:
         return False
-    return os.path.realpath(root) != os.path.realpath(base)
+    if os.path.realpath(root) == os.path.realpath(base):
+        return False
+    # A directory the enclosing repo ignores is not part of it, so it gets
+    # its own repo and is therefore its own root. DVC refuses to
+    # initialize into an ignored path anyway.
+    return not enclosing_repo_ignores(base)
+
+
+def enclosing_repo_ignores(path: str | None = None) -> bool:
+    """Return whether the Git repo above ``path`` ignores it.
+
+    Scratch and test directories are routinely ignored by the repo that
+    contains them, and such a directory is not part of that repo: it
+    needs its own, rather than being treated as a subdirectory project.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(path) if path else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        return False
+    root = repo.working_tree_dir
+    if root is None or os.path.realpath(root) == os.path.realpath(base):
+        return False
+    try:
+        return bool(repo.ignored(base))
+    except Exception:
+        return False
 
 
 def dvc_init_args(wdir: str | None = None) -> list[str]:

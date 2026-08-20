@@ -267,7 +267,13 @@ def init(
     # a second repo there hides its contents from the outer one.
     try:
         calkit.git.get_repo()
+        # A directory the enclosing repo ignores is not part of it, so it
+        # gets its own repo rather than being treated as a subdirectory of
+        # one that will never track it.
+        needs_own_repo = calkit.dvc.enclosing_repo_ignores()
     except InvalidGitRepositoryError:
+        needs_own_repo = True
+    if needs_own_repo:
         subprocess.run(["git", "init"])
     # DVC refuses to initialize inside an existing Git repo unless told the
     # project is a subdirectory of one, so work out which case this is.

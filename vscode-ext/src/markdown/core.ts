@@ -197,3 +197,41 @@ export function findProjectDir(
     dir = parent;
   }
 }
+
+/**
+ * Split a derived stage name into the Markdown stage and block it names.
+ *
+ * The stages a Markdown file declares exist only in dvc.yaml, so anything
+ * looking one up in calkit.yaml has to come back through the file it came
+ * from.
+ */
+export function splitMarkdownStageName(
+  stageName: string,
+  config: CalkitInfo | undefined,
+): { markdownStageName: string; blockName: string } | undefined {
+  for (const [name, stage] of Object.entries(config?.pipeline?.stages ?? {})) {
+    if (stage?.kind !== "markdown") {
+      continue;
+    }
+    const prefix = name + STAGE_NAME_SEPARATOR;
+    if (stageName.startsWith(prefix)) {
+      return {
+        markdownStageName: name,
+        blockName: stageName.slice(prefix.length),
+      };
+    }
+  }
+  return undefined;
+}
+
+/** The path of the Markdown file a markdown stage reads. */
+export function markdownStagePath(
+  config: CalkitInfo | undefined,
+  stageName: string,
+): string | undefined {
+  const stage = config?.pipeline?.stages?.[stageName];
+  if (stage?.kind !== "markdown") {
+    return undefined;
+  }
+  return (stage.target_path ?? stageName).replace(/\\/g, "/");
+}

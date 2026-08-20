@@ -2704,11 +2704,13 @@ def test_sync_markdown_writes_environments(tmp_dir):
         assert f.read() == before
 
 
-def test_to_dvc_markdown_ignores_derived_env_dirs(tmp_dir):
-    """A Markdown-declared environment's venv must not land in Git.
+def test_to_dvc_markdown_ignores_only_the_installed_env(tmp_dir):
+    """Specs and locks are committed; the installed environment is not.
 
-    It goes under .calkit/envs/{name}/, which a stock Python .gitignore
-    doesn't cover, and calkit init doesn't seed one.
+    Recording environments in Git is how a Calkit project is reproducible,
+    so the spec, the lock and the interpreter pin all stay tracked. What
+    can't be committed is the virtualenv itself: it is large and holds
+    absolute paths from the machine that built it.
     """
     import git
 
@@ -2718,7 +2720,7 @@ def test_to_dvc_markdown_ignores_derived_env_dirs(tmp_dir):
     repo = git.Repo.init()
     with open("README.md", "w") as f:
         f.write(
-            "<!-- calkit environment name=main -->\n- numpy\n\n"
+            "<!-- calkit environment name=main python=3.13 -->\n- numpy\n\n"
             "```python calkit stage name=demo\npass\n```\n"
         )
     ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
@@ -2726,12 +2728,15 @@ def test_to_dvc_markdown_ignores_derived_env_dirs(tmp_dir):
         calkit.ryaml.dump(ck_info, f)
     to_dvc(ck_info=ck_info, write=True)
     assert repo.ignored(".calkit/envs/main/.venv/pyvenv.cfg")
-    assert repo.ignored(".calkit/envs/main/pyproject.toml")
+    for tracked in [
+        ".calkit/envs/main/pyproject.toml",
+        ".calkit/envs/main/uv.lock",
+        ".calkit/envs/main/.python-version",
+    ]:
+        assert not repo.ignored(tracked), tracked
+    # Scripts extracted from the Markdown are regenerated on every compile,
+    # so they stay out of Git the way cleaned notebooks do
     assert repo.ignored(".calkit/markdown/README.md/demo.py")
-    # Lock files are the reproducibility artifact and must stay tracked,
-    # including uv's, which lives in the same directory as the derived spec
-    assert not repo.ignored(".calkit/envs/main/uv.lock")
-    assert not repo.ignored(".calkit/env-locks/main")
 
 
 def test_to_dvc_uv_python_version_is_a_stage_input(tmp_dir):

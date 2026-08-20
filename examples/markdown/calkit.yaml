@@ -15,9 +15,9 @@ pipeline:
       target_path: README.md
 
 environments:
-  main:
+  py:
     kind: uv
-    path: .calkit/envs/main/pyproject.toml
+    path: .calkit/envs/py/pyproject.toml
     description: Generated from README.md. Changes made here will be overwritten.
   jl:
     julia: "1.12"

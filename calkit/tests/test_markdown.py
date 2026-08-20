@@ -769,3 +769,31 @@ def test_expand_ck_info_description_alone_is_not_a_conflict(
         "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
     }
     assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv"
+
+
+def test_parse_markdown_file_cache_sees_edits(tmp_path):
+    """The parse cache must never hide a change to the file.
+
+    Project info is expanded several times over one status, so the cache
+    matters---but a stale one would silently run the previous version of
+    the code.
+    """
+    import time
+
+    from calkit.markdown import parse_markdown_file
+
+    md = tmp_path / "README.md"
+    md.write_text("```python calkit stage name=first\nprint(1)\n```\n")
+    blocks = parse_markdown_file(str(md))
+    assert [b.name for b in blocks] == ["first"]
+    # Reading again is served from the cache, so it must be equivalent
+    assert [b.name for b in parse_markdown_file(str(md))] == ["first"]
+    # An edit is picked up. Sleep past the filesystem's timestamp
+    # granularity so this tests the invalidation rather than the clock.
+    time.sleep(0.01)
+    md.write_text("```python calkit stage name=second\nprint(2)\n```\n")
+    assert [b.name for b in parse_markdown_file(str(md))] == ["second"]
+    # Including an edit that keeps the file exactly the same size
+    time.sleep(0.01)
+    md.write_text("```python calkit stage name=SECOND\nprint(2)\n```\n")
+    assert [b.name for b in parse_markdown_file(str(md))] == ["SECOND"]

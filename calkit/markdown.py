@@ -384,10 +384,35 @@ def _merge(
     return pending[0], attrs
 
 
+# Parsed blocks, keyed by path and what the file looked like when read.
+# Project info is expanded several times over a single status---once to
+# check environments, once to compile, once for the status itself---and
+# parsing dominates that work, so the same unchanged file would otherwise
+# be read and scanned each time.
+_PARSE_CACHE: dict[str, tuple[tuple[int, int], list[MarkdownBlock]]] = {}
+
+
 def parse_markdown_file(path: str) -> list[MarkdownBlock]:
-    """Extract Calkit-annotated blocks from a Markdown file."""
+    """Extract Calkit-annotated blocks from a Markdown file.
+
+    The returned blocks are shared between callers, so they must be read
+    rather than modified.
+    """
+    key = Path(path).as_posix()
+    try:
+        stat = os.stat(path)
+        stamp = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        stamp = None
+    if stamp is not None:
+        cached = _PARSE_CACHE.get(key)
+        if cached is not None and cached[0] == stamp:
+            return cached[1]
     with open(path, encoding="utf-8") as f:
-        return parse_markdown(f.read(), path=Path(path).as_posix())
+        blocks = parse_markdown(f.read(), path=key)
+    if stamp is not None:
+        _PARSE_CACHE[key] = (stamp, blocks)
+    return blocks
 
 
 # Separator between a Markdown stage's own name and the name of a stage it

@@ -19,13 +19,13 @@ Only annotated blocks run.
 
 The stages below need these packages:
 
-<!-- calkit environment name=main python=3.13 -->
+<!-- calkit environment name=py python=3.13 -->
 
 - numpy
 - matplotlib
 
 That is an ordinary Markdown list, so it reads as documentation.
-Calkit turns it into a `uv` environment named `main`, resolving and
+Calkit turns it into a `uv` environment named `py`, resolving and
 locking it the same way it would one declared in `calkit.yaml`.
 
 ## Generating some data
@@ -36,7 +36,7 @@ one script.
 
 First, build the data:
 
-```python calkit stage name=analysis environment=main
+```python calkit stage name=analysis environment=py
 import os
 
 import numpy as np
@@ -72,7 +72,7 @@ n points: 50
 This is a separate stage. It declares `data/data.csv` as an input, so Calkit
 knows it runs after `analysis`, and reruns it whenever the data changes:
 
-```python calkit stage name=figure environment=main inputs=[data/data.csv] outputs=[{path: figures/figure.png, storage: git}]
+```python calkit stage name=figure environment=py inputs=[data/data.csv] outputs=[{path: figures/figure.png, storage: git}]
 import os
 
 import matplotlib
@@ -118,7 +118,7 @@ The comment attaches to the block directly below it, so this declares one
 stage, exactly as the version above does:
 
 ````md
-<!-- calkit stage name=example environment=main
+<!-- calkit stage name=example environment=py
      inputs=[data/one.csv, data/two.csv, data/three.csv]
      outputs=[out.png] -->
 

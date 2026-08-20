@@ -1,16 +1,16 @@
 schema: '2.0'
 stages:
   README.md/analysis:
-    cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/analysis.py
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/analysis.py
     deps:
-    - path: .calkit/envs/main/.python-version
+    - path: .calkit/envs/py/.python-version
       hash: md5
       md5: 789ee353b44223a8ed8031aa190631dd
       size: 5
-    - path: .calkit/envs/main/uv.lock
+    - path: .calkit/envs/py/uv.lock
       hash: md5
-      md5: 6de2015a5eb1a5ebc51f85e4f894a238
-      size: 90981
+      md5: b27c83c5dec4b922346f4dd937f365a4
+      size: 90979
     - path: .calkit/markdown/README.md/analysis.py
       hash: md5
       md5: ef6274d4d1082f7a53ec12e7bfbc306f
@@ -25,16 +25,16 @@ stages:
       md5: 08fdae643712833dd7b1312e57037833
       size: 2509
   README.md/figure:
-    cmd: calkit xenv -n main --no-check -- python .calkit/markdown/README.md/figure.py
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/figure.py
     deps:
-    - path: .calkit/envs/main/.python-version
+    - path: .calkit/envs/py/.python-version
       hash: md5
       md5: 789ee353b44223a8ed8031aa190631dd
       size: 5
-    - path: .calkit/envs/main/uv.lock
+    - path: .calkit/envs/py/uv.lock
       hash: md5
-      md5: 6de2015a5eb1a5ebc51f85e4f894a238
-      size: 90981
+      md5: b27c83c5dec4b922346f4dd937f365a4
+      size: 90979
     - path: .calkit/markdown/README.md/figure.py
       hash: md5
       md5: 533ffb2a053b12bce7980402f12b23ee

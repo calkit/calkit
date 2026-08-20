@@ -1224,7 +1224,10 @@ def _write_markdown_environments(
         return False
     with open(ck_yaml_path) as f:
         data = calkit.ryaml.load(f) or {}
-    if "environments" not in data or data["environments"] is None:
+    created_envs_key = (
+        "environments" not in data or data["environments"] is None
+    )
+    if created_envs_key:
         data["environments"] = {}
     envs = data["environments"]
     changed = False
@@ -1234,6 +1237,17 @@ def _write_markdown_environments(
         envs[env_name] = env
         changed = True
     if changed:
+        # Separate a newly created 'environments' section from what comes
+        # before it, the way the rest of the file is written
+        if created_envs_key and hasattr(
+            data, "yaml_set_comment_before_after_key"
+        ):
+            try:
+                data.yaml_set_comment_before_after_key(
+                    "environments", before="\n"
+                )
+            except Exception:
+                pass
         _dump_yaml_if_changed(data, ck_yaml_path)
     return changed
 
@@ -1351,18 +1365,16 @@ def to_dvc(
     if write and manage_gitignore and markdown.script_paths:
         ignore_lines = ["/.calkit/markdown/"]
         for env_name in sorted(markdown.environments):
-            env_dir = f"/.calkit/envs/{env_name}"
-            spec_name = os.path.basename(
-                markdown.environments[env_name]["path"]
-            )
-            # Ignore only what is derived. The lock file lives in here too
-            # for a uv environment, and it is the reproducibility artifact,
-            # so it must stay tracked.
-            ignore_lines += [
-                f"{env_dir}/{spec_name}",
-                f"{env_dir}/.python-version",
-                f"{env_dir}/.venv/",
-            ]
+            env_dir = os.path.dirname(markdown.environments[env_name]["path"])
+            # Specs and locks are committed---that is how a Calkit project
+            # records its environments---and so is the tooling's own
+            # bootstrap (renv's activate.R and .Rprofile, which renv
+            # expects in version control). What can't be committed is the
+            # installed environment itself: it is large and holds absolute
+            # paths from the machine that built it. renv ignores its own
+            # library via renv/.gitignore; a virtualenv has nothing
+            # equivalent, so name it here.
+            ignore_lines.append(f"/{env_dir}/.venv/")
         _write_managed_gitignore_block(
             os.path.join(wdir or ".", ".gitignore"),
             marker="calkit markdown derived files",

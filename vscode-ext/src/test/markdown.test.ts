@@ -7,6 +7,8 @@ import {
   findMarkdownStageBlocks,
   findProjectDir,
   markdownStageNameForFile,
+  markdownStagePath,
+  splitMarkdownStageName,
 } from "../markdown/core";
 
 test("findMarkdownStageBlocks finds annotated fences with their lines", () => {
@@ -173,4 +175,44 @@ test("findProjectDir returns undefined when there is no project", () => {
     findProjectDir("/repo/a/b.md", "/repo", () => false, path.posix),
     undefined,
   );
+});
+
+test("splitMarkdownStageName maps a derived stage back to its file", () => {
+  // These stages exist only in dvc.yaml, so anything looking one up in
+  // calkit.yaml has to come back through the file that declares it
+  const config = {
+    pipeline: {
+      stages: {
+        "README.md": { kind: "markdown" },
+        docs: { kind: "markdown", target_path: "docs/guide.md" },
+        plain: { kind: "python-script", script_path: "a.py" },
+      },
+    },
+  } as never;
+  assert.deepEqual(splitMarkdownStageName("README.md/r", config), {
+    markdownStageName: "README.md",
+    blockName: "r",
+  });
+  assert.deepEqual(splitMarkdownStageName("docs/intro", config), {
+    markdownStageName: "docs",
+    blockName: "intro",
+  });
+  // An ordinary stage is not one of these
+  assert.equal(splitMarkdownStageName("plain", config), undefined);
+  assert.equal(splitMarkdownStageName("unrelated/x", config), undefined);
+});
+
+test("markdownStagePath honors target_path", () => {
+  const config = {
+    pipeline: {
+      stages: {
+        "README.md": { kind: "markdown" },
+        docs: { kind: "markdown", target_path: "docs/guide.md" },
+        plain: { kind: "python-script", script_path: "a.py" },
+      },
+    },
+  } as never;
+  assert.equal(markdownStagePath(config, "README.md"), "README.md");
+  assert.equal(markdownStagePath(config, "docs"), "docs/guide.md");
+  assert.equal(markdownStagePath(config, "plain"), undefined);
 });

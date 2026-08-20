@@ -267,3 +267,45 @@ def test_get_md5(tmp_dir):
     assert dir_hash == "edfc5cb4a1b7c90d07bca687716a75cd"
     dir_hash2 = calkit.get_md5("mydir", exclude_files=["file4.txt"])
     assert dir_hash2 == "f06b4641c3014439f44382db77164354"
+
+
+def test_ryaml_dump_leaves_no_trailing_whitespace():
+    """Wrapping must not leave a space before the fold.
+
+    Whitespace-trimming tools strip those, and Calkit writes them back on
+    the next compile, so the two take turns rewriting the same file.
+    """
+    import io
+
+    import calkit
+
+    # Value lengths near the wrap width are what trigger it
+    for n in range(60, 80):
+        buf = io.StringIO()
+        data = {"stages": {"s": {"cmd": "python " + "a" * n}}}
+        calkit.ryaml.dump(data, buf)
+        text = buf.getvalue()
+        assert not any(line != line.rstrip() for line in text.splitlines()), (
+            f"trailing whitespace at length {n}: {text!r}"
+        )
+        assert calkit.ryaml.load(text) == data
+
+
+def test_ryaml_dump_keeps_significant_trailing_whitespace():
+    """In a block scalar a trailing space is content, not formatting."""
+    import io
+
+    from ruamel.yaml.scalarstring import (
+        FoldedScalarString,
+        LiteralScalarString,
+    )
+
+    import calkit
+
+    for value in [
+        LiteralScalarString("x \ny\n"),
+        FoldedScalarString("x \ny\n"),
+    ]:
+        buf = io.StringIO()
+        calkit.ryaml.dump({"k": value}, buf)
+        assert calkit.ryaml.load(buf.getvalue()) == {"k": value}

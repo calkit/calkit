@@ -458,3 +458,31 @@ def test_dvc_init_args_detects_subdir(tmp_path, monkeypatch):
     # An explicit wdir is honored rather than the process's cwd
     monkeypatch.chdir(tmp_path)
     assert calkit.dvc.dvc_init_args(wdir=str(sub)) == ["init", "--subdir"]
+
+
+def test_enclosing_repo_ignores(tmp_path, monkeypatch):
+    """A directory the enclosing repo ignores needs its own repo.
+
+    Scratch and test project directories are routinely ignored by the repo
+    holding them, and DVC refuses to initialize into an ignored path, so
+    treating one as a subdirectory project fails outright.
+    """
+    import subprocess
+
+    import calkit.dvc
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.check_call(["git", "init", "-q", "."])
+    (tmp_path / ".gitignore").write_text("/scratch\n")
+    tracked = tmp_path / "tracked"
+    tracked.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    # A tracked subdirectory is part of the repo, so DVC is told so
+    assert not calkit.dvc.enclosing_repo_ignores(str(tracked))
+    assert calkit.dvc.dvc_init_args(wdir=str(tracked)) == ["init", "--subdir"]
+    # An ignored one is not, so it becomes its own root instead
+    assert calkit.dvc.enclosing_repo_ignores(str(scratch))
+    assert calkit.dvc.dvc_init_args(wdir=str(scratch)) == ["init"]
+    # The repo root itself is never "ignored by" its own repo
+    assert not calkit.dvc.enclosing_repo_ignores(str(tmp_path))

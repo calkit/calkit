@@ -36,6 +36,11 @@ import {
   resolveFigureRefStage,
   resolveImageRefToRepoRelative,
 } from "./figures/core";
+import {
+  findMarkdownStageBlocks,
+  markdownStagePath,
+  splitMarkdownStageName,
+} from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
   FigureSourceCodeLensProvider,
@@ -3594,6 +3599,29 @@ async function openStageSourceFile(
   workspaceRoot: string,
   stageName: string,
 ): Promise<void> {
+  // A stage declared in a Markdown file has no source file of its own, so
+  // open the file that declares it and go to the block
+  const md = splitMarkdownStageName(stageName, currentCalkitConfig);
+  if (md) {
+    const mdPath = markdownStagePath(currentCalkitConfig, md.markdownStageName);
+    if (mdPath) {
+      const uri = vscode.Uri.file(path.join(workspaceRoot, mdPath));
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const block = findMarkdownStageBlocks(doc.getText()).find(
+        (b) => b.name === md.blockName,
+      );
+      const editor = await vscode.window.showTextDocument(doc);
+      if (block) {
+        const pos = new vscode.Position(block.line, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenter,
+        );
+      }
+      return;
+    }
+  }
   const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
   const filePath =
     (typeof stage?.notebook_path === "string"

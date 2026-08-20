@@ -1654,10 +1654,40 @@ export const EnvironmentSchema = {
       ],
       title: "File Content",
     },
+    locks: {
+      items: {
+        $ref: "#/components/schemas/EnvironmentLock",
+      },
+      type: "array",
+      title: "Locks",
+      default: [],
+    },
   },
   type: "object",
   required: ["name", "kind", "all_attrs"],
   title: "Environment",
+} as const
+
+export const EnvironmentLockSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "content"],
+  title: "EnvironmentLock",
+  description: "A lock file pinning what an environment actually resolved to.",
 } as const
 
 export const ExistsResultSchema = {

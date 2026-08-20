@@ -449,6 +449,7 @@ function ProjectFigures() {
               icon={FaRegFileImage}
               title="No figures found"
               hint="Declare one in calkit.yaml, or add a pipeline stage that produces an image."
+              docsUrl="https://docs.calkit.org/calkit-yaml/"
             >
               {ref && (
                 <Button

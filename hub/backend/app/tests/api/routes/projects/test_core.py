@@ -3697,6 +3697,16 @@ def test_post_project_dataset_provenance(
                 return_value={},
             ),
             patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_repo_tree_for_ref",
+                return_value=None,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "dvc_outputs_from_tree",
+                return_value={},
+            ),
+            patch(
                 "app.api.routes.projects.core.os.path.isfile",
                 return_value=existing_path,
             ),
@@ -3777,7 +3787,9 @@ def test_post_project_dataset_provenance(
             "description": "Collected in the lab",
         }
     )
-    assert resp.status_code == 400  # path isn't in the repo
+    # Not tracked by Git or DVC, so there is nothing to label.
+    assert resp.status_code == 400
+    assert "not tracked by Git or DVC" in resp.text
     resp = post(
         {
             "path": "data/mine.csv",

@@ -313,6 +313,7 @@ function Tables() {
               ? undefined
               : "Declare one in calkit.yaml, or add a CSV to a tables or results directory."
           }
+          docsUrl={needle ? undefined : "https://docs.calkit.org/calkit-yaml/"}
         />
       ) : (
         <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={4}>

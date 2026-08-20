@@ -303,6 +303,7 @@ function Presentations() {
                 icon={FiMonitor}
                 title="No presentations found"
                 hint="Declare slides or a poster in calkit.yaml to show them here."
+                docsUrl="https://docs.calkit.org/calkit-yaml/"
               />
             )}
           </Box>

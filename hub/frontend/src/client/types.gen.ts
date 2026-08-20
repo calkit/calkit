@@ -928,6 +928,30 @@ export type Environment = {
    * File Content
    */
   file_content?: string | null
+  /**
+   * Locks
+   */
+  locks?: Array<EnvironmentLock>
+}
+
+/**
+ * EnvironmentLock
+ *
+ * A lock file pinning what an environment actually resolved to.
+ */
+export type EnvironmentLock = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Truncated
+   */
+  truncated?: boolean
 }
 
 /**

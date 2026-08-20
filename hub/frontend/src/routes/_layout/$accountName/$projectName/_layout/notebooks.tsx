@@ -249,6 +249,7 @@ function Notebooks() {
                 iconColor="orange.300"
                 title="No notebooks found"
                 hint="Add a .ipynb to the repo, or declare one in calkit.yaml to show it here."
+                docsUrl="https://docs.calkit.org/notebooks/"
               />
             )}
           </Box>

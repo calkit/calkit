@@ -101,6 +101,10 @@ const FilterableSelect = ({
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
+        // Choosing an option keeps focus in the input (the mousedown handler
+        // prevents the default blur), so clicking back into it fires no
+        // focus event and the list would stay shut.
+        onClick={() => setOpen(true)}
         // Deferred so a click on a suggestion lands before the list closes.
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={onKeyDown}

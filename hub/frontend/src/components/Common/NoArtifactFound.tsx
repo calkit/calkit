@@ -1,4 +1,5 @@
-import { Flex, Icon, Text } from "@chakra-ui/react"
+import { ExternalLinkIcon } from "@chakra-ui/icons"
+import { Flex, Icon, Link, Text } from "@chakra-ui/react"
 import type { ReactNode } from "react"
 import type { IconType } from "react-icons"
 
@@ -14,6 +15,8 @@ interface NoArtifactFoundProps {
   height?: string
   /** Overrides the muted default, for a mark with a brand color. */
   iconColor?: string
+  /** Docs page explaining this kind of artifact. */
+  docsUrl?: string
 }
 
 /**
@@ -32,6 +35,7 @@ const NoArtifactFound = ({
   children,
   height = "300px",
   iconColor,
+  docsUrl,
 }: NoArtifactFoundProps) => (
   <Flex
     direction="column"
@@ -48,6 +52,13 @@ const NoArtifactFound = ({
       <Text fontSize="sm" mt={1} maxW="440px">
         {hint}
       </Text>
+    ) : null}
+    {docsUrl ? (
+      // An empty page is where someone is most likely to need the docs, and
+      // least likely to know which page of them to read.
+      <Link href={docsUrl} isExternal variant="blue" fontSize="sm" mt={3}>
+        Read the documentation <ExternalLinkIcon mb={0.5} />
+      </Link>
     ) : null}
     {children ? <>{children}</> : null}
   </Flex>

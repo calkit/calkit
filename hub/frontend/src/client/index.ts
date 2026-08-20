@@ -160,6 +160,7 @@ export type {
   DvcOutput,
   DvcPipelineStage,
   Environment,
+  EnvironmentLock,
   ExistsResult,
   ExternalReleasePost,
   ExternalTokenResponse,

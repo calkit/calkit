@@ -123,6 +123,7 @@ function ProjectDataView() {
                 "collected here, downloaded, from a DOI, or from a Git " +
                 "repo\u2014which is what lets a figure be traced back to it."
               }
+              docsUrl="https://docs.calkit.org/datasets/"
             />
           ) : null}
           <SimpleGrid columns={[3, null, 4]} gap={6}>

@@ -1,6 +1,4 @@
 import {
-  Alert,
-  AlertIcon,
   Badge,
   Box,
   Button,
@@ -8,10 +6,12 @@ import {
   Code,
   Flex,
   Heading,
+  IconButton,
   Icon,
   Link,
   SimpleGrid,
   Text,
+  useDisclosure,
 } from "@chakra-ui/react"
 import {
   Link as RouterLink,
@@ -19,14 +19,18 @@ import {
   useNavigate,
 } from "@tanstack/react-router"
 import { AiOutlinePython } from "react-icons/ai"
-import { FaCube, FaDocker } from "react-icons/fa"
+import { FaCube, FaDocker, FaPlus } from "react-icons/fa"
 import { SiAnaconda } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
+import NewEnvironment from "../../../../../components/Environments/NewEnvironment"
 
 import type { Environment } from "../../../../../client"
 import ViewEnvironment from "../../../../../components/Environments/ViewEnvironment"
-import { useProjectEnvironments } from "../../../../../hooks/useProject"
+import useProject, {
+  useProjectEnvironments,
+} from "../../../../../hooks/useProject"
 
 const environmentsSearchSchema = z.object({
   ref: z.string().optional(),
@@ -116,18 +120,17 @@ const EnvCard = ({ environment, onView }: EnvCardProps) => {
           ""
         )}
         <Flex mt={1.5}>
-          {environment.file_content ? (
-            <Button
-              variant="primary"
-              size="xs"
-              mr={2}
-              onClick={() => onView(environment.name)}
-            >
-              View
-            </Button>
-          ) : (
-            ""
-          )}
+          {/* Every kind is viewable: the ones with no spec file of their own
+              (Docker by image, Slurm, PBS) still have a calkit.yaml entry
+              and often a lock. */}
+          <Button
+            variant="primary"
+            size="xs"
+            mr={2}
+            onClick={() => onView(environment.name)}
+          >
+            View
+          </Button>
         </Flex>
       </Card>
     </>
@@ -143,6 +146,8 @@ function ProjectEnvsView() {
     projectName,
     ref,
   )
+  const { userHasWriteAccess } = useProject(accountName, projectName, ref)
+  const newEnvModal = useDisclosure()
   const { isPending: environmentsPending, data: environments } =
     environmentsRequest
 
@@ -157,6 +162,23 @@ function ProjectEnvsView() {
     <>
       <Flex align="center" mb={2}>
         <Heading size="md">Environments</Heading>
+        {userHasWriteAccess ? (
+          <>
+            <IconButton
+              aria-label="New environment"
+              height="25px"
+              width="28px"
+              ml={1.5}
+              icon={<FaPlus />}
+              size="xs"
+              onClick={newEnvModal.onOpen}
+            />
+            <NewEnvironment
+              isOpen={newEnvModal.isOpen}
+              onClose={newEnvModal.onClose}
+            />
+          </>
+        ) : null}
       </Flex>
       {environmentsPending ? (
         <LoadingSpinner height="100vh" />
@@ -173,10 +195,23 @@ function ProjectEnvsView() {
           </SimpleGrid>
         </Box>
       ) : (
-        <Alert mt={2} status="warning" borderRadius="xl">
-          <AlertIcon />
-          This project has no environments defined.
-        </Alert>
+        <NoArtifactFound
+          icon={FaCube}
+          title="No environments found"
+          hint="An environment pins what your code needs to run, so a collaborator, a reviewer, or you in a year gets the same numbers back."
+          docsUrl="https://docs.calkit.org/environments/"
+        >
+          {userHasWriteAccess ? (
+            <Button
+              mt={3}
+              size="sm"
+              variant="primary"
+              onClick={newEnvModal.onOpen}
+            >
+              Create an environment
+            </Button>
+          ) : null}
+        </NoArtifactFound>
       )}
       {selectedEnv && (
         <ViewEnvironment

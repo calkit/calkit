@@ -46,6 +46,7 @@ from TexSoup import TexSoup
 import app.projects
 import calkit
 import calkit.detect
+import calkit.environments
 import calkit.latex
 import calkit.resources
 from app import (
@@ -4079,22 +4080,38 @@ def post_project_dataset(
     datasets = ck_info.get("datasets", [])
     if req.path in [ds.get("path") for ds in datasets]:
         raise HTTPException(400, "Dataset already exists")
-    local_path = os.path.join(repo.working_dir, req.path)
-    zip_path_map = get_zip_path_map_from_repo(repo=repo)
-    # An import names data that isn't here yet, and a stage names data that
-    # doesn't exist until the pipeline runs. Everything else should already
-    # be in the repo, or the entry points at nothing.
-    if (
-        req.imported_from is None
-        and not req.stage
-        and not (
+    # An import names data that isn't here yet, and a stage names data the
+    # pipeline hasn't produced yet. Anything else has to already be in the
+    # project, or the entry points at nothing.
+    if req.imported_from is None and not req.stage:
+        local_path = os.path.join(repo.working_dir, req.path)
+        zip_path_map = get_zip_path_map_from_repo(repo=repo)
+        # Tracked by Git (the checkout has it), tracked by DVC (a .dvc
+        # pointer stands in for content that isn't pulled), or inside a
+        # tracked zip. DVC-tracked data is checked by pointer rather than by
+        # the file itself, which is absent in a fresh clone.
+        dvc_outs = app.projects.dvc_outputs_from_tree(
+            project=project,
+            tree=app.projects.get_repo_tree_for_ref(repo, ref=None),
+        )
+        exists = (
             os.path.isfile(local_path)
             or os.path.isdir(local_path)
             or os.path.isfile(local_path + ".dvc")
             or req.path in zip_path_map
+            or req.path in dvc_outs
+            # A directory tracked by DVC covers the paths under it.
+            or any(
+                out == req.path or req.path.startswith(f"{out}/")
+                for out in dvc_outs
+            )
         )
-    ):
-        raise HTTPException(400, "Path does not exist in the repo")
+        if not exists:
+            raise HTTPException(
+                400,
+                f"'{req.path}' is not tracked by Git or DVC in this project. "
+                "Add and commit it first, or say where it was imported from.",
+            )
     ds: dict[str, Any] = {"path": req.path}
     for key in ["title", "description", "tabular", "stage", "primary"]:
         value = getattr(req, key)
@@ -8050,6 +8067,16 @@ def put_project_reference_notes(
     )
 
 
+class EnvironmentLock(BaseModel):
+    """A lock file pinning what an environment actually resolved to."""
+
+    path: str
+    content: str
+    # Set when the file was too large to send whole, so the viewer can say so
+    # rather than presenting a truncated lock as the lock.
+    truncated: bool = False
+
+
 class Environment(BaseModel):
     name: str
     kind: str
@@ -8058,6 +8085,77 @@ class Environment(BaseModel):
     imported_from: str | None = None
     all_attrs: dict
     file_content: str | None = None
+    # The spec says what was asked for; the lock says what that resolved to,
+    # which is the half that makes the environment reproducible. Docker,
+    # venv, and conda lock per platform, so there can be several.
+    locks: list[EnvironmentLock] = []
+
+
+# Locks can be large (a uv.lock for a real project runs to hundreds of
+# kilobytes), and the point of showing one is to see what it pinned, not to
+# ship the whole file to a browser that will render it in a code block.
+MAX_ENV_LOCK_BYTES = 256_000
+
+
+def _read_env_locks(
+    env: dict[str, Any], env_name: str, wdir: str
+) -> list[dict[str, Any]]:
+    """Read whatever lock files an environment has.
+
+    Which file that is per kind belongs to calkit, so the path comes from
+    there rather than being reconstructed here. Docker, venv, and conda lock
+    once per platform, and ``for_dvc`` resolves those to the directory
+    holding them, so a directory means "several locks" rather than an error.
+    """
+    try:
+        lock_path = calkit.environments.get_env_lock_fpath(
+            env=env, env_name=env_name, wdir=wdir, for_dvc=True
+        )
+    except Exception as e:
+        # A malformed environment (e.g. a Julia env whose path isn't a
+        # Project.toml) shouldn't take the whole page down over its lock.
+        logger.warning(f"Could not resolve lock path for {env_name}: {e}")
+        return []
+    if not lock_path:
+        return []
+    # get_env_lock_fpath resolves against wdir, so what comes back is
+    # absolute. Paths are shown to the user and used to look files up in the
+    # repo, so they have to read as project paths, not server paths.
+    full_path = (
+        lock_path
+        if os.path.isabs(lock_path)
+        else os.path.join(wdir, lock_path)
+    )
+    if os.path.isdir(full_path):
+        # Docker, venv, and conda lock once per platform, so this is a
+        # directory of them rather than a single file.
+        candidates = [
+            os.path.join(full_path, name)
+            for name in sorted(os.listdir(full_path))
+            if os.path.isfile(os.path.join(full_path, name))
+        ]
+    elif os.path.isfile(full_path):
+        candidates = [full_path]
+    else:
+        return []
+    locks = []
+    for abs_path in candidates:
+        rel_path = Path(os.path.relpath(abs_path, wdir)).as_posix()
+        try:
+            size = os.path.getsize(abs_path)
+            with open(abs_path, errors="replace") as f:
+                content = f.read(MAX_ENV_LOCK_BYTES)
+        except OSError as e:
+            logger.warning(f"Could not read lock {rel_path}: {e}")
+            continue
+        locks.append(
+            {
+                "path": rel_path,
+                "content": content,
+                "truncated": size > MAX_ENV_LOCK_BYTES,
+            }
+        )
+    return locks
 
 
 @router.get("/projects/{owner_name}/{project_name}/environments")
@@ -8098,6 +8196,9 @@ def get_project_environments(
             if os.path.isfile(fpath):
                 with open(fpath) as f:
                     env_resp["file_content"] = f.read()
+        env_resp["locks"] = _read_env_locks(
+            env=env, env_name=env_name, wdir=str(repo.working_dir)
+        )
         try:
             resp.append(Environment.model_validate(env_resp))
         except ValidationError as e:

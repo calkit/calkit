@@ -541,6 +541,7 @@ function Publications() {
                 icon={FiBookOpen}
                 title="No publications found"
                 hint="Start one from a template, or link the Overleaf project you're already writing in."
+                docsUrl="https://docs.calkit.org/latex/"
               />
             )}
           </Box>

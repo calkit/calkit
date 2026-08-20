@@ -386,6 +386,168 @@ def get_projects(
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
+# A project small enough to arrive as a zip is the point; anything bigger
+# belongs in Git and DVC rather than an upload form.
+MAX_PROJECT_UPLOAD_BYTES = 50_000_000
+# Guards against a zip that unpacks to far more than it claims.
+MAX_PROJECT_UNPACKED_BYTES = 250_000_000
+
+
+def _valid_project_upload_size(
+    content_length: Annotated[int | None, Header()] = None,
+) -> int | None:
+    """Reject an oversized upload before buffering it.
+
+    Optional because the browser sets this header itself, and requiring it
+    would put it in the generated client's signature as something callers
+    have to compute. The handler counts bytes as it reads regardless, so
+    this is an early out rather than the actual guard.
+    """
+    if (
+        content_length is not None
+        and content_length > MAX_PROJECT_UPLOAD_BYTES
+    ):
+        raise HTTPException(
+            413,
+            f"Upload is larger than "
+            f"{MAX_PROJECT_UPLOAD_BYTES // 1_000_000} MB.",
+        )
+    return content_length
+
+
+def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
+    """Unpack an uploaded project zip into a repo working directory.
+
+    Every member is checked to land inside ``dest``: a zip can name
+    ``../../etc/passwd`` or carry a symlink, and this runs on our server
+    against a path we control. Anything Git owns is skipped, since the repo
+    already exists and the upload is its contents, not its history.
+    """
+    extracted = 0
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "That file isn't a valid zip archive")
+    dest_root = os.path.realpath(dest)
+    # A single top-level folder is what most zips of a project look like, and
+    # keeping it would nest the whole project one level deeper than intended.
+    names = [n for n in archive.namelist() if not n.startswith("__MACOSX/")]
+    tops = {n.split("/")[0] for n in names if n.strip("/")}
+    strip = (
+        f"{tops.pop()}/"
+        if len(tops) == 1 and all(n.count("/") >= 1 for n in names if n)
+        else ""
+    )
+    for info in archive.infolist():
+        name = info.filename
+        if name.startswith("__MACOSX/") or not name.strip("/"):
+            continue
+        if strip and name.startswith(strip):
+            name = name[len(strip) :]
+        if not name:
+            continue
+        parts = PurePosixPath(name).parts
+        # The repo's own Git data is not the uploader's to replace.
+        if ".git" in parts or ".dvc" in parts:
+            continue
+        target = os.path.realpath(os.path.join(dest_root, name))
+        if not (target == dest_root or target.startswith(dest_root + os.sep)):
+            raise HTTPException(
+                400, f"Archive contains a path outside the project: {name}"
+            )
+        if info.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        extracted += info.file_size
+        if extracted > MAX_PROJECT_UNPACKED_BYTES:
+            raise HTTPException(
+                400, "Archive unpacks to more than the size limit allows"
+            )
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with archive.open(info) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return extracted
+
+
+@router.post(
+    "/projects/upload", dependencies=[Depends(_valid_project_upload_size)]
+)
+def post_project_upload(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    title: Annotated[str, Form()],
+    name: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+    description: Annotated[str | None, Form()] = None,
+    is_public: Annotated[bool, Form()] = False,
+) -> ProjectPublic:
+    """Create a project from an uploaded zip of an existing one.
+
+    For work that isn't on GitHub yet, which is most of what "clean up a
+    project in progress" means. The repo is created and scaffolded the same
+    way an empty project is, then the archive is committed on top of it, so
+    the first two commits read as "here's the scaffolding" and "here's what
+    I had".
+    """
+    zip_bytes = file.file.read(MAX_PROJECT_UPLOAD_BYTES + 1)
+    if len(zip_bytes) > MAX_PROJECT_UPLOAD_BYTES:
+        raise HTTPException(
+            413,
+            f"Upload is larger than "
+            f"{MAX_PROJECT_UPLOAD_BYTES // 1_000_000} MB.",
+        )
+    created = post_project(
+        session=session,
+        current_user=current_user,
+        project_in=ProjectPost(
+            name=name,
+            title=title,
+            description=description,
+            is_public=is_public,
+            template=None,
+            git_repo_exists=False,
+        ),
+    )
+    # post_project is declared as returning the public shape, so the row
+    # itself is fetched back for the repo work below.
+    project = app.projects.get_project(
+        session=session,
+        owner_name=created.owner_account_name,
+        project_name=created.name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    _extract_project_zip(zip_bytes, str(repo.working_dir))
+    # Ours are the project's identity on the hub, so they win over whatever
+    # the archive happened to carry; everything else in its calkit.yaml is
+    # the user's and is kept.
+    ck_info = calkit.load_calkit_info(wdir=str(repo.working_dir))
+    ck_info |= {
+        "owner": project.owner_account_name,
+        "name": project.name,
+        "title": project.title,
+        "description": project.description,
+        "hub": settings.frontend_host,
+        "git_repo_url": project.git_repo_url,
+    }
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add(["-A"])
+    if repo.git.diff("--staged"):
+        repo.git.commit(["-m", "Import existing project files"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.track(
+        user=current_user,
+        event_name="Created new project",
+        add_event_info={"from_upload": True},
+    )
+    return created
+
+
 @router.get("/projects/featured")
 def get_featured_projects(
     session: SessionDep, current_user: CurrentUserOptional

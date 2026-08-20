@@ -210,6 +210,32 @@ export type BodyProjectsPostProjectPublication = {
 }
 
 /**
+ * Body_projects-post_project_upload
+ */
+export type BodyProjectsPostProjectUpload = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * File
+   */
+  file: Blob | File
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Is Public
+   */
+  is_public?: boolean
+}
+
+/**
  * Body_projects-put_project_contents
  */
 export type BodyProjectsPutProjectContents = {
@@ -6471,7 +6497,15 @@ export type GetUserGithubReposData = {
     /**
      * Page
      */
-    page?: number
+    page?: number | null
+    /**
+     * Affiliation
+     */
+    affiliation?: string
+    /**
+     * Sort
+     */
+    sort?: "updated" | "created" | "pushed" | "full_name"
   }
   url: "/user/github/repos"
 }
@@ -7479,6 +7513,39 @@ export type PostProjectResponses = {
 
 export type PostProjectResponse =
   PostProjectResponses[keyof PostProjectResponses]
+
+export type PostProjectUploadData = {
+  body: BodyProjectsPostProjectUpload
+  headers?: {
+    /**
+     * Content-Length
+     */
+    "content-length"?: number | null
+  }
+  path?: never
+  query?: never
+  url: "/projects/upload"
+}
+
+export type PostProjectUploadErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectUploadError =
+  PostProjectUploadErrors[keyof PostProjectUploadErrors]
+
+export type PostProjectUploadResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectPublic
+}
+
+export type PostProjectUploadResponse =
+  PostProjectUploadResponses[keyof PostProjectUploadResponses]
 
 export type GetFeaturedProjectsData = {
   body?: never

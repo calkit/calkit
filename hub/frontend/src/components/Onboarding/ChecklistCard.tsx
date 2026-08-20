@@ -104,11 +104,10 @@ interface ChecklistCardProps {
  * Steps stay visible after they're done rather than disappearing, since the
  * finished ones are what make the remaining ones feel finishable.
  *
- * Hiding collapses it to a single line rather than removing it: a card that
- * vanishes with no way back turns one misclick into a permanently missing
- * path through the product. The steps stay listed once everything is done
- * too, since "what did this check?" is a fair question to ask of a
- * checklist that has finished.
+ * The steps stay listed once everything is done, since "what did this
+ * check?" is a fair question to ask of a checklist that has finished.
+ * Dismissing hides it entirely; the project menu and the settings page are
+ * how it comes back, so a misclick isn't permanent.
  */
 const ChecklistCard = ({
   title,
@@ -126,29 +125,11 @@ const ChecklistCard = ({
   const complete = isComplete(steps)
   const percent = progressPercent(steps)
   const remaining = steps.filter((step) => !step.done).length
+  // Dismissing removes it outright rather than leaving a stub: the project
+  // menu brings it back, and the settings page resets every checklist, so
+  // there's a way back that doesn't cost a strip on the page forever.
   if (dismissed) {
-    return (
-      <Flex
-        align="center"
-        py={2}
-        px={6}
-        mb={4}
-        borderRadius="lg"
-        bg={secBgColor}
-      >
-        <Text fontSize="sm" color="ui.dim">
-          {title}: {complete ? "complete" : `${remaining} left`}
-        </Text>
-        <Spacer />
-        <Button
-          size="xs"
-          variant="ghost"
-          onClick={() => onDismissedChange(false)}
-        >
-          Show
-        </Button>
-      </Flex>
-    )
+    return null
   }
   return (
     <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
@@ -160,7 +141,7 @@ const ChecklistCard = ({
           variant="ghost"
           onClick={() => onDismissedChange(true)}
         >
-          {complete ? "Dismiss" : "Hide"}
+          Dismiss
         </Button>
       </Flex>
       {complete ? (

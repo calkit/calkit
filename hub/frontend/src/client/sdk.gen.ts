@@ -19,6 +19,7 @@ import type {
   BodyProjectsPostProjectFigure,
   BodyProjectsPostProjectOverleafPublication,
   BodyProjectsPostProjectPublication,
+  BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
   CommentReply,
   ContentPatch,
@@ -337,6 +338,8 @@ import type {
   PostProjectStatusResponses,
   PostProjectSyncErrors,
   PostProjectSyncResponses,
+  PostProjectUploadErrors,
+  PostProjectUploadResponses,
   PostProjectZoteroImportErrors,
   PostProjectZoteroImportResponses,
   PostProjectZoteroSyncErrors,
@@ -1314,11 +1317,18 @@ export class UsersService {
 
   /**
    * Get User Github Repos
+   *
+   * List the GitHub repos this user could create a project for.
+   *
+   * Pages through to the cap when no page is given, since callers filter the
+   * list themselves and can only filter what they were sent.
    */
   public static getUserGithubRepos<ThrowOnError extends boolean = true>(
     parameters?: {
       per_page?: number
-      page?: number
+      page?: number | null
+      affiliation?: string
+      sort?: "updated" | "created" | "pushed" | "full_name"
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1333,6 +1343,8 @@ export class UsersService {
           args: [
             { in: "query", key: "per_page" },
             { in: "query", key: "page" },
+            { in: "query", key: "affiliation" },
+            { in: "query", key: "sort" },
           ],
         },
       ],
@@ -2488,6 +2500,58 @@ export class ProjectsService {
       ...params,
       headers: {
         "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Upload
+   *
+   * Create a project from an uploaded zip of an existing one.
+   *
+   * For work that isn't on GitHub yet, which is most of what "clean up a
+   * project in progress" means. The repo is created and scaffolded the same
+   * way an empty project is, then the archive is committed on top of it, so
+   * the first two commits read as "here's the scaffolding" and "here's what
+   * I had".
+   */
+  public static postProjectUpload<ThrowOnError extends boolean = true>(
+    parameters: {
+      "content-length"?: number | null
+      bodyProjectsPostProjectUpload: BodyProjectsPostProjectUpload
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectUploadResponses,
+    PostProjectUploadErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "headers", key: "content-length" },
+            { key: "bodyProjectsPostProjectUpload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectUploadResponses,
+      PostProjectUploadErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/upload",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
         ...options?.headers,
         ...params.headers,
       },

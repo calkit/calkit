@@ -379,6 +379,43 @@ export const Body_projects_post_project_publicationSchema = {
   title: "Body_projects-post_project_publication",
 } as const
 
+export const Body_projects_post_project_uploadSchema = {
+  properties: {
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    is_public: {
+      type: "boolean",
+      title: "Is Public",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["title", "name", "file"],
+  title: "Body_projects-post_project_upload",
+} as const
+
 export const Body_projects_put_project_contentsSchema = {
   properties: {
     file: {

@@ -3843,3 +3843,69 @@ def test_post_project_dataset_provenance(
         }
     )
     assert resp.status_code == 400
+
+
+def test_extract_project_zip(tmp_path) -> None:
+    """Unpacking is confined to the target directory."""
+    import io
+    import zipfile
+
+    from fastapi import HTTPException
+
+    from app.api.routes.projects.core import _extract_project_zip
+
+    def make_zip(entries: dict[str, str]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, content in entries.items():
+                z.writestr(name, content)
+        return buf.getvalue()
+
+    dest = tmp_path / "repo"
+    dest.mkdir()
+    _extract_project_zip(
+        make_zip({"data/raw.csv": "a,b\n", "analyze.py": "print(1)\n"}),
+        str(dest),
+    )
+    assert (dest / "data" / "raw.csv").read_text() == "a,b\n"
+    assert (dest / "analyze.py").exists()
+    # A zip of a project usually has one folder at the top; keeping it would
+    # bury the project a level deeper than the user meant.
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _extract_project_zip(
+        make_zip({"my-project/README.md": "hi", "my-project/src/a.py": "x"}),
+        str(nested),
+    )
+    assert (nested / "README.md").read_text() == "hi"
+    assert (nested / "src" / "a.py").exists()
+    assert not (nested / "my-project").exists()
+    # Git's own data belongs to the repo that already exists.
+    skipped = tmp_path / "skipped"
+    skipped.mkdir()
+    _extract_project_zip(
+        make_zip({".git/config": "nope", "keep.txt": "yes"}), str(skipped)
+    )
+    assert not (skipped / ".git").exists()
+    assert (skipped / "keep.txt").exists()
+    # macOS resource forks are noise, not project files.
+    mac = tmp_path / "mac"
+    mac.mkdir()
+    _extract_project_zip(
+        make_zip({"__MACOSX/._x": "junk", "x": "real"}), str(mac)
+    )
+    assert not (mac / "__MACOSX").exists()
+    # A zip naming a path outside the destination is refused outright: this
+    # runs on our server, against a directory we control.
+    escape = tmp_path / "escape"
+    escape.mkdir()
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(
+            make_zip({"../../escaped.txt": "pwned"}), str(escape)
+        )
+    assert excinfo.value.status_code == 400
+    assert not (tmp_path.parent / "escaped.txt").exists()
+    # Something that isn't a zip is a message, not a traceback.
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(b"not a zip at all", str(escape))
+    assert excinfo.value.status_code == 400

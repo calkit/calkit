@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -804,3 +805,57 @@ def test_read_users_search_and_sort(
     ).json()
     assert body["count"] == 0
     assert body["data"] == []
+
+
+def test_get_user_github_repos_excludes_collaborations(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    """Only repos a project can actually be created for, newest first."""
+    url = f"{settings.API_V1_STR}/user/github/repos"
+    calls = []
+
+    def fake_get(request_url, headers=None, params=None):
+        calls.append(params)
+        # Two full pages then a short one, so pagination has to stop on its
+        # own rather than running to the cap.
+        page = params["page"]
+        count = params["per_page"] if page < 3 else 2
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: [
+                {"full_name": f"owner/repo-{page}-{i}"} for i in range(count)
+            ],
+            text="",
+        )
+
+    with (
+        patch(
+            "app.api.routes.users.users.get_github_token",
+            return_value="gh-token",
+        ),
+        patch("app.api.routes.users.requests.get", side_effect=fake_get),
+    ):
+        resp = client.get(url, headers=normal_user_token_headers)
+    assert resp.status_code == 200
+    # A repo you only collaborate on can't have a project created for it, so
+    # asking GitHub for those would offer choices that fail.
+    assert calls[0]["affiliation"] == "owner,organization_member"
+    # GitHub sorts by full_name unless told otherwise, which buries whatever
+    # the user has been working on.
+    assert calls[0]["sort"] == "updated"
+    # Paged through, and stopped at the short page rather than the cap.
+    assert len(calls) == 3
+    assert len(resp.json()) == 100 + 100 + 2
+    # An explicit page asks for exactly that page.
+    with (
+        patch(
+            "app.api.routes.users.users.get_github_token",
+            return_value="gh-token",
+        ),
+        patch("app.api.routes.users.requests.get", side_effect=fake_get),
+    ):
+        resp = client.get(
+            url, headers=normal_user_token_headers, params={"page": 2}
+        )
+    assert resp.status_code == 200
+    assert calls[-1]["page"] == 2

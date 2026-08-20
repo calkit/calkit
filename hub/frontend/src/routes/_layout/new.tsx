@@ -20,7 +20,10 @@ import {
   ModalFooter,
   ModalOverlay,
   Progress,
+  Radio,
+  RadioGroup,
   Select,
+  Stack,
   SimpleGrid,
   Spacer,
   Text,
@@ -37,6 +40,7 @@ import {
 } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
+import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiCircle } from "react-icons/fi"
 import { SiOverleaf, SiZotero } from "react-icons/si"
@@ -205,6 +209,10 @@ function NameItStep({
   onCreated: (project: ProjectPublic) => void
 }) {
   const isExisting = path === "existing"
+  // Plenty of "projects in progress" aren't on GitHub yet, which is the
+  // whole situation this path exists for.
+  const [fromUpload, setFromUpload] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
   const githubAppModal = useDisclosure()
@@ -251,6 +259,25 @@ function NameItStep({
   })
   const mutation = useMutation({
     mutationFn: (data: ProjectFormValues) => {
+      if (isExisting && fromUpload) {
+        if (!uploadFile) {
+          return Promise.reject(new Error("Choose a zip file to upload."))
+        }
+        return ProjectsService.postProjectUpload({
+          bodyProjectsPostProjectUpload: {
+            title: data.title,
+            name:
+              data.name ||
+              data.title
+                .toLowerCase()
+                .replace(/\s+/g, "-")
+                .replace(/[^\w-]+/g, ""),
+            description: data.description || null,
+            is_public: Boolean(data.is_public),
+            file: uploadFile,
+          },
+        }).then((response) => response.data)
+      }
       const post: ProjectPost = {
         title: data.title,
         name: data.name,
@@ -357,6 +384,22 @@ function NameItStep({
               "is research rather than setup."}
       </Text>
       {isExisting ? (
+        <RadioGroup
+          value={fromUpload ? "upload" : "repo"}
+          onChange={(value) => setFromUpload(value === "upload")}
+          mb={4}
+        >
+          <Stack>
+            <Radio value="repo" colorScheme="teal">
+              It's in a GitHub repo
+            </Radio>
+            <Radio value="upload" colorScheme="teal">
+              It's only on my machine — upload a zip of the folder
+            </Radio>
+          </Stack>
+        </RadioGroup>
+      ) : null}
+      {isExisting && !fromUpload ? (
         <FormControl mb={4}>
           <FormLabel htmlFor="existing_repo">Your GitHub repos</FormLabel>
           <FilterableSelect
@@ -368,7 +411,25 @@ function NameItStep({
             onSelect={selectRepo}
           />
           <FormHelperText>
-            Not listed? Paste the URL below instead.
+            Yours and your organizations', most recently updated first. Not
+            listed? Paste the URL below instead.
+          </FormHelperText>
+        </FormControl>
+      ) : null}
+      {isExisting && fromUpload ? (
+        <FormControl isRequired mb={4}>
+          <FormLabel htmlFor="upload">Project folder, zipped</FormLabel>
+          <Input
+            id="upload"
+            type="file"
+            accept=".zip,application/zip"
+            p={1}
+            onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+          />
+          <FormHelperText>
+            Up to 50 MB. A new GitHub repo is created for it, and the contents
+            land as the first commit. Leave large data out and add it with DVC
+            once the project is set up.
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -407,7 +468,11 @@ function NameItStep({
           </Select>
         </FormControl>
       ) : null}
-      <FormControl isInvalid={!!errors.git_repo_url} mb={4}>
+      <FormControl
+        isInvalid={!!errors.git_repo_url}
+        mb={4}
+        display={isExisting && fromUpload ? "none" : undefined}
+      >
         <FormLabel htmlFor="git_repo_url">GitHub repo URL</FormLabel>
         <Input
           id="git_repo_url"

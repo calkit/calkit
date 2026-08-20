@@ -4,7 +4,7 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
 import requests
 import sqlalchemy
@@ -292,23 +292,62 @@ def delete_user(
     return Message(message="User deleted successfully")
 
 
+# Enough to cover any realistic account without pulling on forever; the
+# picker filters client-side, so what isn't fetched can't be found.
+MAX_GITHUB_REPO_PAGES = 5
+
+
 @router.get("/user/github/repos")
 def get_user_github_repos(
     session: SessionDep,
     current_user: CurrentUser,
-    per_page: int = 30,
-    page: int = 1,
-) -> list[dict]:
+    per_page: int = 100,
+    page: int | None = None,
+    # Repos the user merely collaborates on are excluded, and not only to
+    # cut noise: creating a project for one fails, since project creation
+    # allows your own repos and your orgs' repos and nothing else. Listing
+    # them would be offering choices that can't work.
+    affiliation: str = "owner,organization_member",
+    # GitHub sorts by full_name when asked for nothing, so the first page is
+    # whatever happens to start with "a". Recently touched is what someone
+    # bringing an in-progress project over is looking for.
+    sort: Literal["updated", "created", "pushed", "full_name"] = "updated",
+) -> list[dict[str, Any]]:
+    """List the GitHub repos this user could create a project for.
+
+    Pages through to the cap when no page is given, since callers filter the
+    list themselves and can only filter what they were sent.
+    """
     # See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-repositories-for-the-authenticated-user
     access_token = users.get_github_token(session=session, user=current_user)
     url = "https://api.github.com/user/repos"
     headers = {"Authorization": f"Bearer {access_token}"}
-    resp = requests.get(
-        url, headers=headers, params=dict(page=page, per_page=per_page)
-    )
-    if not resp.status_code == 200:
-        raise HTTPException(400, f"GitHub request failed: {resp.text}")
-    return resp.json()
+
+    def fetch(page_number: int) -> list[dict[str, Any]]:
+        resp = requests.get(
+            url,
+            headers=headers,
+            params=dict(
+                page=page_number,
+                per_page=per_page,
+                affiliation=affiliation,
+                sort=sort,
+            ),
+        )
+        if resp.status_code != 200:
+            raise HTTPException(400, f"GitHub request failed: {resp.text}")
+        result: list[dict[str, Any]] = resp.json()
+        return result
+
+    if page is not None:
+        return fetch(page)
+    repos: list[dict[str, Any]] = []
+    for page_number in range(1, MAX_GITHUB_REPO_PAGES + 1):
+        batch = fetch(page_number)
+        repos.extend(batch)
+        if len(batch) < per_page:
+            break
+    return repos
 
 
 @router.put("/user/subscription")

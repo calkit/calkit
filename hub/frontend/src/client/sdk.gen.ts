@@ -28,6 +28,7 @@ import type {
   CreateReleaseShareResponses,
   CreateUserErrors,
   CreateUserResponses,
+  DeleteAllUserOnboardingFlagsResponses,
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
@@ -56,6 +57,8 @@ import type {
   DeleteUserErrors,
   DeleteUserExternalCredentialErrors,
   DeleteUserExternalCredentialResponses,
+  DeleteUserOnboardingFlagErrors,
+  DeleteUserOnboardingFlagResponses,
   DeleteUserResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
@@ -79,6 +82,7 @@ import type {
   GetDatasetsResponses,
   GetDiscountCodeErrors,
   GetDiscountCodeResponses,
+  GetFeaturedProjectsResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
   GetHubVersionResponses,
@@ -206,6 +210,7 @@ import type {
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
@@ -241,6 +246,7 @@ import type {
   NativeCollaboratorPost,
   NewPassword,
   OAuthCodeExchange,
+  OnboardingFlagPost,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
@@ -333,6 +339,8 @@ import type {
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
   PostUserGoogleAuthResponses,
+  PostUserOnboardingFlagErrors,
+  PostUserOnboardingFlagResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
   PostUserZenodoAuthErrors,
@@ -1846,6 +1854,136 @@ export class UsersService {
       ...options,
     })
   }
+
+  /**
+   * Delete User Onboarding Flag
+   *
+   * Undo a dismissal, e.g. to bring a checklist back.
+   */
+  public static deleteUserOnboardingFlag<ThrowOnError extends boolean = true>(
+    parameters: {
+      step: string
+      project_id?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteUserOnboardingFlagResponses,
+    DeleteUserOnboardingFlagErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "step" },
+            { in: "query", key: "project_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteUserOnboardingFlagResponses,
+      DeleteUserOnboardingFlagErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get User Onboarding Flags
+   *
+   * Return every onboarding step this user has dismissed or marked done.
+   *
+   * Both checklists come back together because the pages that show them are
+   * already making several requests, and one small response shared between
+   * them beats a second round trip per project.
+   */
+  public static getUserOnboardingFlags<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOnboardingFlagsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOnboardingFlagsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Onboarding Flag
+   *
+   * Dismiss a checklist, or mark a step done that we can't detect.
+   */
+  public static postUserOnboardingFlag<ThrowOnError extends boolean = true>(
+    parameters: {
+      onboardingFlagPost: OnboardingFlagPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserOnboardingFlagResponses,
+    PostUserOnboardingFlagErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "onboardingFlagPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserOnboardingFlagResponses,
+      PostUserOnboardingFlagErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete All User Onboarding Flags
+   *
+   * Bring every onboarding checklist back, everywhere.
+   *
+   * Its own route rather than a bare DELETE on the collection, so clearing
+   * the lot can't be what a request that merely forgot its ``step`` does.
+   */
+  public static deleteAllUserOnboardingFlags<
+    ThrowOnError extends boolean = true,
+  >(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteAllUserOnboardingFlagsResponses,
+    unknown,
+    ThrowOnError
+  > {
+    return (options?.client ?? client).delete<
+      DeleteAllUserOnboardingFlagsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags/all",
+      ...options,
+    })
+  }
 }
 
 export class MiscService {
@@ -2221,6 +2359,30 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Featured Projects
+   *
+   * Return the hub's curated example projects, in configured order.
+   *
+   * Curated rather than newest-first, since the projects a first-time
+   * visitor should see are the ones that show what a finished Calkit
+   * project looks like, not whatever was created most recently.
+   */
+  public static getFeaturedProjects<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeaturedProjectsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetFeaturedProjectsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/featured",
+      ...options,
     })
   }
 

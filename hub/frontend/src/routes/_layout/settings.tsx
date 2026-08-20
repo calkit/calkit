@@ -17,6 +17,7 @@ import Appearance from "../../components/UserSettings/Appearance"
 import ChangePassword from "../../components/UserSettings/ChangePassword"
 import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
+import OnboardingChecklists from "../../components/UserSettings/OnboardingChecklists"
 import UserInformation from "../../components/UserSettings/UserInformation"
 import UserTokens from "../../components/UserSettings/UserTokens"
 import Subscription from "../../components/UserSettings/Subscription"
@@ -33,6 +34,11 @@ const tabsConfig = [
   { title: "Subscription", component: Subscription, slug: "subscription" },
   { title: "Password", component: ChangePassword, slug: "password" },
   { title: "Appearance", component: Appearance, slug: "appearance" },
+  {
+    title: "Checklists",
+    component: OnboardingChecklists,
+    slug: "checklists",
+  },
   { title: "Tokens", component: UserTokens, slug: "tokens" },
   { title: "Danger zone", component: DeleteAccount, slug: "delete-account" },
 ]

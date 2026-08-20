@@ -227,6 +227,10 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
 
     @computed_field
     @property
@@ -579,6 +583,9 @@ class Project(ProjectBase, table=True):
     releases: list["Release"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -703,6 +710,61 @@ class UserProjectAccess(SQLModel, table=True):
     @property
     def role_name(self) -> str | None:
         return ROLE_NAMES[self.role_id] if self.role_id is not None else None
+
+
+class UserOnboardingFlag(SQLModel, table=True):
+    """A checklist step a user has dismissed or marked done by hand.
+
+    The onboarding checklists themselves are derived from real state --
+    whether the project has questions, an environment, a pipeline that has
+    run -- so nothing here decides whether a step is complete. This table
+    only holds what that state can't answer: a step done off-hub (an editor
+    extension installed), and a checklist the user is finished with.
+
+    ``project_id`` is null for the account-level checklist. Postgres treats
+    nulls as distinct in a unique constraint, so the account-level rows
+    aren't actually deduped by it; the API checks before inserting and reads
+    collapse to a set, which makes a duplicate harmless either way.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "user_id",
+            "project_id",
+            "step",
+            name="uq_useronboardingflag_user_project_step",
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    project_id: uuid.UUID | None = Field(
+        foreign_key="project.id", default=None
+    )
+    step: str = Field(min_length=1, max_length=64)
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    user: User = Relationship(back_populates="onboarding_flags")
+    project: Union["Project", None] = Relationship(
+        back_populates="onboarding_flags"
+    )
+
+
+class OnboardingFlags(SQLModel):
+    """Every onboarding flag a user has set, in one response.
+
+    Both checklists are read on pages that are already fetching plenty, so
+    they share a single query rather than each adding one: ``account`` holds
+    the account-level steps, and ``projects`` maps a project ID to the steps
+    flagged on it.
+    """
+
+    account: list[str] = []
+    projects: dict[str, list[str]] = {}
+
+
+class OnboardingFlagPost(SQLModel):
+    step: str = Field(min_length=1, max_length=64)
+    project_id: uuid.UUID | None = None
 
 
 class ProjectInvitation(SQLModel, table=True):

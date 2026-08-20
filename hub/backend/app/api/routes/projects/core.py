@@ -382,6 +382,42 @@ def get_projects(
     return ProjectsPublic(data=projects, count=count)  # type: ignore
 
 
+@router.get("/projects/featured")
+def get_featured_projects(
+    session: SessionDep, current_user: CurrentUserOptional
+) -> ProjectsPublic:
+    """Return the hub's curated example projects, in configured order.
+
+    Curated rather than newest-first, since the projects a first-time
+    visitor should see are the ones that show what a finished Calkit
+    project looks like, not whatever was created most recently.
+    """
+    slugs = settings.FEATURED_PROJECTS
+    if not slugs:
+        return ProjectsPublic(data=[], count=0)
+    # A featured project is only ever shown to someone who could find it
+    # anyway, so a slug that names a private project simply drops out.
+    owner_names = {slug.split("/")[0] for slug in slugs}
+    project_names = {slug.split("/")[1] for slug in slugs}
+    query = (
+        select(Project)
+        .join(Project.owner_account)  # type: ignore
+        .where(
+            Project.is_public,
+            Account.name.in_(owner_names),  # type: ignore
+            Project.name.in_(project_names),  # type: ignore
+        )
+    )
+    by_slug = {
+        f"{project.owner_account_name}/{project.name}": project
+        for project in session.exec(query).all()
+    }
+    # Sorting in Python keeps the configured order, which a SQL ORDER BY
+    # can't express without a CASE over every slug.
+    projects = [by_slug[slug] for slug in slugs if slug in by_slug]
+    return ProjectsPublic(data=projects, count=len(projects))
+
+
 @router.get("/user/projects")
 def get_owned_projects(
     *,
@@ -2042,6 +2078,10 @@ def get_project_questions(
 
 class QuestionPost(BaseModel):
     question: str
+    # Optional so a question can be recorded alongside what the researcher
+    # expects to find, which is what makes it worth writing down before the
+    # analysis rather than after.
+    hypothesis: str | None = None
 
 
 @router.post("/projects/{owner_name}/{project_name}/questions")
@@ -2064,7 +2104,14 @@ def post_project_question(
     )
     ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
-    ck_questions.append(req.question)
+    # A bare string is the compact form for a question with nothing else
+    # attached; only expand to a mapping when there's a hypothesis to hold.
+    if req.hypothesis:
+        ck_questions.append(
+            {"question": req.question, "hypothesis": req.hypothesis}
+        )
+    else:
+        ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)

@@ -1839,6 +1839,43 @@ export type OAuthCodeExchange = {
 }
 
 /**
+ * OnboardingFlagPost
+ */
+export type OnboardingFlagPost = {
+  /**
+   * Step
+   */
+  step: string
+  /**
+   * Project Id
+   */
+  project_id?: string | null
+}
+
+/**
+ * OnboardingFlags
+ *
+ * Every onboarding flag a user has set, in one response.
+ *
+ * Both checklists are read on pages that are already fetching plenty, so
+ * they share a single query rather than each adding one: ``account`` holds
+ * the account-level steps, and ``projects`` maps a project ID to the steps
+ * flagged on it.
+ */
+export type OnboardingFlags = {
+  /**
+   * Account
+   */
+  account?: Array<string>
+  /**
+   * Projects
+   */
+  projects?: {
+    [key: string]: Array<string>
+  }
+}
+
+/**
  * OperationResult
  *
  * Result for file operations like delete, move, copy.
@@ -3220,6 +3257,10 @@ export type QuestionPost = {
    * Question
    */
   question: string
+  /**
+   * Hypothesis
+   */
+  hypothesis?: string | null
 }
 
 /**
@@ -6709,6 +6750,103 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
+export type DeleteUserOnboardingFlagData = {
+  body?: never
+  path?: never
+  query: {
+    /**
+     * Step
+     */
+    step: string
+    /**
+     * Project Id
+     */
+    project_id?: string | null
+  }
+  url: "/user/onboarding-flags"
+}
+
+export type DeleteUserOnboardingFlagErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteUserOnboardingFlagError =
+  DeleteUserOnboardingFlagErrors[keyof DeleteUserOnboardingFlagErrors]
+
+export type DeleteUserOnboardingFlagResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteUserOnboardingFlagResponse =
+  DeleteUserOnboardingFlagResponses[keyof DeleteUserOnboardingFlagResponses]
+
+export type GetUserOnboardingFlagsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/onboarding-flags"
+}
+
+export type GetUserOnboardingFlagsResponses = {
+  /**
+   * Successful Response
+   */
+  200: OnboardingFlags
+}
+
+export type GetUserOnboardingFlagsResponse =
+  GetUserOnboardingFlagsResponses[keyof GetUserOnboardingFlagsResponses]
+
+export type PostUserOnboardingFlagData = {
+  body: OnboardingFlagPost
+  path?: never
+  query?: never
+  url: "/user/onboarding-flags"
+}
+
+export type PostUserOnboardingFlagErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserOnboardingFlagError =
+  PostUserOnboardingFlagErrors[keyof PostUserOnboardingFlagErrors]
+
+export type PostUserOnboardingFlagResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserOnboardingFlagResponse =
+  PostUserOnboardingFlagResponses[keyof PostUserOnboardingFlagResponses]
+
+export type DeleteAllUserOnboardingFlagsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/onboarding-flags/all"
+}
+
+export type DeleteAllUserOnboardingFlagsResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteAllUserOnboardingFlagsResponse =
+  DeleteAllUserOnboardingFlagsResponses[keyof DeleteAllUserOnboardingFlagsResponses]
+
 export type GetHubVersionData = {
   body?: never
   path?: never
@@ -7061,6 +7199,23 @@ export type PostProjectResponses = {
 
 export type PostProjectResponse =
   PostProjectResponses[keyof PostProjectResponses]
+
+export type GetFeaturedProjectsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/projects/featured"
+}
+
+export type GetFeaturedProjectsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectsPublic
+}
+
+export type GetFeaturedProjectsResponse =
+  GetFeaturedProjectsResponses[keyof GetFeaturedProjectsResponses]
 
 export type GetOwnedProjectsData = {
   body?: never

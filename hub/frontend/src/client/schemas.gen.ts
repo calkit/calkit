@@ -3099,6 +3099,60 @@ export const OAuthCodeExchangeSchema = {
   title: "OAuthCodeExchange",
 } as const
 
+export const OnboardingFlagPostSchema = {
+  properties: {
+    step: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Step",
+    },
+    project_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project Id",
+    },
+  },
+  type: "object",
+  required: ["step"],
+  title: "OnboardingFlagPost",
+} as const
+
+export const OnboardingFlagsSchema = {
+  properties: {
+    account: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Account",
+      default: [],
+    },
+    projects: {
+      additionalProperties: {
+        items: {
+          type: "string",
+        },
+        type: "array",
+      },
+      type: "object",
+      title: "Projects",
+      default: {},
+    },
+  },
+  type: "object",
+  title: "OnboardingFlags",
+  description:
+    "Every onboarding flag a user has set, in one response.\n\nBoth checklists are read on pages that are already fetching plenty, so\nthey share a single query rather than each adding one: ``account`` holds\nthe account-level steps, and ``projects`` maps a project ID to the steps\nflagged on it.",
+} as const
+
 export const OperationResultSchema = {
   properties: {
     success: {
@@ -5639,6 +5693,17 @@ export const QuestionPostSchema = {
     question: {
       type: "string",
       title: "Question",
+    },
+    hypothesis: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hypothesis",
     },
   },
   type: "object",

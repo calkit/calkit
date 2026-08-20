@@ -3544,3 +3544,53 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
             result_value_cache={},
         )
     assert evidence[0].result is None
+
+
+def test_get_featured_projects(client: TestClient, db: Session) -> None:
+    """Curated order, public only, and unknown slugs skipped."""
+    public_project, _ = _make_owner_with_project(db, client)
+    public_project.is_public = True
+    private_project, _ = _make_owner_with_project(db, client)
+    private_project.is_public = False
+    db.add(public_project)
+    db.add(private_project)
+    db.commit()
+    db.refresh(public_project)
+    db.refresh(private_project)
+    public_slug = f"{public_project.owner_account.name}/{public_project.name}"
+    private_slug = (
+        f"{private_project.owner_account.name}/{private_project.name}"
+    )
+    # A slug for a project nobody can see, and one that doesn't exist at
+    # all, both drop out rather than erroring or leaking their existence.
+    with patch.object(
+        settings,
+        "FEATURED_PROJECTS",
+        [private_slug, public_slug, "nobody/nothing"],
+    ):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [f"{p['owner_account_name']}/{p['name']}" for p in body["data"]]
+    assert slugs == [public_slug]
+    assert body["count"] == 1
+    # Configured order is the order returned, not creation order.
+    second_public, _ = _make_owner_with_project(db, client)
+    second_public.is_public = True
+    db.add(second_public)
+    db.commit()
+    db.refresh(second_public)
+    second_slug = f"{second_public.owner_account.name}/{second_public.name}"
+    with patch.object(
+        settings, "FEATURED_PROJECTS", [second_slug, public_slug]
+    ):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert [
+        f"{p['owner_account_name']}/{p['name']}"
+        for p in response.json()["data"]
+    ] == [second_slug, public_slug]
+    # An empty configuration is an empty section, not an error.
+    with patch.object(settings, "FEATURED_PROJECTS", []):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert response.status_code == 200
+    assert response.json() == {"data": [], "count": 0}

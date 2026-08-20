@@ -611,3 +611,114 @@ def test_post_user_zotero_auth(
         users.get_external_credential(session=db, user=user, provider="zotero")
         is None
     )
+
+
+def test_onboarding_flags_round_trip(
+    client: TestClient, db: Session, normal_user_token_headers: dict[str, str]
+) -> None:
+    """Account and project flags are set, listed, and cleared separately."""
+    from app.models import Project
+    from app.tests import create_random_user
+
+    base = f"{settings.API_V1_STR}/user/onboarding-flags"
+    # Start from a known state, since the normal user is shared by tests.
+    for step in ["cli", "editor", "dismissed"]:
+        client.delete(
+            base, headers=normal_user_token_headers, params={"step": step}
+        )
+    response = client.get(base, headers=normal_user_token_headers)
+    assert response.status_code == 200
+    assert response.json()["account"] == []
+    # An account-level flag lands under "account", not under a project.
+    response = client.post(
+        base, headers=normal_user_token_headers, json={"step": "cli"}
+    )
+    assert response.status_code == 200
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["account"] == ["cli"]
+    # Setting the same flag twice is a no-op rather than a duplicate.
+    client.post(base, headers=normal_user_token_headers, json={"step": "cli"})
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["account"] == ["cli"]
+    # A project the user can read takes flags keyed by its ID.
+    owner = create_random_user(db)
+    project = Project(
+        name=f"onboarding-{uuid.uuid4().hex[:8]}",
+        title="Onboarding flags project",
+        git_repo_url="https://github.com/someone/onboarding",
+        owner_account_id=owner.account.id,
+        owner_account=owner.account,
+        is_public=True,
+    )
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    response = client.post(
+        base,
+        headers=normal_user_token_headers,
+        json={"step": "editor", "project_id": str(project.id)},
+    )
+    assert response.status_code == 200
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["projects"][str(project.id)] == ["editor"]
+    # The account list is untouched by a project-scoped flag.
+    assert body["account"] == ["cli"]
+    # Deleting is scoped the same way: the project flag survives clearing
+    # the account one.
+    client.delete(
+        base, headers=normal_user_token_headers, params={"step": "cli"}
+    )
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["account"] == []
+    assert body["projects"][str(project.id)] == ["editor"]
+    client.delete(
+        base,
+        headers=normal_user_token_headers,
+        params={"step": "editor", "project_id": str(project.id)},
+    )
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["projects"].get(str(project.id), []) == []
+    # A project that doesn't exist can't be flagged.
+    response = client.post(
+        base,
+        headers=normal_user_token_headers,
+        json={"step": "editor", "project_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 404
+    # Neither can a private project the user has no access to.
+    private = Project(
+        name=f"private-{uuid.uuid4().hex[:8]}",
+        title="Private project",
+        git_repo_url="https://github.com/someone/private",
+        owner_account_id=owner.account.id,
+        owner_account=owner.account,
+        is_public=False,
+    )
+    db.add(private)
+    db.commit()
+    db.refresh(private)
+    response = client.post(
+        base,
+        headers=normal_user_token_headers,
+        json={"step": "editor", "project_id": str(private.id)},
+    )
+    assert response.status_code == 403
+    # Resetting clears everything at once, account and project alike.
+    client.post(base, headers=normal_user_token_headers, json={"step": "cli"})
+    client.post(
+        base,
+        headers=normal_user_token_headers,
+        json={"step": "editor", "project_id": str(project.id)},
+    )
+    response = client.delete(f"{base}/all", headers=normal_user_token_headers)
+    assert response.status_code == 200
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["account"] == []
+    assert body["projects"] == {}
+    # Resetting again is harmless rather than an error.
+    assert (
+        client.delete(f"{base}/all", headers=normal_user_token_headers)
+    ).status_code == 200
+    # Flags require a session at all.
+    assert client.get(base).status_code == 401
+    assert client.delete(f"{base}/all").status_code == 401

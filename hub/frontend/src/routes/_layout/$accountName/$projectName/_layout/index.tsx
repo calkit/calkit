@@ -42,6 +42,7 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { type QuestionEvidence, ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
+import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import FigureView from "../../../../../components/Figures/FigureView"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
@@ -420,6 +421,14 @@ function ProjectView() {
     <>
       <Flex mt={1}>
         <Box width="65%" mr={8}>
+          {/* What's left to set up, until it's done or dismissed */}
+          {userHasWriteAccess && !ref && projectRequest.data ? (
+            <ProjectChecklist
+              accountName={accountName}
+              projectName={projectName}
+              projectId={projectRequest.data.id}
+            />
+          ) : null}
           {/* Showcase */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">

@@ -29,6 +29,9 @@ from app.messaging import generate_new_account_email, send_email
 from app.models import (
     DiscountCode,
     Message,
+    OnboardingFlagPost,
+    OnboardingFlags,
+    Project,
     StorageUsage,
     SubscriptionUpdate,
     Token,
@@ -36,6 +39,7 @@ from app.models import (
     UpdateSubscriptionResponse,
     User,
     UserCreate,
+    UserOnboardingFlag,
     UserPublic,
     UserRegister,
     UsersPublic,
@@ -863,3 +867,111 @@ def get_user_storage(
         raise HTTPException(404, "User does not have a subscription")
     limit = current_user.subscription.storage_limit
     return StorageUsage(limit_gb=limit, used_gb=used)
+
+
+@router.get("/user/onboarding-flags")
+def get_user_onboarding_flags(
+    session: SessionDep, current_user: CurrentUser
+) -> OnboardingFlags:
+    """Return every onboarding step this user has dismissed or marked done.
+
+    Both checklists come back together because the pages that show them are
+    already making several requests, and one small response shared between
+    them beats a second round trip per project.
+    """
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id
+        )
+    ).all()
+    account: list[str] = []
+    projects: dict[str, list[str]] = {}
+    for row in rows:
+        if row.project_id is None:
+            steps = account
+        else:
+            steps = projects.setdefault(str(row.project_id), [])
+        if row.step not in steps:
+            steps.append(row.step)
+    return OnboardingFlags(account=account, projects=projects)
+
+
+@router.post("/user/onboarding-flags")
+def post_user_onboarding_flag(
+    req: OnboardingFlagPost, session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Dismiss a checklist, or mark a step done that we can't detect."""
+    if req.project_id is not None:
+        # Checked so a flag can't be attached to a project the user can't
+        # see, which would otherwise leak that the project exists. Access
+        # lives in get_project, which takes owner and name, so resolve the
+        # ID to those rather than reimplementing the checks here.
+        project = session.get(Project, req.project_id)
+        if project is None:
+            raise HTTPException(404, "Project not found")
+        app.projects.get_project(
+            session=session,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+    existing = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id,
+            UserOnboardingFlag.project_id == req.project_id,
+            UserOnboardingFlag.step == req.step,
+        )
+    ).first()
+    if existing is not None:
+        return Message(message="Success")
+    session.add(
+        UserOnboardingFlag(
+            user_id=current_user.id,
+            project_id=req.project_id,
+            step=req.step,
+        )
+    )
+    session.commit()
+    return Message(message="Success")
+
+
+@router.delete("/user/onboarding-flags/all")
+def delete_all_user_onboarding_flags(
+    session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Bring every onboarding checklist back, everywhere.
+
+    Its own route rather than a bare DELETE on the collection, so clearing
+    the lot can't be what a request that merely forgot its ``step`` does.
+    """
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    return Message(message=f"Reset {len(rows)} onboarding flags")
+
+
+@router.delete("/user/onboarding-flags")
+def delete_user_onboarding_flag(
+    step: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+    project_id: uuid.UUID | None = None,
+) -> Message:
+    """Undo a dismissal, e.g. to bring a checklist back."""
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id,
+            UserOnboardingFlag.project_id == project_id,
+            UserOnboardingFlag.step == step,
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    return Message(message="Success")

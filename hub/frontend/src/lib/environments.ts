@@ -155,21 +155,21 @@ export const PRESETS: Preset[] = [
     name: "pydata",
     label: "🐍 PyData — pandas, matplotlib, scikit-learn",
     kind: "uv",
-    envName: "main",
+    envName: "py",
     packages: [...PACKAGE_GROUPS.PyData],
   },
   {
     name: "pydata-notebooks",
     label: "📓 PyData with notebooks",
     kind: "uv",
-    envName: "main",
+    envName: "py",
     packages: [...PACKAGE_GROUPS.PyData, ...PACKAGE_GROUPS.Notebooks],
   },
   {
     name: "tidyverse",
     label: "📊 R analysis — tidyverse, knitr",
     kind: "renv",
-    envName: "r-analysis",
+    envName: "r",
     packages: [...PACKAGE_GROUPS.Tidyverse, ...PACKAGE_GROUPS.RMarkdown],
   },
   {
@@ -183,7 +183,7 @@ export const PRESETS: Preset[] = [
     name: "julia",
     label: "🔬 Julia — DataFrames, Plots",
     kind: "julia",
-    envName: "julia",
+    envName: "jl",
     packages: [...PACKAGE_GROUPS.JuliaData],
   },
 ]

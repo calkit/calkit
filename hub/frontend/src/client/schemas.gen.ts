@@ -471,6 +471,29 @@ export const CollaboratorSchema = {
   title: "Collaborator",
 } as const
 
+export const CollectorPostSchema = {
+  properties: {
+    email: {
+      type: "string",
+      title: "Email",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+  },
+  type: "object",
+  required: ["email"],
+  title: "CollectorPost",
+} as const
+
 export const CommentHighlightSchema = {
   properties: {
     position: {
@@ -993,16 +1016,19 @@ export const DatasetPostSchema = {
       ],
       title: "Stage",
     },
-    primary: {
+    collected_by: {
       anyOf: [
         {
-          type: "boolean",
+          items: {
+            $ref: "#/components/schemas/CollectorPost",
+          },
+          type: "array",
         },
         {
           type: "null",
         },
       ],
-      title: "Primary",
+      title: "Collected By",
     },
     imported_from: {
       anyOf: [
@@ -2716,11 +2742,11 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
-export const GitRepoSourcePostSchema = {
+export const GitSourcePostSchema = {
   properties: {
-    url: {
+    repo_url: {
       type: "string",
-      title: "Url",
+      title: "Repo Url",
     },
     rev: {
       type: "string",
@@ -2739,8 +2765,8 @@ export const GitRepoSourcePostSchema = {
     },
   },
   type: "object",
-  required: ["url", "rev"],
-  title: "GitRepoSourcePost",
+  required: ["repo_url", "rev"],
+  title: "GitSourcePost",
 } as const
 
 export const GithubPullRequestSchema = {
@@ -2948,17 +2974,17 @@ export const ImportedFromPostSchema = {
       ],
       title: "Doi",
     },
-    git_repo: {
+    git: {
       anyOf: [
         {
-          $ref: "#/components/schemas/GitRepoSourcePost",
+          $ref: "#/components/schemas/GitSourcePost",
         },
         {
           type: "null",
         },
       ],
     },
-    date_retrieved: {
+    date: {
       anyOf: [
         {
           type: "string",
@@ -2968,7 +2994,7 @@ export const ImportedFromPostSchema = {
           type: "null",
         },
       ],
-      title: "Date Retrieved",
+      title: "Date",
     },
   },
   type: "object",

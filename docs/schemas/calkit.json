@@ -272,6 +272,25 @@
     },
     "Dataset": {
       "properties": {
+        "collected_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Collector"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Collector"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who collected or measured this data for this project, which is what marks it as a primary artifact. Primary data has no upstream source to point at, so saying who produced it is the only way to tell it apart from data whose provenance was never recorded.",
+          "title": "Collected By"
+        },
         "description": {
           "anyOf": [
             {
@@ -289,19 +308,6 @@
           "description": "Path to the file, relative to the project root.",
           "title": "Path",
           "type": "string"
-        },
-        "primary": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Whether this data was collected or measured for this project, rather than obtained from somewhere else. Primary data has no upstream source to point at, so saying so is the only way to tell it apart from data whose provenance was never recorded.",
-          "title": "Primary"
         },
         "stage": {
           "anyOf": [
@@ -966,6 +972,25 @@
     },
     "ImportedDataset": {
       "properties": {
+        "collected_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Collector"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Collector"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who collected or measured this data for this project, which is what marks it as a primary artifact. Primary data has no upstream source to point at, so saying who produced it is the only way to tell it apart from data whose provenance was never recorded.",
+          "title": "Collected By"
+        },
         "description": {
           "anyOf": [
             {
@@ -991,7 +1016,7 @@
               "$ref": "#/$defs/_ImportedFromDoi"
             },
             {
-              "$ref": "#/$defs/_ImportedFromGitRepo"
+              "$ref": "#/$defs/_ImportedFromGit"
             }
           ],
           "title": "Imported From"
@@ -1000,19 +1025,6 @@
           "description": "Path to the file, relative to the project root.",
           "title": "Path",
           "type": "string"
-        },
-        "primary": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Whether this data was collected or measured for this project, rather than obtained from somewhere else. Primary data has no upstream source to point at, so saying so is the only way to tell it apart from data whose provenance was never recorded.",
-          "title": "Primary"
         },
         "stage": {
           "anyOf": [
@@ -7217,7 +7229,35 @@
       "title": "WordToPdfStage",
       "type": "object"
     },
-    "_GitRepoSource": {
+    "_Collector": {
+      "description": "Someone who collected a primary dataset.",
+      "properties": {
+        "email": {
+          "description": "Email address of the person.",
+          "title": "Email",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Their name, if worth recording here.",
+          "title": "Name"
+        }
+      },
+      "required": [
+        "email"
+      ],
+      "title": "_Collector",
+      "type": "object"
+    },
+    "_GitSource": {
       "properties": {
         "path": {
           "anyOf": [
@@ -7232,28 +7272,28 @@
           "description": "Path within that repo, if it isn't the whole thing.",
           "title": "Path"
         },
+        "repo_url": {
+          "description": "Clone URL of the repo the data came from.",
+          "title": "Repo Url",
+          "type": "string"
+        },
         "rev": {
           "description": "The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent.",
           "title": "Rev",
           "type": "string"
-        },
-        "url": {
-          "description": "Clone URL of the repo the data came from.",
-          "title": "Url",
-          "type": "string"
         }
       },
       "required": [
-        "url",
+        "repo_url",
         "rev"
       ],
-      "title": "_GitRepoSource",
+      "title": "_GitSource",
       "type": "object"
     },
     "_ImportedFromDoi": {
       "description": "Data published under a DOI, which is a citation, not just a link.\n\nKept apart from a URL so it can be cited and resolved as a DOI rather\nthan being one more address that happens to start with https.",
       "properties": {
-        "date_retrieved": {
+        "date": {
           "anyOf": [
             {
               "format": "date",
@@ -7265,7 +7305,7 @@
           ],
           "default": null,
           "description": "When the data was downloaded.",
-          "title": "Date Retrieved"
+          "title": "Date"
         },
         "doi": {
           "title": "Doi",
@@ -7278,10 +7318,10 @@
       "title": "_ImportedFromDoi",
       "type": "object"
     },
-    "_ImportedFromGitRepo": {
+    "_ImportedFromGit": {
       "description": "Data from a Git repo that isn't a Calkit project.",
       "properties": {
-        "date_retrieved": {
+        "date": {
           "anyOf": [
             {
               "format": "date",
@@ -7293,16 +7333,16 @@
           ],
           "default": null,
           "description": "When the data was downloaded.",
-          "title": "Date Retrieved"
+          "title": "Date"
         },
-        "git_repo": {
-          "$ref": "#/$defs/_GitRepoSource"
+        "git": {
+          "$ref": "#/$defs/_GitSource"
         }
       },
       "required": [
-        "git_repo"
+        "git"
       ],
-      "title": "_ImportedFromGitRepo",
+      "title": "_ImportedFromGit",
       "type": "object"
     },
     "_ImportedFromProject": {
@@ -7359,7 +7399,7 @@
     },
     "_ImportedFromUrl": {
       "properties": {
-        "date_retrieved": {
+        "date": {
           "anyOf": [
             {
               "format": "date",
@@ -7371,7 +7411,7 @@
           ],
           "default": null,
           "description": "When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit.",
-          "title": "Date Retrieved"
+          "title": "Date"
         },
         "url": {
           "title": "Url",

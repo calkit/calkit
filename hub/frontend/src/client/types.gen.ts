@@ -254,6 +254,20 @@ export type Collaborator = {
 }
 
 /**
+ * CollectorPost
+ */
+export type CollectorPost = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Name
+   */
+  name?: string | null
+}
+
+/**
  * CommentHighlight
  *
  * Portable anchor for a highlighted region within an artifact.
@@ -563,9 +577,9 @@ export type DatasetPost = {
    */
   stage?: string | null
   /**
-   * Primary
+   * Collected By
    */
-  primary?: boolean | null
+  collected_by?: Array<CollectorPost> | null
   imported_from?: ImportedFromPost | null
 }
 
@@ -1585,13 +1599,13 @@ export type GitRemoteHead = {
 }
 
 /**
- * GitRepoSourcePost
+ * GitSourcePost
  */
-export type GitRepoSourcePost = {
+export type GitSourcePost = {
   /**
-   * Url
+   * Repo Url
    */
-  url: string
+  repo_url: string
   /**
    * Rev
    */
@@ -1738,11 +1752,11 @@ export type ImportedFromPost = {
    * Doi
    */
   doi?: string | null
-  git_repo?: GitRepoSourcePost | null
+  git?: GitSourcePost | null
   /**
-   * Date Retrieved
+   * Date
    */
-  date_retrieved?: string | null
+  date?: string | null
 }
 
 /**

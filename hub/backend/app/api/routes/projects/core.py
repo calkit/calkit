@@ -14,7 +14,8 @@ import subprocess
 import uuid
 import zipfile
 from copy import deepcopy
-from datetime import date, datetime, timedelta
+from datetime import date as date_type
+from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
 from pathlib import Path, PurePosixPath
@@ -3965,10 +3966,15 @@ def get_project_dataset(
         return DatasetForImport.model_validate(ds)
 
 
-class GitRepoSourcePost(BaseModel):
-    url: str
+class GitSourcePost(BaseModel):
+    repo_url: str
     rev: str
     path: str | None = None
+
+
+class CollectorPost(BaseModel):
+    email: str
+    name: str | None = None
 
 
 class ImportedFromPost(BaseModel):
@@ -3986,8 +3992,10 @@ class ImportedFromPost(BaseModel):
     git_rev: str | None = None
     url: str | None = None
     doi: str | None = None
-    git_repo: GitRepoSourcePost | None = None
-    date_retrieved: date | None = None
+    git: GitSourcePost | None = None
+    # Aliased type: the field is also called `date`, and under Python 3.14's
+    # lazy annotations a bare `date` here resolves to this field's default.
+    date: date_type | None = None
 
     def to_ck_dict(self) -> dict[str, Any]:
         """Render the calkit.yaml form of this source.
@@ -3997,7 +4005,7 @@ class ImportedFromPost(BaseModel):
         """
         kinds = [
             k
-            for k in ["project", "url", "doi", "git_repo"]
+            for k in ["project", "url", "doi", "git"]
             if getattr(self, k) is not None
         ]
         if len(kinds) != 1:
@@ -4022,10 +4030,10 @@ class ImportedFromPost(BaseModel):
         elif kind == "doi":
             out["doi"] = self.doi
         else:
-            assert self.git_repo is not None
-            out["git_repo"] = self.git_repo.model_dump(exclude_none=True)
-        if self.date_retrieved is not None:
-            out["date_retrieved"] = self.date_retrieved.isoformat()
+            assert self.git is not None
+            out["git"] = self.git.model_dump(exclude_none=True)
+        if self.date is not None:
+            out["date"] = self.date.isoformat()
         return out
 
 
@@ -4038,8 +4046,9 @@ class DatasetPost(BaseModel):
     tabular: bool | None = None
     # The pipeline stage that produces it, for data the project generates.
     stage: str | None = None
-    # Collected or measured for this project, so there's no upstream source.
-    primary: bool | None = None
+    # Who collected or measured it for this project, which is what marks it
+    # as primary; primary data has no upstream source to point at.
+    collected_by: list[CollectorPost] | None = None
     imported_from: ImportedFromPost | None = None
 
 
@@ -4065,7 +4074,7 @@ def post_project_dataset(
         current_user=current_user,
         min_access_level="write",
     )
-    if req.primary and req.imported_from is not None:
+    if req.collected_by and req.imported_from is not None:
         raise HTTPException(
             422, "A dataset can be collected here or imported, not both"
         )
@@ -4113,10 +4122,19 @@ def post_project_dataset(
                 "Add and commit it first, or say where it was imported from.",
             )
     ds: dict[str, Any] = {"path": req.path}
-    for key in ["title", "description", "tabular", "stage", "primary"]:
+    for key in ["title", "description", "tabular", "stage"]:
         value = getattr(req, key)
         if value is not None:
             ds[key] = value
+    if req.collected_by:
+        # One collector stays a mapping rather than a one-item list, which is
+        # what the docs show and what reads best in calkit.yaml.
+        collectors = [
+            c.model_dump(exclude_none=True) for c in req.collected_by
+        ]
+        ds["collected_by"] = (
+            collectors[0] if len(collectors) == 1 else collectors
+        )
     if req.imported_from is not None:
         ds["imported_from"] = req.imported_from.to_ck_dict()
     # Validated against the models that own calkit.yaml, so this route can't
@@ -4140,7 +4158,7 @@ def post_project_dataset(
         event_name="Added dataset",
         add_event_info={
             "imported": req.imported_from is not None,
-            "primary": bool(req.primary),
+            "primary": bool(req.collected_by),
         },
     )
     # TODO: Put datasets into database

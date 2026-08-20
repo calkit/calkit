@@ -24,7 +24,11 @@ import type { AxiosError } from "axios"
 import { useState } from "react"
 import { Controller, type SubmitHandler, useForm } from "react-hook-form"
 
-import { type DatasetPost, ProjectsService } from "../../client"
+import {
+  type DatasetPost,
+  ProjectsService,
+  type UserPublic,
+} from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import FilterableSelect from "../Common/FilterableSelect"
@@ -81,6 +85,7 @@ interface DatasetForm {
   repo_rev: string
   repo_path: string
   date_retrieved: string
+  collected_by: string
 }
 
 /**
@@ -98,6 +103,7 @@ const NewDataset = ({
 }: NewDatasetProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
+  const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
   const routeParams = useParams({ strict: false }) as {
     accountName?: string
     projectName?: string
@@ -135,6 +141,7 @@ const NewDataset = ({
       repo_rev: "",
       repo_path: "",
       date_retrieved: "",
+      collected_by: "",
     },
   })
   const mutation = useMutation({
@@ -145,21 +152,25 @@ const NewDataset = ({
         description: data.description || null,
       }
       if (source === "primary") {
-        post.primary = true
+        // Recording who collected it is what marks it primary, and the
+        // person filling this in is almost always that person.
+        post.collected_by = [
+          { email: data.collected_by || currentUser?.email || "" },
+        ]
       } else {
         const retrieved = data.date_retrieved || null
         if (source === "url") {
-          post.imported_from = { url: data.url, date_retrieved: retrieved }
+          post.imported_from = { url: data.url, date: retrieved }
         } else if (source === "doi") {
-          post.imported_from = { doi: data.doi, date_retrieved: retrieved }
+          post.imported_from = { doi: data.doi, date: retrieved }
         } else {
           post.imported_from = {
-            git_repo: {
-              url: data.repo_url,
+            git: {
+              repo_url: data.repo_url,
               rev: data.repo_rev,
               path: data.repo_path || null,
             },
-            date_retrieved: retrieved,
+            date: retrieved,
           }
         }
       }
@@ -305,6 +316,22 @@ const NewDataset = ({
               />
               <FormHelperText>
                 Optional. Without it, the commit that adds this entry says when.
+              </FormHelperText>
+            </FormControl>
+          ) : null}
+          {source === "primary" ? (
+            <FormControl mb={4}>
+              <FormLabel htmlFor="collected_by">Collected by</FormLabel>
+              <Input
+                id="collected_by"
+                type="email"
+                {...register("collected_by")}
+                placeholder={currentUser?.email ?? "you@example.org"}
+                autoComplete="off"
+              />
+              <FormHelperText>
+                Defaults to you. Naming who produced the data is what marks it
+                as primary.
               </FormHelperText>
             </FormControl>
           ) : null}

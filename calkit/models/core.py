@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import posixpath
 import re
-from datetime import date, datetime, timedelta
+from datetime import date as date_type
+from datetime import datetime, timedelta
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -32,7 +33,7 @@ class _ImportedFromProject(BaseModel):
 
 class _ImportedFromUrl(BaseModel):
     url: str
-    date_retrieved: date | None = Field(
+    date: date_type | None = Field(
         default=None,
         description=(
             "When the data was downloaded. Optional: without it, the commit "
@@ -49,19 +50,25 @@ class _ImportedFromDoi(BaseModel):
     """
 
     doi: str
-    date_retrieved: date | None = Field(
+    date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
 
 
-class _GitRepoSource(BaseModel):
-    url: str = Field(description="Clone URL of the repo the data came from.")
+class _GitSource(BaseModel):
+    repo_url: str = Field(
+        description="Clone URL of the repo the data came from."
+    )
     rev: str = Field(
         description=(
             "The commit hash it came from. A branch or tag would move, so "
             "the data behind this entry could change without the entry "
             "changing, which is the thing recording it is meant to prevent."
         )
+    )
+    path: str | None = Field(
+        default=None,
+        description="Path within that repo, if it isn't the whole thing.",
     )
 
     @field_validator("rev")
@@ -76,18 +83,22 @@ class _GitRepoSource(BaseModel):
             )
         return v
 
-    path: str | None = Field(
-        default=None,
-        description="Path within that repo, if it isn't the whole thing.",
+
+class _ImportedFromGit(BaseModel):
+    """Data from a Git repo that isn't a Calkit project."""
+
+    git: _GitSource
+    date: date_type | None = Field(
+        default=None, description="When the data was downloaded."
     )
 
 
-class _ImportedFromGitRepo(BaseModel):
-    """Data from a Git repo that isn't a Calkit project."""
+class _Collector(BaseModel):
+    """Someone who collected a primary dataset."""
 
-    git_repo: _GitRepoSource
-    date_retrieved: date | None = Field(
-        default=None, description="When the data was downloaded."
+    email: str = Field(description="Email address of the person.")
+    name: str | None = Field(
+        default=None, description="Their name, if worth recording here."
     )
 
 
@@ -108,23 +119,28 @@ class _CalkitObject(BaseModel):
 
 
 class Dataset(_CalkitObject):
-    primary: bool | None = Field(
+    collected_by: _Collector | list[_Collector] | None = Field(
         default=None,
         description=(
-            "Whether this data was collected or measured for this project, "
-            "rather than obtained from somewhere else. Primary data has no "
-            "upstream source to point at, so saying so is the only way to "
-            "tell it apart from data whose provenance was never recorded."
+            "Who collected or measured this data for this project, which is "
+            "what marks it as a primary artifact. Primary data has no "
+            "upstream source to point at, so saying who produced it is the "
+            "only way to tell it apart from data whose provenance was never "
+            "recorded."
         ),
     )
 
     @model_validator(mode="after")
-    def _check_primary_not_imported(self) -> Dataset:
+    def _check_collected_not_imported(self) -> Dataset:
         # Data is either something you produced or something you got; a
         # dataset claiming both has one of the two wrong.
-        if self.primary and getattr(self, "imported_from", None) is not None:
+        if (
+            self.collected_by is not None
+            and getattr(self, "imported_from", None) is not None
+        ):
             raise ValueError(
-                "A primary dataset cannot also be imported from elsewhere"
+                "A dataset collected for this project cannot also be "
+                "imported from elsewhere"
             )
         return self
 
@@ -134,7 +150,7 @@ class ImportedDataset(Dataset):
         _ImportedFromProject
         | _ImportedFromUrl
         | _ImportedFromDoi
-        | _ImportedFromGitRepo
+        | _ImportedFromGit
     )
 
 

@@ -3731,22 +3731,22 @@ def test_post_project_dataset_provenance(
             "path": "data/doi.csv",
             "imported_from": {
                 "doi": "10.5281/zenodo.1",
-                "date_retrieved": "2026-01-02",
+                "date": "2026-01-02",
             },
         }
     )
     assert resp.status_code == 200, resp.text
     assert written[-1]["imported_from"] == {
         "doi": "10.5281/zenodo.1",
-        "date_retrieved": "2026-01-02",
+        "date": "2026-01-02",
     }
     # A Git repo pinned to a revision.
     resp = post(
         {
             "path": "data/repo.csv",
             "imported_from": {
-                "git_repo": {
-                    "url": "https://github.com/a/b",
+                "git": {
+                    "repo_url": "https://github.com/a/b",
                     "rev": "deadbeef",
                     "path": "out.csv",
                 }
@@ -3754,14 +3754,14 @@ def test_post_project_dataset_provenance(
         }
     )
     assert resp.status_code == 200, resp.text
-    assert written[-1]["imported_from"]["git_repo"]["rev"] == "deadbeef"
+    assert written[-1]["imported_from"]["git"]["rev"] == "deadbeef"
     # A branch or tag moves, so it can't stand in for a revision. This is
     # enforced by the model that owns calkit.yaml, not just the form.
     resp = post(
         {
             "path": "data/branch.csv",
             "imported_from": {
-                "git_repo": {"url": "https://github.com/a/b", "rev": "main"}
+                "git": {"repo_url": "https://github.com/a/b", "rev": "main"}
             },
         }
     )
@@ -3777,12 +3777,14 @@ def test_post_project_dataset_provenance(
     assert written[-1]["imported_from"] == {"url": "https://example.org/d.csv"}
     # Data collected here: needs a title and description, and the path has
     # to already exist, since nothing will fetch it.
-    resp = post({"path": "data/mine.csv", "primary": True})
+    resp = post(
+        {"path": "data/mine.csv", "collected_by": [{"email": "me@x.edu"}]}
+    )
     assert resp.status_code == 400
     resp = post(
         {
             "path": "data/mine.csv",
-            "primary": True,
+            "collected_by": [{"email": "me@x.edu"}],
             "title": "Mine",
             "description": "Collected in the lab",
         }
@@ -3793,14 +3795,15 @@ def test_post_project_dataset_provenance(
     resp = post(
         {
             "path": "data/mine.csv",
-            "primary": True,
+            "collected_by": [{"email": "me@x.edu"}],
             "title": "Mine",
             "description": "Collected in the lab",
         },
         existing_path=True,
     )
     assert resp.status_code == 200, resp.text
-    assert written[-1]["primary"] is True
+    # One collector reads better as a mapping than a one-item list.
+    assert written[-1]["collected_by"] == {"email": "me@x.edu"}
     assert "imported_from" not in written[-1]
     # Produced by a stage: doesn't exist until the pipeline runs.
     resp = post(
@@ -3827,7 +3830,7 @@ def test_post_project_dataset_provenance(
     resp = post(
         {
             "path": "data/both.csv",
-            "primary": True,
+            "collected_by": [{"email": "me@x.edu"}],
             "imported_from": {"doi": "10.1/x"},
         }
     )

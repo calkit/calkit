@@ -85,7 +85,7 @@ const NewEnvironment = ({
   const [nameTouched, setNameTouched] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const spec = ENV_KINDS.find((k) => k.kind === kind) ?? ENV_KINDS[0]
-  const path = pathOverride || defaultPathFor(kind, name || "main")
+  const path = pathOverride || defaultPathFor(kind, name || "py")
   const applyPreset = (presetName: string) => {
     const preset = PRESETS.find((p) => p.name === presetName)
     if (!preset) return
@@ -185,13 +185,20 @@ const NewEnvironment = ({
             <FormLabel htmlFor="env-name">Name</FormLabel>
             <Input
               id="env-name"
+              // A short field named "name" is what password managers latch
+              // onto; these turn off Dashlane, 1Password, LastPass, and the
+              // browser's own suggestions, which otherwise cover the field.
+              name="calkit-environment-name"
               value={name}
               onChange={(e) => {
                 setName(e.target.value)
                 setNameTouched(true)
               }}
-              placeholder="Ex: main"
+              placeholder="Ex: py"
               autoComplete="off"
+              data-form-type="other"
+              data-lpignore="true"
+              data-1p-ignore="true"
             />
             {nameError ? (
               <FormErrorMessage>{nameError}</FormErrorMessage>

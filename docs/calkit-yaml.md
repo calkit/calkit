@@ -116,13 +116,15 @@ calkit new result results/summary.json --key metrics.mean --name mean-drag
 
 ## Tables
 
-A table can be cited as evidence inline, just like a result:
+A table can be cited as evidence for a question inline, just like a result:
 
 ```yaml
-evidence:
-  - kind: table
-    path: results/top-kernels.csv
-    explanation: Top 20 GPU kernels by baseline cost.
+questions:
+  - question: What are the top 20 most expensive kernels?
+    evidence:
+      - kind: table
+        path: results/top-kernels.csv
+        explanation: Top 20 GPU kernels by baseline cost.
 ```
 
 Nothing has to be declared for that to work.

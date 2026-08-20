@@ -17,7 +17,6 @@ import {
   Th,
   Thead,
   Tr,
-  useDisclosure,
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
@@ -37,6 +36,12 @@ import { formatTimestamp } from "../../lib/strings"
 
 const usersSearchSchema = z.object({
   page: z.number().catch(1),
+  // In the URL so a search or an ordering can be linked to and survives
+  // opening a user and coming back, the same as the page number already did.
+  q: z.string().optional(),
+  sort_by: z.enum(["created", "email", "full_name"]).catch("created"),
+  desc: z.boolean().catch(true),
+  add_user_open: z.boolean().optional(),
 })
 
 export const Route = createFileRoute("/_layout/admin")({
@@ -82,25 +87,38 @@ function getUsersQueryOptions({
 function UsersTable() {
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
-  const { page } = Route.useSearch()
+  const {
+    page,
+    q,
+    sort_by: sortBy,
+    desc: descending,
+    add_user_open: addUserOpen,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const setPage = (page: number) =>
     navigate({ search: (prev) => ({ ...prev, page }) })
-  const addUserModal = useDisclosure()
-  const [searchText, setSearchText] = useState("")
+  // Typing stays local so every keystroke isn't a history entry; the URL
+  // catches up once the input settles.
+  const [searchText, setSearchText] = useState(q ?? "")
   const [searchFor] = useDebounce(searchText, 400)
-  const [sortBy, setSortBy] = useState<SortBy>("created")
-  const [descending, setDescending] = useState(true)
+  useEffect(() => {
+    if ((q ?? "") !== searchFor) {
+      navigate({
+        search: (prev) => ({ ...prev, q: searchFor || undefined, page: 1 }),
+      })
+    }
+  }, [searchFor, q, navigate])
   // Clicking the column already sorted by flips the direction, which is
   // what a header that shows an arrow implies it will do.
   const toggleSort = (column: SortBy) => {
-    if (column === sortBy) {
-      setDescending((d) => !d)
-    } else {
-      setSortBy(column)
-      setDescending(true)
-    }
-    setPage(1)
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        sort_by: column,
+        desc: column === sortBy ? !descending : true,
+        page: 1,
+      }),
+    })
   }
   const sortIndicator = (column: SortBy) =>
     column === sortBy ? (descending ? " ↓" : " ↑") : ""
@@ -133,18 +151,28 @@ function UsersTable() {
   return (
     <>
       <Flex py={4} gap={4} align="center">
-        <Button variant="primary" gap={1} onClick={addUserModal.onOpen}>
+        <Button
+          variant="primary"
+          gap={1}
+          onClick={() =>
+            navigate({ search: (prev) => ({ ...prev, add_user_open: true }) })
+          }
+        >
           <Icon as={FaPlus} /> Add user
         </Button>
-        <AddUser isOpen={addUserModal.isOpen} onClose={addUserModal.onClose} />
+        <AddUser
+          isOpen={Boolean(addUserOpen)}
+          onClose={() =>
+            navigate({
+              search: (prev) => ({ ...prev, add_user_open: undefined }),
+            })
+          }
+        />
         <ClearableInput
           placeholder="Search by name, email, or GitHub username…"
           width="33%"
           value={searchText}
-          onValueChange={(value) => {
-            setSearchText(value)
-            setPage(1)
-          }}
+          onValueChange={setSearchText}
         />
         {users ? (
           <Text fontSize="sm" color="ui.dim" ml="auto" alignSelf="center">

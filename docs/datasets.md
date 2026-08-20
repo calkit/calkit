@@ -68,5 +68,63 @@ that should be declared explicitly like:
 datasets:
   - path: data/raw.csv
     collected_by:
-      email: me@myorg.edu # Can be a list too
+      email: me@myorg.edu
+      orcid: 0000-0002-1825-0097 # Optional
 ```
+
+`collected_by` can be a list, since data is usually collected by more than
+one person, and each entry carries its own identifiers:
+
+```yaml
+datasets:
+  - path: data/raw.csv
+    collected_by:
+      - email: me@myorg.edu
+        orcid: 0000-0002-1825-0097
+      - orcid: 0000-0001-5109-3700
+      - email: acolleague@elsewhere.edu
+        name: A Colleague
+```
+
+Each person needs an email or an ORCID, or both. A name on its own doesn't
+say which of the several people with that name this is, so credit rests on
+something resolvable. An ORCID is the better of the two, since it identifies
+someone beyond this one project, and it's stored as the full
+`https://orcid.org/...` URL whether you write it that way or not.
+
+## Attributing anything else
+
+Most files are neither a dataset nor a figure nor a paper: a photograph, a
+diagram someone drew, a config a colleague sent over. Those go in `misc`,
+which takes the same `imported_from` shapes plus who made it:
+
+```yaml
+misc:
+  - path: img/test-rig.jpg
+    title: Photo of the test rig
+    created_by:
+      email: me@myorg.edu
+  - path: cfg/solver.toml
+    imported_from:
+      url: https://someone.org/solver.toml
+      date: 2026-01-02
+```
+
+### Disclosing generative AI
+
+If a generative AI tool helped produce something, say so with
+`generated_with_ai`:
+
+```yaml
+figures:
+  - path: figures/schematic.png
+    created_by:
+      email: me@myorg.edu
+    generated_with_ai: Claude Opus 5 # Can be a list too
+```
+
+<!-- prettier-ignore -->
+!!! note
+    `generated_with_ai` has to name people in `created_by` as well. A model
+    can't answer for a file, and a reader deciding whether the use was
+    appropriate needs to know who decided that it was.

@@ -275,11 +275,11 @@
         "collected_by": {
           "anyOf": [
             {
-              "$ref": "#/$defs/_Collector"
+              "$ref": "#/$defs/_Person"
             },
             {
               "items": {
-                "$ref": "#/$defs/_Collector"
+                "$ref": "#/$defs/_Person"
               },
               "type": "array"
             },
@@ -975,11 +975,11 @@
         "collected_by": {
           "anyOf": [
             {
-              "$ref": "#/$defs/_Collector"
+              "$ref": "#/$defs/_Person"
             },
             {
               "items": {
-                "$ref": "#/$defs/_Collector"
+                "$ref": "#/$defs/_Person"
               },
               "type": "array"
             },
@@ -3274,6 +3274,120 @@
         "script_path"
       ],
       "title": "MatlabScriptStage",
+      "type": "object"
+    },
+    "MiscArtifact": {
+      "description": "A path worth attributing that isn't one of the typed artifacts.\n\nMost files in a project are neither a dataset nor a figure nor a paper:\na photograph, a slide someone drew, a config a colleague sent over. They\nstill have an origin, and without somewhere to record it the honest\nanswer is missing rather than merely absent.\n\nWhat's recorded here is a claim, not proof of one: calkit.yaml is\nhand-authored, so nothing in it is verified by having been written down.\nThat's worth being explicit about wherever it's shown to a reader, and\nit's why hashes and signatures aren't among these fields -- they'd read\nas evidence while being just as hand-authored as the rest.",
+      "properties": {
+        "created_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Person"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Person"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who made this, for something produced here rather than obtained from elsewhere.",
+          "title": "Created By"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "generated_with_ai": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was.",
+          "title": "Generated With Ai"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A human-readable title.",
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "MiscArtifact",
       "type": "object"
     },
     "NixEnvironment": {
@@ -7229,34 +7343,6 @@
       "title": "WordToPdfStage",
       "type": "object"
     },
-    "_Collector": {
-      "description": "Someone who collected a primary dataset.",
-      "properties": {
-        "email": {
-          "description": "Email address of the person.",
-          "title": "Email",
-          "type": "string"
-        },
-        "name": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Their name, if worth recording here.",
-          "title": "Name"
-        }
-      },
-      "required": [
-        "email"
-      ],
-      "title": "_Collector",
-      "type": "object"
-    },
     "_GitSource": {
       "properties": {
         "path": {
@@ -7422,6 +7508,52 @@
         "url"
       ],
       "title": "_ImportedFromUrl",
+      "type": "object"
+    },
+    "_Person": {
+      "description": "A person credited with producing something in the project.",
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Email address of the person.",
+          "title": "Email"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Their name, if worth recording here.",
+          "title": "Name"
+        },
+        "orcid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL.",
+          "title": "Orcid"
+        }
+      },
+      "title": "_Person",
       "type": "object"
     }
   },
@@ -7667,6 +7799,15 @@
       "default": null,
       "description": "Base URL of the Calkit Hub on which the project is shared, backed up, and collaborated on, e.g., 'calkit.io'. The scheme can be omitted, in which case https is inferred, or http for a local host. Each project belongs to at most one hub, which makes 'ck://' paths resolvable against a known instance. Projects with no hub set are assumed to belong to 'calkit.io'.",
       "title": "Hub"
+    },
+    "misc": {
+      "default": [],
+      "description": "Paths worth attributing that aren't one of the typed artifacts, e.g. an image someone sent over or a file produced with help from a generative AI tool.",
+      "items": {
+        "$ref": "#/$defs/MiscArtifact"
+      },
+      "title": "Misc",
+      "type": "array"
     },
     "name": {
       "anyOf": [

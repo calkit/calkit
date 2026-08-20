@@ -76,6 +76,14 @@ const searchSchema = z.object({
   // "owner/name" once the project exists, which is what the later steps act
   // on. Present from step 2 onward.
   project: z.string().optional(),
+  // Whether the existing project is coming from a GitHub repo or a zip.
+  // In the URL because connecting GitHub leaves the page and comes back,
+  // and losing the choice there means picking it again.
+  upload: z.boolean().optional(),
+  // Same reason: connecting Zotero leaves the site entirely and returns
+  // here, and coming back to a closed dialog reads as the click failing.
+  overleaf_open: z.boolean().optional(),
+  zotero_open: z.boolean().optional(),
 })
 
 // Which start path the visitor picked before they had an account. The
@@ -210,8 +218,12 @@ function NameItStep({
 }) {
   const isExisting = path === "existing"
   // Plenty of "projects in progress" aren't on GitHub yet, which is the
-  // whole situation this path exists for.
-  const [fromUpload, setFromUpload] = useState(false)
+  // whole situation this path exists for. The file itself can't live in the
+  // URL, but which route the user chose can.
+  const { upload: fromUpload } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const setFromUpload = (value: boolean) =>
+    navigate({ search: (prev) => ({ ...prev, upload: value || undefined }) })
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -259,7 +271,7 @@ function NameItStep({
   })
   const mutation = useMutation({
     mutationFn: (data: ProjectFormValues) => {
-      if (isExisting && fromUpload) {
+      if (isExisting && Boolean(fromUpload)) {
         if (!uploadFile) {
           return Promise.reject(new Error("Choose a zip file to upload."))
         }
@@ -301,7 +313,7 @@ function NameItStep({
       mixpanel.track("Created new project", {
         onboarding: true,
         path,
-        from_upload: isExisting && fromUpload,
+        from_upload: isExisting && Boolean(fromUpload),
       })
       queryClient.invalidateQueries({ queryKey: ["projects"] })
       onCreated(data)
@@ -420,7 +432,7 @@ function NameItStep({
           </FormHelperText>
         </FormControl>
       ) : null}
-      {isExisting && fromUpload ? (
+      {isExisting && Boolean(fromUpload) ? (
         <FormControl isRequired mb={4}>
           <FormLabel htmlFor="upload">Project folder, zipped</FormLabel>
           <Input
@@ -475,7 +487,7 @@ function NameItStep({
       <FormControl
         isInvalid={!!errors.git_repo_url}
         mb={4}
-        display={isExisting && fromUpload ? "none" : undefined}
+        display={isExisting && Boolean(fromUpload) ? "none" : undefined}
       >
         <FormLabel htmlFor="git_repo_url">GitHub repo URL</FormLabel>
         <Input
@@ -661,8 +673,21 @@ function ConnectStep({
 }) {
   const cardBg = useColorModeValue("white", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
-  const overleafModal = useDisclosure()
-  const zoteroModal = useDisclosure()
+  const { overleaf_open: overleafOpen, zotero_open: zoteroOpen } =
+    Route.useSearch()
+  const navigate = Route.useNavigate()
+  const setOpen = (key: "overleaf_open" | "zotero_open", open: boolean) =>
+    navigate({ search: (prev) => ({ ...prev, [key]: open || undefined }) })
+  const overleafModal = {
+    isOpen: Boolean(overleafOpen),
+    onOpen: () => setOpen("overleaf_open", true),
+    onClose: () => setOpen("overleaf_open", false),
+  }
+  const zoteroModal = {
+    isOpen: Boolean(zoteroOpen),
+    onOpen: () => setOpen("zotero_open", true),
+    onClose: () => setOpen("zotero_open", false),
+  }
   return (
     <>
       <Heading size="lg" mb={2}>

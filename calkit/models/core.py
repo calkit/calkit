@@ -93,13 +93,49 @@ class _ImportedFromGit(BaseModel):
     )
 
 
-class _Collector(BaseModel):
-    """Someone who collected a primary dataset."""
+class _Person(BaseModel):
+    """A person credited with producing something in the project."""
 
-    email: str = Field(description="Email address of the person.")
+    email: str | None = Field(
+        default=None, description="Email address of the person."
+    )
     name: str | None = Field(
         default=None, description="Their name, if worth recording here."
     )
+    orcid: str | None = Field(
+        default=None,
+        description=(
+            "Their ORCID, which identifies them globally rather than only "
+            "within this project. Accepted bare or as a full URL."
+        ),
+    )
+
+    @field_validator("orcid")
+    @classmethod
+    def _normalize_orcid(cls, v: str | None) -> str | None:
+        # Stored as the resolvable URL, which is the form CITATION.cff and
+        # RO-Crate both want, so neither has to guess at a bare identifier.
+        if v is None:
+            return v
+        bare = (
+            v.strip()
+            .removeprefix("https://orcid.org/")
+            .removeprefix("http://orcid.org/")
+        )
+        if not re.fullmatch(r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]", bare):
+            raise ValueError(
+                f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
+            )
+        return f"https://orcid.org/{bare}"
+
+    @model_validator(mode="after")
+    def _check_identifiable(self) -> _Person:
+        # A name alone doesn't say which of the several people with it this
+        # is, so credit has to rest on something resolvable. Either one is
+        # enough, and an ORCID is the better of the two.
+        if self.email is None and self.orcid is None:
+            raise ValueError("A person needs an email or an ORCID, or both")
+        return self
 
 
 class _CalkitObject(BaseModel):
@@ -119,7 +155,7 @@ class _CalkitObject(BaseModel):
 
 
 class Dataset(_CalkitObject):
-    collected_by: _Collector | list[_Collector] | None = Field(
+    collected_by: _Person | list[_Person] | None = Field(
         default=None,
         description=(
             "Who collected or measured this data for this project, which is "
@@ -152,6 +188,60 @@ class ImportedDataset(Dataset):
         | _ImportedFromDoi
         | _ImportedFromGit
     )
+
+
+class MiscArtifact(_CalkitObject):
+    """A path worth attributing that isn't one of the typed artifacts.
+
+    Most files in a project are neither a dataset nor a figure nor a paper:
+    a photograph, a slide someone drew, a config a colleague sent over. They
+    still have an origin, and without somewhere to record it the honest
+    answer is missing rather than merely absent.
+
+    What's recorded here is a claim, not proof of one: calkit.yaml is
+    hand-authored, so nothing in it is verified by having been written down.
+    That's worth being explicit about wherever it's shown to a reader, and
+    it's why hashes and signatures aren't among these fields -- they'd read
+    as evidence while being just as hand-authored as the rest.
+    """
+
+    imported_from: (
+        _ImportedFromProject
+        | _ImportedFromUrl
+        | _ImportedFromDoi
+        | _ImportedFromGit
+        | None
+    ) = Field(default=None, description="Where this came from, if imported.")
+    created_by: _Person | list[_Person] | None = Field(
+        default=None,
+        description=(
+            "Who made this, for something produced here rather than "
+            "obtained from elsewhere."
+        ),
+    )
+    generated_with_ai: str | list[str] | None = Field(
+        default=None,
+        description=(
+            "Generative AI tools used to produce this, e.g. 'Claude Opus "
+            "5'. Disclosed alongside the people who made it, never instead "
+            "of them: a model can't answer for a file, and a reader "
+            "assessing whether the use was appropriate needs to know who "
+            "decided it was."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _check_attribution(self) -> MiscArtifact:
+        if self.created_by is not None and self.imported_from is not None:
+            raise ValueError(
+                "An artifact made here cannot also be imported from elsewhere"
+            )
+        if self.generated_with_ai is not None and self.created_by is None:
+            raise ValueError(
+                "generated_with_ai must name who used the tool: set "
+                "created_by as well"
+            )
+        return self
 
 
 class Figure(_CalkitObject):
@@ -1249,6 +1339,14 @@ class ProjectInfo(BaseModel):
         default={},
         description="Environments in which pipeline stages are run, keyed by "
         "name.",
+    )
+    misc: list[MiscArtifact] = Field(
+        default=[],
+        description=(
+            "Paths worth attributing that aren't one of the typed "
+            "artifacts, e.g. an image someone sent over or a file produced "
+            "with help from a generative AI tool."
+        ),
     )
     software: list[Software] = Field(
         default=[], description="Software created as part of the project."

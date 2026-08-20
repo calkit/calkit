@@ -15,12 +15,12 @@ import {
   MenuList,
   MenuItem,
   Button,
-  useDisclosure,
   Link,
 } from "@chakra-ui/react"
 import {
   createFileRoute,
   Link as RouterLink,
+  useNavigate,
   useSearch,
 } from "@tanstack/react-router"
 import { FaPlus } from "react-icons/fa"
@@ -29,11 +29,23 @@ import { FiDatabase } from "react-icons/fi"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
+import { z } from "zod"
+
+// Which "add a dataset" form is open lives in the URL, the same way the
+// references page carries its own. Filling one in is several fields of
+// work, so a refresh or a back button shouldn't throw it away, and a link
+// can hand someone the right form already open.
+const datasetsSearchSchema = z.object({
+  upload_open: z.boolean().optional(),
+  new_dataset_open: z.boolean().optional(),
+  source: z.enum(["primary", "url", "doi", "git_repo"]).optional(),
+})
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/datasets",
 )({
   component: ProjectData,
+  validateSearch: (search) => datasetsSearchSchema.parse(search),
 })
 
 function ProjectDataView() {
@@ -46,10 +58,31 @@ function ProjectDataView() {
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const { datasetsRequest } = useProjectDatasets(accountName, projectName, ref)
   const { isPending: dataPending, data: datasets } = datasetsRequest
-  const uploadDataModal = useDisclosure()
-  const labelDataModal = useDisclosure()
-  const importDataModal = useDisclosure()
-  const gitDataModal = useDisclosure()
+  const {
+    upload_open: uploadOpen,
+    new_dataset_open: newDatasetOpen,
+    source,
+  } = Route.useSearch()
+  const navigate = useNavigate({ from: Route.fullPath })
+  const openUpload = () =>
+    navigate({ search: (prev) => ({ ...prev, upload_open: true }) })
+  const openNewDataset = (nextSource: "primary" | "url" | "git_repo") =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        new_dataset_open: true,
+        source: nextSource,
+      }),
+    })
+  const closeAll = () =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        upload_open: undefined,
+        new_dataset_open: undefined,
+        source: undefined,
+      }),
+    })
 
   return (
     <>
@@ -69,39 +102,28 @@ function ProjectDataView() {
                 <Icon as={FaPlus} fontSize="xs" />
               </MenuButton>
               <MenuList>
-                <MenuItem onClick={uploadDataModal.onOpen}>
-                  Upload new dataset
-                </MenuItem>
-                <MenuItem onClick={labelDataModal.onOpen}>
+                <MenuItem onClick={openUpload}>Upload new dataset</MenuItem>
+                <MenuItem onClick={() => openNewDataset("primary")}>
                   Label an existing file or folder
                 </MenuItem>
-                <MenuItem onClick={importDataModal.onOpen}>
+                <MenuItem onClick={() => openNewDataset("url")}>
                   Import from a URL or DOI
                 </MenuItem>
-                <MenuItem onClick={gitDataModal.onOpen}>
+                <MenuItem onClick={() => openNewDataset("git_repo")}>
                   Fetch from a Git repo
                 </MenuItem>
               </MenuList>
             </Menu>
+            {/* Keyed on the source so switching between menu entries
+                remounts the form rather than leaving the previous one's
+                fields behind. */}
             <NewDataset
-              onClose={labelDataModal.onClose}
-              isOpen={labelDataModal.isOpen}
-              defaultSource="primary"
+              key={source ?? "primary"}
+              onClose={closeAll}
+              isOpen={Boolean(newDatasetOpen)}
+              defaultSource={source ?? "primary"}
             />
-            <NewDataset
-              onClose={importDataModal.onClose}
-              isOpen={importDataModal.isOpen}
-              defaultSource="url"
-            />
-            <NewDataset
-              onClose={gitDataModal.onClose}
-              isOpen={gitDataModal.isOpen}
-              defaultSource="git_repo"
-            />
-            <UploadDataset
-              onClose={uploadDataModal.onClose}
-              isOpen={uploadDataModal.isOpen}
-            />
+            <UploadDataset onClose={closeAll} isOpen={Boolean(uploadOpen)} />
           </>
         ) : (
           ""

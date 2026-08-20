@@ -245,6 +245,7 @@ the properties that go inside pipeline stages are covered under
 | `tables`                                | list[Table]                                                                                                                                                    | no       | The project's tables. Only needed for tables worth a title of their own; evidence can point at one inline.                                                                                                                                                                                                                                                                 |
 | [`references`](references.md)           | list[ReferenceCollection]                                                                                                                                      | no       | The project's bibliographies.                                                                                                                                                                                                                                                                                                                                              |
 | [`environments`](environments.md)       | dict[str, Environment]                                                                                                                                         | no       | Environments in which pipeline stages are run, keyed by name.                                                                                                                                                                                                                                                                                                              |
+| `misc`                                  | list[MiscArtifact]                                                                                                                                             | no       | Paths worth attributing that aren't one of the typed artifacts, e.g. an image someone sent over or a file produced with help from a generative AI tool.                                                                                                                                                                                                                    |
 | `software`                              | list[Software]                                                                                                                                                 | no       | Software created as part of the project.                                                                                                                                                                                                                                                                                                                                   |
 | `notebooks`                             | list[Notebook]                                                                                                                                                 | no       | The project's Jupyter notebooks.                                                                                                                                                                                                                                                                                                                                           |
 | [`procedures`](tutorials/procedures.md) | dict[str, Procedure]                                                                                                                                           | no       | Procedures, typically executed by a human, keyed by name.                                                                                                                                                                                                                                                                                                                  |
@@ -348,6 +349,31 @@ shipped early is not free to remove.
 | `title`       | str \| None | no       | null    | A human-readable title.                         |
 | `description` | str \| None | no       | null    | A longer description.                           |
 | `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+
+#### `MiscArtifact`
+
+A path worth attributing that isn't one of the typed artifacts.
+
+Most files in a project are neither a dataset nor a figure nor a paper:
+a photograph, a slide someone drew, a config a colleague sent over. They
+still have an origin, and without somewhere to record it the honest
+answer is missing rather than merely absent.
+
+What's recorded here is a claim, not proof of one: calkit.yaml is
+hand-authored, so nothing in it is verified by having been written down.
+That's worth being explicit about wherever it's shown to a reader, and
+it's why hashes and signatures aren't among these fields -- they'd read
+as evidence while being just as hand-authored as the rest.
+
+| Parameter           | Type                                                                                     | Required | Default | Description                                                                                                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`              | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                              |
+| `title`             | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                                                                                                      |
+| `description`       | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                                                                                                        |
+| `stage`             | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                               |
+| `imported_from`     | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                           |
+| `created_by`        | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than obtained from elsewhere.                                                                                                                                                                              |
+| `generated_with_ai` | str \| list[str] \| None                                                                 | no       | null    | Generative AI tools used to produce this, e.g. 'Claude Opus 5'. Disclosed alongside the people who made it, never instead of them: a model can't answer for a file, and a reader assessing whether the use was appropriate needs to know who decided it was. |
 
 #### `Software`
 
@@ -509,6 +535,53 @@ Configuration for syncing a directory with an Overleaf project.
 | `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
 | `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
 
+#### `_ImportedFromProject`
+
+| Parameter      | Type              | Required | Default | Description |
+| -------------- | ----------------- | -------- | ------- | ----------- |
+| `project`      | str               | yes      |         |             |
+| `path`         | str \| None       | no       | null    |             |
+| `git_rev`      | str \| None       | no       | null    |             |
+| `filter_paths` | list[str] \| None | no       | null    |             |
+
+#### `_ImportedFromUrl`
+
+| Parameter | Type         | Required | Default | Description                                                                                                         |
+| --------- | ------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `url`     | str          | yes      |         |                                                                                                                     |
+| `date`    | date \| None | no       | null    | When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit. |
+
+#### `_ImportedFromDoi`
+
+Data published under a DOI, which is a citation, not just a link.
+
+Kept apart from a URL so it can be cited and resolved as a DOI rather
+than being one more address that happens to start with https.
+
+| Parameter | Type         | Required | Default | Description                   |
+| --------- | ------------ | -------- | ------- | ----------------------------- |
+| `doi`     | str          | yes      |         |                               |
+| `date`    | date \| None | no       | null    | When the data was downloaded. |
+
+#### `_ImportedFromGit`
+
+Data from a Git repo that isn't a Calkit project.
+
+| Parameter | Type         | Required | Default | Description                   |
+| --------- | ------------ | -------- | ------- | ----------------------------- |
+| `git`     | _GitSource   | yes      |         |                               |
+| `date`    | date \| None | no       | null    | When the data was downloaded. |
+
+#### `_Person`
+
+A person credited with producing something in the project.
+
+| Parameter | Type        | Required | Default | Description                                                                                                       |
+| --------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `email`   | str \| None | no       | null    | Email address of the person.                                                                                      |
+| `name`    | str \| None | no       | null    | Their name, if worth recording here.                                                                              |
+| `orcid`   | str \| None | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL. |
+
 #### `FormulaParams`
 
 | Parameter | Type | Required | Default | Description |
@@ -548,5 +621,13 @@ Configuration for syncing a directory with an Overleaf project.
 | `x_values` | list[float]                                      | yes      |               |             |
 | `y_values` | list[float]                                      | yes      |               |             |
 | `method`   | Literal['floor', 'ceil', 'round', 'interpolate'] | no       | 'interpolate' |             |
+
+#### `_GitSource`
+
+| Parameter  | Type        | Required | Default | Description                                                                                                                                                                           |
+| ---------- | ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo_url` | str         | yes      |         | Clone URL of the repo the data came from.                                                                                                                                             |
+| `rev`      | str         | yes      |         | The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent. |
+| `path`     | str \| None | no       | null    | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
 
 <!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->

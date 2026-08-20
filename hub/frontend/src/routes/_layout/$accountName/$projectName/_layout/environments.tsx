@@ -11,7 +11,6 @@ import {
   Link,
   SimpleGrid,
   Text,
-  useDisclosure,
 } from "@chakra-ui/react"
 import {
   Link as RouterLink,
@@ -33,6 +32,9 @@ import useProject, {
 } from "../../../../../hooks/useProject"
 
 const environmentsSearchSchema = z.object({
+  // Creating an environment is a form worth several minutes; a refresh or a
+  // back button shouldn't discard it, and a link can open it directly.
+  new_env_open: z.boolean().optional(),
   ref: z.string().optional(),
   name: z.string().optional(),
 })
@@ -139,7 +141,11 @@ const EnvCard = ({ environment, onView }: EnvCardProps) => {
 
 function ProjectEnvsView() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, name: selectedEnvName } = Route.useSearch()
+  const {
+    ref,
+    name: selectedEnvName,
+    new_env_open: newEnvOpen,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { environmentsRequest } = useProjectEnvironments(
     accountName,
@@ -147,7 +153,10 @@ function ProjectEnvsView() {
     ref,
   )
   const { userHasWriteAccess } = useProject(accountName, projectName, ref)
-  const newEnvModal = useDisclosure()
+  const openNewEnv = () =>
+    navigate({ search: (prev) => ({ ...prev, new_env_open: true }) })
+  const closeNewEnv = () =>
+    navigate({ search: (prev) => ({ ...prev, new_env_open: undefined }) })
   const { isPending: environmentsPending, data: environments } =
     environmentsRequest
 
@@ -171,11 +180,11 @@ function ProjectEnvsView() {
               ml={1.5}
               icon={<FaPlus />}
               size="xs"
-              onClick={newEnvModal.onOpen}
+              onClick={openNewEnv}
             />
             <NewEnvironment
-              isOpen={newEnvModal.isOpen}
-              onClose={newEnvModal.onClose}
+              isOpen={Boolean(newEnvOpen)}
+              onClose={closeNewEnv}
             />
           </>
         ) : null}
@@ -202,12 +211,7 @@ function ProjectEnvsView() {
           docsUrl="https://docs.calkit.org/environments/"
         >
           {userHasWriteAccess ? (
-            <Button
-              mt={3}
-              size="sm"
-              variant="primary"
-              onClick={newEnvModal.onOpen}
-            >
+            <Button mt={3} size="sm" variant="primary" onClick={openNewEnv}>
               Create an environment
             </Button>
           ) : null}

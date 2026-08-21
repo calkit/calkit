@@ -137,3 +137,26 @@ describe("readCsvPaths", () => {
     expect(readCsvPaths("print(1)")).toEqual([])
   })
 })
+
+it("inputs that aren't CSVs get a marker line, not a pandas load", () => {
+  const paths = ["data/profiles.h5", "data/a.csv", "sims/run-1", "data/b.csv"]
+  const script = defaultScript({ datasetPaths: paths, figurePath: "f.png" })
+  expect(script).toContain("# Input: data/profiles.h5")
+  expect(script).toContain("# Input: sims/run-1")
+  // CSVs count from df regardless of where the other inputs sit
+  expect(script).toContain('df = pd.read_csv("data/a.csv")')
+  expect(script).toContain('df2 = pd.read_csv("data/b.csv")')
+  expect(script).not.toContain("df3")
+  // No CSV at all leaves nothing to plot by default, only the markers
+  const h5Only = defaultScript({
+    datasetPaths: ["data/profiles.h5"],
+    figurePath: "f.png",
+  })
+  expect(h5Only).toContain("# Input: data/profiles.h5")
+  expect(h5Only).not.toContain("df.plot")
+  expect(h5Only).toContain("Load the inputs named above")
+  // Reselecting swaps marker lines along with the load lines
+  const swapped = withDatasetLines(h5Only, ["data/a.csv"])
+  expect(swapped).not.toContain("# Input:")
+  expect(swapped).toContain('df = pd.read_csv("data/a.csv")')
+})

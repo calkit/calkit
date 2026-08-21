@@ -329,7 +329,8 @@ def test_post_project_studio_figure_edits_own_stage(
         tmp_path,
         {
             "environments": {
-                "py": {"kind": "uv-venv", "path": "requirements.txt"}
+                "py": {"kind": "uv-venv", "path": "requirements.txt"},
+                "foam": {"kind": "docker", "image": "openfoam/openfoam"},
             },
             "pipeline": {
                 "stages": {
@@ -343,16 +344,29 @@ def test_post_project_studio_figure_edits_own_stage(
                             {"path": "results/summary.json", "storage": "git"},
                         ],
                         "description": "Keep me",
-                    }
+                    },
+                    "plot-foam": {
+                        "kind": "python-script",
+                        "script_path": "scripts/plot_foam.py",
+                        "environment": "foam",
+                        "inputs": ["data/profiles.h5"],
+                        "outputs": ["figures/z.png"],
+                    },
                 }
             },
             "figures": [
-                {"path": "figures/y.png", "title": "Old", "stage": "analyze"}
+                {"path": "figures/y.png", "title": "Old", "stage": "analyze"},
+                {
+                    "path": "figures/z.png",
+                    "title": "Foam",
+                    "stage": "plot-foam",
+                },
             ],
         },
         files={
             "requirements.txt": "pandas\nmatplotlib\n",
             "scripts/analyze.py": "print('old')\n",
+            "scripts/plot_foam.py": "print('foam')\n",
         },
     )
     body = dict(
@@ -380,11 +394,40 @@ def test_post_project_studio_figure_edits_own_stage(
     ]
     assert "plot-y" not in ck["pipeline"]["stages"]
     assert ck["figures"] == [
-        {"path": "figures/y.png", "title": "New title", "stage": "analyze"}
+        {"path": "figures/y.png", "title": "New title", "stage": "analyze"},
+        {"path": "figures/z.png", "title": "Foam", "stage": "plot-foam"},
     ]
     assert (tmp_path / "repo" / "scripts" / "analyze.py").read_text() == SCRIPT
     assert "Update stage analyze" in repo.head.commit.message
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # A stage running in a Docker image keeps that environment when the
+    # edit doesn't name one: the image has its Python, and swapping it for
+    # a venv would break the stage. Its packages can't be appended to an
+    # image, so they come back as unresolved rather than being dropped.
+    resp = _post(
+        client,
+        normal_user_token_headers,
+        repo,
+        dict(
+            body,
+            stage="plot-foam",
+            figure_path="figures/z.png",
+            title="Foam",
+            script_path="scripts/plot_foam.py",
+            inputs=["data/profiles.h5", "sims/run-1"],
+            packages=["h5py"],
+        ),
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["environment"] == "foam"
+    assert data["environment_created"] is False
+    assert data["packages_missing"] == ["h5py"]
+    ck = yaml.safe_load((tmp_path / "repo" / "calkit.yaml").read_text())
+    foam_stage = ck["pipeline"]["stages"]["plot-foam"]
+    assert foam_stage["environment"] == "foam"
+    assert foam_stage["inputs"] == ["data/profiles.h5", "sims/run-1"]
+    assert ck["environments"]["foam"]["kind"] == "docker"
     # Naming a stage that doesn't exist is refused
     resp = _post(
         client, normal_user_token_headers, repo, dict(body, stage="missing")

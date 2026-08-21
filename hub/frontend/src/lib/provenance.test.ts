@@ -10,6 +10,7 @@ import {
   matchDepsToDatasets,
   normalizePath,
   declaredInputs,
+  expandIteratedPaths,
 } from "./provenance"
 
 const datasets = [
@@ -217,5 +218,79 @@ describe("declaredInputs", () => {
     expect(declaredInputs("kind: latex\n", dvcStages)).toEqual([])
     expect(declaredInputs(undefined, dvcStages)).toEqual([])
     expect(declaredInputs("::not yaml", dvcStages)).toEqual([])
+  })
+})
+
+describe("expandIteratedPaths / declaredInputs with iterate_over", () => {
+  const calkitYaml = `
+parameters:
+  models: [laminar, k-epsilon]
+  res:
+    - 1
+    - range: {start: 2, stop: 4, step: 1}
+pipeline:
+  stages:
+    run-sim:
+      kind: python-script
+      script_path: run.py
+      iterate_over:
+        - arg_name: model
+          values: [{parameter: models}]
+      outputs:
+        - cases/{model}/postProcessing
+    sweep:
+      kind: python-script
+      script_path: sweep.py
+      iterate_over:
+        - arg_name: [a, b]
+          values: [[x, 1], [y, 2]]
+        - arg_name: n
+          values: [{range: {start: 0.5, stop: 1.5, step: 0.5}}]
+      outputs:
+        - out/{a}-{b}-{n}.csv
+    plot:
+      kind: python-script
+      script_path: plot.py
+      inputs:
+        - from_stage_outputs: run-sim
+        - from_stage_outputs: sweep
+        - data/profiles.h5
+`
+  const dvcStages = {
+    "run-sim": { outs: ["cases/${item.model}/postProcessing"] },
+    sweep: { outs: ["out/${item.a}-${item.b}-${item.n}.csv"] },
+  }
+  it("expands every template form over the iterated values", () => {
+    const stageYaml = `
+kind: python-script
+inputs:
+  - from_stage_outputs: run-sim
+  - from_stage_outputs: sweep
+  - data/profiles.h5
+`
+    expect(declaredInputs(stageYaml, dvcStages, calkitYaml)).toEqual([
+      "cases/laminar/postProcessing",
+      "cases/k-epsilon/postProcessing",
+      "out/x-1-0.5.csv",
+      "out/x-1-1.csv",
+      "out/y-2-0.5.csv",
+      "out/y-2-1.csv",
+      "data/profiles.h5",
+    ])
+    // Without the calkit.yaml text there is nothing to expand with, so the
+    // template is left rather than guessed at
+    expect(declaredInputs(stageYaml, dvcStages)).toEqual([
+      "cases/${item.model}/postProcessing",
+      "out/${item.a}-${item.b}-${item.n}.csv",
+      "data/profiles.h5",
+    ])
+    // Plain paths pass through an iterating stage untouched, and a stage
+    // with nothing to iterate returns its paths as they are
+    expect(
+      expandIteratedPaths(["fixed.txt", "${item}.txt"], {
+        iterate_over: [{ arg_name: "k", values: ["p", "q"] }],
+      }),
+    ).toEqual(["fixed.txt", "p.txt", "q.txt"])
+    expect(expandIteratedPaths(["a/{x}"], undefined)).toEqual(["a/{x}"])
   })
 })

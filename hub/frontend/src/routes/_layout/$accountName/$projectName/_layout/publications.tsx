@@ -155,9 +155,10 @@ function PubInfo({
   let feederStages: string[] = []
   if (publication.stage) {
     const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
+    const calkitYaml = pipelineQuery.data?.calkit_yaml
     // What the author declared in calkit.yaml, with other stages' outputs
     // expanded; dvc.yaml's deps also carry environment locks and the like
-    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages)
+    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages, calkitYaml)
     const inputs = classifyPublicationDeps(deps, figuresQuery.data?.items ?? [])
     for (const { path, figure } of inputs.figures) {
       figureLinks.push(

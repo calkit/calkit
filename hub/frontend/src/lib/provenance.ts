@@ -225,9 +225,145 @@ export function findFeederStages(
  * they aren't used here. Empty when the stage hasn't loaded or declares
  * none.
  */
+interface StageIteration {
+  arg_name: string | string[]
+  values: unknown[]
+}
+
+interface CalkitStage {
+  iterate_over?: StageIteration[] | null
+  outputs?: (string | { path?: string })[] | null
+}
+
+/** The stages of a calkit.yaml, and its parameters, from its text. */
+function parseCalkitYaml(text: string | null | undefined): {
+  stages: Record<string, CalkitStage>
+  parameters: Record<string, unknown>
+} {
+  if (!text) return { stages: {}, parameters: {} }
+  try {
+    const doc = (yamlLoad(text) ?? {}) as {
+      pipeline?: { stages?: Record<string, CalkitStage> }
+      parameters?: Record<string, unknown>
+    }
+    return {
+      stages: doc.pipeline?.stages ?? {},
+      parameters: doc.parameters ?? {},
+    }
+  } catch {
+    return { stages: {}, parameters: {} }
+  }
+}
+
+/** The values one `iterate_over` entry runs through, as Calkit expands them:
+ * literals, `{range: {start, stop, step}}`, and `{parameter: name}` lists. */
+function iterationValues(
+  values: unknown[],
+  parameters: Record<string, unknown>,
+): unknown[] {
+  const out: unknown[] = []
+  const expandRange = (r: { start: number; stop: number; step: number }) => {
+    const decimals = Math.max(
+      ...[r.start, r.stop, r.step].map(
+        (n) => (String(n).split(".")[1] ?? "").length,
+      ),
+    )
+    for (let v = r.start; v < r.stop; v += r.step) {
+      out.push(Number(v.toFixed(decimals)))
+    }
+  }
+  for (const v of values) {
+    if (v && typeof v === "object" && "range" in v) {
+      expandRange(
+        (v as { range: { start: number; stop: number; step: number } }).range,
+      )
+    } else if (v && typeof v === "object" && "parameter" in v) {
+      const param = parameters[(v as { parameter: string }).parameter]
+      for (const pv of Array.isArray(param) ? param : []) {
+        if (pv && typeof pv === "object" && "range" in pv) {
+          expandRange(
+            (pv as { range: { start: number; stop: number; step: number } })
+              .range,
+          )
+        } else {
+          out.push(pv)
+        }
+      }
+    } else {
+      out.push(v)
+    }
+  }
+  return out
+}
+
+/**
+ * Every concrete path a templated one stands for, over a stage's
+ * `iterate_over`.
+ *
+ * A stage that runs once per case writes its outputs with the case in the
+ * path: `cases/{model}/postProcessing` in calkit.yaml, which DVC sees as
+ * `cases/${item.model}/postProcessing`. Neither is a path that exists; the
+ * combinations of the iterated arguments are. A path with no template, or
+ * a stage with nothing to iterate, comes back as is.
+ */
+export function expandIteratedPaths(
+  paths: string[],
+  stage: CalkitStage | undefined,
+  parameters: Record<string, unknown> = {},
+): string[] {
+  const iterations = stage?.iterate_over ?? []
+  if (!iterations.length) return paths
+  // Each iteration contributes a list of partial bindings; the stage runs
+  // over their product.
+  let combos: Record<string, unknown>[] = [{}]
+  for (const it of iterations) {
+    const names = Array.isArray(it.arg_name) ? it.arg_name : [it.arg_name]
+    const bindings = iterationValues(it.values ?? [], parameters).map((v) => {
+      const vals = Array.isArray(it.arg_name) ? (v as unknown[]) : [v]
+      return Object.fromEntries(names.map((n, i) => [n, vals[i]]))
+    })
+    combos = combos.flatMap((c) => bindings.map((b) => ({ ...c, ...b })))
+  }
+  const single =
+    iterations.length === 1 && !Array.isArray(iterations[0].arg_name)
+      ? iterations[0].arg_name
+      : null
+  const fill = (path: string, combo: Record<string, unknown>) =>
+    path
+      .replace(/\$\{item\.([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name) =>
+        name in combo ? String(combo[name]) : m,
+      )
+      .replace(/\$\{item\}/g, (m) => (single ? String(combo[single]) : m))
+      .replace(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (m, name) =>
+        name in combo ? String(combo[name]) : m,
+      )
+  const out: string[] = []
+  for (const path of paths) {
+    if (!/\$?\{/.test(path)) {
+      out.push(path)
+      continue
+    }
+    for (const combo of combos) {
+      const filled = fill(path, combo)
+      if (!out.includes(filled)) out.push(filled)
+    }
+  }
+  return out
+}
+
+/**
+ * A stage's inputs as declared in calkit.yaml, as concrete paths.
+ *
+ * `from_stage_outputs` is resolved through the other stage's declared
+ * outputs, and the outputs of a stage that iterates are expanded to one
+ * path per case, so what comes back can be fetched. calkit.yaml is the
+ * source; the compiled dvc.yaml only stands in for a stage it lacks, and
+ * without calkit.yaml, templated paths are left as they are.
+ */
 export function declaredInputs(
   stageYaml: string | undefined | null,
   dvcStages: Record<string, unknown> | undefined | null,
+  calkitYaml?: string | null,
 ): string[] {
   if (!stageYaml) return []
   let parsed: { inputs?: unknown } = {}
@@ -237,6 +373,7 @@ export function declaredInputs(
     return []
   }
   if (!Array.isArray(parsed.inputs)) return []
+  const ck = parseCalkitYaml(calkitYaml)
   const paths: string[] = []
   for (const input of parsed.inputs) {
     if (typeof input === "string") {
@@ -244,11 +381,16 @@ export function declaredInputs(
     } else if (input && typeof input === "object") {
       const item = input as { path?: string; from_stage_outputs?: string }
       if (item.from_stage_outputs) {
-        paths.push(
-          ...getStageOuts(
-            (dvcStages ?? {})[item.from_stage_outputs] as DvcStage | undefined,
-          ),
-        )
+        // The other stage's outputs as calkit.yaml declares them; dvc.yaml
+        // is only a fallback, for a stage calkit.yaml doesn't know.
+        const name = item.from_stage_outputs
+        const ckStage = ck.stages[name]
+        const outs = ckStage
+          ? (ckStage.outputs ?? []).flatMap((o) =>
+              typeof o === "string" ? [o] : o?.path ? [o.path] : [],
+            )
+          : getStageOuts((dvcStages ?? {})[name] as DvcStage | undefined)
+        paths.push(...expandIteratedPaths(outs, ckStage, ck.parameters))
       } else if (item.path) {
         paths.push(item.path)
       }

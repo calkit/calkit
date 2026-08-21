@@ -785,6 +785,34 @@ def get_ck_info_and_dvc_outs_from_tree(
     return result
 
 
+def dvc_object_fpath(
+    owner_name: str,
+    project_name: str,
+    dvc_out: dict[str, Any],
+    fs: Any,
+) -> str | None:
+    """Where a DVC output's bytes sit in storage, or None if not pushed.
+
+    An output imported from another Calkit project is a pointer whose
+    ``remote`` names that project (``calkit:owner/project``) and is
+    ``push: false``, so its bytes only ever live in the source project's
+    storage. That is where such a lookup goes; anything else is looked up
+    in this project's storage.
+    """
+    md5 = dvc_out.get("md5")
+    if not md5:
+        return None
+    remote = str(dvc_out.get("remote") or "")
+    if remote.startswith("calkit:") and "/" in remote:
+        owner_name, project_name = remote[len("calkit:") :].split("/", 1)
+    return get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=md5,
+        fs=fs,
+    )
+
+
 def get_contents_from_tree(
     project: Project,
     tree: RepoTree,
@@ -1117,10 +1145,10 @@ def get_contents_from_tree(
         content = None
         url = None
         if md5:
-            fp = get_data_fpath_for_md5(
+            fp = dvc_object_fpath(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             if fp is not None:
@@ -1163,10 +1191,10 @@ def get_contents_from_tree(
             else:
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
-            fp = get_data_fpath_for_md5(
+            fp = dvc_object_fpath(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             url = (

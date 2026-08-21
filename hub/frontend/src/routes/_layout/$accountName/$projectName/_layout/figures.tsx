@@ -53,6 +53,8 @@ const figuresSearchSchema = z.object({
   // Whether the figure editor is open, so a refresh or a link can land
   // on it directly.
   studio: z.boolean().optional(),
+  // The figure editor, open on the figure at `path`
+  edit: z.boolean().optional(),
   q: z.string().optional(),
 })
 
@@ -289,7 +291,7 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
-  const { studio: studioOpen } = Route.useSearch()
+  const { studio: studioOpen, edit: editOpen } = Route.useSearch()
   const studioModal = {
     isOpen: Boolean(studioOpen),
     onOpen: () => navigate({ search: (prev) => ({ ...prev, studio: true }) }),
@@ -311,6 +313,7 @@ function ProjectFigures() {
         path: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        edit: undefined,
       }),
     })
 
@@ -574,6 +577,12 @@ function ProjectFigures() {
           initialRef={base_ref ?? ref}
           initialRef2={compare_ref}
           initialArtifact={selectedFigure ?? undefined}
+          editOpen={Boolean(editOpen)}
+          onEditOpenChange={(open) =>
+            navigate({
+              search: (prev) => ({ ...prev, edit: open || undefined }),
+            })
+          }
           onRefsChange={(r1, r2) =>
             navigate({
               search: (prev) => ({

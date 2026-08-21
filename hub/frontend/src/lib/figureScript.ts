@@ -83,13 +83,22 @@ export const slug = (text: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "figure"
 
-const isLoadLine = (line: string) => /^\s*df\d*\s*=\s*pd\.read_csv\(/.test(line)
+export const isCsvPath = (path: string) => path.toLowerCase().endsWith(".csv")
 
-const loadLines = (paths: string[]) =>
-  paths.map(
-    (path, i) =>
-      `${i === 0 ? "df" : `df${i + 1}`} = pd.read_csv(${JSON.stringify(path)})`,
-  )
+// The lines the studio owns: a pandas load per CSV, and a marker naming
+// every other input, since what opens an HDF5 file or a results folder is
+// the script's business, not something to guess at.
+const isLoadLine = (line: string) =>
+  /^\s*df\d*\s*=\s*pd\.read_csv\(/.test(line) || /^\s*# Input: /.test(line)
+
+const loadLines = (paths: string[]) => {
+  const csvs = paths.filter(isCsvPath)
+  return paths.map((path) => {
+    if (!isCsvPath(path)) return `# Input: ${path}`
+    const i = csvs.indexOf(path)
+    return `${i === 0 ? "df" : `df${i + 1}`} = pd.read_csv(${JSON.stringify(path)})`
+  })
+}
 
 /**
  * The script with its `df = pd.read_csv(...)` lines replaced for a new
@@ -140,20 +149,22 @@ export function defaultScript({
 }): string {
   const [first] = datasetPaths
   const lines = ["import matplotlib.pyplot as plt", "import pandas as pd", ""]
-  // The first dataset is `df`; the rest count up from df2.
+  // The first CSV is `df`; the rest count up from df2.
   lines.push(...loadLines(datasetPaths))
   lines.push("", "fig, ax = plt.subplots(figsize=(5, 3.5))")
-  if (first && x && y) {
+  if (first && isCsvPath(first) && x && y) {
     lines.push(
       `ax.plot(df[${JSON.stringify(x)}], df[${JSON.stringify(y)}], "o")`,
       `ax.set_xlabel(${JSON.stringify(x)})`,
       `ax.set_ylabel(${JSON.stringify(y)})`,
     )
-  } else if (first) {
+  } else if (first && isCsvPath(first)) {
     lines.push(
       "# Pick the columns to plot; df.columns lists them.",
       "df.plot(ax=ax)",
     )
+  } else if (first) {
+    lines.push("# Load the inputs named above and plot them here.")
   } else {
     lines.push("# Choose a dataset above, or load one here.")
   }

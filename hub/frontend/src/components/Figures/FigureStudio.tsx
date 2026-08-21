@@ -66,6 +66,7 @@ import { ProjectsService, type StudioFigure } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { isSubmitChord } from "../../hooks/useSubmitOnCmdEnter"
 import { numericColumns, previewCsv } from "../../lib/csv"
+import { bytesToText, fetchTree, newBudget } from "../../lib/projectFiles"
 import { handleError } from "../../lib/errors"
 import {
   type RunResult,
@@ -76,6 +77,7 @@ import {
 import {
   defaultScript,
   envPackages,
+  isCsvPath,
   pickPythonEnv,
   readCsvPaths,
   savefigPath,
@@ -217,6 +219,8 @@ export interface StudioEdit {
   scriptPath: string
   figurePath: string
   datasetPaths: string[]
+  /** The stage's own environment, kept on save. */
+  environment?: string | null
   title?: string | null
   description?: string | null
 }
@@ -301,11 +305,8 @@ const FigureStudio = ({
       }).then((response) => response.data),
     enabled: isOpen && Boolean(accountName && projectName),
   })
-  const csvDatasets = useMemo(
-    () =>
-      (datasetsQuery.data ?? [])
-        .map((d) => d.path)
-        .filter((p) => p.toLowerCase().endsWith(".csv")),
+  const declaredDatasets = useMemo(
+    () => (datasetsQuery.data ?? []).map((d) => d.path),
     [datasetsQuery.data],
   )
   // The stage will run in the project's Python environment when there is
@@ -325,23 +326,33 @@ const FigureStudio = ({
     [environmentsQuery.data],
   )
   const envPackageNames = useMemo(() => envPackages(pythonEnv), [pythonEnv])
+  // What the stage will run in: its own environment when editing (which
+  // may be a Docker image, not something to swap for a venv), else the
+  // Python one the save will name.
+  const runEnvName = edit?.environment ?? pythonEnv?.name
   // The first CSV is the default for a new figure, which on a template
-  // project is the data its own pipeline plots. An existing stage's inputs
-  // are whatever they are; nothing gets picked for it.
+  // project is the data its own pipeline plots (a CSV because that's what
+  // the template script knows how to read); failing that, the first
+  // dataset of any kind. An existing stage's inputs are whatever they
+  // are; nothing gets picked for it.
   useEffect(() => {
-    if (!edit && !datasetPaths.length && csvDatasets.length) {
-      setDatasetPaths([initialDataset ?? csvDatasets[0]])
+    if (!edit && !datasetPaths.length && declaredDatasets.length) {
+      setDatasetPaths([
+        initialDataset ??
+          declaredDatasets.find(isCsvPath) ??
+          declaredDatasets[0],
+      ])
     }
-  }, [csvDatasets, datasetPaths.length, initialDataset, edit])
-  // What's offered: the declared CSV datasets, plus anything already
-  // selected that isn't declared as a dataset (a stage input that's the
-  // output of another stage, say), so it can be seen and unticked.
+  }, [declaredDatasets, datasetPaths.length, initialDataset, edit])
+  // What's offered: the declared datasets, plus anything already selected
+  // that isn't declared as a dataset (a stage input that's the output of
+  // another stage, say), so it can be seen and unticked.
   const datasetOptions = useMemo(
     () => [
-      ...datasetPaths.filter((p) => !csvDatasets.includes(p)),
-      ...csvDatasets,
+      ...datasetPaths.filter((p) => !declaredDatasets.includes(p)),
+      ...declaredDatasets,
     ],
-    [datasetPaths, csvDatasets],
+    [datasetPaths, declaredDatasets],
   )
   const primaryPath = datasetPaths[0] ?? ""
   // Editing starts from the script as committed.
@@ -373,9 +384,11 @@ const FigureStudio = ({
       ])
     }
   }, [scriptQuery.data, code])
-  // Every chosen file is fetched up front and written into the in-browser
-  // filesystem at its repo path, so the script reads them exactly as it
-  // will in the pipeline.
+  // Every chosen input is fetched up front, as bytes, and written into the
+  // in-browser filesystem at its repo path, so the script reads it exactly
+  // as it will in the pipeline. An input can be anything a script reads:
+  // an HDF5 file, a folder of simulation output, a sqlite database. What
+  // can't be fetched is reported rather than silently left out.
   const dataQuery = useQuery({
     queryKey: [
       "projects",
@@ -385,25 +398,36 @@ const FigureStudio = ({
       [...datasetPaths].sort(),
     ],
     queryFn: async () => {
-      const entries = await Promise.all(
-        datasetPaths.map(
-          async (path) =>
-            [
-              path,
-              await fetchFileText(accountName, projectName, path),
-            ] as const,
-        ),
-      )
-      return Object.fromEntries(entries) as Record<string, string>
+      const budget = newBudget()
+      const problems: string[] = []
+      const files: { path: string; data: Uint8Array }[] = []
+      for (const path of datasetPaths) {
+        files.push(
+          ...(await fetchTree(
+            accountName,
+            projectName,
+            path,
+            budget,
+            setStatus,
+            problems,
+          )),
+        )
+      }
+      setStatus("")
+      return { files, problems }
     },
     enabled: isOpen && datasetPaths.length > 0,
     retry: false,
     staleTime: 60_000,
   })
+  // Columns are only a CSV's to show; other inputs are the script's
+  // business to open.
   const preview = useMemo(() => {
-    const text = dataQuery.data?.[primaryPath]
-    return text ? previewCsv(text) : null
+    if (!isCsvPath(primaryPath)) return null
+    const file = dataQuery.data?.files.find((f) => f.path === primaryPath)
+    return file ? previewCsv(bytesToText(file.data)) : null
   }, [dataQuery.data, primaryPath])
+  const inputsReady = datasetPaths.length === 0 || Boolean(dataQuery.data)
   // Defaults follow the first dataset until the user has edited something.
   useEffect(() => {
     if (!primaryPath) return
@@ -416,8 +440,9 @@ const FigureStudio = ({
     if (!codeTouched) {
       setCode(defaultScript({ datasetPaths, figurePath: nextFigure, x, y }))
       setEditorKey((k) => k + 1)
-      // Only the version written with the columns in hand is worth running.
-      if (preview) setCodeSettled(true)
+      // Only the version written with the columns in hand is worth running
+      // (for a CSV; anything else has no columns to wait for).
+      if (preview || !isCsvPath(primaryPath)) setCodeSettled(true)
     }
   }, [primaryPath, datasetPaths, preview, codeTouched])
   useEffect(() => {
@@ -452,12 +477,12 @@ const FigureStudio = ({
   const scriptPath =
     edit?.scriptPath ?? `scripts/plot-${slug(stem(figurePath || "figure"))}.py`
   const packages = useMemo(() => packagesFromImports(code), [code])
-  const canRun = Boolean(dataQuery.data && figurePath && code.trim())
+  const canRun = Boolean(inputsReady && figurePath && code.trim())
   // One run on launch, as soon as the data and script are in, so the
   // studio opens on a figure rather than on an empty pane.
   const autoRan = useRef(false)
   const run = async () => {
-    if (!dataQuery.data || !figurePath || running) return
+    if (!inputsReady || !figurePath || running) return
     setRunning(true)
     setResult(null)
     const started = performance.now()
@@ -467,10 +492,7 @@ const FigureStudio = ({
     }
     const res = await runFigureScript({
       code,
-      files: Object.entries(dataQuery.data).map(([path, data]) => ({
-        path,
-        data,
-      })),
+      files: dataQuery.data?.files ?? [],
       figurePath,
       onStatus: setStatus,
     })
@@ -504,7 +526,8 @@ const FigureStudio = ({
           script_content: code,
           inputs: datasetPaths,
           packages,
-          environment: pythonEnv?.name ?? null,
+          // An existing stage keeps the environment it runs in
+          environment: edit?.environment ?? pythonEnv?.name ?? null,
           stage: edit?.stage ?? null,
         },
       }).then((response) => response.data),
@@ -610,7 +633,7 @@ const FigureStudio = ({
           >
             <GridItem minW={0}>
               <FormControl mb={3}>
-                <FormLabel fontSize="sm">Data</FormLabel>
+                <FormLabel fontSize="sm">Inputs</FormLabel>
                 {datasetOptions.length ? (
                   <CheckboxGroup
                     value={datasetPaths}
@@ -646,11 +669,13 @@ const FigureStudio = ({
                           <Checkbox value={p} size="sm" colorScheme="teal">
                             <Code fontSize="xs">{p}</Code>
                           </Checkbox>
-                          <DatasetPeek
-                            accountName={accountName}
-                            projectName={projectName}
-                            path={p}
-                          />
+                          {isCsvPath(p) ? (
+                            <DatasetPeek
+                              accountName={accountName}
+                              projectName={projectName}
+                              path={p}
+                            />
+                          ) : null}
                         </WrapItem>
                       ))}
                     </Wrap>
@@ -659,7 +684,7 @@ const FigureStudio = ({
                   <Text fontSize="sm" color="ui.dim">
                     {datasetsQuery.isPending
                       ? "Loading datasets"
-                      : "No CSV datasets declared yet. Add one from the " +
+                      : "No datasets declared yet. Add one from the " +
                         "datasets page first."}
                   </Text>
                 )}
@@ -673,6 +698,12 @@ const FigureStudio = ({
                 ) : dataQuery.isError ? (
                   <FormHelperText fontSize="xs" color="red.400">
                     {(dataQuery.error as Error).message}
+                  </FormHelperText>
+                ) : null}
+                {dataQuery.data?.problems.length ? (
+                  <FormHelperText fontSize="xs" color="red.400">
+                    Some inputs didn't load:{" "}
+                    {dataQuery.data.problems.join("; ")}
                   </FormHelperText>
                 ) : null}
               </FormControl>
@@ -723,7 +754,7 @@ const FigureStudio = ({
                   {packages.length
                     ? `Uses ${packages.join(", ")}`
                     : "No packages detected"}
-                  {pythonEnv ? (
+                  {runEnvName ? (
                     <>
                       . Runs in environment{" "}
                       <Link
@@ -733,7 +764,7 @@ const FigureStudio = ({
                         // the same confirmation as closing it would.
                         onClick={() => requestLeave(goToEnvironment)}
                       >
-                        '{pythonEnv.name}'
+                        '{runEnvName}'
                       </Link>
                     </>
                   ) : environmentsQuery.isSuccess ? (

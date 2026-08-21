@@ -57,108 +57,11 @@ import CodeEditorPane from "../Common/CodeEditorPane"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import { envPackages, pickPythonEnv } from "../../lib/figureScript"
+import { fetchTree, newBudget } from "../../lib/projectFiles"
 
 // Inputs are what the code reads, so the caps are about what a browser can
 // hold, not about tidiness: a profiler's sqlite or a results HDF5 can run
 // to hundreds of megabytes and still be exactly what's needed.
-const MAX_INPUT_BYTES = 512 * 1024 * 1024
-const MAX_TOTAL_INPUT_BYTES = 1536 * 1024 * 1024
-const MAX_INPUT_FILES = 5000
-
-const bytesOf = (item: any): Promise<Uint8Array | null> => {
-  if (item.content) {
-    const binary = atob(item.content)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return Promise.resolve(bytes)
-  }
-  if (item.url) {
-    return fetch(String(item.url)).then(async (resp) =>
-      resp.ok ? new Uint8Array(await resp.arrayBuffer()) : null,
-    )
-  }
-  return Promise.resolve(null)
-}
-
-/**
- * Every file under a repo path, as bytes at their repo paths.
- *
- * A stage input is as often a directory (a stage's output folder, a
- * results tree) as a single file, and a notebook reading from it expects
- * the files inside. Missing a file is worse than it looks: sqlite, for
- * one, quietly creates an empty database at a path that isn't there.
- */
-async function fetchTree(
-  ownerName: string,
-  projectName: string,
-  path: string,
-  budget: { bytes: number; files: number },
-  onStatus: (status: string) => void,
-  problems: string[],
-): Promise<{ path: string; data: Uint8Array }[]> {
-  let item: any
-  try {
-    item = await ProjectsService.getProjectContents({
-      owner_name: ownerName,
-      project_name: projectName,
-      path,
-    }).then((response) => response.data as any)
-  } catch {
-    problems.push(`${path}: not found in the project`)
-    return []
-  }
-  if (!item) return []
-  if (item.type === "dir") {
-    const out: { path: string; data: Uint8Array }[] = []
-    for (const child of (item.dir_items ?? []) as any[]) {
-      if (budget.files <= 0 || budget.bytes <= 0) {
-        problems.push(`${path}: not fully loaded, the input budget ran out`)
-        break
-      }
-      out.push(
-        ...(await fetchTree(
-          ownerName,
-          projectName,
-          String(child.path),
-          budget,
-          onStatus,
-          problems,
-        )),
-      )
-    }
-    return out
-  }
-  if (item.size && item.size > MAX_INPUT_BYTES) {
-    problems.push(
-      `${path}: ${(item.size / 1e6).toFixed(0)} MB is over the ${
-        MAX_INPUT_BYTES / 1024 / 1024
-      } MB per-file limit`,
-    )
-    return []
-  }
-  if (!item.content && !item.url) {
-    problems.push(
-      `${path}: this version isn't in the hub's storage; ` +
-        "push it with `calkit dvc push` (against this hub) and reopen",
-    )
-    return []
-  }
-  onStatus(`Loading ${path}`)
-  let data: Uint8Array | null = null
-  try {
-    data = await bytesOf(item)
-  } catch (e) {
-    problems.push(`${path}: download failed (${(e as Error).message})`)
-    return []
-  }
-  if (!data) {
-    problems.push(`${path}: download failed`)
-    return []
-  }
-  budget.files -= 1
-  budget.bytes -= data.length
-  return [{ path, data }]
-}
 
 interface NotebookRunnerProps {
   isOpen: boolean
@@ -282,7 +185,7 @@ const NotebookRunner = ({
     const files: { path: string; data: Uint8Array }[] = []
     // Every input the stage declares, as is, directories walked: these are
     // what the code reads, not a list for a person, so nothing is filtered.
-    const budget = { bytes: MAX_TOTAL_INPUT_BYTES, files: MAX_INPUT_FILES }
+    const budget = newBudget()
     const problems: string[] = []
     for (const inputPath of inputs) {
       files.push(

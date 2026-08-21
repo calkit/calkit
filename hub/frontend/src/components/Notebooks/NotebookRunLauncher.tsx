@@ -3,14 +3,14 @@ import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
-import { declaredInputs, getStageDeps } from "../../lib/provenance"
+import { declaredInputs } from "../../lib/provenance"
 import NotebookRunner from "./NotebookRunner"
 
 /**
  * The "Run notebook" button, wherever a Jupyter notebook is shown.
  *
- * The stage's inputs come from the compiled pipeline so the runner can put
- * the files the notebook reads into place. A marimo notebook (a .py) is a
+ * The stage's inputs come from calkit.yaml so the runner can put the
+ * files the notebook reads into place. A marimo notebook (a .py) is a
  * different runtime and isn't offered here yet.
  */
 const NotebookRunLauncher = ({
@@ -68,13 +68,13 @@ const NotebookRunLauncher = ({
   })
   if (!path.toLowerCase().endsWith(".ipynb")) return null
   const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
-  const declared = declaredInputs(stageQuery.data?.yaml, dvcStages)
-  const inputs = (
-    declared.length
-      ? declared
-      : getStageDeps((stage ? dvcStages[stage] : undefined) as any).filter(
-          (d) => !d.startsWith(".calkit/"),
-        )
+  const calkitYaml = pipelineQuery.data?.calkit_yaml
+  // calkit.yaml is the source of what the notebook reads; the compiled
+  // pipeline only helps resolve a stage calkit.yaml doesn't describe.
+  const inputs = declaredInputs(
+    stageQuery.data?.yaml,
+    dvcStages,
+    calkitYaml,
   ).filter((d) => d !== path)
   return (
     <Box mt={3} pt={3} borderTopWidth={1}>

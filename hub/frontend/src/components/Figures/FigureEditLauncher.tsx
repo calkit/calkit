@@ -5,6 +5,7 @@ import mixpanel from "mixpanel-browser"
 
 import { type Figure, ProjectsService } from "../../client"
 import useProject from "../../hooks/useProject"
+import { declaredInputs } from "../../lib/provenance"
 import NotebookRunLauncher from "../Notebooks/NotebookRunLauncher"
 import FigureStudio, { type StudioEdit } from "./FigureStudio"
 
@@ -12,6 +13,7 @@ interface StageInfo {
   kind?: string
   script_path?: string
   notebook_path?: string
+  environment?: string | null
   inputs?: (string | { from_stage_outputs?: string; path?: string })[]
 }
 
@@ -26,13 +28,23 @@ const FigureEditLauncher = ({
   ownerName,
   projectName,
   figure,
+  isOpen,
+  onOpenChange,
 }: {
   ownerName: string
   projectName: string
   figure: Figure
+  /** Controlled open state, for a page that keeps it in the URL. */
+  isOpen?: boolean
+  onOpenChange?: (open: boolean) => void
 }) => {
   const { userHasWriteAccess } = useProject(ownerName, projectName)
-  const studio = useDisclosure()
+  const local = useDisclosure()
+  const studio = {
+    isOpen: isOpen ?? local.isOpen,
+    onOpen: () => (onOpenChange ? onOpenChange(true) : local.onOpen()),
+    onClose: () => (onOpenChange ? onOpenChange(false) : local.onClose()),
+  }
   const stageQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "stage", figure.stage],
     queryFn: () =>
@@ -74,16 +86,14 @@ const FigureEditLauncher = ({
   } catch {
     return null
   }
-  const dvcStage = pipelineQuery.data?.dvc_stages?.[figure.stage] as
-    | { deps?: string[] | null }
-    | undefined
-  // Inputs from both places they can be declared: concrete deps in
-  // dvc.yaml, and plain paths in the stage's own inputs list.
-  const declared = (stage.inputs ?? []).flatMap((i) =>
-    typeof i === "string" ? [i] : i.path ? [i.path] : [],
-  )
-  const csvDeps = [...new Set([...(dvcStage?.deps ?? []), ...declared])].filter(
-    (d) => d.toLowerCase().endsWith(".csv"),
+  // What the script reads, of any kind (a CSV, an HDF5 file, another
+  // stage's output folder): the stage's inputs as declared in calkit.yaml,
+  // with `from_stage_outputs` resolved through the other stage's declared
+  // outputs and any iteration expanded.
+  const inputs = declaredInputs(
+    stageQuery.data.yaml,
+    pipelineQuery.data?.dvc_stages as Record<string, unknown> | undefined,
+    pipelineQuery.data?.calkit_yaml,
   )
   if (stage.kind === "python-script" && stage.script_path) {
     if (!userHasWriteAccess) return null
@@ -91,7 +101,8 @@ const FigureEditLauncher = ({
       stage: figure.stage,
       scriptPath: stage.script_path,
       figurePath: figure.path,
-      datasetPaths: csvDeps,
+      datasetPaths: inputs,
+      environment: stage.environment ?? null,
       title: figure.title,
       description: figure.description,
     }

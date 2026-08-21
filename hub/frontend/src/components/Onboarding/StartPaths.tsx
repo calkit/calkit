@@ -31,7 +31,7 @@ export const START_PATHS: PathOption[] = [
   {
     path: "existing",
     icon: FaBroom,
-    title: "Get a grip on a project in progress",
+    title: "Take control of a project in progress",
     description:
       "Scripts on your laptop, data on a shared drive, figures pasted into " +
       "Overleaf. Bring it under one roof and find out what it would take " +

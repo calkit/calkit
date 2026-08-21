@@ -263,8 +263,14 @@ def post_project_studio_figure(
                     f"Stage '{name}' already produces {figure_path}; "
                     "edit that stage or choose another path",
                 )
-    # Environment: reuse the project's Python one, or make one
-    env_name, env = _choose_environment(ck_info, req.environment)
+    # Environment: the one asked for; when editing, the stage's own unless
+    # asked otherwise (a stage may run in a Docker image with Python in it,
+    # which is nothing to replace with a fresh venv); else the project's
+    # Python one, or a new one
+    requested_env = req.environment
+    if requested_env is None and editing is not None:
+        requested_env = editing.get("environment")
+    env_name, env = _choose_environment(ck_info, requested_env)
     env_created = False
     packages_missing: list[str] = []
     if env_name is None or env is None:

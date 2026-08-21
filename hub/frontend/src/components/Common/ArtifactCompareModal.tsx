@@ -100,6 +100,9 @@ interface ArtifactCompareModalProps {
   onRefsChange?: (ref1: string | undefined, ref2: string | undefined) => void
   onPrev?: () => void
   onNext?: () => void
+  /** Whether the figure editor is open, when the page keeps it in the URL. */
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }
 
 /** Render the artifact content for a given kind/data. */
@@ -300,11 +303,15 @@ function FigureInfo({
   ownerName,
   projectName,
   gitRef,
+  editOpen,
+  onEditOpenChange,
 }: {
   figure: Figure
   ownerName: string
   projectName: string
   gitRef?: string
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }) {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   // Typed as plain string so the router's typed `to` prop accepts them.
@@ -351,6 +358,7 @@ function FigureInfo({
     const deps = declaredInputs(
       stageQuery.data?.yaml,
       pipelineQuery.data.dvc_stages,
+      pipelineQuery.data.calkit_yaml,
     )
     if (figure.dataset && !deps.includes(figure.dataset))
       deps.push(figure.dataset)
@@ -443,6 +451,8 @@ function FigureInfo({
         ownerName={ownerName}
         projectName={projectName}
         figure={figure}
+        isOpen={editOpen}
+        onOpenChange={onEditOpenChange}
       />
     </Box>
   )
@@ -573,6 +583,8 @@ export function ArtifactCompareModal({
   onRefsChange,
   onPrev,
   onNext,
+  editOpen,
+  onEditOpenChange,
 }: ArtifactCompareModalProps) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.50", "gray.700")
@@ -1115,6 +1127,8 @@ export function ArtifactCompareModal({
                     ownerName={ownerName}
                     projectName={projectName}
                     gitRef={ref1}
+                    editOpen={editOpen}
+                    onEditOpenChange={onEditOpenChange}
                   />
                 )}
                 <FigureComments

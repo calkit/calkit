@@ -315,6 +315,15 @@ function ProjectView() {
   const visibleIssues = issuesRequest.data?.filter(
     (issue) => showClosedTodos || issue.state === "open",
   )
+  // The home page shows the top of the list; the full list, with labels,
+  // milestones, and search, is GitHub's own issues page.
+  const HOME_TODOS_LIMIT = 5
+  const topIssues = visibleIssues?.slice(0, HOME_TODOS_LIMIT)
+  const issuesUrl = projectRequest.data?.git_repo_url
+    ? `${projectRequest.data.git_repo_url}/issues${
+        showClosedTodos ? "?q=is%3Aissue" : ""
+      }`
+    : null
   const { readmeRequest } = useProjectReadme(accountName, projectName, ref)
   const { questionsRequest } = useProjectQuestions(
     accountName,
@@ -689,7 +698,7 @@ function ProjectView() {
               <LoadingSpinner />
             ) : (
               <>
-                {visibleIssues?.map((issue) => {
+                {topIssues?.map((issue) => {
                   const routeMap: Record<string, string> = {
                     figure: "figures",
                     publication: "publications",
@@ -730,6 +739,20 @@ function ProjectView() {
                     </Flex>
                   )
                 })}
+                {issuesUrl && (visibleIssues?.length ?? 0) > 0 ? (
+                  <Link
+                    isExternal
+                    href={issuesUrl}
+                    fontSize="sm"
+                    display="inline-block"
+                    mt={2}
+                  >
+                    {(visibleIssues?.length ?? 0) > HOME_TODOS_LIMIT
+                      ? `See all ${visibleIssues?.length} on GitHub`
+                      : "See all on GitHub"}{" "}
+                    <Icon as={ExternalLinkIcon} mb={0.5} />
+                  </Link>
+                ) : null}
               </>
             )}
           </Box>

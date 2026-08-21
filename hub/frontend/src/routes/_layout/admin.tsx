@@ -223,6 +223,14 @@ function UsersTable() {
         />
         <ClearableInput
           placeholder="Search by name, email, or GitHub username…"
+          // A search box that mentions "email" and "username" is exactly
+          // what password managers try to fill; these opt out of Dashlane,
+          // 1Password, LastPass, and the browser's own suggestions.
+          name="calkit-user-search"
+          autoComplete="off"
+          data-form-type="other"
+          data-lpignore="true"
+          data-1p-ignore="true"
           width="33%"
           value={searchText}
           onValueChange={setSearchText}

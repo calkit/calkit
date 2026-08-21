@@ -21,6 +21,7 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 import type { AxiosError } from "axios"
 import Logo from "/assets/images/calkit-no-bg.svg"
 import { LoginService, UsersService } from "../client"
+import OAuthButtons from "../components/Common/OAuthButtons"
 import { isLoggedIn } from "../hooks/useAuth"
 import useCustomToast from "../hooks/useCustomToast"
 import { popPostLoginRedirect, storeTokens } from "../lib/auth"
@@ -100,6 +101,7 @@ function SignUp() {
       <Text fontSize="lg" fontWeight="bold">
         Create your account
       </Text>
+      <OAuthButtons verb="Sign up" page="signup" />
       <form onSubmit={handleSubmit(onSubmit)} style={{ width: "100%" }}>
         <FormControl isInvalid={!!errors.full_name} mb={3}>
           <FormLabel htmlFor="full_name">Name</FormLabel>

@@ -88,6 +88,10 @@ export type BodyProjectsPostProjectDatasetUpload = {
    * Collected By Name
    */
   collected_by_name?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | null
 }
 
 /**

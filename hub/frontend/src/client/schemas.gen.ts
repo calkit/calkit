@@ -142,6 +142,18 @@ export const Body_projects_post_project_dataset_uploadSchema = {
       ],
       title: "Collected By Name",
     },
+    storage: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["git", "dvc"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage",
+    },
   },
   type: "object",
   required: ["path", "title", "description", "file"],

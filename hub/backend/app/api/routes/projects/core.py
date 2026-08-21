@@ -47,6 +47,7 @@ from TexSoup import TexSoup
 
 import app.projects
 import calkit
+import calkit.core
 import calkit.detect
 import calkit.environments
 import calkit.latex
@@ -4612,6 +4613,9 @@ def post_project_dataset_upload(
     # is what identifies them; the name is a courtesy for readers.
     collected_by: Optional[Annotated[str, Form()]] = Form(None),
     collected_by_name: Optional[Annotated[str, Form()]] = Form(None),
+    # Where the file is tracked. Unset applies the same rule as `calkit
+    # add`: small files go in Git, large ones in DVC.
+    storage: Optional[Annotated[Literal["git", "dvc"], Form()]] = Form(None),
 ) -> Dataset:
     logger.info(
         f"Received dataset file {path} with content type: {file.content_type}"
@@ -4643,28 +4647,32 @@ def post_project_dataset_upload(
     full_ds_path = os.path.join(repo.working_dir, path)
     with open(full_ds_path, "wb") as f:
         f.write(file_data)
-    # Either git add {path} or dvc add {path}
-    # If we DVC add, we'll get output like
-    # To track the changes with git, run:
-
-    #         git add figures/.gitignore figures/my-figure.png.dvc
-
-    # To enable auto staging, run:
-
-    #         dvc config core.autostage true
-    # Initialize DVC if it's never been
-    if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
-        logger.info("Calling dvc init since .dvc directory is missing")
-        run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
-    logger.info(f"Running dvc add {path}")
-    run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
-    files_to_stage = [path + ".dvc"]
-    gitignore = os.path.join(os.path.dirname(path), ".gitignore")
-    if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
-        files_to_stage.append(gitignore)
-    logger.info(f"Git-adding {files_to_stage}")
-    repo.git.add(files_to_stage)
-    ds: dict = dict(path=path, title=title, description=description)
+    if storage is None:
+        storage = (
+            "git"
+            if len(file_data) < calkit.core.DVC_SIZE_THRESH_BYTES
+            else "dvc"
+        )
+    url: str | None = None
+    if storage == "git":
+        # A small file is simplest as a plain Git-tracked file: no pointer,
+        # no object storage round trip, readable straight from the repo.
+        logger.info(f"Git-adding {path}")
+        repo.git.add(path)
+    else:
+        # Initialize DVC if it's never been
+        if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
+            logger.info("Calling dvc init since .dvc directory is missing")
+            run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
+        logger.info(f"Running dvc add {path}")
+        run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
+        files_to_stage = [path + ".dvc"]
+        gitignore = os.path.join(os.path.dirname(path), ".gitignore")
+        if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
+            files_to_stage.append(gitignore)
+        logger.info(f"Git-adding {files_to_stage}")
+        repo.git.add(files_to_stage)
+    ds: dict[str, Any] = dict(path=path, title=title, description=description)
     if collected_by:
         person: dict[str, str] = dict(email=collected_by.strip())
         if collected_by_name and collected_by_name.strip():
@@ -4683,25 +4691,26 @@ def post_project_dataset_upload(
     repo.git.commit(["-m", f"Add dataset {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
     repo.git.push(["origin", repo.active_branch.name])
-    # If using the DVC remote, we can just put it in the expected location
-    # since we'll have the md5 hash in the dvc file
-    with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
-        dvc_yaml = yaml.safe_load(f)
-    md5 = dvc_yaml["outs"][0]["md5"]
-    fs = get_object_fs()
-    fpath = make_data_fpath(
-        owner_name=owner_name,
-        project_name=project_name,
-        idx=md5[:2],
-        md5=md5[2:],
-    )
-    with fs.open(fpath, "wb") as f:
-        f.write(file_data)  # type: ignore[arg-type]
-    if settings.ENVIRONMENT != "local":
-        remove_gcs_content_type(fpath)
-    url = get_object_url(fpath=fpath, fname=os.path.basename(path))
-    # Finally, remove the dataset from the cached repo
-    os.remove(full_ds_path)
+    if storage == "dvc":
+        # If using the DVC remote, we can just put it in the expected
+        # location since we'll have the md5 hash in the dvc file
+        with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
+            dvc_yaml = yaml.safe_load(f)
+        md5 = dvc_yaml["outs"][0]["md5"]
+        fs = get_object_fs()
+        fpath = make_data_fpath(
+            owner_name=owner_name,
+            project_name=project_name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        with fs.open(fpath, "wb") as f:
+            f.write(file_data)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
+        url = get_object_url(fpath=fpath, fname=os.path.basename(path))
+        # Finally, remove the dataset from the cached repo
+        os.remove(full_ds_path)
     # TODO: Put this dataset into the database
     return Dataset(
         project_id=project.id,
@@ -4709,7 +4718,7 @@ def post_project_dataset_upload(
         path=path,
         title=title,
         description=description,
-        content=None,  # type: ignore
+        content=None,
         url=url,
     )
 

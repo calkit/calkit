@@ -441,9 +441,12 @@ function ProjectLayout() {
   // A session/token 403 (an expired token that briefly slipped through) is not
   // a missing project — don't render NotFound for it; the auth layer refreshes
   // or logs out. Only a real 404 or a genuine permission denial is NotFound.
+  // The status lives on the response; the message is axios's generic
+  // "Request failed with status code 404", so it can't be matched on.
+  const errorStatus = (error as any)?.response?.status ?? (error as any)?.status
   if (
-    error?.message === "Not Found" ||
-    (error?.message === "Forbidden" && !isAuthenticationError(error))
+    errorStatus === 404 ||
+    (errorStatus === 403 && !isAuthenticationError(error))
   ) {
     throw notFound()
   }

@@ -9,7 +9,7 @@
 
 const PYODIDE_VERSION = "0.27.7"
 const INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
-const PROJECT_DIR = "/project"
+export const PROJECT_DIR = "/project"
 
 interface PyodideFS {
   mkdirTree: (path: string) => void
@@ -258,6 +258,145 @@ const mimeFor = (path: string): string => {
 
 const dirname = (path: string) => path.split("/").slice(0, -1).join("/")
 
+/** Write repo files into the in-browser filesystem at their repo paths. */
+export function writeProjectFiles(
+  pyodide: PyodideInterface,
+  files: { path: string; data: Uint8Array | string }[],
+): void {
+  for (const file of files) {
+    const full = `${PROJECT_DIR}/${file.path}`
+    const dir = dirname(full)
+    if (dir) pyodide.FS.mkdirTree(dir)
+    pyodide.FS.writeFile(full, file.data)
+  }
+}
+
+/** The Python that puts the interpreter in the project directory. */
+export const PRELUDE = [
+  "import os",
+  `os.chdir(${JSON.stringify(PROJECT_DIR)})`,
+  "try:",
+  "    import matplotlib",
+  "    matplotlib.use('AGG')",
+  "    import matplotlib.pyplot as _plt",
+  "    _plt.close('all')",
+  "except ImportError:",
+  "    pass",
+].join("\n")
+
+// Collects every open matplotlib figure as a PNG and closes it, so a
+// notebook cell's plots show up under the cell the way they would in
+// Jupyter, and don't leak into the next cell.
+const CAPTURE_FIGURES = [
+  "import json as _json, io as _io, base64 as _b64",
+  "_out = []",
+  "try:",
+  "    import matplotlib.pyplot as _plt",
+  "    for _n in _plt.get_fignums():",
+  "        _buf = _io.BytesIO()",
+  "        _plt.figure(_n).savefig(_buf, format='png', dpi=110, bbox_inches='tight')",
+  "        _out.append(_b64.b64encode(_buf.getvalue()).decode())",
+  "    _plt.close('all')",
+  "except Exception:",
+  "    pass",
+  "_json.dumps(_out)",
+].join("\n")
+
+export interface CellRun {
+  stdout: string
+  stderr: string
+  error: string | null
+  /** repr of the cell's last expression, when it has one. */
+  result: string | null
+  /** PNGs, base64, of any matplotlib figures the cell left open. */
+  images: string[]
+  durationMs: number
+}
+
+/**
+ * Run one notebook cell in the shared interpreter.
+ *
+ * State carries from cell to cell, as in a kernel: variables defined in
+ * one are there for the next. Packages are loaded from the cell's imports
+ * first, with the same micropip fallback the figure run uses.
+ */
+export async function runCell(
+  pyodide: PyodideInterface,
+  code: string,
+): Promise<CellRun> {
+  const started = performance.now()
+  let stdout = ""
+  let stderr = ""
+  pyodide.setStdout({
+    batched: (text) => {
+      stdout += `${text}\n`
+    },
+  })
+  pyodide.setStderr({
+    batched: (text) => {
+      stderr += `${text}\n`
+    },
+  })
+  const done = (
+    error: string | null,
+    result: string | null,
+    images: string[],
+  ) => ({
+    stdout,
+    stderr,
+    error,
+    result,
+    images,
+    durationMs: Math.round(performance.now() - started),
+  })
+  try {
+    await pyodide.loadPackagesFromImports(code)
+  } catch (err) {
+    return done(`Could not load packages: ${(err as Error).message}`, null, [])
+  }
+  let value: unknown
+  let triedMicropip = false
+  for (;;) {
+    try {
+      value = await pyodide.runPythonAsync(code)
+      break
+    } catch (err) {
+      const message = (err as Error).message ?? String(err)
+      const missing = missingModule(message)
+      if (missing && !triedMicropip) {
+        triedMicropip = true
+        try {
+          await pyodide.loadPackage("micropip")
+          const micropip = pyodide.pyimport("micropip")
+          await micropip.install(MODULE_TO_PACKAGE[missing] ?? missing)
+          continue
+        } catch {
+          return done(message, null, [])
+        }
+      }
+      return done(message, null, [])
+    }
+  }
+  let images: string[] = []
+  try {
+    images = JSON.parse(String(await pyodide.runPythonAsync(CAPTURE_FIGURES)))
+  } catch {
+    images = []
+  }
+  let result: string | null = null
+  if (value !== undefined && value !== null) {
+    const asText =
+      typeof value === "object" && value && "toString" in value
+        ? String(value)
+        : String(value)
+    result = asText === "undefined" ? null : asText
+    // A PyProxy holds interpreter memory until released.
+    const proxy = value as { destroy?: () => void }
+    if (typeof proxy?.destroy === "function") proxy.destroy()
+  }
+  return done(null, result, images)
+}
+
 /**
  * Run a plotting script against the given files and collect the figure.
  *
@@ -299,12 +438,7 @@ export async function runFigureScript({
     },
   })
   const fs = pyodide.FS
-  for (const file of files) {
-    const full = `${PROJECT_DIR}/${file.path}`
-    const dir = dirname(full)
-    if (dir) fs.mkdirTree(dir)
-    fs.writeFile(full, file.data)
-  }
+  writeProjectFiles(pyodide, files)
   const figureFull = `${PROJECT_DIR}/${figurePath}`
   const figureDir = dirname(figureFull)
   if (figureDir) fs.mkdirTree(figureDir)
@@ -317,18 +451,7 @@ export async function runFigureScript({
     return result(`Could not load packages: ${(err as Error).message}`, null)
   }
   onStatus?.("Running")
-  const prelude = [
-    "import os",
-    `os.chdir(${JSON.stringify(PROJECT_DIR)})`,
-    "try:",
-    "    import matplotlib",
-    "    matplotlib.use('AGG')",
-    "    import matplotlib.pyplot as _plt",
-    "    _plt.close('all')",
-    "except ImportError:",
-    "    pass",
-  ].join("\n")
-  await pyodide.runPythonAsync(prelude)
+  await pyodide.runPythonAsync(PRELUDE)
   let triedMicropip = false
   for (;;) {
     try {

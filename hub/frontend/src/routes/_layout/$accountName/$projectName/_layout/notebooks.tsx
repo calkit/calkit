@@ -23,6 +23,8 @@ import Tooltip from "../../../../../components/Common/Tooltip"
 import { type Notebook, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import useProject from "../../../../../hooks/useProject"
 import NotebookView from "../../../../../components/Notebooks/NotebookView"
 
 const notebookSearchSchema = z.object({
@@ -46,12 +48,15 @@ function NotebookInfo({
   projectName,
   gitRef,
   onOpenCompare,
+  canRun,
 }: {
   notebook: Notebook
   accountName: string
   projectName: string
   gitRef?: string
   onOpenCompare: () => void
+  /** Whether the viewer may run and edit it (write access, default ref). */
+  canRun?: boolean
 }) {
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
 
@@ -127,6 +132,17 @@ function NotebookInfo({
         <Icon as={FaCodeBranch} mr={1} />
         Browse history
       </Button>
+      {/* Jupyter notebooks run in the browser; a marimo notebook is a
+          different runtime and waits for its own runner */}
+      {canRun ? (
+        <NotebookRunLauncher
+          ownerName={accountName}
+          projectName={projectName}
+          path={notebook.path}
+          stage={notebook.stage}
+          source="notebooks-page"
+        />
+      ) : null}
     </Box>
   )
 }
@@ -140,6 +156,7 @@ function Notebooks() {
     base_ref,
     compare_ref,
   } = Route.useSearch()
+  const { userHasWriteAccess } = useProject(accountName, projectName)
   const navigate = useNavigate({ from: Route.fullPath })
   const setSelectedPath = (p: string) =>
     navigate({ search: (prev) => ({ ...prev, path: p }) })
@@ -257,6 +274,7 @@ function Notebooks() {
           {selectedNotebook && (
             <Box w="240px" flexShrink={0}>
               <NotebookInfo
+                canRun={userHasWriteAccess && !ref}
                 notebook={selectedNotebook}
                 accountName={accountName}
                 projectName={projectName}

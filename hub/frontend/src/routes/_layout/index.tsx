@@ -247,7 +247,7 @@ function LandingPage() {
           <Button as={RouterLink} to="/new" variant="primary" size="lg">
             Start a project
           </Button>
-          <Button as={RouterLink} to="/login" size="lg" variant="ghost">
+          <Button as={RouterLink} to="/login" size="lg" variant="outline">
             Sign in
           </Button>
         </HStack>

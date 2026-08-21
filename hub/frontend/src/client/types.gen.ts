@@ -1778,6 +1778,46 @@ export type HttpValidationError = {
 }
 
 /**
+ * Hdf5Key
+ */
+export type Hdf5Key = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Shape
+   */
+  shape?: Array<number> | null
+  /**
+   * Dtype
+   */
+  dtype?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean
+}
+
+/**
+ * Hdf5Listing
+ */
+export type Hdf5Listing = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Keys
+   */
+  keys: Array<Hdf5Key>
+}
+
+/**
  * HttpRequestAccess
  */
 export type HttpRequestAccess = {
@@ -4972,6 +5012,32 @@ export type Table = {
 }
 
 /**
+ * TableText
+ */
+export type TableText = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Columns
+   */
+  columns: Array<string>
+  /**
+   * N Rows
+   */
+  n_rows: number
+  /**
+   * Truncated
+   */
+  truncated: boolean
+}
+
+/**
  * TextDiff
  */
 export type TextDiff = {
@@ -6694,6 +6760,10 @@ export type GetUserGithubReposData = {
      * Sort
      */
     sort?: "updated" | "created" | "pushed" | "full_name"
+    /**
+     * Search
+     */
+    search?: string | null
   }
   url: "/user/github/repos"
 }
@@ -11857,6 +11927,102 @@ export type PostProjectStudioFigureResponses = {
 
 export type PostProjectStudioFigureResponse =
   PostProjectStudioFigureResponses[keyof PostProjectStudioFigureResponses]
+
+export type GetProjectDatasetCsvData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dataset-csv/{path}"
+}
+
+export type GetProjectDatasetCsvErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDatasetCsvError =
+  GetProjectDatasetCsvErrors[keyof GetProjectDatasetCsvErrors]
+
+export type GetProjectDatasetCsvResponses = {
+  /**
+   * Successful Response
+   */
+  200: TableText
+}
+
+export type GetProjectDatasetCsvResponse =
+  GetProjectDatasetCsvResponses[keyof GetProjectDatasetCsvResponses]
+
+export type GetProjectDatasetHdf5Data = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: {
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}"
+}
+
+export type GetProjectDatasetHdf5Errors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDatasetHdf5Error =
+  GetProjectDatasetHdf5Errors[keyof GetProjectDatasetHdf5Errors]
+
+export type GetProjectDatasetHdf5Responses = {
+  /**
+   * Response Projects-Get Project Dataset Hdf5
+   *
+   * Successful Response
+   */
+  200: Hdf5Listing | TableText
+}
+
+export type GetProjectDatasetHdf5Response =
+  GetProjectDatasetHdf5Responses[keyof GetProjectDatasetHdf5Responses]
 
 export type GetReferencesData = {
   body?: never

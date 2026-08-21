@@ -29,6 +29,8 @@ import { FiDatabase } from "react-icons/fi"
 
 import Markdown from "../../../../../components/Common/Markdown"
 import BrowseDatasets from "../../../../../components/Datasets/BrowseDatasets"
+import DatasetViewer from "../../../../../components/Datasets/DatasetViewer"
+import Tooltip from "../../../../../components/Common/Tooltip"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
 import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
@@ -111,20 +113,35 @@ const DatasetSource = ({
       return (
         <Text fontSize="sm">
           <strong>Source:</strong> imported from DOI{" "}
-          <Link href={`https://doi.org/${doi}`} isExternal>
-            {doi} <ExternalLinkIcon mb={0.5} />
-          </Link>
+          <Tooltip label={`https://doi.org/${doi}`}>
+            <Link href={`https://doi.org/${doi}`} isExternal>
+              {doi} <ExternalLinkIcon mb={0.5} />
+            </Link>
+          </Tooltip>
           {date}
         </Text>
       )
     }
     if (importedFrom.url) {
+      // A download URL can run to hundreds of characters; the card shows
+      // where it points and the tooltip holds the whole thing.
+      let shown = importedFrom.url
+      try {
+        const u = new URL(importedFrom.url)
+        shown = `${u.host}${u.pathname.length > 1 ? "/…/" : ""}${
+          u.pathname.split("/").filter(Boolean).pop() ?? ""
+        }`
+      } catch {
+        // Not a parseable URL; show it as is, truncated
+      }
       return (
-        <Text fontSize="sm" noOfLines={2}>
+        <Text fontSize="sm" isTruncated>
           <strong>Source:</strong> downloaded from{" "}
-          <Link href={importedFrom.url} isExternal>
-            {importedFrom.url} <ExternalLinkIcon mb={0.5} />
-          </Link>
+          <Tooltip label={importedFrom.url}>
+            <Link href={importedFrom.url} isExternal>
+              {shown} <ExternalLinkIcon mb={0.5} />
+            </Link>
+          </Tooltip>
           {date}
         </Text>
       )
@@ -134,31 +151,38 @@ const DatasetSource = ({
       const commitUrl = repo_url.includes("github.com")
         ? `${repo_url.replace(/\.git$/, "")}/tree/${rev}/${path ?? ""}`
         : repo_url
+      const label = `${repo_url.replace(/^https?:\/\/(www\.)?/, "")}${
+        path ? `/${path}` : ""
+      }`
       return (
-        <Text fontSize="sm" noOfLines={2}>
+        <Text fontSize="sm" isTruncated>
           <strong>Source:</strong> from Git repo{" "}
-          <Link href={commitUrl} isExternal>
-            {repo_url.replace(/^https?:\/\/(www\.)?/, "")}
-            {path ? `/${path}` : ""} <ExternalLinkIcon mb={0.5} />
-          </Link>{" "}
+          <Tooltip label={`${label} at ${rev}`}>
+            <Link href={commitUrl} isExternal>
+              {label} <ExternalLinkIcon mb={0.5} />
+            </Link>
+          </Tooltip>{" "}
           at <Code fontSize="xs">{rev.slice(0, 7)}</Code>
           {date}
         </Text>
       )
     }
     if (importedFrom.project) {
+      const srcPath = importedFrom.path ?? ""
+      const label = `${importedFrom.project}${srcPath ? `/${srcPath}` : ""}`
       return (
-        <Text fontSize="sm">
-          <strong>Source:</strong> imported from project{" "}
-          <Link as={RouterLink} to={`/${importedFrom.project}` as any}>
-            {importedFrom.project}
-          </Link>
-          {importedFrom.path ? (
-            <>
-              {" "}
-              (<Code fontSize="xs">{importedFrom.path}</Code>)
-            </>
-          ) : null}
+        <Text fontSize="sm" isTruncated>
+          <strong>Source:</strong> imported from{" "}
+          <Tooltip label={label}>
+            {/* Straight to that dataset's viewer in its own project */}
+            <Link
+              as={RouterLink}
+              to={`/${importedFrom.project}/datasets` as any}
+              search={(srcPath ? { view: srcPath } : {}) as any}
+            >
+              {label}
+            </Link>
+          </Tooltip>
           {importedFrom.git_rev ? (
             <>
               {" "}
@@ -199,6 +223,8 @@ const datasetsSearchSchema = z.object({
   studio: z.string().optional(),
   // The "find a dataset on Calkit" browser.
   browse: z.boolean().optional(),
+  // The dataset open in the viewer, by path.
+  view: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -224,7 +250,11 @@ function ProjectDataView() {
     source,
     studio: studioDataset,
     browse: browseOpen,
+    view: viewPath,
   } = Route.useSearch()
+  const setViewPath = (path: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, view: path }) })
+  const viewedDataset = datasets?.find((d) => d.path === viewPath) ?? null
   const setBrowseOpen = (open: boolean) =>
     navigate({ search: (prev) => ({ ...prev, browse: open || undefined }) })
   const setStudioDataset = (path: string | undefined) =>
@@ -333,6 +363,21 @@ function ProjectDataView() {
               isOpen={Boolean(browseOpen)}
               onClose={() => setBrowseOpen(false)}
             />
+          </>
+        ) : (
+          ""
+        )}
+        {viewedDataset ? (
+          <DatasetViewer
+            isOpen
+            onClose={() => setViewPath(undefined)}
+            ownerName={accountName}
+            projectName={projectName}
+            dataset={viewedDataset}
+          />
+        ) : null}
+        {userHasWriteAccess ? (
+          <>
             {studioDataset ? (
               <FigureStudio
                 isOpen
@@ -371,10 +416,11 @@ function ProjectDataView() {
               <Card key={dataset.path} p={6} variant="elevated">
                 <Heading size="sm" mb={2}>
                   <Code p={1} maxW="100%">
+                    {/* The card's heading opens the viewer; the viewer's
+                        own header links to the file on the files page */}
                     <Link
-                      as={RouterLink}
-                      to={"../files"}
-                      search={{ path: dataset.path } as any}
+                      cursor="pointer"
+                      onClick={() => setViewPath(dataset.path)}
                     >
                       {dataset.path}
                     </Link>

@@ -3055,6 +3055,71 @@ export const HTTPValidationErrorSchema = {
   title: "HTTPValidationError",
 } as const
 
+export const Hdf5KeySchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    shape: {
+      anyOf: [
+        {
+          items: {
+            type: "integer",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shape",
+    },
+    dtype: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dtype",
+    },
+    tabular: {
+      type: "boolean",
+      title: "Tabular",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["key", "kind"],
+  title: "Hdf5Key",
+} as const
+
+export const Hdf5ListingSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    keys: {
+      items: {
+        $ref: "#/components/schemas/Hdf5Key",
+      },
+      type: "array",
+      title: "Keys",
+    },
+  },
+  type: "object",
+  required: ["path", "keys"],
+  title: "Hdf5Listing",
+} as const
+
 export const HttpRequestAccessSchema = {
   properties: {
     kind: {
@@ -8696,6 +8761,37 @@ export const TableSchema = {
   title: "Table",
   description:
     "Tabular data the project publishes, resolved for display.\n\nCarries content like a figure does rather than metadata alone: a table\nis only useful once its rows can be read, and the files are small\nenough to inline. Large or DVC-tracked ones come back as a ``url``\ninstead, exactly as figures do.",
+} as const
+
+export const TableTextSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+    columns: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Columns",
+    },
+    n_rows: {
+      type: "integer",
+      title: "N Rows",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+    },
+  },
+  type: "object",
+  required: ["path", "content", "columns", "n_rows", "truncated"],
+  title: "TableText",
 } as const
 
 export const TextDiffSchema = {

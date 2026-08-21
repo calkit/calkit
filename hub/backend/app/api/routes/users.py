@@ -334,6 +334,9 @@ def get_user_github_repos(
     # whatever happens to start with "a". Recently touched is what someone
     # bringing an in-progress project over is looking for.
     sort: Literal["updated", "created", "pushed", "full_name"] = "updated",
+    # A name search across everything the user owns or belongs to, for
+    # accounts with more repos than the listing cap reaches.
+    search: str | None = None,
 ) -> list[dict[str, Any]]:
     """List the GitHub repos this user could create a project for.
 
@@ -344,6 +347,40 @@ def get_user_github_repos(
     access_token = users.get_github_token(session=session, user=current_user)
     url = "https://api.github.com/user/repos"
     headers = {"Authorization": f"Bearer {access_token}"}
+    if search and search.strip():
+        # Several user:/org: qualifiers are ORed by GitHub search, so one
+        # query covers the user's own repos and every org they belong to
+        orgs_resp = requests.get(
+            "https://api.github.com/user/orgs",
+            headers=headers,
+            params=dict(per_page=100),
+        )
+        org_logins = (
+            [o["login"] for o in orgs_resp.json()]
+            if orgs_resp.status_code == 200
+            else []
+        )
+        scope = " ".join(
+            [f"user:{current_user.github_username}"]
+            + [f"org:{o}" for o in org_logins]
+        )
+        term = " ".join(search.split())
+        search_resp = requests.get(
+            "https://api.github.com/search/repositories",
+            headers=headers,
+            params=dict(
+                q=f"{term} in:name {scope}",
+                sort="updated",
+                order="desc",
+                per_page=min(per_page, 100),
+            ),
+        )
+        if search_resp.status_code != 200:
+            raise HTTPException(
+                400, f"GitHub search failed: {search_resp.text}"
+            )
+        items: list[dict[str, Any]] = search_resp.json().get("items", [])
+        return items
 
     def fetch(page_number: int) -> list[dict[str, Any]]:
         resp = requests.get(

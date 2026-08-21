@@ -118,7 +118,11 @@ import type {
   GetProjectContents2Responses,
   GetProjectContentsErrors,
   GetProjectContentsResponses,
+  GetProjectDatasetCsvErrors,
+  GetProjectDatasetCsvResponses,
   GetProjectDatasetErrors,
+  GetProjectDatasetHdf5Errors,
+  GetProjectDatasetHdf5Responses,
   GetProjectDatasetResponses,
   GetProjectDatasetsErrors,
   GetProjectDatasetsResponses,
@@ -1332,6 +1336,7 @@ export class UsersService {
       page?: number | null
       affiliation?: string
       sort?: "updated" | "created" | "pushed" | "full_name"
+      search?: string | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1348,6 +1353,7 @@ export class UsersService {
             { in: "query", key: "page" },
             { in: "query", key: "affiliation" },
             { in: "query", key: "sort" },
+            { in: "query", key: "search" },
           ],
         },
       ],
@@ -7031,6 +7037,105 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Get Project Dataset Csv
+   *
+   * A tabular file as CSV, for the table viewer.
+   *
+   * CSV and TSV are read and re-emitted (which also normalizes them);
+   * parquet and JSON lines are converted. Rows beyond ``MAX_ROWS`` are cut
+   * and the response says so, rather than sending a browser more than it
+   * can hold.
+   */
+  public static getProjectDatasetCsv<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDatasetCsvResponses,
+    GetProjectDatasetCsvErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDatasetCsvResponses,
+      GetProjectDatasetCsvErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dataset-csv/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Dataset Hdf5
+   *
+   * Browse an HDF5 file: its keys, or one dataset as CSV.
+   *
+   * Without ``key`` the response lists every group and dataset with shape
+   * and dtype; with ``key`` it returns that dataset the way the CSV route
+   * does, so the same table viewer shows it.
+   */
+  public static getProjectDatasetHdf5<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key?: string | null
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDatasetHdf5Responses,
+    GetProjectDatasetHdf5Errors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDatasetHdf5Responses,
+      GetProjectDatasetHdf5Errors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}",
+      ...options,
+      ...params,
     })
   }
 }

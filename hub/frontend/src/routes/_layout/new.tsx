@@ -42,6 +42,7 @@ import {
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
 import { useState } from "react"
+import { useDebounce } from "use-debounce"
 import { type SubmitHandler, useForm } from "react-hook-form"
 import { FiCircle } from "react-icons/fi"
 import { SiOverleaf, SiZotero } from "react-icons/si"
@@ -282,20 +283,30 @@ function NameItStep({
   const needsGitHub =
     connectedAccountsQuery.isSuccess && !connectedAccountsQuery.data?.github
   // Picking from a list beats pasting a URL for the cleanup path, which is
-  // the whole point of that path: the repo already exists somewhere.
+  // the whole point of that path: the repo already exists somewhere. The
+  // list starts as the most recently updated repos; once a couple of
+  // characters are typed, the question goes to GitHub's search so a repo
+  // past the listing cap is found too.
+  const [repoSearch, setRepoSearch] = useState("")
+  const [debouncedRepoSearch] = useDebounce(repoSearch.trim(), 300)
+  const serverSearch =
+    debouncedRepoSearch.length >= 2 ? debouncedRepoSearch : undefined
   const reposQuery = useQuery({
-    queryKey: ["user", "github", "repos"],
+    queryKey: ["user", "github", "repos", serverSearch ?? ""],
     queryFn: () =>
-      UsersService.getUserGithubRepos({ per_page: 100, page: 1 }).then(
-        (response) => response.data,
-      ),
+      UsersService.getUserGithubRepos({
+        per_page: 100,
+        search: serverSearch,
+      }).then((response) => response.data),
     enabled: isExisting && !needsGitHub,
     retry: false,
+    placeholderData: (prev) => prev,
   })
   const {
     register,
     handleSubmit,
     setValue,
+    watch,
     formState: { errors, isSubmitting },
   } = useForm<ProjectFormValues>({
     mode: "onBlur",
@@ -304,7 +315,9 @@ function NameItStep({
       title: "",
       name: "",
       description: "",
-      git_repo_url: isExisting ? "" : `https://github.com/${githubUsername}/`,
+      // The owner prefix is nearly always the user's own, so it's typed
+      // for them; picking a repo from the list replaces it anyway.
+      git_repo_url: `https://github.com/${githubUsername}/`,
       is_public: false,
       template: isExisting ? null : "calkit/example-basic",
       keep_template_history: false,
@@ -410,6 +423,30 @@ function NameItStep({
       setValue("description", repo.description)
     }
   }
+  // A repo under an organization needs two things a personal repo doesn't:
+  // the org in Calkit (created on the way, which takes an admin of it on
+  // GitHub) and the Calkit GitHub App installed for that org. Both are
+  // checked here so the person finds out before the submit fails.
+  const repoUrl = watch("git_repo_url") ?? ""
+  const repoOwner = repoUrl.match(/github\.com\/([^/]+)\/./)?.[1] ?? ""
+  const isOrgRepo =
+    Boolean(repoOwner) &&
+    repoOwner.toLowerCase() !== githubUsername.toLowerCase()
+  const installationsQuery = useQuery({
+    queryKey: ["user", "github-app-installations"],
+    queryFn: () =>
+      UsersService.getUserGithubAppInstallations().then(
+        (response) => response.data,
+      ),
+    enabled: isOrgRepo && !needsGitHub,
+    retry: false,
+  })
+  const installedFor = new Set(
+    (installationsQuery.data?.installations ?? []).map((i: any) =>
+      String(i?.account?.login ?? "").toLowerCase(),
+    ),
+  )
+  const appInstalledForOrg = installedFor.has(repoOwner.toLowerCase())
   const onSubmit: SubmitHandler<ProjectFormValues> = (data) =>
     mutation.mutate(data)
   if (needsGitHub) {
@@ -466,10 +503,19 @@ function NameItStep({
           <FilterableSelect
             id="existing_repo"
             options={repoOptions}
-            isLoading={reposQuery.isPending}
+            isLoading={reposQuery.isPending || reposQuery.isFetching}
             placeholder="Start typing…"
-            emptyMessage="No repo matches that."
-            onSelect={selectRepo}
+            emptyMessage={
+              serverSearch
+                ? "No repo matches that on GitHub."
+                : "No repo matches that."
+            }
+            value={repoSearch}
+            onChange={setRepoSearch}
+            onSelect={(fullName) => {
+              setRepoSearch(fullName)
+              selectRepo(fullName)
+            }}
           />
           <FormHelperText>
             Yours and your organizations', most recently updated first. Not
@@ -569,6 +615,54 @@ function NameItStep({
           <FormErrorMessage>{errors.git_repo_url.message}</FormErrorMessage>
         ) : null}
       </FormControl>
+      {isOrgRepo ? (
+        <Box
+          mb={4}
+          p={4}
+          borderRadius="md"
+          borderWidth={1}
+          borderColor={appInstalledForOrg ? "ui.success" : "orange.300"}
+          fontSize="sm"
+        >
+          <Text fontWeight="semibold" mb={1}>
+            This repo belongs to the organization {repoOwner}
+          </Text>
+          <Text color="ui.dim" mb={2}>
+            Calkit will add {repoOwner} as an organization here, which needs you
+            to be one of its admins on GitHub, and the Calkit GitHub App has to
+            be installed for it so Calkit can work with its repos.
+          </Text>
+          {installationsQuery.isPending ? (
+            <Text color="ui.dim">Checking the app installation…</Text>
+          ) : appInstalledForOrg ? (
+            <Flex align="center" gap={2} color="ui.success">
+              <Icon as={CheckCircleIcon} />
+              The Calkit App is installed for {repoOwner}.
+            </Flex>
+          ) : (
+            <HStack spacing={3}>
+              <Button
+                as={Link}
+                size="sm"
+                variant="primary"
+                href={`https://github.com/apps/${appName}/installations/new`}
+                isExternal
+              >
+                Install the Calkit App for {repoOwner}{" "}
+                <ExternalLinkIcon ml={1} />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => installationsQuery.refetch()}
+                isLoading={installationsQuery.isFetching}
+              >
+                Check again
+              </Button>
+            </HStack>
+          )}
+        </Box>
+      ) : null}
       {!isExisting ? (
         <FormControl mb={6}>
           <Checkbox {...register("is_public")} colorScheme="teal">

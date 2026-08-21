@@ -973,3 +973,50 @@ def test_get_user_github_repos_excludes_collaborations(
         )
     assert resp.status_code == 200
     assert calls[-1]["page"] == 2
+
+
+def test_get_user_github_repos_search(
+    client: TestClient, normal_user_token_headers: dict[str, str]
+) -> None:
+    """A search term goes to GitHub search, scoped to the user and their orgs."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_get(url, headers=None, params=None):
+        calls.append((url, dict(params or {})))
+        if url.endswith("/user/orgs"):
+            return SimpleNamespace(
+                status_code=200, json=lambda: [{"login": "calkit"}]
+            )
+        assert url.endswith("/search/repositories")
+        return SimpleNamespace(
+            status_code=200,
+            json=lambda: {
+                "items": [
+                    {"full_name": "me/boundary-layer-turbulence-modeling"}
+                ]
+            },
+        )
+
+    with (
+        patch("app.api.routes.users.requests.get", side_effect=fake_get),
+        patch("app.api.routes.users.users.get_github_token", return_value="t"),
+    ):
+        resp = client.get(
+            f"{settings.API_V1_STR}/user/github/repos",
+            params={"search": "  boundary   layer "},
+            headers=normal_user_token_headers,
+        )
+    assert resp.status_code == 200, resp.text
+    assert (
+        resp.json()[0]["full_name"] == "me/boundary-layer-turbulence-modeling"
+    )
+    search_call = next(
+        c for c in calls if c[0].endswith("/search/repositories")
+    )
+    q = search_call[1]["q"]
+    assert q.startswith("boundary layer in:name user:")
+    assert "org:calkit" in q
+    assert search_call[1]["sort"] == "updated"

@@ -44,6 +44,8 @@ dependencies = [
   # Reading the text out of a PDF to diff two builds of a document; pure
   # Python, so the image needs no system packages for it
   "pypdf>=6.1.1",
+  "polars>=1.38.1",
+  "h5py",
 ]
 
 [dependency-groups]

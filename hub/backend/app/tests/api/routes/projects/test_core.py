@@ -2763,6 +2763,9 @@ def test_project_pipeline_stage_edit(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
             side_effect=fake_ck_info,
         ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
     ):
         # Reading a stage hands it back as written: nothing reordered and
         # nothing removed, since tidying is the user's call

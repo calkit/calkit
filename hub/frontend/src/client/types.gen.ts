@@ -4795,6 +4795,10 @@ export type StudioFigurePost = {
    */
   environment?: string | null
   /**
+   * Stage
+   */
+  stage?: string | null
+  /**
    * Message
    */
   message?: string | null

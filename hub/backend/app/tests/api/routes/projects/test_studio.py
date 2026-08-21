@@ -104,6 +104,17 @@ def test_post_project_studio_figure(
     assert not repo.is_dirty(untracked_files=True)
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
     assert "plot-y" in repo.head.commit.message
+    # dvc.yaml is compiled in the same commit, since that's what the
+    # pipeline view reads
+    dvc = yaml.safe_load((tmp_path / "a" / "repo" / "dvc.yaml").read_text())
+    assert "plot-y" in dvc["stages"]
+    assert dvc["stages"]["plot-y"]["deps"] == ["data/raw.csv"] or (
+        "data/raw.csv" in dvc["stages"]["plot-y"]["deps"]
+    )
+    assert "figures/y.png" in [
+        o if isinstance(o, str) else o.get("path")
+        for o in dvc["stages"]["plot-y"]["outs"]
+    ]
     # An existing requirements-based env is reused and gains the missing
     # packages; the stage name is kept unique; an existing figure entry is
     # updated in place rather than duplicated
@@ -182,3 +193,200 @@ def test_post_project_studio_figure(
         assert resp.status_code == status, (bad, resp.text)
     # Nothing was committed by any of the rejected requests
     assert repo.head.commit.hexsha == before
+
+
+EXAMPLE_BASIC_CK = """
+owner: calkit
+name: example-basic
+title: Basic Calkit example
+description: A basic Calkit example project.
+git_repo_url: https://github.com/calkit/example-basic
+
+dependencies:
+  - docker
+  - uv
+
+questions:
+  - question: How does the system respond to increasing $x$?
+    hypothesis: The value of $y$ increases linearly with $x$.
+
+environments:
+  py:
+    path: requirements.txt
+    kind: uv-venv
+    python: "3.13"
+    prefix: .venv
+    description: A Python virtual environment managed with uv
+  tex:
+    kind: docker
+    image: texlive/texlive:latest-full
+    description: TeX Live via Docker.
+
+pipeline:
+  stages:
+    collect-data:
+      kind: python-script
+      script_path: scripts/collect-data.py
+      environment: py
+      outputs:
+        - data/raw/data.csv
+    analyze:
+      kind: python-script
+      script_path: scripts/analyze.py
+      environment: py
+      inputs:
+        - from_stage_outputs: collect-data
+      outputs:
+        - figures/x-vs-y.png
+        - path: results/summary.json
+          storage: git
+    build-paper:
+      kind: latex
+      target_path: paper/paper.tex
+      environment: tex
+      inputs:
+        - paper/references.bib
+      outputs:
+        - paper/paper.pdf
+
+datasets:
+  - path: data/raw/data.csv
+    title: Raw data
+    description: This is raw $x$ and $y$ data.
+    stage: collect-data
+
+figures:
+  - path: figures/x-vs-y.png
+    title: x vs y
+    description: A plot.
+    stage: analyze
+
+publications:
+  - path: paper/paper.pdf
+    kind: journal-article
+    title: The paper
+    description: A paper.
+    stage: build-paper
+"""
+
+
+def test_post_project_studio_figure_on_template_project(
+    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+) -> None:
+    """The exact shape a project made from example-basic has."""
+    import ruamel.yaml
+
+    origin = git.Repo.init(tmp_path / "origin.git", bare=True)
+    repo = git.Repo.init(tmp_path / "repo")
+    with repo.config_writer() as cw:
+        cw.set_value("user", "name", "Test")
+        cw.set_value("user", "email", "test@example.com")
+    # Written with comments and blank lines, as the template keeps them, so
+    # the round trip through ruamel is the real one
+    (tmp_path / "repo" / "calkit.yaml").write_text(EXAMPLE_BASIC_CK)
+    (tmp_path / "repo" / "requirements.txt").write_text(
+        "pandas\nmatplotlib\nnumpy\n"
+    )
+    repo.git.add(all=True)
+    repo.git.commit("-m", "Initial")
+    repo.create_remote("origin", str(origin.working_dir))
+    repo.git.push("origin", repo.active_branch.name)
+    body = dict(
+        figure_path="figures/data.png",
+        title="y vs. x",
+        description=None,
+        script_path="scripts/plot-data.py",
+        script_content=SCRIPT,
+        inputs=["data/raw/data.csv"],
+        packages=["matplotlib", "pandas"],
+        environment=None,
+    )
+    resp = _post(client, normal_user_token_headers, repo, body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["environment"] == "py"
+    assert data["environment_created"] is False
+    assert data["packages_missing"] == []
+    assert data["stage_name"] == "plot-data"
+    # Nothing was added to a requirements file that already had it all
+    assert (tmp_path / "repo" / "requirements.txt").read_text() == (
+        "pandas\nmatplotlib\nnumpy\n"
+    )
+    yaml_rt = ruamel.yaml.YAML()
+    ck = yaml_rt.load((tmp_path / "repo" / "calkit.yaml").read_text())
+    assert ck["pipeline"]["stages"]["plot-data"]["environment"] == "py"
+    assert ck["figures"][-1]["path"] == "figures/data.png"
+    # The rest of the file survived the round trip
+    assert ck["questions"][0]["hypothesis"].startswith("The value")
+    assert ck["environments"]["tex"]["image"] == "texlive/texlive:latest-full"
+    assert origin.head.commit.hexsha == repo.head.commit.hexsha
+
+
+def test_post_project_studio_figure_edits_own_stage(
+    client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
+) -> None:
+    repo, origin = _make_repo(
+        tmp_path,
+        {
+            "environments": {
+                "py": {"kind": "uv-venv", "path": "requirements.txt"}
+            },
+            "pipeline": {
+                "stages": {
+                    "analyze": {
+                        "kind": "python-script",
+                        "script_path": "scripts/analyze.py",
+                        "environment": "py",
+                        "inputs": ["data/old.csv"],
+                        "outputs": [
+                            "figures/y.png",
+                            {"path": "results/summary.json", "storage": "git"},
+                        ],
+                        "description": "Keep me",
+                    }
+                }
+            },
+            "figures": [
+                {"path": "figures/y.png", "title": "Old", "stage": "analyze"}
+            ],
+        },
+        files={
+            "requirements.txt": "pandas\nmatplotlib\n",
+            "scripts/analyze.py": "print('old')\n",
+        },
+    )
+    body = dict(
+        figure_path="figures/y.png",
+        title="New title",
+        script_path="scripts/analyze.py",
+        script_content=SCRIPT,
+        inputs=["data/raw.csv"],
+        packages=["matplotlib", "pandas"],
+        stage="analyze",
+    )
+    resp = _post(client, normal_user_token_headers, repo, body)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["stage_name"] == "analyze"
+    assert data["environment"] == "py"
+    ck = yaml.safe_load((tmp_path / "repo" / "calkit.yaml").read_text())
+    stage = ck["pipeline"]["stages"]["analyze"]
+    # Script, inputs, and environment are the studio's; the rest survives
+    assert stage["inputs"] == ["data/raw.csv"]
+    assert stage["description"] == "Keep me"
+    assert stage["outputs"] == [
+        "figures/y.png",
+        {"path": "results/summary.json", "storage": "git"},
+    ]
+    assert "plot-y" not in ck["pipeline"]["stages"]
+    assert ck["figures"] == [
+        {"path": "figures/y.png", "title": "New title", "stage": "analyze"}
+    ]
+    assert (tmp_path / "repo" / "scripts" / "analyze.py").read_text() == SCRIPT
+    assert "Update stage analyze" in repo.head.commit.message
+    assert origin.head.commit.hexsha == repo.head.commit.hexsha
+    # Naming a stage that doesn't exist is refused
+    resp = _post(
+        client, normal_user_token_headers, repo, dict(body, stage="missing")
+    )
+    assert resp.status_code == 404, resp.text

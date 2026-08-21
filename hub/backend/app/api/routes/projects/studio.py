@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 import app.projects
+import calkit.pipeline
 from app import mixpanel
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import _validate_ck_stage
@@ -50,6 +51,10 @@ class StudioFigurePost(BaseModel):
     # An existing environment to run in; None picks the project's Python
     # environment, or creates one when there isn't any.
     environment: str | None = None
+    # The stage this figure already comes from, when editing rather than
+    # creating. Its script is overwritten and its inputs replaced; the stage
+    # keeps its name and anything else declared on it.
+    stage: str | None = None
     message: str | None = None
 
 
@@ -226,12 +231,22 @@ def post_project_studio_figure(
     ck_info = get_ck_info_from_repo(repo=repo)
     pipeline = ck_info.get("pipeline") or {}
     stages = pipeline.get("stages") or {}
+    editing = None
+    if req.stage is not None:
+        editing = stages.get(req.stage)
+        if editing is None:
+            raise HTTPException(404, f"Stage '{req.stage}' not found")
+        if editing.get("kind") != "python-script":
+            raise HTTPException(
+                400, f"Stage '{req.stage}' is not a Python script stage"
+            )
     # Another stage already writing this path would make the pipeline
-    # ambiguous about where the figure comes from.
+    # ambiguous about where the figure comes from, unless that's the stage
+    # being edited.
     for name, stage in stages.items():
         for out in stage.get("outputs") or []:
             out_path = out.get("path") if isinstance(out, dict) else out
-            if out_path == figure_path:
+            if out_path == figure_path and name != req.stage:
                 raise HTTPException(
                     400,
                     f"Stage '{name}' already produces {figure_path}; "
@@ -273,23 +288,41 @@ def post_project_studio_figure(
     with open(script_full, "w") as f:
         f.write(content)
     repo.git.add(script_path)
-    # Stage, named after the figure and kept unique
-    base = (
-        f"plot-{_slug(posixpath.splitext(posixpath.basename(figure_path))[0])}"
-    )
-    stage_name = base
-    n = 2
-    while stage_name in stages:
-        stage_name = f"{base}-{n}"
-        n += 1
-    stage_map: dict[str, Any] = {
-        "kind": "python-script",
-        "script_path": script_path,
-        "environment": env_name,
-    }
-    if inputs:
-        stage_map["inputs"] = inputs
-    stage_map["outputs"] = [figure_path]
+    if editing is not None and req.stage is not None:
+        # Editing: the stage keeps its name and whatever else it declares;
+        # only what the studio owns changes
+        stage_name = req.stage
+        stage_map: dict[str, Any] = dict(editing)
+        stage_map["script_path"] = script_path
+        stage_map["environment"] = env_name
+        if inputs:
+            stage_map["inputs"] = inputs
+        else:
+            stage_map.pop("inputs", None)
+        outs = list(stage_map.get("outputs") or [])
+        if not any(
+            (o.get("path") if isinstance(o, dict) else o) == figure_path
+            for o in outs
+        ):
+            outs.append(figure_path)
+        stage_map["outputs"] = outs
+    else:
+        # Creating: named after the figure and kept unique
+        stem = posixpath.splitext(posixpath.basename(figure_path))[0]
+        base = f"plot-{_slug(stem)}"
+        stage_name = base
+        n = 2
+        while stage_name in stages:
+            stage_name = f"{base}-{n}"
+            n += 1
+        stage_map = {
+            "kind": "python-script",
+            "script_path": script_path,
+            "environment": env_name,
+        }
+        if inputs:
+            stage_map["inputs"] = inputs
+        stage_map["outputs"] = [figure_path]
     _validate_ck_stage(stage_map, stage_name)
     stages[stage_name] = stage_map
     pipeline["stages"] = stages
@@ -313,7 +346,20 @@ def post_project_studio_figure(
     with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    message = req.message or f"Add stage {stage_name} to produce {figure_path}"
+    # The project page reads the committed dvc.yaml, so the stage has to be
+    # compiled into it here rather than waiting for the next `calkit run`.
+    try:
+        calkit.pipeline.to_dvc(ck_info=ck_info, wdir=wdir, write=True)
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
+    repo.git.add("-A")
+    message = req.message or (
+        f"Update stage {stage_name} producing {figure_path}"
+        if editing is not None
+        else f"Add stage {stage_name} to produce {figure_path}"
+    )
     repo.git.commit(["-m", message])
     repo.git.push(["origin", repo.active_branch.name])
     mixpanel.user_saved_studio_figure(

@@ -26,10 +26,16 @@ import {
 import { FaPlus } from "react-icons/fa"
 import { FiDatabase } from "react-icons/fi"
 
+import Markdown from "../../../../../components/Common/Markdown"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
+import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
+import { useQuery } from "@tanstack/react-query"
+import mixpanel from "mixpanel-browser"
 import { z } from "zod"
+
+import { ProjectsService } from "../../../../../client"
 
 // Which "add a dataset" form is open lives in the URL, the same way the
 // references page carries its own. Filling one in is several fields of
@@ -39,6 +45,8 @@ const datasetsSearchSchema = z.object({
   upload_open: z.boolean().optional(),
   new_dataset_open: z.boolean().optional(),
   source: z.enum(["primary", "enter", "url", "doi", "git_repo"]).optional(),
+  // Dataset the figure studio is open on, so the studio survives a refresh.
+  studio: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -62,7 +70,41 @@ function ProjectDataView() {
     upload_open: uploadOpen,
     new_dataset_open: newDatasetOpen,
     source,
+    studio: studioDataset,
   } = Route.useSearch()
+  const setStudioDataset = (path: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, studio: path }) })
+  // Which figures each dataset feeds: a figure's stage lists its concrete
+  // inputs in dvc.yaml, so a dataset path (or a file under a dataset
+  // folder) among those deps ties the two together.
+  const figuresQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "figures"],
+    queryFn: () =>
+      ProjectsService.getProjectFigures({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+  })
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+  })
+  const figuresUsing = (datasetPath: string) =>
+    (figuresQuery.data?.items ?? []).filter((figure) => {
+      if (!figure.stage) return false
+      const stage = pipelineQuery.data?.dvc_stages?.[figure.stage] as
+        | { deps?: string[] | null }
+        | undefined
+      return (stage?.deps ?? []).some(
+        (dep) => dep === datasetPath || dep.startsWith(`${datasetPath}/`),
+      )
+    })
   const navigate = useNavigate({ from: Route.fullPath })
   const openUpload = () =>
     navigate({ search: (prev) => ({ ...prev, upload_open: true }) })
@@ -129,6 +171,15 @@ function ProjectDataView() {
               defaultSource={source ?? "primary"}
             />
             <UploadDataset onClose={closeAll} isOpen={Boolean(uploadOpen)} />
+            {studioDataset ? (
+              <FigureStudio
+                isOpen
+                onClose={() => setStudioDataset(undefined)}
+                ownerName={accountName}
+                projectName={projectName}
+                initialDataset={studioDataset}
+              />
+            ) : null}
           </>
         ) : (
           ""
@@ -182,12 +233,50 @@ function ProjectDataView() {
                   ""
                 )}
                 {dataset.description ? (
-                  <Text>
-                    <strong>Description:</strong> {dataset.description}
-                  </Text>
+                  <Box sx={{ "& p": { my: 0 } }}>
+                    <strong>Description:</strong>{" "}
+                    <Markdown inline>{dataset.description}</Markdown>
+                  </Box>
                 ) : (
                   ""
                 )}
+                {(() => {
+                  const used = figuresUsing(dataset.path)
+                  const isCsv = dataset.path.toLowerCase().endsWith(".csv")
+                  return (
+                    <Flex mt={3} gap={3} align="center" wrap="wrap">
+                      {used.length > 0 ? (
+                        <Link
+                          as={RouterLink}
+                          to={"../figures"}
+                          search={{ path: used[0].path } as any}
+                          fontSize="sm"
+                        >
+                          Used in {used.length}{" "}
+                          {used.length === 1 ? "figure" : "figures"} →
+                        </Link>
+                      ) : pipelineQuery.isSuccess ? (
+                        <Text fontSize="sm" color="ui.dim">
+                          Not plotted yet
+                        </Text>
+                      ) : null}
+                      {userHasWriteAccess && isCsv && !ref ? (
+                        <Button
+                          size="xs"
+                          variant="primary"
+                          onClick={() => {
+                            mixpanel.track("Opened figure studio", {
+                              source: "dataset-card",
+                            })
+                            setStudioDataset(dataset.path)
+                          }}
+                        >
+                          New figure
+                        </Button>
+                      ) : null}
+                    </Flex>
+                  )
+                })()}
               </Card>
             ))}
           </SimpleGrid>

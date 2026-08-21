@@ -8362,6 +8362,17 @@ export const StudioFigurePostSchema = {
       ],
       title: "Environment",
     },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
     message: {
       anyOf: [
         {

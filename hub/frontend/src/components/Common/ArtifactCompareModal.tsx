@@ -55,6 +55,7 @@ import {
 import useAuth from "../../hooks/useAuth"
 import { httpStatus } from "../../lib/api"
 import FigureView from "../Figures/FigureView"
+import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FileContent from "../Files/FileContent"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
@@ -369,6 +370,13 @@ function FigureInfo({
           </Text>
         )}
       </Text>
+      {/* Back into the code that made it, when there is some: last, after
+          the facts, and set off from them */}
+      <FigureEditLauncher
+        ownerName={ownerName}
+        projectName={projectName}
+        figure={figure}
+      />
     </Box>
   )
 }

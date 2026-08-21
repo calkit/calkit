@@ -207,6 +207,26 @@ const missingModule = (message: string): string | null => {
   return match ? match[1] : null
 }
 
+/**
+ * Load an environment's packages ahead of a run, so the browser mirrors
+ * the environment the stage will run in. Names Pyodide doesn't ship are
+ * skipped quietly; the run's own import-driven loading covers the rest.
+ */
+export async function preloadPackages(
+  names: string[],
+  onStatus?: (status: string) => void,
+): Promise<void> {
+  if (!names.length) return
+  const pyodide = await getPyodide(onStatus)
+  for (const name of names) {
+    try {
+      await pyodide.loadPackage(name)
+    } catch {
+      // Not in the Pyodide distribution; nothing to do here.
+    }
+  }
+}
+
 export interface RunInput {
   code: string
   /** Repo-relative paths and their contents, written before the run. */

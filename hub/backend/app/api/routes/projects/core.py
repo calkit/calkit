@@ -51,6 +51,7 @@ import calkit.core
 import calkit.detect
 import calkit.environments
 import calkit.latex
+import calkit.pipeline
 import calkit.resources
 import calkit.templates
 from app import (
@@ -6315,6 +6316,17 @@ def put_project_pipeline_stage(
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
+    # read; otherwise the edit sits in calkit.yaml until the next run.
+    try:
+        calkit.pipeline.to_dvc(
+            ck_info=ck_info, wdir=str(repo.working_dir), write=True
+        )
+        repo.git.add("-A")
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
     if repo.is_dirty():
         repo.git.commit(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]

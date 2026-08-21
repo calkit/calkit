@@ -56,7 +56,7 @@ import { decodeBase64Utf8 } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
-import { envPackages, pickPythonEnv } from "../Figures/FigureStudio"
+import { envPackages, pickPythonEnv } from "../../lib/figureScript"
 
 // Inputs are what the code reads, so the caps are about what a browser can
 // hold, not about tidiness: a profiler's sqlite or a results HDF5 can run

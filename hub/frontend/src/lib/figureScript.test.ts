@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import type { Environment } from "../../client"
+import type { Environment } from "../client"
 import {
   defaultScript,
   envPackages,
@@ -8,7 +8,7 @@ import {
   readCsvPaths,
   savefigPath,
   withDatasetLines,
-} from "./FigureStudio"
+} from "./figureScript"
 
 describe("savefigPath", () => {
   it("reads the path from the last savefig call, in any quoting", () => {

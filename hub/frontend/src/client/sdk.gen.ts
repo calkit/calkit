@@ -7056,6 +7056,10 @@ export class ProjectsService {
       project_name: string
       path: string
       ref?: string | null
+      row_offset?: number
+      row_limit?: number
+      col_offset?: number
+      col_limit?: number
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -7072,6 +7076,10 @@ export class ProjectsService {
             { in: "path", key: "project_name" },
             { in: "path", key: "path" },
             { in: "query", key: "ref" },
+            { in: "query", key: "row_offset" },
+            { in: "query", key: "row_limit" },
+            { in: "query", key: "col_offset" },
+            { in: "query", key: "col_limit" },
           ],
         },
       ],
@@ -7105,6 +7113,10 @@ export class ProjectsService {
       path: string
       key?: string | null
       ref?: string | null
+      row_offset?: number
+      row_limit?: number
+      col_offset?: number
+      col_limit?: number
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -7122,6 +7134,10 @@ export class ProjectsService {
             { in: "path", key: "path" },
             { in: "query", key: "key" },
             { in: "query", key: "ref" },
+            { in: "query", key: "row_offset" },
+            { in: "query", key: "row_limit" },
+            { in: "query", key: "col_offset" },
+            { in: "query", key: "col_limit" },
           ],
         },
       ],

@@ -12,7 +12,7 @@ import posixpath
 
 import git
 import polars as pl
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import app.projects
@@ -28,16 +28,32 @@ router = APIRouter()
 
 TABLE_SUFFIXES = {".csv", ".tsv", ".parquet", ".jsonl", ".ndjson"}
 MAX_TABLE_BYTES = 500_000_000
-MAX_ROWS = 200_000
+MAX_ROW_LIMIT = 5000
+DEFAULT_ROW_LIMIT = 1000
+MAX_COL_LIMIT = 500
+DEFAULT_COL_LIMIT = 100
 
 
 class TableText(BaseModel):
+    """A window of a table as CSV, which is what the table viewer reads.
+
+    A table can be wider or longer than a browser can hold (a 2D array in
+    an HDF5 file with thousands of columns, say), so the response is a
+    window in both dimensions and says where it sits in the whole.
+    """
+
     path: str
-    # The table as CSV, base64-encoded, which is what the table viewer reads
+    # The window as CSV, base64-encoded
     content: str
+    # Names of the columns in the window
     columns: list[str]
     n_rows: int
-    # True when the file has more rows than are included
+    n_cols: int
+    row_offset: int
+    row_limit: int
+    col_offset: int
+    col_limit: int
+    # True when rows or columns lie outside the window
     truncated: bool
 
 
@@ -123,10 +139,38 @@ def read_table(data: bytes, path: str) -> pl.DataFrame:
         raise HTTPException(422, f"Could not read '{path}' as a table: {e}")
 
 
-def to_csv_text(df: pl.DataFrame, max_rows: int) -> tuple[str, bool]:
-    """The frame as CSV text, cut at ``max_rows``."""
-    truncated = df.height > max_rows
-    return df.head(max_rows).write_csv(), truncated
+def window_table(
+    df: pl.DataFrame,
+    path: str,
+    row_offset: int,
+    row_limit: int,
+    col_offset: int,
+    col_limit: int,
+) -> TableText:
+    """One window of a frame as CSV, with its place in the whole."""
+    cols = df.columns[col_offset : col_offset + col_limit]
+    window = (
+        df.select(cols).slice(row_offset, row_limit) if cols else df.head(0)
+    )
+    text = window.write_csv()
+    truncated = (
+        col_offset > 0
+        or row_offset > 0
+        or len(df.columns) > col_offset + col_limit
+        or df.height > row_offset + row_limit
+    )
+    return TableText(
+        path=path,
+        content=base64.b64encode(text.encode("utf-8")).decode("ascii"),
+        columns=list(cols),
+        n_rows=df.height,
+        n_cols=len(df.columns),
+        row_offset=row_offset,
+        row_limit=row_limit,
+        col_offset=col_offset,
+        col_limit=col_limit,
+        truncated=truncated,
+    )
 
 
 @router.get("/projects/{owner_name}/{project_name}/dataset-csv/{path:path}")
@@ -137,6 +181,10 @@ def get_project_dataset_csv(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
+    row_offset: int = Query(0, ge=0),
+    row_limit: int = Query(DEFAULT_ROW_LIMIT, ge=1, le=MAX_ROW_LIMIT),
+    col_offset: int = Query(0, ge=0),
+    col_limit: int = Query(DEFAULT_COL_LIMIT, ge=1, le=MAX_COL_LIMIT),
 ) -> TableText:
     """A tabular file as CSV, for the table viewer.
 
@@ -163,14 +211,7 @@ def get_project_dataset_csv(
         project, repo, path, ref, MAX_TABLE_BYTES, session, current_user
     )
     df = read_table(data, path)
-    text, truncated = to_csv_text(df, MAX_ROWS)
-    return TableText(
-        path=path,
-        content=base64.b64encode(text.encode("utf-8")).decode("ascii"),
-        columns=list(df.columns),
-        n_rows=df.height,
-        truncated=truncated,
-    )
+    return window_table(df, path, row_offset, row_limit, col_offset, col_limit)
 
 
 HDF5_SUFFIXES = {".h5", ".hdf5", ".hdf", ".he5"}
@@ -265,6 +306,10 @@ def get_project_dataset_hdf5(
     session: SessionDep,
     key: str | None = None,
     ref: str | None = None,
+    row_offset: int = Query(0, ge=0),
+    row_limit: int = Query(DEFAULT_ROW_LIMIT, ge=1, le=MAX_ROW_LIMIT),
+    col_offset: int = Query(0, ge=0),
+    col_limit: int = Query(DEFAULT_COL_LIMIT, ge=1, le=MAX_COL_LIMIT),
 ) -> Hdf5Listing | TableText:
     """Browse an HDF5 file: its keys, or one dataset as CSV.
 
@@ -295,11 +340,6 @@ def get_project_dataset_hdf5(
         raise
     except Exception as e:
         raise HTTPException(422, f"Could not read '{path}': {e}")
-    text, truncated = to_csv_text(df, MAX_ROWS)
-    return TableText(
-        path=f"{path}:{key}",
-        content=base64.b64encode(text.encode("utf-8")).decode("ascii"),
-        columns=list(df.columns),
-        n_rows=df.height,
-        truncated=truncated,
+    return window_table(
+        df, f"{path}:{key}", row_offset, row_limit, col_offset, col_limit
     )

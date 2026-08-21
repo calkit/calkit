@@ -116,9 +116,17 @@ function TableModal({
   }, [onPrev, onNext])
 
   return (
-    <Modal isOpen onClose={onClose} size="full" scrollBehavior="inside">
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="6xl"
+      scrollBehavior="inside"
+      isCentered
+    >
       <ModalOverlay />
-      <ModalContent>
+      {/* Wide enough for a table's columns, still a dialog over the page,
+          and a fixed height so filtering changes the rows, not the box */}
+      <ModalContent maxW={{ base: "100%", lg: "92vw" }} h="92vh" maxH="92vh">
         <ModalHeader pb={1}>
           <Flex align="center" gap={2}>
             <IconButton
@@ -201,7 +209,7 @@ function TableModal({
             // query rather than keeping the one being left behind.
             key={table.path}
             table={table}
-            maxHeight="calc(100vh - 260px)"
+            maxHeight="calc(92vh - 260px)"
             highlight={highlight}
             onHighlightChange={onHighlightChange}
             search={search}

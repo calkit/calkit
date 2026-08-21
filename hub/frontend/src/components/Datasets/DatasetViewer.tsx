@@ -2,6 +2,8 @@ import {
   Box,
   Code,
   Flex,
+  HStack,
+  IconButton,
   Link,
   Modal,
   ModalBody,
@@ -17,8 +19,10 @@ import {
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
+import { ChevronLeftIcon, ChevronRightIcon } from "@chakra-ui/icons"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
+import { useState } from "react"
 import {
   type DatasetPublic,
   type Hdf5Listing,
@@ -28,8 +32,11 @@ import {
 } from "../../client"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
-import FileContent from "../Files/FileContent"
+import { getLanguage } from "../Files/FileContent"
 import TableView from "../Tables/TableView"
+import SyntaxHighlighter from "react-syntax-highlighter"
+import { atomOneDark } from "react-syntax-highlighter/dist/esm/styles/hljs"
+import { decodeBase64Utf8 } from "../../lib/strings"
 
 const TABLE_SUFFIXES = ["csv", "tsv", "parquet", "jsonl", "ndjson"]
 const HDF5_SUFFIXES = ["h5", "hdf5", "hdf", "he5"]
@@ -53,14 +60,138 @@ const TEXT_SUFFIXES = [
 
 const suffixOf = (path: string) => path.toLowerCase().split(".").pop() ?? ""
 
+const ROW_WINDOW = 1000
+const COL_WINDOW = 100
+
+interface WindowParams {
+  row_offset: number
+  row_limit: number
+  col_offset: number
+  col_limit: number
+}
+
 /**
- * The table behind a dataset, in the same viewer the tables page uses.
+ * One window of a table in the tables-page viewer, with controls to move
+ * the window through the rows and the columns.
  *
- * The server turns CSV, TSV, parquet, or JSON lines into CSV text (capped
- * at a row count a browser can hold, and it says when it cut), and
- * TableView does the rest: search, sort, the gear menu for hiding columns,
- * and highlight links.
+ * The server cuts the table in both dimensions, since a file can be too
+ * long (a million rows) or too wide (a 2D array with thousands of columns)
+ * for a browser to hold or lay out; TableView then does search, sort, and
+ * the gear menu within the window it's given.
  */
+function TableWindow({
+  queryKey,
+  fetchWindow,
+  parserPath,
+  title,
+}: {
+  queryKey: unknown[]
+  fetchWindow: (params: WindowParams) => Promise<TableText>
+  parserPath: string
+  title: string
+}) {
+  const subtle = useColorModeValue("gray.600", "gray.400")
+  const [rowOffset, setRowOffset] = useState(0)
+  const [colOffset, setColOffset] = useState(0)
+  const params: WindowParams = {
+    row_offset: rowOffset,
+    row_limit: ROW_WINDOW,
+    col_offset: colOffset,
+    col_limit: COL_WINDOW,
+  }
+  const query = useQuery({
+    queryKey: [...queryKey, params],
+    queryFn: () => fetchWindow(params),
+    retry: false,
+    staleTime: 60_000,
+    placeholderData: (prev) => prev,
+  })
+  if (query.isPending) return <LoadingSpinner height="50vh" />
+  if (query.isError) {
+    const err = query.error as any
+    return (
+      <Text color="red.400" fontSize="sm">
+        {(err?.response?.data?.detail as string) ??
+          err?.message ??
+          "Could not read this file as a table."}
+      </Text>
+    )
+  }
+  const data = query.data
+  const table: Table = {
+    path: `${parserPath}.csv`,
+    title,
+    content: data.content,
+  }
+  const rowEnd = Math.min(data.n_rows, data.row_offset + data.row_limit)
+  const colEnd = Math.min(data.n_cols, data.col_offset + data.col_limit)
+  const pager = (
+    label: string,
+    start: number,
+    end: number,
+    total: number,
+    step: number,
+    setOffset: (n: number) => void,
+  ) =>
+    total > step ? (
+      <HStack spacing={1} fontSize="xs" color={subtle}>
+        <IconButton
+          aria-label={`Previous ${label}`}
+          icon={<ChevronLeftIcon />}
+          size="xs"
+          variant="ghost"
+          isDisabled={start <= 0}
+          onClick={() => setOffset(Math.max(0, start - step))}
+        />
+        <Text whiteSpace="nowrap">
+          {label} {(start + 1).toLocaleString()}–{end.toLocaleString()} of{" "}
+          {total.toLocaleString()}
+        </Text>
+        <IconButton
+          aria-label={`Next ${label}`}
+          icon={<ChevronRightIcon />}
+          size="xs"
+          variant="ghost"
+          isDisabled={end >= total}
+          onClick={() => setOffset(start + step)}
+        />
+      </HStack>
+    ) : (
+      <Text fontSize="xs" color={subtle} whiteSpace="nowrap">
+        {total.toLocaleString()} {label}
+      </Text>
+    )
+  return (
+    <Box opacity={query.isFetching ? 0.7 : 1}>
+      <Flex gap={4} mb={2} align="center" wrap="wrap">
+        {pager(
+          "rows",
+          data.row_offset,
+          rowEnd,
+          data.n_rows,
+          ROW_WINDOW,
+          setRowOffset,
+        )}
+        {pager(
+          "columns",
+          data.col_offset,
+          colEnd,
+          data.n_cols,
+          COL_WINDOW,
+          setColOffset,
+        )}
+      </Flex>
+      <TableView
+        // A new window is a new table to the viewer
+        key={`${data.row_offset}:${data.col_offset}`}
+        table={table}
+        maxHeight="calc(92vh - 300px)"
+      />
+    </Box>
+  )
+}
+
+/** A CSV, TSV, parquet, or JSON-lines dataset, windowed by the server. */
 function DatasetTable({
   ownerName,
   projectName,
@@ -70,47 +201,26 @@ function DatasetTable({
   projectName: string
   dataset: DatasetPublic
 }) {
-  const csvQuery = useQuery({
-    queryKey: ["projects", ownerName, projectName, "dataset-csv", dataset.path],
-    queryFn: () =>
-      ProjectsService.getProjectDatasetCsv({
-        owner_name: ownerName,
-        project_name: projectName,
-        path: dataset.path,
-      }).then((response) => response.data),
-    retry: false,
-    staleTime: 60_000,
-  })
-  if (csvQuery.isPending) return <LoadingSpinner height="60vh" />
-  if (csvQuery.isError) {
-    const err = csvQuery.error as any
-    return (
-      <Text color="red.400" fontSize="sm">
-        {(err?.response?.data?.detail as string) ??
-          err?.message ??
-          "Could not read this file as a table."}
-      </Text>
-    )
-  }
-  const data = csvQuery.data
-  // The content is CSV whatever the file was, so the parser is told so.
-  const table: Table = {
-    path: `${dataset.path}.csv`,
-    title: dataset.title || dataset.path,
-    description: dataset.description,
-    stage: dataset.stage,
-    content: data.content,
-  }
   return (
-    <Box>
-      {data.truncated ? (
-        <Text fontSize="xs" color="orange.400" mb={2}>
-          The file has {data.n_rows.toLocaleString()} rows; the first 200,000
-          are loaded here.
-        </Text>
-      ) : null}
-      <TableView table={table} maxHeight="calc(92vh - 240px)" />
-    </Box>
+    <TableWindow
+      queryKey={[
+        "projects",
+        ownerName,
+        projectName,
+        "dataset-csv",
+        dataset.path,
+      ]}
+      fetchWindow={(params) =>
+        ProjectsService.getProjectDatasetCsv({
+          owner_name: ownerName,
+          project_name: projectName,
+          path: dataset.path,
+          ...params,
+        }).then((response) => response.data)
+      }
+      parserPath={dataset.path}
+      title={dataset.title || dataset.path}
+    />
   )
 }
 
@@ -120,50 +230,34 @@ function Hdf5DatasetTable({
   projectName,
   path,
   hkey,
-  title,
 }: {
   ownerName: string
   projectName: string
   path: string
   hkey: string
-  title: string
 }) {
-  const query = useQuery({
-    queryKey: ["projects", ownerName, projectName, "dataset-hdf5", path, hkey],
-    queryFn: () =>
-      ProjectsService.getProjectDatasetHdf5({
-        owner_name: ownerName,
-        project_name: projectName,
-        path,
-        key: hkey,
-      }).then((response) => response.data as TableText),
-    retry: false,
-    staleTime: 60_000,
-  })
-  if (query.isPending) return <LoadingSpinner height="50vh" />
-  if (query.isError) {
-    const err = query.error as any
-    return (
-      <Text color="red.400" fontSize="sm">
-        {(err?.response?.data?.detail as string) ?? err?.message}
-      </Text>
-    )
-  }
-  const table: Table = {
-    path: `${path}-${hkey.replace(/\//g, "-")}.csv`,
-    title,
-    content: query.data.content,
-  }
   return (
-    <Box>
-      {query.data.truncated ? (
-        <Text fontSize="xs" color="orange.400" mb={2}>
-          {query.data.n_rows.toLocaleString()} rows; the first 200,000 are
-          loaded here.
-        </Text>
-      ) : null}
-      <TableView table={table} maxHeight="calc(92vh - 300px)" />
-    </Box>
+    <TableWindow
+      queryKey={[
+        "projects",
+        ownerName,
+        projectName,
+        "dataset-hdf5",
+        path,
+        hkey,
+      ]}
+      fetchWindow={(params) =>
+        ProjectsService.getProjectDatasetHdf5({
+          owner_name: ownerName,
+          project_name: projectName,
+          path,
+          key: hkey,
+          ...params,
+        }).then((response) => response.data as TableText)
+      }
+      parserPath={`${path}-${hkey.replace(/\//g, "-")}`}
+      title={hkey}
+    />
   )
 }
 
@@ -244,13 +338,41 @@ function Hdf5Browser({
                   projectName={projectName}
                   path={path}
                   hkey={k.key}
-                  title={k.key}
                 />
               </TabPanel>
             ))}
           </TabPanels>
         </Tabs>
       )}
+    </Box>
+  )
+}
+
+/**
+ * A text-like file in a box sized to its content, capped to the dialog.
+ *
+ * FileContent's panes are sized for the files page (the full viewport), so
+ * a one-line JSON file would get a tall empty block in a dialog.
+ */
+function TextFile({ item }: { item: any }) {
+  const text = item?.content ? decodeBase64Utf8(String(item.content)) : ""
+  const name = String(item?.name ?? item?.path ?? "")
+  if (name.toLowerCase().endsWith(".md")) {
+    return (
+      <Box maxH="70vh" overflowY="auto">
+        <Markdown>{text}</Markdown>
+      </Box>
+    )
+  }
+  return (
+    <Box maxH="70vh" overflowY="auto" borderRadius="md" fontSize="sm">
+      <SyntaxHighlighter
+        language={getLanguage(name)}
+        style={atomOneDark}
+        customStyle={{ margin: 0, borderRadius: "8px" }}
+      >
+        {text}
+      </SyntaxHighlighter>
     </Box>
   )
 }
@@ -372,7 +494,7 @@ const DatasetViewer = ({
               Couldn't load this file. It may not be pushed to storage yet.
             </Text>
           ) : isText && item ? (
-            <FileContent item={item} />
+            <TextFile item={item} />
           ) : (
             <Box fontSize="sm">
               <Text color={subtle}>

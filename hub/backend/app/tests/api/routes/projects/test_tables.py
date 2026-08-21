@@ -67,12 +67,28 @@ def test_get_project_dataset_csv(client: TestClient, tmp_path) -> None:
         # Not a table format, and not a file
         assert client.get(f"{BASE}/data/notes.txt").status_code == 415
         assert client.get(f"{BASE}/data/missing.csv").status_code == 404
-        # The row cap is reported rather than silently applied
-        with patch("app.api.routes.projects.tables.MAX_ROWS", 10):
-            resp = client.get(f"{BASE}/data/raw.csv")
-            assert resp.json()["truncated"] is True
-            assert resp.json()["n_rows"] == 250
-            assert len(_csv(resp).splitlines()) == 11
+        # Windows in both dimensions, with the whole's size reported
+        resp = client.get(
+            f"{BASE}/data/raw.csv",
+            params={"row_offset": 240, "row_limit": 10, "col_limit": 2},
+        )
+        body = resp.json()
+        assert body["truncated"] is True
+        assert body["n_rows"] == 250 and body["n_cols"] == 3
+        assert body["columns"] == ["x", "y"]
+        assert _csv(resp).splitlines() == ["x,y"] + [
+            f"{i},{i * i}" for i in range(240, 250)
+        ]
+        resp = client.get(
+            f"{BASE}/data/raw.csv", params={"col_offset": 2, "row_limit": 1}
+        )
+        assert _csv(resp).splitlines() == ["label", "row0"]
+        assert (
+            client.get(
+                f"{BASE}/data/raw.csv", params={"row_limit": 99999}
+            ).status_code
+            == 422
+        )
 
 
 def test_get_project_dataset_hdf5(client: TestClient, tmp_path) -> None:

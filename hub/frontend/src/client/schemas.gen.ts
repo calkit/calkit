@@ -8784,14 +8784,47 @@ export const TableTextSchema = {
       type: "integer",
       title: "N Rows",
     },
+    n_cols: {
+      type: "integer",
+      title: "N Cols",
+    },
+    row_offset: {
+      type: "integer",
+      title: "Row Offset",
+    },
+    row_limit: {
+      type: "integer",
+      title: "Row Limit",
+    },
+    col_offset: {
+      type: "integer",
+      title: "Col Offset",
+    },
+    col_limit: {
+      type: "integer",
+      title: "Col Limit",
+    },
     truncated: {
       type: "boolean",
       title: "Truncated",
     },
   },
   type: "object",
-  required: ["path", "content", "columns", "n_rows", "truncated"],
+  required: [
+    "path",
+    "content",
+    "columns",
+    "n_rows",
+    "n_cols",
+    "row_offset",
+    "row_limit",
+    "col_offset",
+    "col_limit",
+    "truncated",
+  ],
   title: "TableText",
+  description:
+    "A window of a table as CSV, which is what the table viewer reads.\n\nA table can be wider or longer than a browser can hold (a 2D array in\nan HDF5 file with thousands of columns, say), so the response is a\nwindow in both dimensions and says where it sits in the whole.",
 } as const
 
 export const TextDiffSchema = {

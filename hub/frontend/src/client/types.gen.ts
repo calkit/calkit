@@ -5013,6 +5013,12 @@ export type Table = {
 
 /**
  * TableText
+ *
+ * A window of a table as CSV, which is what the table viewer reads.
+ *
+ * A table can be wider or longer than a browser can hold (a 2D array in
+ * an HDF5 file with thousands of columns, say), so the response is a
+ * window in both dimensions and says where it sits in the whole.
  */
 export type TableText = {
   /**
@@ -5031,6 +5037,26 @@ export type TableText = {
    * N Rows
    */
   n_rows: number
+  /**
+   * N Cols
+   */
+  n_cols: number
+  /**
+   * Row Offset
+   */
+  row_offset: number
+  /**
+   * Row Limit
+   */
+  row_limit: number
+  /**
+   * Col Offset
+   */
+  col_offset: number
+  /**
+   * Col Limit
+   */
+  col_limit: number
   /**
    * Truncated
    */
@@ -11949,6 +11975,22 @@ export type GetProjectDatasetCsvData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Row Offset
+     */
+    row_offset?: number
+    /**
+     * Row Limit
+     */
+    row_limit?: number
+    /**
+     * Col Offset
+     */
+    col_offset?: number
+    /**
+     * Col Limit
+     */
+    col_limit?: number
   }
   url: "/projects/{owner_name}/{project_name}/dataset-csv/{path}"
 }
@@ -11998,6 +12040,22 @@ export type GetProjectDatasetHdf5Data = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Row Offset
+     */
+    row_offset?: number
+    /**
+     * Row Limit
+     */
+    row_limit?: number
+    /**
+     * Col Offset
+     */
+    col_offset?: number
+    /**
+     * Col Limit
+     */
+    col_limit?: number
   }
   url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}"
 }

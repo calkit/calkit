@@ -426,6 +426,10 @@ const FigureStudio = ({
   const [result, setResult] = useState<RunResult | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [showOutput, setShowOutput] = useState(false)
+  // The script as first shown is not the script to auto-run: a new figure's
+  // template is regenerated once the data's columns are known, and an
+  // existing script arrives from the repo. This flips when that's done.
+  const [codeSettled, setCodeSettled] = useState(false)
   const viewRef = useRef<EditorView | null>(null)
   const discardDialog = useDisclosure()
   const keepEditingRef = useRef<HTMLButtonElement>(null)
@@ -499,6 +503,7 @@ const FigureStudio = ({
     if (scriptQuery.data !== undefined && !code) {
       setCode(scriptQuery.data)
       setEditorKey((k) => k + 1)
+      setCodeSettled(true)
       // The script is the last word on what it reads. The stage definition
       // is asked first, but a dvc.yaml that predates the stage, or inputs
       // declared as another stage's outputs, can leave that list short.
@@ -552,6 +557,8 @@ const FigureStudio = ({
     if (!codeTouched) {
       setCode(defaultScript({ datasetPaths, figurePath: nextFigure, x, y }))
       setEditorKey((k) => k + 1)
+      // Only the version written with the columns in hand is worth running.
+      if (preview) setCodeSettled(true)
     }
   }, [primaryPath, datasetPaths, preview, codeTouched])
   useEffect(() => {
@@ -601,11 +608,11 @@ const FigureStudio = ({
   }
   // biome-ignore lint/correctness/useExhaustiveDependencies: fire once, when runnable
   useEffect(() => {
-    if (isOpen && canRun && !autoRan.current && !running) {
+    if (isOpen && canRun && codeSettled && !autoRan.current && !running) {
       autoRan.current = true
       run()
     }
-  }, [isOpen, canRun])
+  }, [isOpen, canRun, codeSettled])
   const saveMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectStudioFigure({

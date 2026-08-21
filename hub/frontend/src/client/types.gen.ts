@@ -632,6 +632,67 @@ export type DatasetPost = {
 }
 
 /**
+ * DatasetPublic
+ *
+ * A dataset as the API returns it, with its provenance spelled out.
+ *
+ * The table keeps ``imported_from`` as a project path for the one kind of
+ * import the hub can resolve itself; the structured origin (DOI, URL, Git
+ * repo, project) and the collectors come straight from calkit.yaml, which
+ * is where they're authored.
+ */
+export type DatasetPublic = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Imported From
+   */
+  imported_from?: string | null
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Project Id
+   */
+  project_id: string
+  /**
+   * Imported From Info
+   */
+  imported_from_info?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Collected By
+   */
+  collected_by?: Array<{
+    [key: string]: unknown
+  }> | null
+}
+
+/**
  * DatasetResponse
  */
 export type DatasetResponse = {
@@ -9181,7 +9242,7 @@ export type GetProjectDatasetsResponses = {
    *
    * Successful Response
    */
-  200: Array<Dataset>
+  200: Array<DatasetPublic>
 }
 
 export type GetProjectDatasetsResponse =

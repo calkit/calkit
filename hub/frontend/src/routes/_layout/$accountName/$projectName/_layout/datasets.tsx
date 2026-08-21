@@ -1,21 +1,22 @@
+import { ExternalLinkIcon } from "@chakra-ui/icons"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import {
-  Box,
-  Heading,
-  Flex,
-  Text,
-  Code,
   Badge,
-  SimpleGrid,
+  Box,
+  Button,
   Card,
+  Code,
+  Flex,
+  Heading,
+  Icon,
+  Link,
   Menu,
   MenuButton,
-  Icon,
-  MenuList,
   MenuItem,
-  Button,
-  Link,
+  MenuList,
+  SimpleGrid,
+  Text,
 } from "@chakra-ui/react"
 import {
   createFileRoute,
@@ -41,6 +42,154 @@ import { ProjectsService } from "../../../../../client"
 // references page carries its own. Filling one in is several fields of
 // work, so a refresh or a back button shouldn't throw it away, and a link
 // can hand someone the right form already open.
+interface ImportedFrom {
+  project?: string | null
+  path?: string | null
+  git_rev?: string | null
+  url?: string | null
+  doi?: string | null
+  git?: { repo_url: string; rev: string; path?: string | null } | null
+  date?: string | null
+}
+
+interface Person {
+  name?: string | null
+  email?: string | null
+  orcid?: string | null
+  with_ai?: string | string[] | null
+}
+
+interface DatasetSourceProps {
+  stage?: string | null
+  importedFrom?: ImportedFrom | null
+  collectedBy?: Person[] | null
+  /** Where the stage link goes, when there is one. */
+  pipelineTo?: string
+}
+
+const personLabel = (p: Person) =>
+  p.name ?? p.email ?? p.orcid?.replace(/^https?:\/\/orcid\.org\//, "") ?? "?"
+
+/**
+ * Where a dataset came from, in one line.
+ *
+ * A dataset is produced by a stage, collected by someone, or imported from
+ * somewhere, and a reader deciding whether to trust a figure needs to know
+ * which. A dataset with none of the three is flagged, since that's the one
+ * case where the answer is "nobody said".
+ */
+const DatasetSource = ({
+  stage,
+  importedFrom,
+  collectedBy,
+  pipelineTo,
+}: DatasetSourceProps) => {
+  if (stage) {
+    return (
+      <Text fontSize="sm">
+        <strong>Source:</strong> produced by stage{" "}
+        {pipelineTo ? (
+          <Link as={RouterLink} to={pipelineTo} search={{ stage } as any}>
+            <Code fontSize="xs">{stage}</Code>
+          </Link>
+        ) : (
+          <Code fontSize="xs">{stage}</Code>
+        )}
+      </Text>
+    )
+  }
+  if (importedFrom) {
+    const date = importedFrom.date ? ` on ${importedFrom.date}` : ""
+    if (importedFrom.doi) {
+      // Entries written before the hub normalized DOIs may still carry a
+      // doi.org prefix; show and link the bare identifier either way.
+      const doi = importedFrom.doi
+        .trim()
+        .replace(/^(?:https?:\/\/)?(?:www\.|dx\.)?doi\.org\//i, "")
+        .replace(/^doi:\s*/i, "")
+      return (
+        <Text fontSize="sm">
+          <strong>Source:</strong> imported from DOI{" "}
+          <Link href={`https://doi.org/${doi}`} isExternal>
+            {doi} <ExternalLinkIcon mb={0.5} />
+          </Link>
+          {date}
+        </Text>
+      )
+    }
+    if (importedFrom.url) {
+      return (
+        <Text fontSize="sm" noOfLines={2}>
+          <strong>Source:</strong> downloaded from{" "}
+          <Link href={importedFrom.url} isExternal>
+            {importedFrom.url} <ExternalLinkIcon mb={0.5} />
+          </Link>
+          {date}
+        </Text>
+      )
+    }
+    if (importedFrom.git) {
+      const { repo_url, rev, path } = importedFrom.git
+      const commitUrl = repo_url.includes("github.com")
+        ? `${repo_url.replace(/\.git$/, "")}/tree/${rev}/${path ?? ""}`
+        : repo_url
+      return (
+        <Text fontSize="sm" noOfLines={2}>
+          <strong>Source:</strong> from Git repo{" "}
+          <Link href={commitUrl} isExternal>
+            {repo_url.replace(/^https?:\/\/(www\.)?/, "")}
+            {path ? `/${path}` : ""} <ExternalLinkIcon mb={0.5} />
+          </Link>{" "}
+          at <Code fontSize="xs">{rev.slice(0, 7)}</Code>
+          {date}
+        </Text>
+      )
+    }
+    if (importedFrom.project) {
+      return (
+        <Text fontSize="sm">
+          <strong>Source:</strong> imported from project{" "}
+          <Link as={RouterLink} to={`/${importedFrom.project}` as any}>
+            {importedFrom.project}
+          </Link>
+          {importedFrom.path ? (
+            <>
+              {" "}
+              (<Code fontSize="xs">{importedFrom.path}</Code>)
+            </>
+          ) : null}
+          {importedFrom.git_rev ? (
+            <>
+              {" "}
+              at <Code fontSize="xs">{importedFrom.git_rev.slice(0, 7)}</Code>
+            </>
+          ) : null}
+        </Text>
+      )
+    }
+  }
+  if (collectedBy?.length) {
+    const names = collectedBy.map(personLabel).join(", ")
+    const withAi = collectedBy.some((p) => p.with_ai)
+    return (
+      <Text fontSize="sm">
+        <strong>Source:</strong> collected by {names}
+        {withAi ? (
+          <Text as="span" color="orange.400">
+            {" "}
+            (with generative AI)
+          </Text>
+        ) : null}
+      </Text>
+    )
+  }
+  return (
+    <Text fontSize="sm" color="orange.400">
+      <strong>Source:</strong> not recorded
+    </Text>
+  )
+}
+
 const datasetsSearchSchema = z.object({
   upload_open: z.boolean().optional(),
   new_dataset_open: z.boolean().optional(),
@@ -233,13 +382,19 @@ function ProjectDataView() {
                   ""
                 )}
                 {dataset.description ? (
-                  <Box sx={{ "& p": { my: 0 } }}>
+                  <Box sx={{ "& p": { my: 0 } }} mb={1}>
                     <strong>Description:</strong>{" "}
                     <Markdown inline>{dataset.description}</Markdown>
                   </Box>
                 ) : (
                   ""
                 )}
+                <DatasetSource
+                  stage={dataset.stage}
+                  importedFrom={dataset.imported_from_info as any}
+                  collectedBy={dataset.collected_by as any}
+                  pipelineTo={`/${accountName}/${projectName}/pipeline`}
+                />
                 {(() => {
                   const used = figuresUsing(dataset.path)
                   const isCsv = dataset.path.toLowerCase().endsWith(".csv")

@@ -3695,6 +3695,24 @@ def test_post_project_dataset_provenance(
                 "get_ck_info_from_repo",
                 return_value=ck_info,
             ),
+            # This test is about what gets written to calkit.yaml; the
+            # fetching of imports has its own test with a real repo
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_files",
+                side_effect=lambda files, wdir, path: (path, [path]),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_git_path",
+                side_effect=lambda *a, **k: [a[-1]],
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.resolve_doi_files",
+                return_value={"x.csv": "https://example.org/x.csv"},
+            ),
+            patch(
+                "app.api.routes.projects.core.calkit.get_size",
+                return_value=0,
+            ),
             patch(
                 "app.api.routes.projects.core.get_zip_path_map_from_repo",
                 return_value={},

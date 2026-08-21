@@ -227,7 +227,13 @@ const NewDataset = ({
     },
     onSuccess: () => {
       mixpanel.track("Added dataset", { source })
-      showToast("Success!", "Dataset added.", "success")
+      showToast(
+        "Success!",
+        source === "url" || source === "doi" || source === "git_repo"
+          ? "Dataset fetched and added."
+          : "Dataset added.",
+        "success",
+      )
       reset()
       setSource(defaultSource)
       setTable(EMPTY_TABLE)
@@ -358,10 +364,13 @@ const NewDataset = ({
             <FormControl mb={4}>
               <FormLabel htmlFor="date_retrieved">Date retrieved</FormLabel>
               <Input
-                autoComplete="off"
                 id="date_retrieved"
                 type="date"
                 {...register("date_retrieved")}
+                autoComplete="off"
+                data-form-type="other"
+                data-lpignore="true"
+                data-1p-ignore="true"
               />
               <FormHelperText>
                 Optional. Without it, the commit that adds this entry says when.
@@ -439,7 +448,11 @@ const NewDataset = ({
                   ? "Must already exist in the repo."
                   : source === "enter"
                     ? "Where the CSV will be written."
-                    : "Where it will live once it's fetched."}
+                    : source === "git_repo"
+                      ? "Where the file or folder is copied to."
+                      : "Where it's downloaded to: a file name for a " +
+                        "single file, or a folder for a record with " +
+                        "several."}
               </FormHelperText>
             )}
           </FormControl>

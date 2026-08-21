@@ -41,10 +41,16 @@ from fastapi import (
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
 from git.exc import GitCommandError
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
+import app.imports
 import app.projects
 import calkit
 import calkit.core
@@ -106,6 +112,7 @@ from app.models import (
     ContentsItem,
     Dataset,
     DatasetForImport,
+    DatasetPublic,
     Figure,
     FileLock,
     GitRef,
@@ -4171,7 +4178,7 @@ def get_project_datasets(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-) -> list[Dataset]:
+) -> list[DatasetPublic]:
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -4190,7 +4197,31 @@ def get_project_datasets(
     project = _sync_datasets_with_db(
         ck_info=ck_info, project=project, session=session
     )
-    return project.datasets
+    # Provenance as written in calkit.yaml, keyed by path
+    by_path: dict[str, dict] = {
+        ds["path"]: ds
+        for ds in ck_info.get("datasets", []) or []
+        if isinstance(ds, dict) and ds.get("path")
+    }
+    out = []
+    for row in project.datasets:
+        ck = by_path.get(row.path, {})
+        imported = ck.get("imported_from")
+        collected = ck.get("collected_by")
+        if isinstance(collected, dict):
+            collected = [collected]
+        out.append(
+            DatasetPublic.model_validate(
+                row,
+                update=dict(
+                    imported_from_info=(
+                        imported if isinstance(imported, dict) else None
+                    ),
+                    collected_by=collected if collected else None,
+                ),
+            )
+        )
+    return out
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -4398,6 +4429,23 @@ class ImportedFromPost(BaseModel):
     # lazy annotations a bare `date` here resolves to this field's default.
     date: date_type | None = None
 
+    @model_validator(mode="after")
+    def _doi_urls_are_dois(self) -> "ImportedFromPost":
+        """A doi.org link pasted as a URL is a DOI, and is kept as one.
+
+        The DOI is the durable identifier; the URL is just one way to
+        reach it. Recording the DOI also lets the fetch go through the
+        archive's API rather than a landing page.
+        """
+        if self.url and not self.doi:
+            doi = app.imports.doi_from_url(self.url)
+            if doi:
+                self.doi = doi
+                self.url = None
+        if self.doi:
+            self.doi = app.imports.normalize_doi(self.doi)
+        return self
+
     def kind(self) -> str:
         """Which of the four sources this is.
 
@@ -4542,6 +4590,59 @@ def post_project_dataset(
         )
     if req.imported_from is not None:
         ds["imported_from"] = req.imported_from.to_ck_dict()
+    # An import from a DOI, a URL, or a Git repo is fetched now, so the
+    # declaration and the data arrive together. A project import is left to
+    # `calkit import dataset`, which pulls it through DVC on the machine
+    # that needs it.
+    fetch_kind = req.imported_from.kind() if req.imported_from else None
+    storage: str | None = None
+    if fetch_kind in ("url", "doi", "git"):
+        wdir = str(repo.working_dir)
+        assert req.imported_from is not None
+        if os.path.exists(os.path.join(wdir, req.path)):
+            raise HTTPException(400, f"'{req.path}' already exists")
+        # A multi-file record lands in a folder even when a file name was
+        # given, so the path written to calkit.yaml is the one that exists
+        landed = req.path
+        if fetch_kind == "url":
+            url = str(req.imported_from.url)
+            name = posixpath.basename(urlparse(url).path) or "download"
+            landed, _ = app.imports.fetch_files({name: url}, wdir, req.path)
+        elif fetch_kind == "doi":
+            files = app.imports.resolve_doi_files(str(req.imported_from.doi))
+            landed, _ = app.imports.fetch_files(files, wdir, req.path)
+        else:
+            git_src = req.imported_from.git
+            assert git_src is not None
+            app.imports.fetch_git_path(
+                git_src.repo_url, git_src.rev, git_src.path, wdir, req.path
+            )
+        if landed != req.path:
+            if landed in [d.get("path") for d in datasets] or os.path.exists(
+                os.path.join(wdir, landed + ".dvc")
+            ):
+                shutil.rmtree(os.path.join(wdir, landed), ignore_errors=True)
+                raise HTTPException(
+                    400,
+                    f"The record has several files, which go in a folder, "
+                    f"and '{landed}' is already taken",
+                )
+            ds["path"] = landed
+        # Small goes in Git, large in DVC, the same rule as `calkit add`
+        size = calkit.get_size(os.path.join(wdir, landed))
+        if size < calkit.core.DVC_SIZE_THRESH_BYTES:
+            storage = "git"
+            repo.git.add(landed)
+        else:
+            storage = "dvc"
+            if not os.path.isdir(os.path.join(wdir, ".dvc")):
+                run_dvc_command(["init"], wdir=wdir, check=True)
+            run_dvc_command(["add", landed], wdir=wdir, check=True)
+            to_stage = [landed + ".dvc"]
+            gitignore = os.path.join(os.path.dirname(landed), ".gitignore")
+            if os.path.isfile(os.path.join(wdir, gitignore)):
+                to_stage.append(gitignore)
+            repo.git.add(to_stage)
     # Validated against the models that own calkit.yaml, so this route can't
     # write a shape the CLI would later reject.
     try:
@@ -4556,8 +4657,16 @@ def post_project_dataset(
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    repo.git.commit(["-m", f"Add dataset {req.path}"])
+    repo.git.commit(["-m", f"Add dataset {ds['path']}"])
     repo.git.push(["origin", repo.active_branch.name])
+    if storage == "dvc":
+        # The pointer is pushed with Git; the bytes go to this project's
+        # object storage so a clone can pull them
+        _push_dvc_cache_to_storage(
+            repo_dir=str(repo.working_dir),
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+        )
     if req.imported_from is not None:
         source = req.imported_from.kind()
     elif req.collected_by:

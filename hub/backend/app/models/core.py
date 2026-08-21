@@ -1176,6 +1176,21 @@ class Dataset(DatasetBase, table=True):
     project: Project = Relationship(back_populates="datasets")
 
 
+class DatasetPublic(DatasetBase):
+    """A dataset as the API returns it, with its provenance spelled out.
+
+    The table keeps ``imported_from`` as a project path for the one kind of
+    import the hub can resolve itself; the structured origin (DOI, URL, Git
+    repo, project) and the collectors come straight from calkit.yaml, which
+    is where they're authored.
+    """
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    imported_from_info: dict[str, Any] | None = None
+    collected_by: list[dict[str, Any]] | None = None
+
+
 class DVCOut(BaseModel):
     md5: str
     size: int

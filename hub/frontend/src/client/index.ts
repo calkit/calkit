@@ -55,6 +55,7 @@ export type {
   Dataset,
   DatasetForImport,
   DatasetPost,
+  DatasetPublic,
   DatasetResponse,
   DatasetsResponse,
   DeleteAllUserOnboardingFlagsData,

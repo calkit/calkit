@@ -1138,6 +1138,123 @@ export const DatasetPostSchema = {
     "A dataset to declare, however it came to be part of the project.",
 } as const
 
+export const DatasetPublicSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    tabular: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Tabular",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    project_id: {
+      type: "string",
+      format: "uuid",
+      title: "Project Id",
+    },
+    imported_from_info: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From Info",
+    },
+    collected_by: {
+      anyOf: [
+        {
+          items: {
+            additionalProperties: true,
+            type: "object",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By",
+    },
+  },
+  type: "object",
+  required: ["path", "id", "project_id"],
+  title: "DatasetPublic",
+  description:
+    "A dataset as the API returns it, with its provenance spelled out.\n\nThe table keeps ``imported_from`` as a project path for the one kind of\nimport the hub can resolve itself; the structured origin (DOI, URL, Git\nrepo, project) and the collectors come straight from calkit.yaml, which\nis where they're authored.",
+} as const
+
 export const DatasetResponseSchema = {
   properties: {
     project: {

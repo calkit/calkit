@@ -1285,9 +1285,10 @@ function MachineStep({
         Get it onto your machine
       </Heading>
       <Text color="ui.dim" mb={6}>
-        This is where the work happens. The CLI runs the pipeline, manages
-        environments, and moves results between your machine and here, and every
-        bit of it works with the hub closed.
+        This is where the work happens. The command line interface (CLI) runs
+        the pipeline, manages environments, and moves results between your
+        machine and here, and every bit of it works offline using free and
+        open-source tools.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>

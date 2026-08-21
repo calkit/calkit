@@ -164,6 +164,7 @@ const EditFileInfo = ({ isOpen, onClose, item }: EditFileProps) => {
               <FormControl mb={2}>
                 <FormLabel htmlFor="attrs.title">Title</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="attrs.title"
                   {...register("attrs.title", {})}
                   placeholder="Enter title..."
@@ -176,6 +177,7 @@ const EditFileInfo = ({ isOpen, onClose, item }: EditFileProps) => {
               <FormControl mb={2}>
                 <FormLabel htmlFor="attrs.name">Name</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="attrs.name"
                   {...register("attrs.name", {})}
                   placeholder="Enter name..."

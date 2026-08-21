@@ -163,6 +163,7 @@ const PathPicker = ({
         <PopoverHeader>
           <InputGroup size="sm" mb={trimmedQuery ? 0 : 2}>
             <Input
+              autoComplete="off"
               autoFocus
               placeholder="Search or type a path…"
               value={query}

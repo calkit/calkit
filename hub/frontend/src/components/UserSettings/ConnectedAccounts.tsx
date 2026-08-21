@@ -225,6 +225,7 @@ function ConnectedAccounts() {
                 {isEditingOverleaf ? (
                   <>
                     <Input
+                      autoComplete="off"
                       size="sm"
                       placeholder="Enter new token"
                       value={overleafToken}

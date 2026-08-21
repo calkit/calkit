@@ -4607,9 +4607,11 @@ def post_project_dataset_upload(
     title: Annotated[str, Form()],
     description: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
-    # Email of whoever collected the data, when it's primary data rather
-    # than a file from somewhere else; recorded as the dataset's provenance.
+    # Whoever collected the data, when it's primary data rather than a file
+    # from somewhere else; recorded as the dataset's provenance. The email
+    # is what identifies them; the name is a courtesy for readers.
     collected_by: Optional[Annotated[str, Form()]] = Form(None),
+    collected_by_name: Optional[Annotated[str, Form()]] = Form(None),
 ) -> Dataset:
     logger.info(
         f"Received dataset file {path} with content type: {file.content_type}"
@@ -4664,7 +4666,10 @@ def post_project_dataset_upload(
     repo.git.add(files_to_stage)
     ds: dict = dict(path=path, title=title, description=description)
     if collected_by:
-        ds["collected_by"] = [dict(email=collected_by.strip())]
+        person: dict[str, str] = dict(email=collected_by.strip())
+        if collected_by_name and collected_by_name.strip():
+            person["name"] = collected_by_name.strip()
+        ds["collected_by"] = [person]
         try:
             CkDataset.model_validate(ds)
         except ValidationError as e:

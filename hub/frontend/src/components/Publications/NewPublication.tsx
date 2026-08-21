@@ -143,6 +143,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 Path (relative to project folder)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -206,6 +207,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
             <FormControl mt={4} isRequired isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...register("title")}
                 placeholder="Title"
@@ -235,6 +237,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                   Docker environment name
                 </FormLabel>
                 <Input
+                  autoComplete="off"
                   id="environment"
                   {...register("environment")}
                   placeholder="Ex: tex"
@@ -254,6 +257,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
               <FormControl mt={4} isRequired isInvalid={!!errors.stage}>
                 <FormLabel htmlFor="title">Pipeline stage name</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="stage"
                   {...register("stage")}
                   placeholder="Ex: build-paper"

@@ -196,6 +196,7 @@ const ImportOverleaf = ({
               <FormLabel htmlFor="overleaf_url">Overleaf project URL</FormLabel>
               <HStack>
                 <Input
+                  autoComplete="off"
                   id="overleaf_url"
                   {...register("overleaf_url", {
                     validate: (value) => {
@@ -257,6 +258,7 @@ const ImportOverleaf = ({
               >
                 <FormLabel htmlFor="overleaf_token">Overleaf token</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="overleaf_token"
                   {...register("overleaf_token", {
                     validate: (value) => {
@@ -282,6 +284,7 @@ const ImportOverleaf = ({
             <FormControl mt={4} isRequired isInvalid={!!errors.path}>
               <FormLabel htmlFor="path">Destination folder</FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -378,6 +381,7 @@ const ImportOverleaf = ({
                     Target TeX file path
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="target_path"
                     {...register("target_path")}
                     placeholder={"Ex: main.tex"}
@@ -395,6 +399,7 @@ const ImportOverleaf = ({
                     Docker environment name
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="environment"
                     {...register("environment")}
                     placeholder="Ex: tex"
@@ -410,6 +415,7 @@ const ImportOverleaf = ({
                 <FormControl mt={4} isInvalid={!!errors.stage}>
                   <FormLabel htmlFor="stage">Pipeline stage name</FormLabel>
                   <Input
+                    autoComplete="off"
                     id="stage"
                     {...register("stage")}
                     placeholder="Ex: build-paper"

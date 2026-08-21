@@ -373,6 +373,7 @@ export default function CommentsPanel({
                 Name (optional)
               </FormLabel>
               <Input
+                autoComplete="off"
                 size="sm"
                 value={authorName}
                 onChange={(e) => setAuthorName(e.target.value)}

@@ -38,7 +38,7 @@ import { z } from "zod"
 const datasetsSearchSchema = z.object({
   upload_open: z.boolean().optional(),
   new_dataset_open: z.boolean().optional(),
-  source: z.enum(["primary", "url", "doi", "git_repo"]).optional(),
+  source: z.enum(["primary", "enter", "url", "doi", "git_repo"]).optional(),
 })
 
 export const Route = createFileRoute(
@@ -66,7 +66,9 @@ function ProjectDataView() {
   const navigate = useNavigate({ from: Route.fullPath })
   const openUpload = () =>
     navigate({ search: (prev) => ({ ...prev, upload_open: true }) })
-  const openNewDataset = (nextSource: "primary" | "url" | "git_repo") =>
+  const openNewDataset = (
+    nextSource: "primary" | "enter" | "url" | "git_repo",
+  ) =>
     navigate({
       search: (prev) => ({
         ...prev,
@@ -102,6 +104,9 @@ function ProjectDataView() {
                 <Icon as={FaPlus} fontSize="xs" />
               </MenuButton>
               <MenuList>
+                <MenuItem onClick={() => openNewDataset("enter")}>
+                  Enter data by hand
+                </MenuItem>
                 <MenuItem onClick={openUpload}>Upload new dataset</MenuItem>
                 <MenuItem onClick={() => openNewDataset("primary")}>
                   Label an existing file or folder

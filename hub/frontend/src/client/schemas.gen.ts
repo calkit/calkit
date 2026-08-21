@@ -131,6 +131,17 @@ export const Body_projects_post_project_dataset_uploadSchema = {
       ],
       title: "Collected By",
     },
+    collected_by_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By Name",
+    },
   },
   type: "object",
   required: ["path", "title", "description", "file"],

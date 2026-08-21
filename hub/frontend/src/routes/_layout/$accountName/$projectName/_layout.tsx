@@ -158,6 +158,7 @@ function SwitchVersionModal({
         <ModalCloseButton />
         <ModalBody pb={4}>
           <Input
+            autoComplete="off"
             placeholder="Search branches or commits…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

@@ -855,6 +855,7 @@ const LatexEditor = ({
           <ModalCloseButton />
           <ModalBody>
             <Input
+              autoComplete="off"
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}

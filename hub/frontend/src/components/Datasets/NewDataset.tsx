@@ -184,7 +184,10 @@ const NewDataset = ({
             title: data.title,
             description: data.description,
             file,
-            collected_by: data.collected_by || currentUser?.email || null,
+            // Typed-in data is attested by the person typing it: the
+            // signed-in user, not a free-text field.
+            collected_by: currentUser?.email ?? null,
+            collected_by_name: currentUser?.full_name ?? null,
           },
         }).then((response) => response.data)
       }
@@ -355,6 +358,7 @@ const NewDataset = ({
             <FormControl mb={4}>
               <FormLabel htmlFor="date_retrieved">Date retrieved</FormLabel>
               <Input
+                autoComplete="off"
                 id="date_retrieved"
                 type="date"
                 {...register("date_retrieved")}
@@ -370,7 +374,18 @@ const NewDataset = ({
               <DataEntryGrid value={table} onChange={setTable} />
             </FormControl>
           ) : null}
-          {source === "primary" || source === "enter" ? (
+          {source === "enter" ? (
+            <Text fontSize="sm" color="ui.dim" mb={4}>
+              Recorded as collected by{" "}
+              <Text as="span" fontWeight="semibold">
+                {currentUser?.full_name
+                  ? `${currentUser.full_name} (${currentUser.email})`
+                  : currentUser?.email}
+              </Text>
+              , written into calkit.yaml with the file.
+            </Text>
+          ) : null}
+          {source === "primary" ? (
             <FormControl mb={4}>
               <FormLabel htmlFor="collected_by">Collected by</FormLabel>
               <Input

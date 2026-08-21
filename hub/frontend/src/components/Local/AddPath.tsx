@@ -109,6 +109,7 @@ const AddPath = ({ path }: AddPathProps) => {
             <FormControl isRequired isInvalid={!!errors.commit_message} mb={2}>
               <FormLabel htmlFor="name">Commit message</FormLabel>
               <Input
+                autoComplete="off"
                 id="commit_message"
                 {...register("commit_message", {})}
                 placeholder="Ex: Add my-file.png"

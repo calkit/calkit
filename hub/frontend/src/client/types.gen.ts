@@ -84,6 +84,10 @@ export type BodyProjectsPostProjectDatasetUpload = {
    * Collected By
    */
   collected_by?: string | null
+  /**
+   * Collected By Name
+   */
+  collected_by_name?: string | null
 }
 
 /**

@@ -81,14 +81,26 @@ const StartPaths = ({
     <SimpleGrid columns={{ base: 1, md: columns }} spacing={4}>
       {START_PATHS.map((option) => {
         const isSelected = selected === option.path
+        const select = () => {
+          mixpanel.track("Chose project start path", {
+            path: option.path,
+            source,
+          })
+          onSelect?.(option.path)
+        }
         const cardProps = onSelect
           ? {
-              onClick: () => {
-                mixpanel.track("Chose project start path", {
-                  path: option.path,
-                  source,
-                })
-                onSelect(option.path)
+              // A div that acts as a button has to say so, and take the
+              // keyboard, or the wizard's first step can't be tabbed through.
+              role: "button",
+              tabIndex: 0,
+              "aria-pressed": isSelected,
+              onClick: select,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  select()
+                }
               },
               cursor: "pointer",
             }

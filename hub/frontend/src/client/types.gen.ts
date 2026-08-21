@@ -80,6 +80,10 @@ export type BodyProjectsPostProjectDatasetUpload = {
    * File
    */
   file: Blob | File
+  /**
+   * Collected By
+   */
+  collected_by?: string | null
 }
 
 /**
@@ -4434,6 +4438,14 @@ export type ReproCheck = {
    */
   n_publications_no_import_or_stage: number
   /**
+   * N Misc
+   */
+  n_misc?: number
+  /**
+   * N Misc No Import Or Stage
+   */
+  n_misc_no_import_or_stage?: number
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -4455,6 +4467,10 @@ export type ReproCheck = {
    * N Publications With Import Or Stage
    */
   readonly n_publications_with_import_or_stage: number
+  /**
+   * N Misc With Import Or Stage
+   */
+  readonly n_misc_with_import_or_stage: number
   /**
    * N Stages Without Env
    */
@@ -4709,6 +4725,71 @@ export type StorageUsage = {
    * Used Gb
    */
   used_gb: number
+}
+
+/**
+ * StudioFigure
+ */
+export type StudioFigure = {
+  figure: Figure
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Created
+   */
+  environment_created: boolean
+  /**
+   * Packages Missing
+   */
+  packages_missing: Array<string>
+}
+
+/**
+ * StudioFigurePost
+ */
+export type StudioFigurePost = {
+  /**
+   * Figure Path
+   */
+  figure_path: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Script Content
+   */
+  script_content: string
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Packages
+   */
+  packages?: Array<string>
+  /**
+   * Environment
+   */
+  environment?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -5683,6 +5764,14 @@ export type ReproCheckWritable = {
    * N Publications No Import Or Stage
    */
   n_publications_no_import_or_stage: number
+  /**
+   * N Misc
+   */
+  n_misc?: number
+  /**
+   * N Misc No Import Or Stage
+   */
+  n_misc_no_import_or_stage?: number
   /**
    * N Dvc Remotes
    */
@@ -11643,6 +11732,42 @@ export type PostProjectFsBatchOpResponses = {
 
 export type PostProjectFsBatchOpResponse =
   PostProjectFsBatchOpResponses[keyof PostProjectFsBatchOpResponses]
+
+export type PostProjectStudioFigureData = {
+  body: StudioFigurePost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/figures/studio"
+}
+
+export type PostProjectStudioFigureErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectStudioFigureError =
+  PostProjectStudioFigureErrors[keyof PostProjectStudioFigureErrors]
+
+export type PostProjectStudioFigureResponses = {
+  /**
+   * Successful Response
+   */
+  200: StudioFigure
+}
+
+export type PostProjectStudioFigureResponse =
+  PostProjectStudioFigureResponses[keyof PostProjectStudioFigureResponses]
 
 export type GetReferencesData = {
   body?: never

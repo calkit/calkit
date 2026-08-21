@@ -237,7 +237,7 @@ the properties that go inside pipeline stages are covered under
 | [`dependencies`](requirements.md)       | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                               | no       | Deprecated alias for 'requirements', still honored so existing projects keep working. Set one or the other, not both.                                                                                                                                                                                                                                                      |
 | `parameters`                            | dict[str, int \| float \| str \| list[int \| float \| str \| RangeIteration]]                                                                                  | no       | Project-level parameters, which can be referenced from pipeline stages.                                                                                                                                                                                                                                                                                                    |
 | [`pipeline`](pipeline/index.md)         | Pipeline                                                                                                                                                       | no       | The project's reproducible pipeline.                                                                                                                                                                                                                                                                                                                                       |
-| [`datasets`](datasets.md)               | list[ImportedDataset \| Dataset]                                                                                                                               | no       | The project's datasets.                                                                                                                                                                                                                                                                                                                                                    |
+| [`datasets`](datasets.md)               | list[Dataset]                                                                                                                                                  | no       | The project's datasets.                                                                                                                                                                                                                                                                                                                                                    |
 | `figures`                               | list[Figure]                                                                                                                                                   | no       | The project's figures.                                                                                                                                                                                                                                                                                                                                                     |
 | `results`                               | list[Result]                                                                                                                                                   | no       | The project's findings, each referring to a file, or to part of one.                                                                                                                                                                                                                                                                                                       |
 | `publications`                          | list[Publication]                                                                                                                                              | no       | The project's papers, reports, and proposals.                                                                                                                                                                                                                                                                                                                              |
@@ -281,15 +281,17 @@ A figure, usually produced by a pipeline stage.
 
 Carries attribution for the ones that aren't: a schematic drawn by hand
 or laid out with a generative AI tool has no stage to point at, and is
-exactly the kind of thing a reader wants told.
+exactly the kind of thing a reader wants told. One obtained from
+elsewhere records `imported_from` instead, like a dataset does.
 
-| Parameter     | Type                             | Required | Default | Description                                                                                                                                                                 |
-| ------------- | -------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `path`        | str                              | yes      |         | Path to the file, relative to the project root.                                                                                                                             |
-| `title`       | str \| None                      | no       | null    | A human-readable title.                                                                                                                                                     |
-| `description` | str \| None                      | no       | null    | A longer description.                                                                                                                                                       |
-| `stage`       | str \| None                      | no       | null    | Name of the pipeline stage that produces this.                                                                                                                              |
-| `created_by`  | _Person \| list[_Person] \| None | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``. |
+| Parameter       | Type                                                                                     | Required | Default | Description                                                                                                                                                                 |
+| --------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `path`          | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                             |
+| `title`         | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                     |
+| `description`   | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                       |
+| `stage`         | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                              |
+| `created_by`    | _Person \| list[_Person] \| None                                                         | no       | null    | Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``. |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                          |
 
 #### `Result`
 
@@ -313,15 +315,16 @@ addressing can be added without reshaping what a result is.
 
 #### `Publication`
 
-| Parameter      | Type                                                                                                                 | Required | Default | Description                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------- |
-| `path`         | str                                                                                                                  | yes      |         | Path to the file, relative to the project root. |
-| `title`        | str \| None                                                                                                          | no       | null    | A human-readable title.                         |
-| `description`  | str \| None                                                                                                          | no       | null    | A longer description.                           |
-| `stage`        | str \| None                                                                                                          | no       | null    | Name of the pipeline stage that produces this.  |
-| `kind`         | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                 |
-| `is_published` | bool                                                                                                                 | no       | False   |                                                 |
-| `doi`          | str \| None                                                                                                          | no       | null    |                                                 |
+| Parameter       | Type                                                                                                                 | Required | Default | Description                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------- |
+| `path`          | str                                                                                                                  | yes      |         | Path to the file, relative to the project root. |
+| `title`         | str \| None                                                                                                          | no       | null    | A human-readable title.                         |
+| `description`   | str \| None                                                                                                          | no       | null    | A longer description.                           |
+| `stage`         | str \| None                                                                                                          | no       | null    | Name of the pipeline stage that produces this.  |
+| `kind`          | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                 |
+| `is_published`  | bool                                                                                                                 | no       | False   |                                                 |
+| `doi`           | str \| None                                                                                                          | no       | null    |                                                 |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None                             | no       | null    | Where this came from, if imported.              |
 
 #### `Presentation`
 
@@ -573,10 +576,10 @@ Data published under a DOI, which is a citation, not just a link.
 Kept apart from a URL so it can be cited and resolved as a DOI rather
 than being one more address that happens to start with https.
 
-| Parameter | Type         | Required | Default | Description                   |
-| --------- | ------------ | -------- | ------- | ----------------------------- |
-| `doi`     | str          | yes      |         |                               |
-| `date`    | date \| None | no       | null    | When the data was downloaded. |
+| Parameter | Type         | Required | Default | Description                                                                                       |
+| --------- | ------------ | -------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `doi`     | str          | yes      |         | The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or doi: prefix is accepted and stripped. |
+| `date`    | date \| None | no       | null    | When the data was downloaded.                                                                     |
 
 #### `_ImportedFromGit`
 

@@ -2,13 +2,14 @@ import { ExternalLinkIcon } from "@chakra-ui/icons"
 import { Button, Flex, HStack, Link, useDisclosure } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
-import useOnboardingFlags, { useLocalServer } from "../../hooks/useOnboarding"
+import useOnboardingFlags from "../../hooks/useOnboarding"
 import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
 import NewDataset from "../Datasets/NewDataset"
-import NewEnvironment from "../Environments/NewEnvironment"
+import FigureStudio from "../Figures/FigureStudio"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
 import CreateQuestion from "../Projects/CreateQuestion"
@@ -20,7 +21,6 @@ const VSCODE_EXT_URL =
 const CHROME_EXT_URL =
   "https://chromewebstore.google.com/detail/idhdomgapfolnpffanajdckdaojencal"
 const JUPYTER_DOCS_URL = "https://docs.calkit.org/jupyterlab/"
-const ENV_DOCS_URL = "https://docs.calkit.org/environments/"
 const PIPELINE_DOCS_URL = "https://docs.calkit.org/pipeline/"
 
 interface ProjectChecklistProps {
@@ -43,7 +43,6 @@ const ProjectChecklist = ({
 }: ProjectChecklistProps) => {
   const { projectFlags, setFlag } = useOnboardingFlags(projectId)
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
-  const { projectConnected } = useLocalServer(accountName, projectName)
   // Both of these read the project's repo, which the page has already had
   // cloned and cached for the README and showcase, so they're cheap here
   // and expensive nowhere else.
@@ -68,15 +67,19 @@ const ProjectChecklist = ({
     refetchOnWindowFocus: false,
   })
   const newQuestionModal = useDisclosure()
-  const newEnvironmentModal = useDisclosure()
   const newDatasetModal = useDisclosure()
+  const enterDataModal = useDisclosure()
+  const studioModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
   const steps = buildProjectSteps({
     questionCount: questionsRequest.data?.length ?? 0,
-    localConnected: projectConnected,
     reproCheck: reproCheckQuery.data,
     pipelineStatus: pipelineQuery.data?.status,
+    stageStatuses: pipelineQuery.data?.stage_statuses as Record<
+      string,
+      { status?: string | null }
+    >,
     flags: projectFlags,
   })
   // Waiting on the repo read would flash a list of unchecked boxes at
@@ -98,50 +101,23 @@ const ProjectChecklist = ({
         />
       </>
     ),
-    local: (
-      <>
-        <CommandBlock
-          label="Install the CLI"
-          command="curl -LsSf install.calkit.org | sh"
-        />
-        <CommandBlock
-          label="Then clone this project"
-          command={`calkit clone ${accountName}/${projectName}`}
-        />
-      </>
-    ),
-    environment: (
-      <>
-        <HStack spacing={3}>
-          <Button
-            size="xs"
-            variant="primary"
-            onClick={newEnvironmentModal.onOpen}
-          >
-            Create an environment
-          </Button>
-          <Button
-            size="xs"
-            as={RouterLink}
-            to={`/${accountName}/${projectName}/environments`}
-          >
-            View all
-          </Button>
-          <Link fontSize="xs" variant="blue" href={ENV_DOCS_URL} isExternal>
-            How environments work <ExternalLinkIcon mb={0.5} />
-          </Link>
-        </HStack>
-        <NewEnvironment
-          isOpen={newEnvironmentModal.isOpen}
-          onClose={newEnvironmentModal.onClose}
-        />
-      </>
-    ),
     dataset: (
       <>
-        <Button size="xs" variant="primary" onClick={newDatasetModal.onOpen}>
-          Add a dataset
-        </Button>
+        <HStack spacing={3}>
+          <Button size="xs" variant="primary" onClick={enterDataModal.onOpen}>
+            Type it in
+          </Button>
+          <Button size="xs" onClick={newDatasetModal.onOpen}>
+            Upload or import
+          </Button>
+        </HStack>
+        {/* Two instances rather than one with a changing default, so each
+            opens on the source its button named. */}
+        <NewDataset
+          isOpen={enterDataModal.isOpen}
+          onClose={enterDataModal.onClose}
+          defaultSource="enter"
+        />
         <NewDataset
           isOpen={newDatasetModal.isOpen}
           onClose={newDatasetModal.onClose}
@@ -149,25 +125,60 @@ const ProjectChecklist = ({
       </>
     ),
     figure: (
-      <HStack spacing={3}>
-        <Button
-          size="xs"
-          as={RouterLink}
-          to={`/${accountName}/${projectName}/pipeline`}
-        >
-          Open the pipeline
-        </Button>
-        {/* A stage needs an environment to run in, and this is usually
-            where someone finds that out. */}
-        <Button size="xs" onClick={newEnvironmentModal.onOpen}>
-          New environment
-        </Button>
-        <Link fontSize="xs" variant="blue" href={PIPELINE_DOCS_URL} isExternal>
-          Writing a stage <ExternalLinkIcon mb={0.5} />
-        </Link>
-      </HStack>
+      <>
+        <HStack spacing={3}>
+          <Button
+            size="xs"
+            variant="primary"
+            onClick={() => {
+              mixpanel.track("Opened figure studio", { source: "checklist" })
+              studioModal.onOpen()
+            }}
+          >
+            Plot a dataset in the browser
+          </Button>
+          <Button
+            size="xs"
+            as={RouterLink}
+            to={`/${accountName}/${projectName}/pipeline`}
+          >
+            Open the pipeline
+          </Button>
+          <Link
+            fontSize="xs"
+            variant="blue"
+            href={PIPELINE_DOCS_URL}
+            isExternal
+          >
+            Writing a stage <ExternalLinkIcon mb={0.5} />
+          </Link>
+        </HStack>
+        {studioModal.isOpen ? (
+          <FigureStudio
+            isOpen={studioModal.isOpen}
+            onClose={studioModal.onClose}
+            ownerName={accountName}
+            projectName={projectName}
+          />
+        ) : null}
+      </>
     ),
-    run: <CommandBlock command='calkit run -m "Run pipeline"' />,
+    run: (
+      <>
+        <CommandBlock
+          label="Install the CLI (macOS, Linux, or Git Bash)"
+          command="curl -LsSf install.calkit.org | sh"
+        />
+        <CommandBlock
+          label="Clone the project"
+          command={`calkit clone ${accountName}/${projectName}`}
+        />
+        <CommandBlock
+          label="Run it and push the results"
+          command='calkit run -m "Run pipeline"'
+        />
+      </>
+    ),
     publication: (
       <>
         <HStack spacing={3}>

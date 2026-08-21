@@ -364,6 +364,24 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
                         "the two."
                     ),
                 )
+            if not users.email_is_verified(session=session, user=existing):
+                # The account's own address was never checked either:
+                # password signup takes any email, so the match may be
+                # someone who registered this one first and is waiting for
+                # its owner to sign in through GitHub and hand over the
+                # account along with their GitHub token.
+                logger.info(
+                    f"Refusing to link {github_username} to an account "
+                    "whose email is unverified"
+                )
+                raise HTTPException(
+                    400,
+                    (
+                        "An account already exists for this email. Sign in "
+                        "with your email and password, then connect GitHub "
+                        "from your user settings."
+                    ),
+                )
             logger.info(
                 f"Linking GitHub account {github_username} to existing user"
             )
@@ -479,9 +497,14 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
         logger.info(f"Found existing user with email: {user.email}")
     if not user.is_active:
         raise HTTPException(401, "User is not active")
-    # Persist the Google credential so the account shows as connected.
+    # Persist the Google credential so the account shows as connected, and
+    # with it the address Google vouched for, which is what lets a GitHub
+    # login under the same email claim this account later.
     users.save_google_token(
-        session=session, user=user, google_resp=google_resp
+        session=session,
+        user=user,
+        google_resp=google_resp,
+        verified_email=email,
     )
     mixpanel.user_logged_in(user)
     access_token, raw_refresh, refresh_db = _make_tokens(

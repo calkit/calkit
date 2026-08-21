@@ -1258,6 +1258,45 @@ def update_dataset(
             help="URL the dataset was imported from.",
         ),
     ] = None,
+    imported_from_doi: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-doi",
+            help="DOI the dataset was imported from, e.g. 10.5281/zenodo.1.",
+        ),
+    ] = None,
+    imported_from_git_url: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-git-url",
+            help="Clone URL of the Git repo the dataset was imported from.",
+        ),
+    ] = None,
+    imported_from_git_rev: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-git-rev",
+            help=(
+                "Commit hash it was taken from. A branch or tag isn't "
+                "accepted, since it would move."
+            ),
+        ),
+    ] = None,
+    imported_from_git_path: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-git-path",
+            help="Path within that repo, if it isn't the whole thing.",
+        ),
+    ] = None,
+    imported_from_date: Annotated[
+        datetime | None,
+        typer.Option(
+            "--imported-from-date",
+            formats=["%Y-%m-%d"],
+            help="Date it was downloaded, as YYYY-MM-DD.",
+        ),
+    ] = None,
     stage: Annotated[
         str | None,
         typer.Option(
@@ -1267,23 +1306,88 @@ def update_dataset(
     ] = None,
 ) -> None:
     """Update a dataset entry in calkit.yaml."""
-    if imported_from_url is None and stage is None:
+    from pydantic import ValidationError
+
+    from calkit.models.core import (
+        Dataset,
+        _GitSource,
+        _ImportedFromDoi,
+        _ImportedFromGit,
+        _ImportedFromUrl,
+    )
+
+    # One source, since the entry records where the data came from rather
+    # than every place it could be found
+    source_options = {
+        "--imported-from-url": imported_from_url,
+        "--imported-from-doi": imported_from_doi,
+        "--imported-from-git-url": imported_from_git_url,
+    }
+    sources_given = [k for k, v in source_options.items() if v is not None]
+    if len(sources_given) > 1:
+        raise_error("Specify only one of " + ", ".join(source_options) + ".")
+    if not sources_given and (
+        imported_from_git_rev is not None
+        or imported_from_git_path is not None
+        or imported_from_date is not None
+    ):
+        raise_error(
+            "--imported-from-git-rev, --imported-from-git-path, and "
+            "--imported-from-date go with one of "
+            + ", ".join(source_options)
+            + "."
+        )
+    if not sources_given and stage is None:
         raise_error("No updates specified.")
+    imported_from: dict | None = None
+    if sources_given:
+        date = imported_from_date.date() if imported_from_date else None
+        try:
+            source: _ImportedFromUrl | _ImportedFromDoi | _ImportedFromGit
+            if imported_from_url is not None:
+                source = _ImportedFromUrl(url=imported_from_url, date=date)
+            elif imported_from_doi is not None:
+                source = _ImportedFromDoi(doi=imported_from_doi, date=date)
+            else:
+                if imported_from_git_rev is None:
+                    raise_error(
+                        "--imported-from-git-rev is required with "
+                        "--imported-from-git-url."
+                    )
+                source = _ImportedFromGit(
+                    git=_GitSource(
+                        repo_url=imported_from_git_url or "",
+                        rev=imported_from_git_rev,
+                        path=imported_from_git_path,
+                    ),
+                    date=date,
+                )
+        except ValidationError as e:
+            raise_error(
+                "Invalid import source: "
+                + "; ".join(str(err["msg"]) for err in e.errors())
+            )
+        imported_from = source.model_dump(exclude_none=True)
     ck_info = calkit.load_calkit_info()
     datasets = ck_info.get("datasets", [])
     for ds in datasets:
         if ds.get("path") == path:
-            if imported_from_url is not None:
-                ds["imported_from"] = {"url": imported_from_url}
-            if stage is not None:
-                ds["stage"] = stage
             break
     else:
-        entry: dict = {"path": path}
-        if imported_from_url is not None:
-            entry["imported_from"] = {"url": imported_from_url}
-        if stage is not None:
-            entry["stage"] = stage
-        datasets.append(entry)
+        ds = {"path": path}
+        datasets.append(ds)
         ck_info["datasets"] = datasets
+    if imported_from is not None:
+        ds["imported_from"] = imported_from
+    if stage is not None:
+        ds["stage"] = stage
+    # Checked as a whole, so an import added to a dataset someone collected
+    # is refused here rather than left for the next validation to find
+    try:
+        Dataset.model_validate(ds)
+    except ValidationError as e:
+        raise_error(
+            "Invalid dataset: "
+            + "; ".join(str(err["msg"]) for err in e.errors())
+        )
     calkit.save_calkit_info(ck_info)

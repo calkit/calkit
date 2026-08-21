@@ -614,6 +614,84 @@ def test_post_user_zotero_auth(
     )
 
 
+def _github_auth(client: TestClient, headers: dict[str, str], username: str):
+    """Drive POST /user/github-auth with GitHub's responses stubbed out."""
+
+    def api_get(url, *args, **kwargs):
+        if "login/oauth/access_token" in url:
+            return SimpleNamespace(
+                status_code=200, text="access_token=gho_fake&scope="
+            )
+        if url.endswith("/user"):
+            return SimpleNamespace(
+                status_code=200, json=lambda: {"login": username}
+            )
+        raise AssertionError(f"unexpected URL: {url}")
+
+    with (
+        patch("app.api.routes.users.requests.get", side_effect=api_get),
+        patch("app.api.routes.users.users.save_github_token"),
+    ):
+        return client.post(
+            f"{settings.API_V1_STR}/user/github-auth",
+            headers=headers,
+            json={"code": "c", "redirect_uri": "http://localhost/x"},
+        )
+
+
+def test_post_user_github_auth_renames_only_on_first_link(
+    client: TestClient, db: Session
+) -> None:
+    from app.tests import authentication_token_from_email
+
+    suffix = uuid.uuid4().hex[:8]
+    # An account with no GitHub yet takes the GitHub name when it's free and
+    # nothing points at the old one.
+    fresh = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"fresh-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"fresh{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=fresh.email, db=db
+    )
+    username = f"GhFresh{suffix}"
+    r = _github_auth(client, headers, username)
+    assert r.status_code == 200, r.text
+    db.refresh(fresh)
+    assert fresh.account.github_name == username
+    assert fresh.account.name == username.lower()
+    # An account already linked keeps its name on reauthorization, even
+    # though it differs from the GitHub login and owns no projects: a token
+    # refresh is not the moment to rename someone.
+    linked = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"linked-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"keepme{suffix}",
+            github_username=f"ghlinked{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=linked.email, db=db
+    )
+    r = _github_auth(client, headers, f"ghlinked{suffix}")
+    assert r.status_code == 200, r.text
+    db.refresh(linked)
+    assert linked.account.name == f"keepme{suffix}"
+    assert linked.account.github_name == f"ghlinked{suffix}"
+    # A different GitHub identity can't replace the one already linked.
+    r = _github_auth(client, headers, f"ghother{suffix}")
+    assert r.status_code == 400
+    # And one that belongs to another account is refused outright.
+    r = _github_auth(client, headers, username)
+    assert r.status_code == 409
+
+
 def test_onboarding_flags_round_trip(
     client: TestClient, db: Session, normal_user_token_headers: dict[str, str]
 ) -> None:
@@ -638,7 +716,10 @@ def test_onboarding_flags_round_trip(
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["account"] == ["cli"]
     # Setting the same flag twice is a no-op rather than a duplicate.
-    client.post(base, headers=normal_user_token_headers, json={"step": "cli"})
+    response = client.post(
+        base, headers=normal_user_token_headers, json={"step": "cli"}
+    )
+    assert response.status_code == 200
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["account"] == ["cli"]
     # A project the user can read takes flags keyed by its ID.
@@ -664,6 +745,31 @@ def test_onboarding_flags_round_trip(
     assert body["projects"][str(project.id)] == ["editor"]
     # The account list is untouched by a project-scoped flag.
     assert body["account"] == ["cli"]
+    # Two requests for the same flag at once (a double-click) both pass the
+    # existence check; the unique constraint settles it and the loser still
+    # gets a 200. Simulated by blinding the check so the insert collides.
+    import sqlalchemy
+
+    import app.api.routes.users as users_routes
+    from app.models import UserOnboardingFlag
+
+    real_select = users_routes.select
+
+    def blind_select(*args):
+        stmt = real_select(*args)
+        if args and args[0] is UserOnboardingFlag:
+            return stmt.where(sqlalchemy.false())
+        return stmt
+
+    with patch.object(users_routes, "select", blind_select):
+        response = client.post(
+            base,
+            headers=normal_user_token_headers,
+            json={"step": "editor", "project_id": str(project.id)},
+        )
+    assert response.status_code == 200, response.text
+    body = client.get(base, headers=normal_user_token_headers).json()
+    assert body["projects"][str(project.id)] == ["editor"]
     # Deleting is scoped the same way: the project flag survives clearing
     # the account one.
     client.delete(
@@ -805,6 +911,14 @@ def test_read_users_search_and_sort(
     ).json()
     assert body["count"] == 0
     assert body["data"] == []
+    # LIKE's wildcards in the search are characters to find, not patterns:
+    # "a_pha" would otherwise match "alpha", and "%" everything.
+    for term in [f"a_pha-{marker}", f"alpha%{marker}", f"{marker}\\"]:
+        body = client.get(
+            url, headers=superuser_token_headers, params={"search_for": term}
+        ).json()
+        assert body["count"] == 0, term
+        assert body["data"] == []
 
 
 def test_get_user_github_repos_excludes_collaborations(

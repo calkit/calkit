@@ -20,7 +20,7 @@ import {
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
-import { useEffect, useState } from "react"
+import { type ReactNode, useEffect, useRef, useState } from "react"
 import { FaPlus } from "react-icons/fa"
 import { useDebounce } from "use-debounce"
 import { z } from "zod"
@@ -84,6 +84,48 @@ function getUsersQueryOptions({
   }
 }
 
+/**
+ * A column header that sorts on click and on Enter or Space.
+ *
+ * The header cell keeps its `aria-sort` so a screen reader announces the
+ * ordering, and the button inside it is what takes focus, since a `th` with
+ * an onClick is invisible to the keyboard.
+ */
+function SortableTh({
+  width,
+  active,
+  descending,
+  onToggle,
+  children,
+}: {
+  width: string
+  active: boolean
+  descending: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <Th
+      width={width}
+      aria-sort={active ? (descending ? "descending" : "ascending") : "none"}
+    >
+      <Box
+        as="button"
+        type="button"
+        onClick={onToggle}
+        fontWeight="inherit"
+        textTransform="inherit"
+        letterSpacing="inherit"
+        color="inherit"
+        cursor="pointer"
+      >
+        {children}
+        {active ? (descending ? " ↓" : " ↑") : ""}
+      </Box>
+    </Th>
+  )
+}
+
 function UsersTable() {
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
@@ -98,16 +140,29 @@ function UsersTable() {
   const setPage = (page: number) =>
     navigate({ search: (prev) => ({ ...prev, page }) })
   // Typing stays local so every keystroke isn't a history entry; the URL
-  // catches up once the input settles.
+  // catches up once the input settles. The URL is still the source of
+  // truth: a `q` that differs from what this component last pushed arrived
+  // by Back or a link, and the input follows it rather than pushing its own
+  // stale value back over the top, which would undo the Back.
   const [searchText, setSearchText] = useState(q ?? "")
   const [searchFor] = useDebounce(searchText, 400)
+  const lastPushed = useRef(q ?? "")
   useEffect(() => {
-    if ((q ?? "") !== searchFor) {
-      navigate({
-        search: (prev) => ({ ...prev, q: searchFor || undefined, page: 1 }),
-      })
+    const fromUrl = q ?? ""
+    if (fromUrl !== lastPushed.current) {
+      lastPushed.current = fromUrl
+      setSearchText(fromUrl)
     }
-  }, [searchFor, q, navigate])
+  }, [q])
+  useEffect(() => {
+    // Only once the debounce has caught up with the input: right after a
+    // Back, the debounced value is still the search that was just left.
+    if (searchFor !== searchText || searchFor === lastPushed.current) return
+    lastPushed.current = searchFor
+    navigate({
+      search: (prev) => ({ ...prev, q: searchFor || undefined, page: 1 }),
+    })
+  }, [searchFor, searchText, navigate])
   // Clicking the column already sorted by flips the direction, which is
   // what a header that shows an arrow implies it will do.
   const toggleSort = (column: SortBy) => {
@@ -120,8 +175,6 @@ function UsersTable() {
       }),
     })
   }
-  const sortIndicator = (column: SortBy) =>
-    column === sortBy ? (descending ? " ↓" : " ↑") : ""
 
   const {
     data: users,
@@ -184,28 +237,31 @@ function UsersTable() {
         <Table size={{ base: "sm", md: "md" }}>
           <Thead>
             <Tr>
-              <Th
+              <SortableTh
                 width="18%"
-                cursor="pointer"
-                onClick={() => toggleSort("full_name")}
+                active={sortBy === "full_name"}
+                descending={descending}
+                onToggle={() => toggleSort("full_name")}
               >
-                Full name{sortIndicator("full_name")}
-              </Th>
+                Full name
+              </SortableTh>
               <Th width="16%">GitHub username</Th>
-              <Th
+              <SortableTh
                 width="30%"
-                cursor="pointer"
-                onClick={() => toggleSort("email")}
+                active={sortBy === "email"}
+                descending={descending}
+                onToggle={() => toggleSort("email")}
               >
-                Email{sortIndicator("email")}
-              </Th>
-              <Th
+                Email
+              </SortableTh>
+              <SortableTh
                 width="16%"
-                cursor="pointer"
-                onClick={() => toggleSort("created")}
+                active={sortBy === "created"}
+                descending={descending}
+                onToggle={() => toggleSort("created")}
               >
-                Signed up{sortIndicator("created")}
-              </Th>
+                Signed up
+              </SortableTh>
               <Th width="10%">Role</Th>
               <Th width="10%">Status</Th>
               <Th width="10%">Actions</Th>

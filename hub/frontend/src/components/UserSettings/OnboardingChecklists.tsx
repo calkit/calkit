@@ -20,7 +20,6 @@ const OnboardingChecklists = () => {
     resetAllMutation.mutate(undefined, {
       onSuccess: () => {
         mixpanel.track("Reset onboarding checklists", { n_flags: flagCount })
-        return
         showToast(
           "Checklists reset",
           "Your setup checklists are back on the home and project pages.",

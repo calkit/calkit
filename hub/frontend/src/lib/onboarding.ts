@@ -10,7 +10,7 @@
 // installed on the user's laptop. Those steps carry `manual`, and the user
 // marks them done; the mark is stored server-side as an onboarding flag.
 
-import type { ReproCheck } from "../client"
+import type { OnboardingFlags, ReproCheck } from "../client"
 
 export interface OnboardingStep {
   key: string
@@ -42,28 +42,44 @@ export const DISMISSED = "dismissed"
 export interface ProjectOnboardingInput {
   /** Research questions declared in calkit.yaml. */
   questionCount: number
-  /** The local Calkit server can see this project, so it's cloned locally. */
-  localConnected: boolean
   reproCheck?: ReproCheck | null
   pipelineStatus?: "up-to-date" | "stale" | "unknown" | null
+  /**
+   * Per-stage statuses from the pipeline endpoint. A stage that's up to
+   * date or stale has been run at least once; "not-run" hasn't.
+   */
+  stageStatuses?: Record<string, { status?: string | null }> | null
   /** Steps this user has marked done or dismissed on this project. */
   flags: string[]
+}
+
+/** Whether the pipeline has produced anything yet, stale or not. */
+export function pipelineHasRun(
+  stageStatuses?: Record<string, { status?: string | null }> | null,
+): boolean {
+  return Object.values(stageStatuses ?? {}).some((s) =>
+    ["up-to-date", "stale", "frozen"].includes(s?.status ?? ""),
+  )
 }
 
 /**
  * The path from a fresh project to a reproducible one, as a checklist.
  *
- * Ordered the way the work actually happens: decide what you're asking,
- * get the project onto the machine that will do the computing, describe
- * that machine, make something, run it, and write it up.
+ * It follows the loop a project moves through: ask, collect, analyze, run,
+ * write. Environments don't get a step of their own; the figure studio
+ * creates one as part of saving a figure, which is when it's needed and
+ * the only time most people want to think about it. Every step here can
+ * be detected, so the list never holds an item open that the user has in
+ * fact finished.
  */
 export function buildProjectSteps({
   questionCount,
-  localConnected,
   reproCheck,
   pipelineStatus,
+  stageStatuses,
   flags,
 }: ProjectOnboardingInput): OnboardingStep[] {
+  const hasRun = pipelineHasRun(stageStatuses)
   const steps: OnboardingStep[] = [
     {
       key: "question",
@@ -74,54 +90,43 @@ export function buildProjectSteps({
       done: questionCount > 0,
     },
     {
-      key: "local",
-      title: "Get the project onto your machine",
-      detail:
-        "Install the CLI and clone it. Everything from here works offline " +
-        "and in whatever editor you already use.",
-      done: localConnected,
-    },
-    {
-      key: "environment",
-      title: "Define a computational environment",
-      detail:
-        "Pin what your code needs so it runs the same on your laptop, a " +
-        "cluster, or a collaborator's machine. The spec lives in your repo, " +
-        "not here.",
-      done: (reproCheck?.n_environments ?? 0) > 0,
-    },
-    {
       key: "dataset",
-      title: "Declare your data and where it came from",
+      title: "Bring in your data",
       detail:
-        "Data you collected, downloaded, or pulled from a DOI or repo. " +
+        "Type it in, upload it, or import it by DOI, URL, or repo. " +
         "Recording the source now is what lets anyone trace a figure back " +
         "to it later.",
       done: (reproCheck?.n_datasets ?? 0) > 0,
     },
     {
       key: "figure",
-      title: "Produce a figure from a pipeline stage",
+      title: "Make a figure from it",
       detail:
-        "Declare the stage that builds the figure, so the figure always " +
-        "traces back to the code and data that made it.",
+        "Plot the data in the browser, then save it as a pipeline stage. " +
+        "That creates the environment it runs in, so the figure traces back " +
+        "to code, data, and a pinned set of packages.",
       done: (reproCheck?.n_figures_with_import_or_stage ?? 0) > 0,
     },
     {
       key: "run",
-      title: "Run the pipeline and save the results",
-      detail:
-        "Run it end to end, then push what it made back here. Your repo " +
-        "stays the source of truth; the hub makes it visible to everyone " +
-        "else.",
+      title: hasRun
+        ? "Run the pipeline again"
+        : "Run the pipeline on your machine",
+      detail: hasRun
+        ? "Something changed since the last run. Run it again and push, " +
+          "so what's shown here matches the code."
+        : "Install the CLI, clone the project, and run it end to end. " +
+          "What it produces gets pushed back here, where the project page " +
+          "picks it up.",
       done: pipelineStatus === "up-to-date",
     },
     {
       key: "publication",
-      title: "Link your paper",
+      title: "Write it up",
       detail:
-        "Start from a template or connect the Overleaf project you're " +
-        "already writing in, so its figures stop drifting out of date.",
+        "Start a paper from a template or connect the Overleaf project " +
+        "you're already writing in, so its figures stop drifting out of " +
+        "date.",
       done: (reproCheck?.n_publications ?? 0) > 0,
     },
     {
@@ -146,7 +151,41 @@ function applyFlags(step: OnboardingStep, flags: string[]): OnboardingStep {
   // A step we can see the answer to ignores flags outright, so a mark left
   // over from before it became detectable can't hold it checked.
   const marked = !step.detectedOnly && flags.includes(step.key)
-  return { ...step, done: step.done || marked, manuallyDone: marked }
+  // A mark on a step we can see is done adds nothing: taking it back would
+  // leave the step done, so there's nothing for the user to undo.
+  return {
+    ...step,
+    done: step.done || marked,
+    manuallyDone: marked && !step.done,
+  }
+}
+
+/**
+ * A flags response with one step added to or removed from a checklist.
+ *
+ * Written into the query cache before the request lands, so the click shows
+ * up at once rather than after a round trip. `projectId` picks the project's
+ * list; without one, the account-level list is the one that changes.
+ */
+export function applyFlagLocally(
+  old: OnboardingFlags | undefined,
+  projectId: string | null | undefined,
+  step: string,
+  add: boolean,
+): OnboardingFlags {
+  const account = [...(old?.account ?? [])]
+  const projects: Record<string, string[]> = { ...(old?.projects ?? {}) }
+  const steps = projectId ? [...(projects[projectId] ?? [])] : account
+  const updated = add
+    ? steps.includes(step)
+      ? steps
+      : [...steps, step]
+    : steps.filter((s) => s !== step)
+  if (projectId) {
+    projects[projectId] = updated
+    return { account, projects }
+  }
+  return { account: updated, projects }
 }
 
 export interface AccountOnboardingInput {

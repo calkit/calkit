@@ -488,6 +488,17 @@ def test_login_with_github_links_to_existing_account(
         session=db,
         user_create=UserCreate(email=email, password="testpassword123"),
     )
+    # Created through Google, which is what proves the address is theirs.
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+        verified_email=email,
+    )
     assert existing.account.github_name is None
     username = f"ghuser{uuid.uuid4().hex[:6]}"
     # An unverified address proves nothing about who owns it, so it can't be
@@ -529,6 +540,91 @@ def test_login_with_github_links_to_existing_account(
     assert r.status_code == 400, r.text
 
 
+def test_login_with_github_refuses_unproven_email_match(
+    client: TestClient, db: Session
+) -> None:
+    """A password account is never handed to whoever shows up with its email.
+
+    Password signup doesn't verify the address, so an account under the
+    victim's email may be the attacker's, parked there to collect the
+    victim's GitHub identity and token the first time they sign in that way.
+    """
+    email = f"pw-{uuid.uuid4().hex[:8]}@example.com"
+    existing = users.create_user(
+        session=db,
+        user_create=UserCreate(email=email, password="testpassword123"),
+    )
+    original_name = existing.account.name
+    username = f"ghpw{uuid.uuid4().hex[:6]}"
+    verified = [{"email": email, "primary": True, "verified": True}]
+    r = _github_login(client, username, verified)
+    assert r.status_code == 400, r.text
+    # The message points at the path that is safe: prove you hold the
+    # account by signing in to it, then connect GitHub from there.
+    assert "email and password" in r.json()["detail"]
+    assert "settings" in r.json()["detail"]
+    db.refresh(existing)
+    assert existing.account.github_name is None
+    assert existing.account.name == original_name
+    # No second user was created for the GitHub identity either.
+    assert len(db.exec(select(User).where(User.email == email)).all()) == 1
+    # A Google account connected from settings is any Google account, so it
+    # says nothing about this email and doesn't unlock the link.
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+    )
+    r = _github_login(client, username, verified)
+    assert r.status_code == 400, r.text
+    db.refresh(existing)
+    assert existing.account.github_name is None
+    # Nor does one Google vouched for under a different address.
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+        verified_email=f"other-{email}",
+    )
+    r = _github_login(client, username, verified)
+    assert r.status_code == 400, r.text
+    # Once Google has vouched for this address, the match is evidence.
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+        verified_email=email.upper(),
+    )
+    r = _github_login(client, username, verified)
+    assert r.status_code == 200, r.text
+    db.refresh(existing)
+    assert existing.account.github_name == username
+    # A later Google save that doesn't know the address keeps the proof
+    # rather than clearing it.
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+    )
+    assert users.email_is_verified(session=db, user=existing)
+
+
 def test_login_with_github_creates_user_for_a_new_email(
     client: TestClient, db: Session
 ) -> None:
@@ -565,6 +661,16 @@ def test_login_with_github_keeps_account_name_when_projects_exist(
     existing = users.create_user(
         session=db,
         user_create=UserCreate(email=email, password="testpassword123"),
+    )
+    users.save_google_token(
+        session=db,
+        user=existing,
+        google_resp={
+            "access_token": "ya29.x",
+            "refresh_token": "r",
+            "expires_in": 3600,
+        },
+        verified_email=email,
     )
     original_name = existing.account.name
     db.add(

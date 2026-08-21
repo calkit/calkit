@@ -25,6 +25,9 @@ import mixpanel from "mixpanel-browser"
 import { useState } from "react"
 import { Controller, type SubmitHandler, useForm } from "react-hook-form"
 
+import { type Table as TableData, toCsv } from "../../lib/csv"
+import DataEntryGrid from "./DataEntryGrid"
+
 import {
   type DatasetPost,
   ProjectsService,
@@ -34,7 +37,16 @@ import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import FilterableSelect from "../Common/FilterableSelect"
 
-type Source = "primary" | "url" | "doi" | "git_repo"
+type Source = "primary" | "enter" | "url" | "doi" | "git_repo"
+
+const EMPTY_TABLE: TableData = {
+  columns: ["x", "y"],
+  rows: [
+    ["", ""],
+    ["", ""],
+    ["", ""],
+  ],
+}
 
 interface NewDatasetProps {
   isOpen: boolean
@@ -58,6 +70,11 @@ const SOURCES: { value: Source; label: string; help: string }[] = [
     value: "primary",
     label: "I collected this myself",
     help: "Measured or generated for this project, so there's no upstream source.",
+  },
+  {
+    value: "enter",
+    label: "I'll type it in now",
+    help: "Readings off an instrument, a tally, a table from a paper: enter it here and it's saved as a CSV you collected.",
   },
   {
     value: "url",
@@ -112,6 +129,7 @@ const NewDataset = ({
   const accountName = ownerName ?? routeParams.accountName ?? ""
   const projectName = projectNameProp ?? routeParams.projectName ?? ""
   const [source, setSource] = useState<Source>(defaultSource)
+  const [table, setTable] = useState<TableData>(EMPTY_TABLE)
   // Only fetched for the source that needs it: data collected here has to
   // already be in the repo, while an import names a path that doesn't
   // exist yet and so has nothing to pick from.
@@ -147,6 +165,29 @@ const NewDataset = ({
   })
   const mutation = useMutation({
     mutationFn: (data: DatasetForm) => {
+      if (source === "enter") {
+        // Typed-in data becomes a real CSV in the repo, tracked like any
+        // uploaded file, with the person who entered it as its collector.
+        const csv = toCsv({
+          columns: table.columns,
+          rows: table.rows.filter((row) => row.some((cell) => cell !== "")),
+        })
+        const file = new File([csv], data.path.split("/").pop() ?? "data.csv", {
+          type: "text/csv",
+        })
+        return ProjectsService.postProjectDatasetUpload({
+          "content-length": file.size,
+          owner_name: accountName,
+          project_name: projectName,
+          bodyProjectsPostProjectDatasetUpload: {
+            path: data.path,
+            title: data.title,
+            description: data.description,
+            file,
+            collected_by: data.collected_by || currentUser?.email || null,
+          },
+        }).then((response) => response.data)
+      }
       const post: DatasetPost = {
         path: data.path,
         title: data.title || null,
@@ -186,6 +227,7 @@ const NewDataset = ({
       showToast("Success!", "Dataset added.", "success")
       reset()
       setSource(defaultSource)
+      setTable(EMPTY_TABLE)
       onClose()
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -200,8 +242,9 @@ const NewDataset = ({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      size={{ base: "sm", md: "lg" }}
+      size={{ base: "sm", md: source === "enter" ? "2xl" : "lg" }}
       isCentered
+      scrollBehavior="inside"
     >
       <ModalOverlay />
       <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
@@ -321,7 +364,13 @@ const NewDataset = ({
               </FormHelperText>
             </FormControl>
           ) : null}
-          {source === "primary" ? (
+          {source === "enter" ? (
+            <FormControl mb={4}>
+              <FormLabel>Data</FormLabel>
+              <DataEntryGrid value={table} onChange={setTable} />
+            </FormControl>
+          ) : null}
+          {source === "primary" || source === "enter" ? (
             <FormControl mb={4}>
               <FormLabel htmlFor="collected_by">Collected by</FormLabel>
               <Input
@@ -373,12 +422,14 @@ const NewDataset = ({
               <FormHelperText>
                 {source === "primary"
                   ? "Must already exist in the repo."
-                  : "Where it will live once it's fetched."}
+                  : source === "enter"
+                    ? "Where the CSV will be written."
+                    : "Where it will live once it's fetched."}
               </FormHelperText>
             )}
           </FormControl>
           <FormControl
-            isRequired={source === "primary"}
+            isRequired={source === "primary" || source === "enter"}
             isInvalid={!!errors.title}
             mb={4}
           >
@@ -387,7 +438,7 @@ const NewDataset = ({
               id="title"
               {...register("title", {
                 required:
-                  source === "primary"
+                  source === "primary" || source === "enter"
                     ? "Data you collected needs a title."
                     : false,
               })}
@@ -399,7 +450,7 @@ const NewDataset = ({
             ) : null}
           </FormControl>
           <FormControl
-            isRequired={source === "primary"}
+            isRequired={source === "primary" || source === "enter"}
             isInvalid={!!errors.description}
           >
             <FormLabel htmlFor="description">Description</FormLabel>
@@ -407,12 +458,12 @@ const NewDataset = ({
               id="description"
               {...register("description", {
                 required:
-                  source === "primary"
+                  source === "primary" || source === "enter"
                     ? "Data you collected needs a description."
                     : false,
               })}
               placeholder={
-                source === "primary"
+                source === "primary" || source === "enter"
                   ? "How it was collected: instrument, conditions, units"
                   : "What it contains"
               }
@@ -420,7 +471,7 @@ const NewDataset = ({
             />
             {errors.description ? (
               <FormErrorMessage>{errors.description.message}</FormErrorMessage>
-            ) : source === "primary" ? (
+            ) : source === "primary" || source === "enter" ? (
               <FormHelperText>
                 Nobody else can reconstruct how primary data was made, so this
                 is the only record of it.
@@ -429,7 +480,7 @@ const NewDataset = ({
           </FormControl>
           {source === "primary" ? (
             <Text fontSize="xs" color="ui.dim" mt={4}>
-              Data your pipeline produces doesn't need declaring here—name the
+              Data your pipeline produces doesn't need declaring here. Name the
               stage that makes it and it's tracked from there.
             </Text>
           ) : null}

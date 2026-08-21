@@ -271,6 +271,23 @@
       "type": "object"
     },
     "Dataset": {
+      "not": {
+        "properties": {
+          "collected_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "collected_by"
+        ]
+      },
       "properties": {
         "collected_by": {
           "anyOf": [
@@ -303,6 +320,28 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -801,7 +840,24 @@
       "type": "object"
     },
     "Figure": {
-      "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told.",
+      "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told. One obtained from\nelsewhere records ``imported_from`` instead, like a dataset does.",
+      "not": {
+        "properties": {
+          "created_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "created_by"
+        ]
+      },
       "properties": {
         "created_by": {
           "anyOf": [
@@ -834,6 +890,28 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -988,96 +1066,6 @@
         "formula"
       ],
       "title": "FormulaParams",
-      "type": "object"
-    },
-    "ImportedDataset": {
-      "properties": {
-        "collected_by": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/_Person"
-            },
-            {
-              "items": {
-                "$ref": "#/$defs/_Person"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Who collected or measured this data for this project, which is what marks it as a primary artifact. Primary data has no upstream source to point at, so saying who produced it is the only way to tell it apart from data whose provenance was never recorded.",
-          "title": "Collected By"
-        },
-        "description": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A longer description.",
-          "title": "Description"
-        },
-        "imported_from": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/_ImportedFromProject"
-            },
-            {
-              "$ref": "#/$defs/_ImportedFromUrl"
-            },
-            {
-              "$ref": "#/$defs/_ImportedFromDoi"
-            },
-            {
-              "$ref": "#/$defs/_ImportedFromGit"
-            }
-          ],
-          "title": "Imported From"
-        },
-        "path": {
-          "description": "Path to the file, relative to the project root.",
-          "title": "Path",
-          "type": "string"
-        },
-        "stage": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Name of the pipeline stage that produces this.",
-          "title": "Stage"
-        },
-        "title": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "A human-readable title.",
-          "title": "Title"
-        }
-      },
-      "required": [
-        "path",
-        "imported_from"
-      ],
-      "title": "ImportedDataset",
       "type": "object"
     },
     "Input": {
@@ -3298,6 +3286,23 @@
     },
     "MiscArtifact": {
       "description": "A path worth attributing that isn't one of the typed artifacts.\n\nMost files in a project are neither a dataset nor a figure nor a paper:\na photograph, a slide someone drew, a config a colleague sent over. They\nstill have an origin, and without somewhere to record it the honest\nanswer is missing rather than merely absent.",
+      "not": {
+        "properties": {
+          "created_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "created_by"
+        ]
+      },
       "properties": {
         "created_by": {
           "anyOf": [
@@ -4159,6 +4164,28 @@
           ],
           "default": null,
           "title": "Doi"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "is_published": {
           "default": false,
@@ -7395,6 +7422,7 @@
           "title": "Date"
         },
         "doi": {
+          "description": "The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or doi: prefix is accepted and stripped.",
           "title": "Doi",
           "type": "string"
         }
@@ -7635,14 +7663,7 @@
       "default": [],
       "description": "The project's datasets.",
       "items": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/ImportedDataset"
-          },
-          {
-            "$ref": "#/$defs/Dataset"
-          }
-        ]
+        "$ref": "#/$defs/Dataset"
       },
       "title": "Datasets",
       "type": "array"

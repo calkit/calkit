@@ -5,6 +5,7 @@ import {
   PRESETS,
   buildEnvironment,
   buildSpecFile,
+  builtImageTagFor,
   defaultPathFor,
 } from "./environments"
 
@@ -123,14 +124,6 @@ describe("buildEnvironment", () => {
     // environment is removing one directory.
     expect(venv.all_attrs.prefix).toBe(".calkit/envs/analysis/.venv")
     expect(venv.all_attrs.python).toBe("3.12")
-    const docker = buildEnvironment({
-      name: "tex",
-      kind: "docker",
-      path: "Dockerfile",
-      packages: [],
-      image: "texlive/texlive:latest-full",
-    })
-    expect(docker.all_attrs.image).toBe("texlive/texlive:latest-full")
     const julia = buildEnvironment({
       name: "j",
       kind: "julia",
@@ -139,6 +132,47 @@ describe("buildEnvironment", () => {
     })
     // The model requires a version for Julia.
     expect(julia.all_attrs.julia).toBeDefined()
+  })
+
+  it("uses a Docker image as is unless there is something to build", () => {
+    // No packages: the image is the environment. Writing a Dockerfile and
+    // tagging the build with the same name would overwrite the local copy
+    // of the base image, so no Dockerfile or path is written at all.
+    const imageOnly = buildEnvironment({
+      name: "tex",
+      kind: "docker",
+      path: "Dockerfile",
+      packages: [],
+      image: "texlive/texlive:latest-full",
+    })
+    expect(imageOnly.all_attrs).toEqual({
+      kind: "docker",
+      image: "texlive/texlive:latest-full",
+    })
+    expect(imageOnly.path).toBeNull()
+    expect(imageOnly.file_content).toBeNull()
+    // With packages there's a build, so the result gets its own tag and the
+    // base image only appears in the FROM line.
+    const built = buildEnvironment({
+      name: "py",
+      kind: "docker",
+      path: "Dockerfile",
+      packages: ["pandas"],
+      image: "python:3.13-slim",
+    })
+    expect(built.all_attrs).toEqual({
+      kind: "docker",
+      path: "Dockerfile",
+      image: builtImageTagFor("py"),
+    })
+    expect(built.all_attrs.image).not.toBe("python:3.13-slim")
+    expect(built.path).toBe("Dockerfile")
+    expect(built.file_content).toContain("FROM python:3.13-slim")
+    expect(built.file_content).toContain("pandas")
+    // The LaTeX preset is the image-only case, which is the one that bit.
+    const latex = PRESETS.find((p) => p.name === "latex")
+    expect(latex?.kind).toBe("docker")
+    expect(latex?.packages ?? []).toHaveLength(0)
   })
 
   it("carries a description only when there is one", () => {

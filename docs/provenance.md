@@ -87,6 +87,10 @@ figures:
       email: me@myorg.edu
 ```
 
+A figure obtained from elsewhere takes the same `imported_from` forms a
+dataset does, and publications do too; `created_by` and `imported_from`
+can't both be set on one entry.
+
 ## Disclosing generative AI
 
 If a generative AI tool helped produce a figure or a `misc` artifact, the

@@ -153,7 +153,7 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     name: "pydata",
-    label: "🐍 PyData—pandas, matplotlib, scikit-learn",
+    label: "🐍 PyData: pandas, matplotlib, scikit-learn",
     kind: "uv",
     envName: "py",
     packages: [...PACKAGE_GROUPS.PyData],
@@ -167,21 +167,21 @@ export const PRESETS: Preset[] = [
   },
   {
     name: "tidyverse",
-    label: "📊 R analysis—tidyverse, knitr",
+    label: "📊 R analysis: tidyverse, knitr",
     kind: "renv",
     envName: "r",
     packages: [...PACKAGE_GROUPS.Tidyverse, ...PACKAGE_GROUPS.RMarkdown],
   },
   {
     name: "latex",
-    label: "📄 LaTeX—full TeX Live in Docker",
+    label: "📄 LaTeX: full TeX Live in Docker",
     kind: "docker",
     envName: "latex",
     image: "texlive/texlive:latest-full",
   },
   {
     name: "julia",
-    label: "🔬 Julia—DataFrames, Plots",
+    label: "🔬 Julia: DataFrames, Plots",
     kind: "julia",
     envName: "jl",
     packages: [...PACKAGE_GROUPS.JuliaData],
@@ -201,6 +201,18 @@ export function defaultPathFor(kind: EnvKind, envName: string): string {
   return ENV_KINDS.find((k) => k.kind === kind)?.defaultPath ?? ""
 }
 
+/**
+ * The tag a Docker environment is built under when it has a Dockerfile.
+ *
+ * Calkit builds the Dockerfile and tags the result with `image`, so that
+ * can't be the base image's name: a LaTeX environment that built on
+ * texlive/texlive and tagged itself the same would overwrite the local copy
+ * of the base. The base image goes in the FROM line instead.
+ */
+export function builtImageTagFor(envName: string): string {
+  return `calkit-${envName}`
+}
+
 export interface BuildEnvironmentInput {
   name: string
   kind: EnvKind
@@ -216,6 +228,11 @@ export interface BuildEnvironmentInput {
  *
  * `all_attrs` is written into calkit.yaml verbatim, so it carries exactly
  * the keys the chosen kind uses and nothing else.
+ *
+ * A Docker environment with nothing to install is the image itself: no
+ * Dockerfile is written and no `path` is set, so calkit pulls the image
+ * rather than building and retagging it. With packages, the Dockerfile
+ * builds on the image and the result gets its own project-local tag.
  */
 export function buildEnvironment({
   name,
@@ -226,9 +243,11 @@ export function buildEnvironment({
   image,
   pythonVersion,
 }: BuildEnvironmentInput): Environment {
+  const imageOnly = kind === "docker" && packages.length === 0
+  const specPath = imageOnly ? "" : path
   const attrs: Record<string, unknown> = { kind }
-  if (path) {
-    attrs.path = path
+  if (specPath) {
+    attrs.path = specPath
   }
   if (description) {
     attrs.description = description
@@ -239,7 +258,7 @@ export function buildEnvironment({
     attrs.prefix = `.calkit/envs/${name}/.venv`
   }
   if (kind === "docker") {
-    attrs.image = image
+    attrs.image = imageOnly ? image : builtImageTagFor(name)
   }
   if (pythonVersion && (kind === "uv-venv" || kind === "conda")) {
     attrs.python = pythonVersion
@@ -251,16 +270,18 @@ export function buildEnvironment({
   return {
     name,
     kind,
-    path: path || null,
+    path: specPath || null,
     description: description || null,
     all_attrs: attrs,
-    file_content: buildSpecFile({
-      name,
-      kind,
-      packages,
-      image,
-      pythonVersion,
-    }),
+    file_content: imageOnly
+      ? null
+      : buildSpecFile({
+          name,
+          kind,
+          packages,
+          image,
+          pythonVersion,
+        }),
   }
 }
 

@@ -49,7 +49,7 @@ datasets:
   # From a DOI, e.g., Figshare or Zenodo
   - path: data/from-archive.csv
     imported_from:
-      doi: 10.21223.zenodo/etc
+      doi: 10.5281/zenodo.1234567
   # From a Git repo
   - path: data/from-git.csv
     imported_from:
@@ -90,7 +90,14 @@ Each person needs an email or an ORCID, or both. A name on its own doesn't
 say which of the several people with that name this is, so credit rests on
 something resolvable. An ORCID is the better of the two, since it identifies
 someone beyond this one project, and it's stored as the full
-`https://orcid.org/...` URL whether you write it that way or not.
+`https://orcid.org/...` URL whether you write it that way or not. Its last
+character is a check digit, so a mistyped one is refused rather than
+recorded.
+
+A DOI can be written bare, as `doi:10.5281/zenodo.1234567`, or as the
+`https://doi.org/...` URL; it's stored bare. A `collected_by` and an
+`imported_from` on the same dataset is an error, since data is either
+something you produced or something you got.
 
 For attributing files that aren't datasets, and for disclosing generative
 AI, see [provenance](provenance.md).

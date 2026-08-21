@@ -192,6 +192,26 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     return session_user
 
 
+def email_is_verified(*, session: Session, user: User) -> bool:
+    """Whether the account's email is known to belong to whoever holds it.
+
+    Signing up with a password never checks the address, so anyone can
+    register someone else's email and wait. Signing in through Google does
+    check it (Google only reports an address it has verified, and login
+    refuses the rest) and records which address that was on the credential
+    it leaves behind. Only a match with the account's own email counts: a
+    Google account connected from settings can be any Google account.
+    """
+    cred = get_external_credential(
+        session=session, user=user, provider="google"
+    )
+    return (
+        cred is not None
+        and cred.provider_account_id is not None
+        and cred.provider_account_id.lower() == user.email.lower()
+    )
+
+
 def link_github_account(
     *, session: Session, user: User, github_username: str
 ) -> bool:
@@ -204,15 +224,19 @@ def link_github_account(
     name at link time keeps them the same for accounts created some other
     way first.
 
-    Only when the new name is free and the account owns no projects, since
-    renaming is what every existing project URL and configured DVC remote
-    points at. Returns whether the account was renamed.
+    Only the first time, when the new name is free, and the account owns no
+    projects, since renaming is what every existing project URL and
+    configured DVC remote points at, and a reauthorization to refresh a
+    token is not the moment to take a name the user has kept. Returns
+    whether the account was renamed.
     """
+    first_link = user.account.github_name is None
     user.account.github_name = github_username
     renamed = False
     desired = github_username.lower()
     if (
-        user.account.name != desired
+        first_link
+        and user.account.name != desired
         and not user.account.owned_projects
         and desired not in (INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES)
         and session.exec(
@@ -641,33 +665,43 @@ def get_google_token(session: Session, user: User) -> str:
     return tokens["access_token"]
 
 
-def save_google_token(session: Session, user: User, google_resp: dict):
+def save_google_token(
+    session: Session,
+    user: User,
+    google_resp: dict[str, Any],
+    verified_email: str | None = None,
+) -> None:
     """Save Google OAuth token to UserExternalCredential table.
 
     Preserves existing refresh_token when Google doesn't return a new one
     (Google often omits refresh_token on subsequent authorizations).
+
+    ``verified_email`` is the address Google reported as verified, when the
+    caller fetched the profile and checked it. It's kept on the credential
+    as what this account has proven about its email, and is carried over
+    rather than cleared when a later save doesn't know it.
     """
     now = utcnow()
     # Google's expires_in is in seconds
     expires = now + timedelta(seconds=int(google_resp["expires_in"]))
+    existing_cred = get_external_credential(
+        session=session,
+        user=user,
+        provider="google",
+        label="default",
+    )
     # Preserve existing refresh_token if not provided in response
     refresh_token = google_resp.get("refresh_token")
-    if not refresh_token:
-        # Try to get existing refresh_token
-        existing_cred = get_external_credential(
-            session=session,
-            user=user,
-            provider="google",
-            label="default",
-        )
-        if existing_cred:
-            try:
-                existing_tokens = json.loads(
-                    decrypt_secret(existing_cred.secret_payload)
-                )
-                refresh_token = existing_tokens.get("refresh_token")
-            except Exception:
-                pass
+    if not refresh_token and existing_cred:
+        try:
+            existing_tokens = json.loads(
+                decrypt_secret(existing_cred.secret_payload)
+            )
+            refresh_token = existing_tokens.get("refresh_token")
+        except Exception:
+            pass
+    if verified_email is None and existing_cred is not None:
+        verified_email = existing_cred.provider_account_id
     payload = json.dumps(
         {
             "access_token": google_resp["access_token"],
@@ -680,6 +714,7 @@ def save_google_token(session: Session, user: User, google_resp: dict):
         provider="google",
         secret_payload=payload,
         credential_type="oauth2",
+        provider_account_id=verified_email,
         expires=expires,
     )
 

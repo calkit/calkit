@@ -155,6 +155,11 @@ def test_post_feedback(
     assert "no smtp" in messages
     assert "Sent while the relay was down" in messages
     assert listed[0]["message"] == "no smtp"
+    # A page has a ceiling; the whole table is not one request.
+    resp = client.get(
+        url, headers=superuser_token_headers, params={"limit": 1000}
+    )
+    assert resp.status_code == 422
     assert listed[0]["user_email"] == settings.EMAIL_TEST_USER
     assert listed[0]["resolved"] is False
     # Resolving, and putting it back.

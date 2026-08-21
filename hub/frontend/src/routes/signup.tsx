@@ -39,7 +39,6 @@ export const Route = createFileRoute("/signup")({
 
 interface SignUpForm {
   full_name: string
-  account_name: string
   email: string
   password: string
 }
@@ -60,7 +59,6 @@ function SignUp() {
           email: data.email,
           password: data.password,
           full_name: data.full_name,
-          account_name: data.account_name,
         },
       }).then((response) => response.data)
       const resp = await LoginService.loginAccessToken({
@@ -114,27 +112,6 @@ function SignUp() {
             <FormErrorMessage>{errors.full_name.message}</FormErrorMessage>
           )}
         </FormControl>
-        <FormControl isInvalid={!!errors.account_name} mb={3}>
-          <FormLabel htmlFor="account_name">Username</FormLabel>
-          <Input
-            id="account_name"
-            {...register("account_name", {
-              required: "Username is required",
-              pattern: {
-                value: /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,62}[a-zA-Z0-9])?$/,
-                message: "Use letters, numbers, and dashes",
-              },
-            })}
-            placeholder="Choose a unique username"
-          />
-          {errors.account_name ? (
-            <FormErrorMessage>{errors.account_name.message}</FormErrorMessage>
-          ) : (
-            <Text fontSize="xs" color="ui.dim" mt={1}>
-              Your account name, used in your project URLs.
-            </Text>
-          )}
-        </FormControl>
         <FormControl isInvalid={!!errors.email} mb={3}>
           <FormLabel htmlFor="email">Email</FormLabel>
           <Input
@@ -143,8 +120,13 @@ function SignUp() {
             {...register("email", { required: "Email is required" })}
             placeholder="you@example.com"
           />
-          {errors.email && (
+          {errors.email ? (
             <FormErrorMessage>{errors.email.message}</FormErrorMessage>
+          ) : (
+            <Text fontSize="xs" color="ui.dim" mt={1}>
+              Your account name starts as the part before the @ and switches to
+              your GitHub username when you connect GitHub.
+            </Text>
           )}
         </FormControl>
         <FormControl isInvalid={!!errors.password} mb={4}>

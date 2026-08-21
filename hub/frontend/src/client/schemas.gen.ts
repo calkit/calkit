@@ -120,6 +120,17 @@ export const Body_projects_post_project_dataset_uploadSchema = {
       format: "binary",
       title: "File",
     },
+    collected_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By",
+    },
   },
   type: "object",
   required: ["path", "title", "description", "file"],
@@ -7752,6 +7763,16 @@ export const ReproCheckSchema = {
       type: "integer",
       title: "N Publications No Import Or Stage",
     },
+    n_misc: {
+      type: "integer",
+      title: "N Misc",
+      default: 0,
+    },
+    n_misc_no_import_or_stage: {
+      type: "integer",
+      title: "N Misc No Import Or Stage",
+      default: 0,
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -7782,6 +7803,11 @@ export const ReproCheckSchema = {
     n_publications_with_import_or_stage: {
       type: "integer",
       title: "N Publications With Import Or Stage",
+      readOnly: true,
+    },
+    n_misc_with_import_or_stage: {
+      type: "integer",
+      title: "N Misc With Import Or Stage",
       readOnly: true,
     },
     n_stages_without_env: {
@@ -7819,6 +7845,7 @@ export const ReproCheckSchema = {
     "n_datasets_with_import_or_stage",
     "n_figures_with_import_or_stage",
     "n_publications_with_import_or_stage",
+    "n_misc_with_import_or_stage",
     "n_stages_without_env",
     "n_stages_with_env",
   ],
@@ -8220,6 +8247,113 @@ export const StorageUsageSchema = {
   type: "object",
   required: ["limit_gb", "used_gb"],
   title: "StorageUsage",
+} as const
+
+export const StudioFigureSchema = {
+  properties: {
+    figure: {
+      $ref: "#/components/schemas/Figure",
+    },
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_created: {
+      type: "boolean",
+      title: "Environment Created",
+    },
+    packages_missing: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Packages Missing",
+    },
+  },
+  type: "object",
+  required: [
+    "figure",
+    "stage_name",
+    "environment",
+    "environment_created",
+    "packages_missing",
+  ],
+  title: "StudioFigure",
+} as const
+
+export const StudioFigurePostSchema = {
+  properties: {
+    figure_path: {
+      type: "string",
+      title: "Figure Path",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    script_content: {
+      type: "string",
+      title: "Script Content",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    packages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Packages",
+    },
+    environment: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["figure_path", "title", "script_path", "script_content"],
+  title: "StudioFigurePost",
 } as const
 
 export const SubscriptionPlanSchema = {
@@ -9875,6 +10009,16 @@ export const ReproCheckWritableSchema = {
     n_publications_no_import_or_stage: {
       type: "integer",
       title: "N Publications No Import Or Stage",
+    },
+    n_misc: {
+      type: "integer",
+      title: "N Misc",
+      default: 0,
+    },
+    n_misc_no_import_or_stage: {
+      type: "integer",
+      title: "N Misc No Import Or Stage",
+      default: 0,
     },
     n_dvc_remotes: {
       type: "integer",

@@ -4,15 +4,16 @@ import html
 import logging
 import os
 import uuid
-from typing import Literal
+from typing import Annotated, Literal
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from pydantic.networks import EmailStr
 from sqlalchemy.exc import DataError
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, or_, select
 from starlette.requests import Request
 
@@ -159,11 +160,16 @@ def post_feedback(
 
 @router.get("/feedback", dependencies=[Depends(get_current_active_superuser)])
 def get_feedback(
-    session: SessionDep, limit: int = 100, offset: int = 0
+    session: SessionDep,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[FeedbackPublic]:
     """List what users have sent in, newest first."""
     rows = session.exec(
         select(Feedback)
+        # The sender's name and email are on the user, which would
+        # otherwise be a query per row.
+        .options(selectinload(Feedback.user))  # type: ignore[arg-type]
         .order_by(sqlalchemy.desc(Feedback.created))  # type: ignore
         .limit(limit)
         .offset(offset)

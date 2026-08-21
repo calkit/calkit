@@ -10,7 +10,6 @@ import {
   SimpleGrid,
   Spacer,
   Text,
-  Tooltip,
   useColorModeValue,
 } from "@chakra-ui/react"
 import mixpanel from "mixpanel-browser"
@@ -22,6 +21,7 @@ import {
   isComplete,
   progressPercent,
 } from "../../lib/onboarding"
+import Tooltip from "../Common/Tooltip"
 
 /**
  * A step's status icon, which is also how a step gets ticked off.
@@ -55,10 +55,7 @@ function StepMark({
     return icon
   }
   return (
-    <Tooltip
-      label={step.done ? "Not done after all?" : "Mark as done"}
-      openDelay={400}
-    >
+    <Tooltip label={step.done ? "Not done after all?" : "Mark as done"}>
       <Box
         as="button"
         type="button"

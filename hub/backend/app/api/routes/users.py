@@ -10,7 +10,8 @@ import requests
 import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.exc import DataError
+from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.orm import selectinload
 from sqlmodel import Field, col, func, or_, select
 
 import app.projects
@@ -84,18 +85,39 @@ def read_users(
     """
     where_clause = None
     if search_for:
-        pattern = f"%{search_for}%"
-        where_clause = or_(
-            User.email.ilike(pattern),  # type: ignore
-            User.full_name.ilike(pattern),  # type: ignore
-            # The GitHub username lives on the account, not the user.
-            User.account.has(Account.github_name.ilike(pattern)),  # type: ignore
-            User.account.has(Account.name.ilike(pattern)),  # type: ignore
+        # The search is a substring, so LIKE's own wildcards in it are
+        # characters to find, not patterns to match.
+        escaped = (
+            search_for.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
         )
-    count_statement = select(func.count()).select_from(User)
-    # Signup time lives on the account, which is created with the user, so
-    # ordering by it needs the join.
-    statement = select(User).join(Account, Account.user_id == User.id)  # type: ignore
+        pattern = f"%{escaped}%"
+        where_clause = or_(
+            col(User.email).ilike(pattern, escape="\\"),
+            col(User.full_name).ilike(pattern, escape="\\"),
+            # The GitHub username lives on the account, not the user.
+            col(Account.github_name).ilike(pattern, escape="\\"),
+            col(Account.name).ilike(pattern, escape="\\"),
+        )
+    # Signup time and GitHub name live on the account, which is created with
+    # the user, so both searching and ordering need the join. The count
+    # takes the same one so the two can't disagree.
+    count_statement = (
+        select(func.count())
+        .select_from(User)
+        .outerjoin(Account, col(Account.user_id) == col(User.id))
+    )
+    statement = (
+        select(User)
+        .outerjoin(Account, col(Account.user_id) == col(User.id))
+        # Each user's signup time and GitHub name come off the account,
+        # which would otherwise be a query per row of the page.
+        .options(
+            selectinload(User.account),  # type: ignore[arg-type]
+            selectinload(User.subscription),  # type: ignore[arg-type]
+        )
+    )
     if where_clause is not None:
         count_statement = count_statement.where(where_clause)
         statement = statement.where(where_clause)
@@ -1042,7 +1064,14 @@ def post_user_onboarding_flag(
             step=req.step,
         )
     )
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError:
+        # Two requests for the same flag (a double-click) can both pass the
+        # check above, and the unique constraint settles it. Losing that
+        # race means the flag is set, which is what was asked for.
+        session.rollback()
+        return Message(message="Success")
     mixpanel.user_set_onboarding_flag(
         user=current_user,
         step=req.step,

@@ -22,6 +22,27 @@ def _bool_to_check_x(val: bool | int) -> str:
         return "❌"
 
 
+# The artifact kinds whose provenance is checked. Each entry must say where
+# it came from: a pipeline stage, an import, or the person who collected or
+# created it.
+PROVENANCE_ARTIFACT_TYPES = ["datasets", "figures", "publications", "misc"]
+
+
+def has_provenance(artifact: dict) -> bool:
+    """Return whether an artifact entry records where it came from.
+
+    A stage and an import are the stronger forms, but ``collected_by`` and
+    ``created_by`` count too: a dataset someone measured, or a schematic
+    someone drew, is accounted for even though there's nothing upstream to
+    point at. The field names in :class:`ReproCheck` predate the latter two
+    and are kept so callers reading them keep working.
+    """
+    return any(
+        artifact.get(key) is not None
+        for key in ["stage", "imported_from", "collected_by", "created_by"]
+    )
+
+
 class ReproCheck(BaseModel):
     has_pipeline: bool
     has_readme: bool
@@ -40,6 +61,8 @@ class ReproCheck(BaseModel):
     n_figures_no_import_or_stage: int
     n_publications: int
     n_publications_no_import_or_stage: int
+    n_misc: int = 0
+    n_misc_no_import_or_stage: int = 0
     n_dvc_remotes: int
     # TODO: Check calkit remotes are authenticated
 
@@ -91,13 +114,14 @@ class ReproCheck(BaseModel):
                 "executed outside a defined environment. "
                 "Define the environment for those next."
             )
-        for artifact_type in ["datasets", "figures", "publications"]:
+        for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
             if n_bad:
                 return (
-                    f"There are {n_bad} {artifact_type} that are neither "
-                    "imported nor produced by a pipeline stage. "
-                    "Define where they were imported from or create "
+                    f"There are {n_bad} {artifact_type} with no provenance "
+                    "recorded: neither produced by a pipeline stage, nor "
+                    "imported, nor attributed to whoever collected or "
+                    "created them. Define where they came from or create "
                     "stage(s) to produce them."
                 )
         if not self.has_dev_container:
@@ -120,6 +144,11 @@ class ReproCheck(BaseModel):
     @property
     def n_publications_with_import_or_stage(self) -> int:
         return self.n_publications - self.n_publications_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_misc_with_import_or_stage(self) -> int:
+        return self.n_misc - self.n_misc_no_import_or_stage
 
     @computed_field
     @property
@@ -156,13 +185,13 @@ class ReproCheck(BaseModel):
             f"{self.n_stages_with_env}/{self.n_stages} "
             f"{_bool_to_check_x(self.n_stages_without_env == 0)}\n"
         )
-        for artifact_type in ["datasets", "figures", "publications"]:
+        for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
             n_good = getattr(self, f"n_{artifact_type}_with_import_or_stage")
             txt += (
-                f"{artifact_type.capitalize()} imported or "
-                f"created by pipeline: {n_good}/{n} "
+                f"{artifact_type.capitalize()} with provenance recorded "
+                f"(stage, import, or attribution): {n_good}/{n} "
                 f"{_bool_to_check_x(n_bad == 0)}\n"
             )
         if self.recommendation:
@@ -176,7 +205,7 @@ def check_reproducibility(
     """Check the reproducibility of a project."""
     from git.exc import InvalidGitRepositoryError
 
-    res = dict()
+    res: dict = dict()
     if log_func is None:
         log_func = print
     try:
@@ -208,16 +237,12 @@ def check_reproducibility(
         res["instructions_in_readme"] = False
     ck_info = calkit.load_calkit_info(wdir=wdir)
     pipeline = calkit.dvc.read_pipeline(wdir=wdir)
-    # Check for non-imported artifacts not produced by the pipeline
-    for artifact_type in ["datasets", "figures", "publications"]:
+    # Check for artifacts with no provenance recorded
+    for artifact_type in PROVENANCE_ARTIFACT_TYPES:
         artifacts = ck_info.get(artifact_type, [])
         res[f"n_{artifact_type}"] = len(artifacts)
         res[f"n_{artifact_type}_no_import_or_stage"] = len(
-            [
-                a
-                for a in artifacts
-                if a.get("stage") is None and a.get("imported_from") is None
-            ]
+            [a for a in artifacts if not has_provenance(a)]
         )
     res["n_environments"] = len(ck_info.get("environments", {}))
     # Check for stages not run with environments

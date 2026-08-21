@@ -40,6 +40,7 @@ import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactC
 import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
+import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
 import useProject from "../../../../../hooks/useProject"
 
@@ -285,6 +286,7 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
+  const studioModal = useDisclosure()
 
   const selectedFigure = figures?.find((f) => f.path === selectedPath) ?? null
 
@@ -403,6 +405,9 @@ function ProjectFigures() {
                   <Icon as={FaPlus} fontSize="xs" />
                 </MenuButton>
                 <MenuList>
+                  <MenuItem onClick={studioModal.onOpen}>
+                    Plot a dataset in the browser
+                  </MenuItem>
                   <MenuItem onClick={uploadFigureModal.onOpen}>
                     Upload new figure
                   </MenuItem>
@@ -419,6 +424,12 @@ function ProjectFigures() {
                 isOpen={labelFigureModal.isOpen}
                 onClose={labelFigureModal.onClose}
               />
+              {studioModal.isOpen ? (
+                <FigureStudio
+                  isOpen={studioModal.isOpen}
+                  onClose={studioModal.onClose}
+                />
+              ) : null}
             </>
           ) : null}
           <ClearableInput

@@ -153,3 +153,34 @@ def generate_new_account_email(
         },
     )
     return EmailData(html_content=html_content, subject=subject)
+
+
+def generate_new_project_email(
+    email_to: str,
+    owner_name: str,
+    project_name: str,
+    project_title: str,
+) -> EmailData:
+    """The note that follows someone's first project: what to type next.
+
+    The project page lives in the browser; the pipeline runs in a terminal.
+    This is the bridge between the two, sent once, with nothing in it that
+    isn't a command or a link.
+    """
+    subject = f"{project_title} is ready to run"
+    html_content = render_email_template(
+        template_name="new_project.html",
+        context={
+            "project_title": project_title,
+            "project_slug": f"{owner_name}/{project_name}",
+            "project_link": (
+                f"{settings.frontend_host}/{owner_name}/{project_name}"
+            ),
+            "install_command": "curl -LsSf install.calkit.org | sh",
+            "clone_command": f"calkit clone {owner_name}/{project_name}",
+            "run_command": 'calkit run -m "Run pipeline"',
+            "docs_link": "https://docs.calkit.org",
+            "email": email_to,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)

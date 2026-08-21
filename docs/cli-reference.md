@@ -878,17 +878,20 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                    |
-| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------- |
-| `--title`                | text    | yes      |         |                                                                |
-| `--description`          | text    | yes      |         |                                                                |
-| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this figure.         |
-| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                     |
-| `--dep`                  | text    | no       |         | Path to stage dependency.                                      |
-| `--out`                  | text    | no       |         | Path to stage output. Figure path will be added automatically. |
-| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.          |
-| `--no-commit`            | boolean | no       | False   |                                                                |
-| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                       |
+| Option                   | Type    | Required | Default | Description                                                                               |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
+| `--title`                | text    | yes      |         |                                                                                           |
+| `--description`          | text    | yes      |         |                                                                                           |
+| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this figure.                                    |
+| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                                                |
+| `--dep`                  | text    | no       |         | Path to stage dependency.                                                                 |
+| `--out`                  | text    | no       |         | Path to stage output. Figure path will be added automatically.                            |
+| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                     |
+| `--created-by-email`     | text    | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
+| `--created-by-orcid`     | text    | no       |         | ORCID of whoever made this figure.                                                        |
+| `--created-with-ai`      | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
+| `--no-commit`            | boolean | no       | False   |                                                                                           |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                                                  |
 
 <a id="subcommand-new-create-result"></a>
 
@@ -1086,17 +1089,20 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                     |
-| ------------------------ | ------- | -------- | ------- | --------------------------------------------------------------- |
-| `--title`                | text    | yes      |         |                                                                 |
-| `--description`          | text    | yes      |         |                                                                 |
-| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this dataset.         |
-| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                      |
-| `--dep`                  | text    | no       |         | Path to stage dependency.                                       |
-| `--out`                  | text    | no       |         | Path to stage output. Dataset path will be added automatically. |
-| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.           |
-| `--no-commit`            | boolean | no       | False   |                                                                 |
-| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                       |
+| Option                   | Type    | Required | Default | Description                                                                                                       |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
+| `--title`                | text    | yes      |         |                                                                                                                   |
+| `--description`          | text    | yes      |         |                                                                                                                   |
+| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this dataset.                                                           |
+| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                                                                        |
+| `--dep`                  | text    | no       |         | Path to stage dependency.                                                                                         |
+| `--out`                  | text    | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
+| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                                             |
+| `--collected-by-email`   | text    | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
+| `--collected-by-orcid`   | text    | no       |         | ORCID of whoever collected this data.                                                                             |
+| `--collected-with-ai`    | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
+| `--no-commit`            | boolean | no       | False   |                                                                                                                   |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                                                                         |
 
 <a id="subcommand-new-create-publication-pub"></a>
 
@@ -1825,23 +1831,24 @@ Options:
 
 List Calkit objects.
 
-| Command                                                         | Description                                   |
-| --------------------------------------------------------------- | --------------------------------------------- |
-| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)             | List notebooks in the project.                |
-| [`figures\|figs`](#subcommand-list-ls-figures-figs)             | List figures in the project.                  |
-| [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                 |
-| [`results`](#subcommand-list-ls-results)                        | List results in the project.                  |
-| [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.            |
-| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).     |
-| [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.             |
-| [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.    |
-| [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.             |
-| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.          |
-| [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer. |
-| [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.       |
-| [`releases`](#subcommand-list-ls-releases)                      | List releases.                                |
-| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                         |
-| [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                     |
+| Command                                                         | Description                                                                                    |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)             | List notebooks in the project.                                                                 |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)             | List figures in the project.                                                                   |
+| [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                                                                  |
+| [`results`](#subcommand-list-ls-results)                        | List results in the project.                                                                   |
+| [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.                                                             |
+| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).                                                      |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.                                                              |
+| [`misc`](#subcommand-list-ls-misc)                              | List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds. |
+| [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.                                                     |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.                                                              |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.                                                           |
+| [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer.                                                  |
+| [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.                                                        |
+| [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
+| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
+| [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -1965,6 +1972,24 @@ Usage:
 
 ```text
 calkit list|ls publications|pubs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-misc"></a>
+
+#### `calkit list|ls misc`
+
+List misc artifacts in the project, i.e., attributed paths that aren't one of the typed kinds.
+
+Usage:
+
+```text
+calkit list|ls misc [OPTIONS]
 ```
 
 Options:
@@ -2794,10 +2819,15 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                                            |
-| --------------------- | ---- | -------- | ------- | ------------------------------------------------------ |
-| `--imported-from-url` | text | no       |         | URL the dataset was imported from.                     |
-| `--stage`             | text | no       |         | Name of the pipeline stage that produces this dataset. |
+| Option                     | Type     | Required | Default | Description                                                                         |
+| -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--imported-from-url`      | text     | no       |         | URL the dataset was imported from.                                                  |
+| `--imported-from-doi`      | text     | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                           |
+| `--imported-from-git-url`  | text     | no       |         | Clone URL of the Git repo the dataset was imported from.                            |
+| `--imported-from-git-rev`  | text     | no       |         | Commit hash it was taken from. A branch or tag isn't accepted, since it would move. |
+| `--imported-from-git-path` | text     | no       |         | Path within that repo, if it isn't the whole thing.                                 |
+| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
+| `--stage`                  | text     | no       |         | Name of the pipeline stage that produces this dataset.                              |
 
 <a id="command-group-check"></a>
 

@@ -54,7 +54,16 @@ def touch_token(session: Session, token: UserToken) -> None:
         return
     token.last_used = now
     session.add(token)
-    session.commit()
+    # Committing would normally expire everything loaded, and the next read
+    # of the token's user would go back to the database for a row fetched a
+    # moment ago. Nothing else is pending this early in a request, so the
+    # loaded state is kept across the commit.
+    expire = session.expire_on_commit
+    session.expire_on_commit = False
+    try:
+        session.commit()
+    finally:
+        session.expire_on_commit = expire
 
 
 def get_db() -> Generator[Session, None, None]:

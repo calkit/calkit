@@ -38,6 +38,7 @@ import {
   PACKAGE_GROUPS,
   PRESETS,
   buildEnvironment,
+  builtImageTagFor,
   defaultPathFor,
 } from "../../lib/environments"
 import { handleError } from "../../lib/errors"
@@ -124,6 +125,28 @@ const NewEnvironment = ({
   const nameError = submitted && !name ? "A name is required." : undefined
   const imageError =
     submitted && spec.needsImage && !image ? "An image is required." : undefined
+  // A Docker environment with nothing to install is just the image, so
+  // there's no Dockerfile to show a path for.
+  const imageOnly = kind === "docker" && packages.length === 0
+  // The modal stays mounted between openings, so what was typed would
+  // otherwise greet the next "New environment" click.
+  const resetForm = () => {
+    setName("")
+    setKind("uv")
+    setDescription("")
+    setPackages([])
+    setNewPackage("")
+    setImage("")
+    setPythonVersion("3.13")
+    setPathOverride("")
+    setNameTouched(false)
+    setSubmitted(false)
+    setUsedPreset(null)
+  }
+  const close = () => {
+    resetForm()
+    onClose()
+  }
   const mutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectEnvironment({
@@ -146,7 +169,7 @@ const NewEnvironment = ({
         n_packages: packages.length,
       })
       showToast("Success!", "Environment created.", "success")
-      onClose()
+      close()
       onCreated?.(name)
     },
     onError: (err: AxiosError) => handleError(err, showToast),
@@ -164,7 +187,7 @@ const NewEnvironment = ({
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={close}
       size={{ base: "sm", md: "2xl" }}
       isCentered
       scrollBehavior="inside"
@@ -251,8 +274,12 @@ const NewEnvironment = ({
                 <FormErrorMessage>{imageError}</FormErrorMessage>
               ) : (
                 <FormHelperText>
-                  Used as the base image; listed packages are installed on top
-                  of it.
+                  {imageOnly
+                    ? "Pulled and used as is. Add packages below to build " +
+                      "on top of it instead."
+                    : `The base image. Packages are installed on top of it and the result is tagged ${builtImageTagFor(
+                        name || "env",
+                      )}, so the base is left as it was.`}
                 </FormHelperText>
               )}
             </FormControl>
@@ -336,18 +363,20 @@ const NewEnvironment = ({
               ) : null}
             </FormControl>
           ) : null}
-          <FormControl mb={4}>
-            <FormLabel htmlFor="env-path">Spec file</FormLabel>
-            <Input
-              id="env-path"
-              value={path}
-              onChange={(e) => setPathOverride(e.target.value)}
-              autoComplete="off"
-            />
-            <FormHelperText>
-              Lives in your repo, so the environment travels with the project.
-            </FormHelperText>
-          </FormControl>
+          {imageOnly ? null : (
+            <FormControl mb={4}>
+              <FormLabel htmlFor="env-path">Spec file</FormLabel>
+              <Input
+                id="env-path"
+                value={path}
+                onChange={(e) => setPathOverride(e.target.value)}
+                autoComplete="off"
+              />
+              <FormHelperText>
+                Lives in your repo, so the environment travels with the project.
+              </FormHelperText>
+            </FormControl>
+          )}
           <FormControl>
             <FormLabel htmlFor="env-description">Description</FormLabel>
             <Textarea
@@ -371,7 +400,7 @@ const NewEnvironment = ({
           >
             Create
           </Button>
-          <Button onClick={onClose}>Cancel</Button>
+          <Button onClick={close}>Cancel</Button>
         </ModalFooter>
       </ModalContent>
     </Modal>

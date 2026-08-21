@@ -9,8 +9,9 @@
  * Score how well `text` matches `query`, or null if it doesn't.
  *
  * Lower is better: the score is the number of characters skipped over,
- * plus how far in the first match starts. So a tight match near the front
- * beats a scattered one further along.
+ * counting from the start of the text, so the lead-in before the first
+ * match costs the same as a gap between matches. A tight match near the
+ * front beats a scattered one further along.
  */
 export function fuzzyScore(text: string, query: string): number | null {
   const target = text.toLowerCase()
@@ -26,7 +27,7 @@ export function fuzzyScore(text: string, query: string): number | null {
     score += next - index - 1
     index = next
   }
-  return score + target.indexOf(q[0])
+  return score
 }
 
 /**

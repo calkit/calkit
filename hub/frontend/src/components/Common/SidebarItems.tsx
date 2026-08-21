@@ -1,7 +1,5 @@
 import { Box, Flex, Icon, Text, useColorModeValue } from "@chakra-ui/react"
-import { useQuery } from "@tanstack/react-query"
 import { Link, getRouteApi, useSearch } from "@tanstack/react-router"
-import axios from "axios"
 import type { IconType } from "react-icons"
 import { FaLaptop } from "react-icons/fa"
 import { FaCubes } from "react-icons/fa"
@@ -23,6 +21,7 @@ import { MdOutlineDashboard } from "react-icons/md"
 import { SiJupyter } from "react-icons/si"
 import { TiFlowMerge } from "react-icons/ti"
 import useAuth from "../../hooks/useAuth"
+import { useLocalServer } from "../../hooks/useOnboarding"
 
 export interface ProjectNavItem {
   icon: IconType
@@ -81,26 +80,10 @@ const SidebarItems = ({ onClose, basePath }: SidebarItemsProps) => {
     strict: false,
   }) as any
   const currentRef: string | undefined = layoutSearch?.ref
-  const {
-    isPending: localServerPending,
-    error: localServerError,
-    data: localServerData,
-  } = useQuery({
-    queryKey: ["local-server-sidebar", accountName, projectName],
-    queryFn: () =>
-      // The Calkit local server is usually not running. Fail fast so a
-      // silently-dropped connection can't leave a request hanging; the
-      // result only controls the sidebar "running locally" icon color.
-      axios.get(
-        `http://localhost:8866/projects/${accountName}/${projectName}`,
-        { timeout: 2000 },
-      ),
-    retry: false,
-  })
-  const localMachineColor =
-    localServerError || localServerPending || !localServerData
-      ? "gray"
-      : "ui.success"
+  // Only controls the "running locally" icon color; the hook shares its
+  // query with the onboarding checklist so the page asks localhost once.
+  const { projectConnected } = useLocalServer(accountName, projectName)
+  const localMachineColor = projectConnected ? "ui.success" : "gray"
 
   const listItems = finalItems.map(({ icon, title, path, requiresLogin }) => {
     if (requiresLogin && !user) {

@@ -17,6 +17,7 @@ import {
   Th,
   Thead,
   Tr,
+  useColorModeValue,
 } from "@chakra-ui/react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -192,9 +193,10 @@ function EmptyState() {
         Let's get your research in one place
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
-        Code, data, environments, figures, and the paper, all in one project
-        that anyone can clone and re-run. It stays a plain Git repo the whole
-        time, and every part of it works with this page closed.
+        Reading, collecting data, analyzing it, and writing it up, in one
+        project instead of four tools. It stays a plain Git repo the whole time,
+        anyone can clone and re-run it, and every part of it works with this
+        page closed.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
@@ -204,8 +206,30 @@ function EmptyState() {
   )
 }
 
+// The four phases a research project cycles through, and what Calkit
+// gives each one. The pitch is that they happen in one place.
+const LOOP = [
+  {
+    title: "Read",
+    body: "Your Zotero library becomes the project's bibliography, and stays in step as you add references.",
+  },
+  {
+    title: "Collect",
+    body: "Type data in, upload it, or import it by DOI, URL, or repo. Every dataset records where it came from.",
+  },
+  {
+    title: "Analyze",
+    body: "Plot in the browser, then save as a pipeline stage with a pinned environment. Figures trace back to code and data.",
+  },
+  {
+    title: "Write",
+    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked so its figures never go stale.",
+  },
+]
+
 /** The signed-out landing page. */
 function LandingPage() {
+  const loopBorder = useColorModeValue("gray.200", "gray.600")
   return (
     <>
       <Box mt={16} mb={12} textAlign={{ base: "center", md: "left" }}>
@@ -215,22 +239,42 @@ function LandingPage() {
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
           Scripts on a laptop, data on a shared drive, a paper in Overleaf, a
           library in Zotero, and no one sure which figure came from which run.
-          Calkit connects those pieces into one reproducible project—without
-          asking you to leave any of them behind.
+          Calkit puts the whole loop, reading, collecting, analyzing, and
+          writing, in one reproducible project, without asking you to leave any
+          of those tools behind.
         </Text>
         <HStack spacing={4} justify={{ base: "center", md: "flex-start" }}>
-          <Link as={RouterLink} to="/new">
-            <Button variant="primary" size="lg">
-              Start a project
-            </Button>
-          </Link>
-          <Link as={RouterLink} to="/login">
-            <Button size="lg" variant="ghost">
-              Sign in
-            </Button>
-          </Link>
+          <Button as={RouterLink} to="/new" variant="primary" size="lg">
+            Start a project
+          </Button>
+          <Button as={RouterLink} to="/login" size="lg" variant="ghost">
+            Sign in
+          </Button>
         </HStack>
       </Box>
+      {/* The loop a project actually moves through, and the tool each
+          phase usually lives in. One place for all four is the pitch. */}
+      <SimpleGrid columns={{ base: 2, md: 4 }} spacing={4} mb={10}>
+        {LOOP.map((phase, index) => (
+          <Box
+            key={phase.title}
+            borderWidth={1}
+            borderColor={loopBorder}
+            borderRadius="lg"
+            p={4}
+          >
+            <Text fontSize="xs" color="ui.dim" mb={1}>
+              {index + 1}
+            </Text>
+            <Heading size="sm" mb={1}>
+              {phase.title}
+            </Heading>
+            <Text fontSize="sm" color="ui.dim">
+              {phase.body}
+            </Text>
+          </Box>
+        ))}
+      </SimpleGrid>
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
         {[
           {
@@ -243,7 +287,7 @@ function LandingPage() {
           },
           {
             title: "Best practice, without the setup",
-            body: "Environments, a DAG, versioned data, and a paper that rebuilds itself—the things a careful researcher wires together by hand, ready to go.",
+            body: "Environments, a DAG, versioned data, and a paper that rebuilds itself: the things a careful researcher wires together by hand, ready to go.",
           },
         ].map((item) => (
           <Box key={item.title}>
@@ -301,9 +345,12 @@ function Home() {
   if (countQuery.isPending) {
     return null
   }
+  // A failed count says nothing about whether there are projects, so it
+  // falls through to the table, which shows its own error, rather than
+  // telling someone with twenty projects to start their first.
   return (
     <Container maxW={pageWidthNoSidebar} pb={16}>
-      {projectCount === 0 ? (
+      {projectCount === 0 && !countQuery.isError ? (
         <EmptyState />
       ) : (
         <>

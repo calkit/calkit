@@ -3740,6 +3740,14 @@ def test_post_project_dataset_provenance(
         "doi": "10.5281/zenodo.1",
         "date": "2026-01-02",
     }
+    # The DB shape holds this as a string, so the response carries it as
+    # JSON a client can parse rather than a Python repr.
+    import json
+
+    assert (
+        json.loads(resp.json()["imported_from"])
+        == written[-1]["imported_from"]
+    )
     # A Git repo pinned to a revision.
     resp = post(
         {
@@ -3909,6 +3917,138 @@ def test_extract_project_zip(tmp_path) -> None:
     with pytest.raises(HTTPException) as excinfo:
         _extract_project_zip(b"not a zip at all", str(escape))
     assert excinfo.value.status_code == 400
+
+
+def test_post_project_upload_validates_before_creating(
+    client: TestClient, db: Session
+) -> None:
+    """A bad archive is refused before any project exists for it."""
+    import io
+    import zipfile
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"upload-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"upload{suffix}",
+            github_username=f"upload{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=owner.email, db=db
+    )
+    url = f"{settings.API_V1_STR}/projects/upload"
+
+    def upload(name: str, content: bytes):
+        with patch(
+            "app.api.routes.projects.core.post_project"
+        ) as post_project:
+            resp = client.post(
+                url,
+                headers=headers,
+                data={"title": "Uploaded", "name": name},
+                files={"file": (f"{name}.zip", content, "application/zip")},
+            )
+        return resp, post_project
+
+    def no_project(name: str) -> bool:
+        return (
+            db.exec(select(Project).where(Project.name == name)).first()
+            is None
+        )
+
+    # Not a zip at all.
+    name = f"notzip-{suffix}"
+    resp, post_project = upload(name, b"this is not a zip archive")
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # A zip naming a path outside the project.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("../../escaped.txt", "pwned")
+    name = f"escape-{suffix}"
+    resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # One whose members declare more than the unpacked cap allows.
+    from app.api.routes.projects import core as core_mod
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("big.bin", "x")
+    name = f"bomb-{suffix}"
+    with patch.object(core_mod, "MAX_PROJECT_UNPACKED_BYTES", 0):
+        resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+
+
+def test_get_project_environments_stays_inside_repo(
+    client: TestClient, tmp_path
+) -> None:
+    """Spec and lock reads stay in the clone, whatever calkit.yaml says."""
+    # The repo is one directory under tmp_path, so tmp_path itself is what
+    # a traversal lands in.
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not yours\n")
+    (repo_dir / "pyproject.toml").write_text("[project]\n")
+    (repo_dir / "uv.lock").write_text("version = 1\n")
+    lock_dir = repo_dir / ".calkit" / "env-locks" / "py"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "linux-64.txt").write_text("numpy==2.0\n")
+    # A symlink in the locks directory pointing out of the repo.
+    (lock_dir / "osx-arm64.txt").symlink_to(secret)
+    envs = {
+        # Legitimate: spec in the repo, lock next to it.
+        "main": {"kind": "uv", "path": "pyproject.toml"},
+        # Legitimate directory of locks, one entry of which is a symlink out.
+        "py": {"kind": "venv", "path": "requirements.txt"},
+        # A Docker env named to make its lock "directory" the repo's parent.
+        "../../..": {"kind": "docker", "image": "x"},
+        # A spec path that is absolute and exists, plus the classic.
+        "abs": {"kind": "uv", "path": str(secret)},
+        "passwd": {"kind": "uv", "path": "/etc/passwd"},
+        # A relative spec path climbing out of the repo.
+        "climb": {"kind": "uv", "path": "../secret.txt"},
+    }
+    fake_project = SimpleNamespace(
+        owner_account_name="o", name="p", file_locks=[]
+    )
+    fake_repo = SimpleNamespace(working_dir=str(repo_dir))
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={"environments": envs},
+        ),
+    ):
+        resp = client.get(f"{settings.API_V1_STR}/projects/o/p/environments")
+    assert resp.status_code == 200, resp.text
+    by_name = {e["name"]: e for e in resp.json()}
+    assert by_name["main"]["file_content"] == "[project]\n"
+    assert [lk["path"] for lk in by_name["main"]["locks"]] == ["uv.lock"]
+    # Only the lock that's really in the repo is returned.
+    assert [lk["path"] for lk in by_name["py"]["locks"]] == [
+        ".calkit/env-locks/py/linux-64.txt"
+    ]
+    assert by_name["../../.."]["locks"] == []
+    for name in ["abs", "passwd", "climb"]:
+        assert by_name[name]["file_content"] is None, name
+        assert by_name[name]["locks"] == [], name
+    # Nothing anywhere in the response came from outside the clone.
+    assert "not yours" not in resp.text
+    assert "root:" not in resp.text
 
 
 def test_push_dvc_cache_to_storage(tmp_path) -> None:

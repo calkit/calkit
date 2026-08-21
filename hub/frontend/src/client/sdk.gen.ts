@@ -336,6 +336,8 @@ import type {
   PostProjectResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
+  PostProjectStudioFigureErrors,
+  PostProjectStudioFigureResponses,
   PostProjectSyncErrors,
   PostProjectSyncResponses,
   PostProjectUploadErrors,
@@ -419,6 +421,7 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
+  StudioFigurePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -6970,6 +6973,57 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/fs/ops/batch",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Studio Figure
+   *
+   * Commit a studio script as a stage that produces the figure.
+   *
+   * One commit carries the script, the stage, the figure entry, and the
+   * environment (created or amended), so the repo never holds a figure
+   * that points at a stage that doesn't exist yet.
+   */
+  public static postProjectStudioFigure<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      studioFigurePost: StudioFigurePost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectStudioFigureResponses,
+    PostProjectStudioFigureErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "studioFigurePost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectStudioFigureResponses,
+      PostProjectStudioFigureErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/figures/studio",
       ...options,
       ...params,
       headers: {

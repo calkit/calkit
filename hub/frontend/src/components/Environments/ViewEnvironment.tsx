@@ -29,7 +29,10 @@ interface ViewEnvProps {
 /** Guess a highlighter language from a file name. */
 const languageFor = (path: string): string => {
   const name = path.toLowerCase()
-  if (name.endsWith(".json")) return "json"
+  // Lock files share an extension but not a format: pixi's is YAML, renv's
+  // is JSON, and uv's, poetry's, and Cargo's are TOML.
+  if (name.endsWith(".json") || name.endsWith("renv.lock")) return "json"
+  if (name.endsWith("pixi.lock")) return "yaml"
   if (name.endsWith(".toml") || name.endsWith(".lock")) return "ini"
   if (name.endsWith(".yml") || name.endsWith(".yaml")) return "yaml"
   if (name.endsWith("dockerfile")) return "dockerfile"

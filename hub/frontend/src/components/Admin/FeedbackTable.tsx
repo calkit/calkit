@@ -121,7 +121,10 @@ const FeedbackTable = () => {
                     <Td>
                       <Button
                         size="xs"
-                        isLoading={resolveMutation.isPending}
+                        isLoading={
+                          resolveMutation.isPending &&
+                          resolveMutation.variables?.id === item.id
+                        }
                         onClick={() =>
                           resolveMutation.mutate({
                             id: item.id,

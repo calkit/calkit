@@ -48,6 +48,7 @@ import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import EditQuestion from "../../../../../components/Projects/EditQuestion"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
+import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
@@ -462,6 +463,17 @@ function ProjectView() {
               }
             />
           </Box>
+          {/* What moved since the last visit: pushes from the CLI, a
+              collaborator's commits, an Overleaf sync */}
+          {!ref ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <RecentChanges
+                accountName={accountName}
+                projectName={projectName}
+                gitRepoUrl={gitRepoUrl}
+              />
+            </Box>
+          ) : null}
           {/* README */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">

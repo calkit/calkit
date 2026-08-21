@@ -11,6 +11,7 @@ import {
   Heading,
   HStack,
   Icon,
+  Image,
   Input,
   Link,
   Modal,
@@ -55,7 +56,9 @@ import {
 } from "../../client"
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
 import FilterableSelect from "../../components/Common/FilterableSelect"
+import FigureStudio from "../../components/Figures/FigureStudio"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
+import ReproAudit from "../../components/Onboarding/ReproAudit"
 import StartPaths, {
   type StartPath,
 } from "../../components/Onboarding/StartPaths"
@@ -70,20 +73,23 @@ import { handleError } from "../../lib/errors"
 // Each step's state lives in the URL so a refresh, a back button, or a trip
 // out to GitHub or Zotero to connect an account all come back to the same
 // place rather than to the start.
+// Each field falls back to unset rather than throwing, so a hand-edited or
+// stale URL lands on the first step instead of the error boundary.
 const searchSchema = z.object({
-  path: z.enum(["existing", "fresh", "overleaf"]).optional(),
-  step: z.number().optional(),
+  path: z.enum(["existing", "fresh", "overleaf"]).optional().catch(undefined),
+  step: z.number().optional().catch(undefined),
   // "owner/name" once the project exists, which is what the later steps act
   // on. Present from step 2 onward.
-  project: z.string().optional(),
+  project: z.string().optional().catch(undefined),
   // Whether the existing project is coming from a GitHub repo or a zip.
   // In the URL because connecting GitHub leaves the page and comes back,
   // and losing the choice there means picking it again.
-  upload: z.boolean().optional(),
+  upload: z.boolean().optional().catch(undefined),
   // Same reason: connecting Zotero leaves the site entirely and returns
   // here, and coming back to a closed dialog reads as the click failing.
-  overleaf_open: z.boolean().optional(),
-  zotero_open: z.boolean().optional(),
+  overleaf_open: z.boolean().optional().catch(undefined),
+  zotero_open: z.boolean().optional().catch(undefined),
+  studio_open: z.boolean().optional().catch(undefined),
 })
 
 // Which start path the visitor picked before they had an account. The
@@ -118,43 +124,68 @@ export const Route = createFileRoute("/_layout/new")({
   },
 })
 
-const STEP_TITLES = [
-  "Where you're starting",
-  "Name it",
-  "The question",
-  "Bring in your work",
-  "Your machine",
-]
+type StepKey =
+  | "path"
+  | "name"
+  | "audit"
+  | "question"
+  | "figure"
+  | "paper"
+  | "machine"
+
+// The order the work happens in differs by where someone starts. A fresh
+// project walks the research loop the template already embodies: question,
+// data and a figure, the paper, then the machine that runs it. An imported
+// project gets looked at before anything is asked of it. A project that
+// starts from a paper links the paper before anything else.
+const STEPS_BY_PATH: Record<StartPath, StepKey[]> = {
+  fresh: ["path", "name", "question", "figure", "paper", "machine"],
+  existing: ["path", "name", "audit", "question", "machine"],
+  overleaf: ["path", "name", "paper", "question", "machine"],
+}
+
+const STEP_TITLES: Record<StepKey, string> = {
+  path: "Where you're starting",
+  name: "Name it",
+  audit: "What we found",
+  question: "The question",
+  figure: "Data and a figure",
+  paper: "Paper and references",
+  machine: "Your machine",
+}
+
+const stepsFor = (path?: StartPath): StepKey[] =>
+  path ? STEPS_BY_PATH[path] : ["path", "name"]
 
 const TEMPLATES = [
   {
     value: "calkit/example-basic",
-    label: "Basic—uv environment, Python analysis, LaTeX paper",
+    label: "Basic: uv environment, Python analysis, LaTeX paper",
   },
   {
     value: "calkit/example-matlab",
-    label: "MATLAB—scripts run in batch mode",
+    label: "MATLAB: scripts run in batch mode",
   },
   {
     value: "calkit/example-analytics",
-    label: "Analytics—data processing and interactive figures",
+    label: "Analytics: data processing and interactive figures",
   },
 ]
 
-function StepHeader({ step }: { step: number }) {
+function StepHeader({ step, steps }: { step: number; steps: StepKey[] }) {
   const dimColor = useColorModeValue("gray.300", "gray.600")
   return (
     <Box mb={8}>
       <Progress
-        value={((step + 1) / STEP_TITLES.length) * 100}
+        value={((step + 1) / steps.length) * 100}
         size="xs"
         colorScheme="teal"
         borderRadius="full"
         mb={3}
       />
       <Flex gap={4} wrap="wrap">
-        {STEP_TITLES.map((title, index) => (
-          <Flex key={title} align="center" gap={1.5}>
+        {steps.map((key, index) => (
+          <Flex key={key} align="center" gap={1.5}>
             <Icon
               as={index < step ? CheckCircleIcon : FiCircle}
               boxSize={3}
@@ -171,7 +202,7 @@ function StepHeader({ step }: { step: number }) {
               color={index === step ? "inherit" : "ui.dim"}
               fontWeight={index === step ? "semibold" : "normal"}
             >
-              {title}
+              {STEP_TITLES[key]}
             </Text>
           </Flex>
         ))}
@@ -194,10 +225,11 @@ function ChoosePathStep({
         What are we starting with?
       </Heading>
       <Text color="ui.dim" mb={6}>
-        Calkit puts the pieces of a research project—the data, the code, the
-        environment it runs in, the figures, the paper—into one place that stays
-        a plain Git repo. Nothing you set up here is trapped in Calkit, and all
-        of it works offline.
+        A research project moves between reading, collecting data, analyzing it,
+        and writing it up, and the pieces usually live in four different places.
+        Calkit puts them in one project that stays a plain Git repo, so you can
+        move between them without leaving. Nothing you set up here is trapped in
+        Calkit, and all of it works offline.
       </Text>
       <StartPaths onSelect={onSelect} selected={path} source="wizard" />
     </>
@@ -387,7 +419,7 @@ function NameItStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         {isExisting
-          ? "Point Calkit at the repo. Nothing in it is moved or rewritten—" +
+          ? "Point Calkit at the repo. Nothing in it is moved or rewritten: " +
             "we read what's there and show you what it would take to " +
             "reproduce."
           : path === "overleaf"
@@ -410,7 +442,7 @@ function NameItStep({
               It's in a GitHub repo
             </Radio>
             <Radio value="upload" colorScheme="teal">
-              It's only on my machine—upload a zip of the folder
+              It's only on my machine: upload a zip of the folder
             </Radio>
           </Stack>
         </RadioGroup>
@@ -453,9 +485,13 @@ function NameItStep({
         <FormLabel htmlFor="title">Title</FormLabel>
         <Input
           id="title"
-          {...register("title", { required: "Title is required." })}
+          {...register("title", {
+            required: "Title is required.",
+            // Passed through register so it chains with the form's own
+            // handler rather than replacing it.
+            onChange: isExisting ? undefined : onTitleChange,
+          })}
           placeholder="Ex: Coherent structures in high Reynolds number boundary layers"
-          onChange={isExisting ? undefined : onTitleChange}
           autoComplete="off"
         />
         {errors.title ? (
@@ -480,7 +516,7 @@ function NameItStep({
                 {template.label}
               </option>
             ))}
-            <option value="">Empty repo—I'll set it up myself</option>
+            <option value="">Empty repo: I'll set it up myself</option>
           </Select>
         </FormControl>
       ) : null}
@@ -493,7 +529,13 @@ function NameItStep({
         <Input
           id="git_repo_url"
           {...register("git_repo_url", {
-            required: "GitHub repo URL is required.",
+            // The field is hidden in upload mode, where the repo is created
+            // for the zip, so requiring it there would block submit with an
+            // error nobody can see.
+            required:
+              isExisting && Boolean(fromUpload)
+                ? false
+                : "GitHub repo URL is required.",
           })}
           placeholder="https://github.com/your-name/your-repo"
           autoComplete="off"
@@ -526,14 +568,15 @@ function NameItStep({
             The Calkit GitHub App needs access to your account or org before it
             can create the repo. Install it, then try again.
           </Text>
-          <Link
+          <Button
+            as={Link}
             href={`https://github.com/apps/${appName}/installations/new`}
             isExternal
+            size="sm"
+            variant="primary"
           >
-            <Button size="sm" variant="primary">
-              Install on GitHub <ExternalLinkIcon ml={1} />
-            </Button>
-          </Link>
+            Install on GitHub <ExternalLinkIcon ml={1} />
+          </Button>
         </Box>
       ) : null}
     </Box>
@@ -649,7 +692,7 @@ function QuestionStep({
           variant="ghost"
           onClick={() => {
             mixpanel.track("Skipped project wizard step", {
-              step_name: "The question",
+              step: "question",
             })
             onDone()
           }}
@@ -661,12 +704,176 @@ function QuestionStep({
   )
 }
 
-/** Step 4: the services the user's research already lives in. */
-function ConnectStep({
+/** For an imported project: what's there, and what it would take. */
+function AuditStep({
   accountName,
   projectName,
   onDone,
 }: {
+  accountName: string
+  projectName: string
+  onDone: () => void
+}) {
+  return (
+    <>
+      <Heading size="lg" mb={2}>
+        Here's what we found
+      </Heading>
+      <Text color="ui.dim" mb={6}>
+        Nothing was moved or rewritten. This is the project as it stands, read
+        the way a stranger trying to reproduce it would read it. Each gap
+        becomes an item on the project's setup list, with a button that closes
+        it.
+      </Text>
+      <Box mb={6}>
+        <ReproAudit accountName={accountName} projectName={projectName} />
+      </Box>
+      <Button variant="primary" onClick={onDone}>
+        Continue
+      </Button>
+    </>
+  )
+}
+
+/**
+ * For a fresh project: the figure the template already produced, and the
+ * studio to make the next one.
+ *
+ * The template's data, script, and figure are all in the repo, and the
+ * figure is on the project page before anything has been installed. That
+ * is the thing to show first: not a form, a result.
+ */
+function FigureStep({
+  accountName,
+  projectName,
+  onDone,
+}: {
+  accountName: string
+  projectName: string
+  onDone: () => void
+}) {
+  const { studio_open: studioOpen } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const setStudioOpen = (open: boolean) =>
+    navigate({
+      search: (prev) => ({ ...prev, studio_open: open || undefined }),
+    })
+  const figuresQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "figures"],
+    queryFn: () =>
+      ProjectsService.getProjectFigures({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+  })
+  const figures = figuresQuery.data?.items ?? []
+  const shown = figures.find((f) => f.content || f.url)
+  const datasetsQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "datasets"],
+    queryFn: () =>
+      ProjectsService.getProjectDatasets({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+  })
+  const dataset = datasetsQuery.data?.[0]
+  const borderColor = useColorModeValue("gray.200", "gray.600")
+  return (
+    <>
+      <Heading size="lg" mb={2}>
+        {shown ? "Your project already makes a figure" : "Make a figure"}
+      </Heading>
+      <Text color="ui.dim" mb={5}>
+        {shown
+          ? "The template's pipeline collects data, analyzes it, and draws " +
+            "this. It's on your project page now, and it traces back to the " +
+            "script, the data, and the environment that made it. Edit any of " +
+            "those and it rebuilds."
+          : "Plot a dataset right here in the browser, then save it as a " +
+            "pipeline stage with a real environment, so it's reproducible " +
+            "from the start."}
+      </Text>
+      {shown ? (
+        <Flex
+          gap={5}
+          mb={5}
+          direction={{ base: "column", md: "row" }}
+          align="flex-start"
+        >
+          <Box
+            borderWidth={1}
+            borderColor={borderColor}
+            borderRadius="md"
+            p={2}
+            maxW={{ base: "100%", md: "55%" }}
+          >
+            <Image
+              src={
+                shown.content
+                  ? `data:image/png;base64,${shown.content}`
+                  : String(shown.url)
+              }
+              alt={shown.title}
+              maxH="260px"
+            />
+          </Box>
+          <Box fontSize="sm">
+            <Text fontWeight="semibold">{shown.title}</Text>
+            <Text color="ui.dim" mb={2}>
+              {shown.path}
+              {shown.stage ? `, from stage ${shown.stage}` : ""}
+            </Text>
+            {dataset ? (
+              <Text color="ui.dim">
+                Data: {dataset.path}
+                {dataset.title ? ` (${dataset.title})` : ""}
+              </Text>
+            ) : null}
+          </Box>
+        </Flex>
+      ) : null}
+      <HStack spacing={3} mb={2}>
+        <Button
+          variant={shown ? "outline" : "primary"}
+          onClick={() => {
+            mixpanel.track("Opened figure studio", { source: "wizard" })
+            setStudioOpen(true)
+          }}
+        >
+          {shown ? "Plot the data yourself" : "Open the figure studio"}
+        </Button>
+        <Button variant={shown ? "primary" : "ghost"} onClick={onDone}>
+          Continue
+        </Button>
+      </HStack>
+      <Text fontSize="xs" color="ui.dim">
+        The studio runs Python in your browser, nothing to install. Saving a
+        plot from it adds a stage to the pipeline and an environment for it to
+        run in.
+      </Text>
+      {studioOpen ? (
+        <FigureStudio
+          isOpen
+          onClose={() => setStudioOpen(false)}
+          ownerName={accountName}
+          projectName={projectName}
+          initialDataset={dataset?.path}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/** The paper and the library: where the writing already lives. */
+function PaperStep({
+  path,
+  accountName,
+  projectName,
+  onDone,
+}: {
+  path: StartPath
   accountName: string
   projectName: string
   onDone: () => void
@@ -688,16 +895,54 @@ function ConnectStep({
     onOpen: () => setOpen("zotero_open", true),
     onClose: () => setOpen("zotero_open", false),
   }
+  const isOverleaf = path === "overleaf"
+  const isFresh = path === "fresh"
   return (
     <>
       <Heading size="lg" mb={2}>
-        Bring in what you already have
+        {isOverleaf ? "Link the paper" : "The paper and the references"}
       </Heading>
       <Text color="ui.dim" mb={6}>
-        Your paper stays in Overleaf and your library stays in Zotero. Calkit
-        links them to the project so the figures and citations in them come from
-        the pipeline instead of from a folder of exports.
+        {isOverleaf
+          ? "The Overleaf project you're writing in becomes a folder in this " +
+            "repo and syncs both ways. Once the analysis lives alongside it, " +
+            "its figures come from the pipeline instead of your downloads."
+          : isFresh
+            ? "The template includes a LaTeX paper that builds from the " +
+              "pipeline, so a figure that changes reaches the PDF on the " +
+              "next run. If you'd rather write in Overleaf, link that " +
+              "instead; either way the references can come from Zotero."
+            : "Your paper stays in Overleaf and your library stays in " +
+              "Zotero. Linking them here is what makes the figures and " +
+              "citations in them come from the pipeline."}
       </Text>
+      {isFresh ? (
+        <Box
+          borderWidth={1}
+          borderColor={borderColor}
+          borderRadius="lg"
+          bg={cardBg}
+          p={4}
+          mb={4}
+          fontSize="sm"
+        >
+          <Text fontWeight="semibold" mb={1}>
+            paper/paper.tex builds paper/paper.pdf
+          </Text>
+          <Text color="ui.dim" mb={3}>
+            Edit it in the browser with a live preview, or in any editor once
+            it's on your machine.
+          </Text>
+          <Button
+            size="sm"
+            as={RouterLink}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            to={`/${accountName}/${projectName}/publications` as any}
+          >
+            Open the paper
+          </Button>
+        </Box>
+      ) : null}
       <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4} mb={6}>
         <Box
           borderWidth={1}
@@ -714,7 +959,11 @@ function ConnectStep({
             Link the project you're writing in. Its .tex lives in a subfolder of
             your repo and syncs both ways.
           </Text>
-          <Button size="sm" variant="primary" onClick={overleafModal.onOpen}>
+          <Button
+            size="sm"
+            variant={isOverleaf ? "primary" : "outline"}
+            onClick={overleafModal.onOpen}
+          >
             Link a paper
           </Button>
         </Box>
@@ -733,7 +982,7 @@ function ConnectStep({
             Import a collection into the project's .bib file, and keep it in
             step as you add references.
           </Text>
-          <Button size="sm" variant="primary" onClick={zoteroModal.onOpen}>
+          <Button size="sm" variant="outline" onClick={zoteroModal.onOpen}>
             Import a collection
           </Button>
         </Box>
@@ -743,7 +992,7 @@ function ConnectStep({
           Continue
         </Button>
         <Text fontSize="sm" color="ui.dim">
-          You can do either of these later from the project page.
+          Both are available later from the project page.
         </Text>
       </HStack>
       <ImportOverleaf
@@ -785,7 +1034,7 @@ function MachineStep({
       </Heading>
       <Text color="ui.dim" mb={6}>
         This is where the work happens. The CLI runs the pipeline, manages
-        environments, and moves results between your machine and here—and every
+        environments, and moves results between your machine and here, and every
         bit of it works with the hub closed.
       </Text>
       <Box mb={5}>
@@ -835,7 +1084,7 @@ function MachineStep({
         <Icon as={cliRunning ? CheckCircleIcon : FiCircle} />
         {cliRunning
           ? "Calkit is running on this machine."
-          : "Waiting to see Calkit running locally—this check is optional."}
+          : "Waiting to see Calkit running locally. This check is optional."}
       </Flex>
       <Box mb={8}>
         <Text fontWeight="semibold" mb={2}>
@@ -873,28 +1122,30 @@ function MachineStep({
 function NewProjectWizard() {
   const navigate = useNavigate({ from: Route.fullPath })
   const { path, step: stepParam, project } = Route.useSearch()
-  const step = stepParam ?? 0
+  const steps = stepsFor(path)
+  const step = Math.min(Math.max(stepParam ?? 0, 0), steps.length - 1)
+  const current = steps[step]
   const [accountName, projectName] = (project ?? "").split("/")
   const goTo = (next: Partial<z.infer<typeof searchSchema>>) => {
     if (next.step !== undefined && next.step !== step) {
       // The whole point of the wizard is knowing where people stop, which
       // needs an event per transition rather than only at the end.
+      const nextSteps = stepsFor(next.path ?? path)
       mixpanel.track("Moved through project wizard", {
-        from_step: step,
-        to_step: next.step,
-        step_name: STEP_TITLES[next.step] ?? "unknown",
-        path,
+        from_step: current,
+        to_step: nextSteps[next.step] ?? "unknown",
+        path: next.path ?? path,
         direction: next.step > step ? "forward" : "back",
       })
     }
     navigate({ search: (prev) => ({ ...prev, ...next }) })
   }
+  const advance = () => goTo({ step: step + 1 })
   // Closing lands on the project once there is one, so backing out of the
   // optional steps doesn't feel like abandoning what was already created.
   const close = () => {
     mixpanel.track("Closed project wizard", {
-      step,
-      step_name: STEP_TITLES[step] ?? "unknown",
+      step: current,
       path,
       has_project: Boolean(project),
     })
@@ -903,59 +1154,61 @@ function NewProjectWizard() {
       to: (project ? `/${accountName}/${projectName}` : "/") as any,
     })
   }
+  const onCreated = (created: ProjectPublic) =>
+    goTo({
+      step: 2,
+      project: `${created.owner_account_name}/${created.name}`,
+    })
   let body
-  if (step === 0 || !path) {
+  if (current === "path" || !path) {
     body = (
       <ChoosePathStep
         path={path}
         onSelect={(chosen) => goTo({ path: chosen, step: 1 })}
       />
     )
-  } else if (step === 1) {
-    body = (
-      <NameItStep
-        path={path}
-        onCreated={(created) =>
-          goTo({
-            step: 2,
-            project: `${created.owner_account_name}/${created.name}`,
-          })
-        }
-      />
-    )
-  } else if (!accountName || !projectName) {
+  } else if (current === "name" || !accountName || !projectName) {
     // A link into a later step without a project has nothing to act on, so
     // render the step that creates one rather than steps that would 404.
+    body = <NameItStep path={path} onCreated={onCreated} />
+  } else if (current === "audit") {
     body = (
-      <NameItStep
-        path={path}
-        onCreated={(created) =>
-          goTo({
-            step: 2,
-            project: `${created.owner_account_name}/${created.name}`,
-          })
-        }
+      <AuditStep
+        accountName={accountName}
+        projectName={projectName}
+        onDone={advance}
       />
     )
-  } else if (step === 2) {
+  } else if (current === "question") {
     body = (
       <QuestionStep
         accountName={accountName}
         projectName={projectName}
-        onDone={() => goTo({ step: 3 })}
+        onDone={advance}
       />
     )
-  } else if (step === 3) {
+  } else if (current === "figure") {
     body = (
-      <ConnectStep
+      <FigureStep
         accountName={accountName}
         projectName={projectName}
-        onDone={() => goTo({ step: 4 })}
+        onDone={advance}
+      />
+    )
+  } else if (current === "paper") {
+    body = (
+      <PaperStep
+        path={path}
+        accountName={accountName}
+        projectName={projectName}
+        onDone={advance}
       />
     )
   } else {
     body = <MachineStep accountName={accountName} projectName={projectName} />
   }
+  // Once the project exists there's no going back to the step that made it.
+  const canGoBack = step > 0 && !(project && step === 2)
   return (
     // A modal rather than a page, since starting a project is something you
     // step into and back out of. The route stays real so each step keeps its
@@ -973,12 +1226,12 @@ function NewProjectWizard() {
       <ModalContent>
         <ModalCloseButton />
         <ModalBody px={{ base: 6, md: 10 }} py={8}>
-          <StepHeader step={Math.min(step, STEP_TITLES.length - 1)} />
+          <StepHeader step={step} steps={steps} />
           {body}
         </ModalBody>
         <ModalFooter>
           <Flex width="100%" align="center">
-            {step > 0 && step !== 2 ? (
+            {canGoBack ? (
               <Button
                 size="sm"
                 variant="ghost"

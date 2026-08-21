@@ -49,10 +49,34 @@ class _ImportedFromDoi(BaseModel):
     than being one more address that happens to start with https.
     """
 
-    doi: str
+    doi: str = Field(
+        description=(
+            "The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or "
+            "doi: prefix is accepted and stripped."
+        )
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
+
+    @field_validator("doi")
+    @classmethod
+    def _normalize_doi(cls, v: str) -> str:
+        # Stored bare, so citing it and resolving it both start from one
+        # form. Anything that isn't a DOI is refused rather than kept as a
+        # string that merely sits under the ``doi`` key: that would make the
+        # entry look citable when it isn't.
+        bare = re.sub(
+            r"^(https?://(dx\.)?doi\.org/|doi:)",
+            "",
+            v.strip(),
+            flags=re.IGNORECASE,
+        )
+        if not re.fullmatch(r"10\.\d{4,9}/\S+", bare):
+            raise ValueError(
+                f"doi must look like 10.5281/zenodo.1234567 (got {v!r})"
+            )
+        return bare
 
 
 class _GitSource(BaseModel):
@@ -125,6 +149,40 @@ class _Person(BaseModel):
         ),
     )
 
+    @field_validator("email")
+    @classmethod
+    def _check_email(cls, v: str | None) -> str | None:
+        # A light check only: a full RFC 5322 parse refuses addresses that
+        # get mail. What matters is that an empty or mangled value can't
+        # count as identifying someone, which it would otherwise do here.
+        if v is None:
+            return v
+        v = v.strip()
+        local, at, domain = v.partition("@")
+        if not (local and at and domain):
+            raise ValueError(
+                f"email must look like name@example.org (got {v!r})"
+            )
+        return v
+
+    @field_validator("with_ai")
+    @classmethod
+    def _check_with_ai(
+        cls, v: str | list[str] | None
+    ) -> str | list[str] | None:
+        # A disclosure that names nothing discloses nothing, and would read
+        # to a later tool as "used AI, tool unknown". Omitting the key is
+        # how to say no tool was used.
+        if v is None:
+            return v
+        tools = [v] if isinstance(v, str) else v
+        if not tools or any(not t.strip() for t in tools):
+            raise ValueError(
+                "with_ai names the tool(s) used, e.g. 'Claude Opus 5'; omit "
+                "it if none were"
+            )
+        return v
+
     @field_validator("orcid")
     @classmethod
     def _normalize_orcid(cls, v: str | None) -> str | None:
@@ -132,14 +190,28 @@ class _Person(BaseModel):
         # RO-Crate both want, so neither has to guess at a bare identifier.
         if v is None:
             return v
-        bare = (
-            v.strip()
-            .removeprefix("https://orcid.org/")
-            .removeprefix("http://orcid.org/")
+        match = re.fullmatch(
+            r"(?:(?:https?://)?(?:www\.)?orcid\.org/)?"
+            r"(\d{4}-\d{4}-\d{4}-\d{3}[\dXx])",
+            v.strip(),
         )
-        if not re.fullmatch(r"\d{4}-\d{4}-\d{4}-\d{3}[\dX]", bare):
+        if match is None:
             raise ValueError(
                 f"orcid must look like 0000-0002-1825-0097 (got {v!r})"
+            )
+        bare = match.group(1).upper()
+        # The last character is an ISO 7064 MOD 11-2 check digit over the
+        # other 15, so a typo is caught here rather than by whoever later
+        # finds the identifier resolves to a stranger, or to nobody.
+        total = 0
+        for digit in bare[:-1].replace("-", ""):
+            total = (total + int(digit)) * 2
+        result = (12 - total % 11) % 11
+        expected = "X" if result == 10 else str(result)
+        if bare[-1] != expected:
+            raise ValueError(
+                f"orcid {v!r} has check digit {bare[-1]} but its other "
+                f"digits call for {expected}, so one of them is mistyped"
             )
         return f"https://orcid.org/{bare}"
 
@@ -169,7 +241,54 @@ class _CalkitObject(BaseModel):
     )
 
 
+# Every place an artifact can have come from. One union shared by every
+# artifact that can be imported, so they all accept the same forms.
+ImportedFromType = (
+    _ImportedFromProject
+    | _ImportedFromUrl
+    | _ImportedFromDoi
+    | _ImportedFromGit
+)
+
+_IMPORTED_FROM_DESCRIPTION = "Where this came from, if imported."
+
+
+def _exclusive_with_imported_from(made_key: str) -> dict:
+    """JSON schema refusing ``imported_from`` together with ``made_key``.
+
+    Mirrors the model validator, so the published schema doesn't advertise
+    a combination the validator then rejects. Both keys have to be present
+    and non-null to trip it, which is what the validator checks too: a key
+    written as ``null`` is the same as one left out.
+    """
+    return {
+        "not": {
+            "required": ["imported_from", made_key],
+            "properties": {
+                "imported_from": {"type": "object"},
+                made_key: {"type": ["object", "array"]},
+            },
+        }
+    }
+
+
+def _refuse_empty_people(key: str, v: object) -> object:
+    # An empty list claims nobody, which isn't the same as saying nothing:
+    # it would count as provenance while naming no one. Leave the key out
+    # instead, or name at least one person.
+    if isinstance(v, list) and not v:
+        raise ValueError(
+            f"{key} cannot be an empty list; omit it or name at least one "
+            "person"
+        )
+    return v
+
+
 class Dataset(_CalkitObject):
+    model_config = ConfigDict(
+        json_schema_extra=_exclusive_with_imported_from("collected_by")
+    )
+
     collected_by: _Person | list[_Person] | None = Field(
         default=None,
         description=(
@@ -180,15 +299,20 @@ class Dataset(_CalkitObject):
             "recorded."
         ),
     )
+    imported_from: ImportedFromType | None = Field(
+        default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+
+    @field_validator("collected_by", mode="before")
+    @classmethod
+    def _check_collected_by(cls, v: object) -> object:
+        return _refuse_empty_people("collected_by", v)
 
     @model_validator(mode="after")
     def _check_collected_not_imported(self) -> Dataset:
         # Data is either something you produced or something you got; a
         # dataset claiming both has one of the two wrong.
-        if (
-            self.collected_by is not None
-            and getattr(self, "imported_from", None) is not None
-        ):
+        if self.collected_by is not None and self.imported_from is not None:
             raise ValueError(
                 "A dataset collected for this project cannot also be "
                 "imported from elsewhere"
@@ -197,12 +321,15 @@ class Dataset(_CalkitObject):
 
 
 class ImportedDataset(Dataset):
-    imported_from: (
-        _ImportedFromProject
-        | _ImportedFromUrl
-        | _ImportedFromDoi
-        | _ImportedFromGit
-    )
+    """A dataset known to have been imported, so ``imported_from`` is required.
+
+    Otherwise the same as ``Dataset``, which already takes ``imported_from``
+    and refuses a malformed one. ``ProjectInfo`` validates every dataset as
+    a ``Dataset``; this is for callers holding one they know was imported
+    and wanting that checked, e.g. the hub's create-dataset route.
+    """
+
+    imported_from: ImportedFromType
 
 
 class _AuthoredArtifact(_CalkitObject):
@@ -213,7 +340,15 @@ class _AuthoredArtifact(_CalkitObject):
     That's worth being explicit about wherever it's shown to a reader, and
     it's why hashes and signatures aren't among these fields -- they'd read
     as evidence while being just as hand-authored as the rest.
+
+    Something made here can equally have been obtained from elsewhere, so
+    the same ``imported_from`` forms a dataset takes apply, and the two are
+    exclusive: made here or got from there, not both.
     """
+
+    model_config = ConfigDict(
+        json_schema_extra=_exclusive_with_imported_from("created_by")
+    )
 
     created_by: _Person | list[_Person] | None = Field(
         default=None,
@@ -223,6 +358,22 @@ class _AuthoredArtifact(_CalkitObject):
             "the generative AI tools they used via ``with_ai``."
         ),
     )
+    imported_from: ImportedFromType | None = Field(
+        default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
+
+    @field_validator("created_by", mode="before")
+    @classmethod
+    def _check_created_by(cls, v: object) -> object:
+        return _refuse_empty_people("created_by", v)
+
+    @model_validator(mode="after")
+    def _check_not_both_made_and_imported(self) -> _AuthoredArtifact:
+        if self.created_by is not None and self.imported_from is not None:
+            raise ValueError(
+                "An artifact made here cannot also be imported from elsewhere"
+            )
+        return self
 
 
 class MiscArtifact(_AuthoredArtifact):
@@ -234,29 +385,14 @@ class MiscArtifact(_AuthoredArtifact):
     answer is missing rather than merely absent.
     """
 
-    imported_from: (
-        _ImportedFromProject
-        | _ImportedFromUrl
-        | _ImportedFromDoi
-        | _ImportedFromGit
-        | None
-    ) = Field(default=None, description="Where this came from, if imported.")
-
-    @model_validator(mode="after")
-    def _check_not_both_made_and_imported(self) -> MiscArtifact:
-        if self.created_by is not None and self.imported_from is not None:
-            raise ValueError(
-                "An artifact made here cannot also be imported from elsewhere"
-            )
-        return self
-
 
 class Figure(_AuthoredArtifact):
     """A figure, usually produced by a pipeline stage.
 
     Carries attribution for the ones that aren't: a schematic drawn by hand
     or laid out with a generative AI tool has no stage to point at, and is
-    exactly the kind of thing a reader wants told.
+    exactly the kind of thing a reader wants told. One obtained from
+    elsewhere records ``imported_from`` instead, like a dataset does.
     """
 
 
@@ -328,6 +464,12 @@ class Publication(_CalkitObject):
     ) = None
     is_published: bool = False
     doi: str | None = None
+    # Distinct from ``doi`` above, which is this publication's own: a paper
+    # pulled in from an archive to be cited or built upon records where it
+    # was got from here, the same way a dataset does.
+    imported_from: ImportedFromType | None = Field(
+        default=None, description=_IMPORTED_FROM_DESCRIPTION
+    )
 
 
 class ReferenceFile(BaseModel):
@@ -1292,10 +1434,10 @@ class ProjectInfo(BaseModel):
     pipeline: Pipeline | None = Field(
         default=None, description="The project's reproducible pipeline."
     )
-    # ImportedDataset first, so an entry carrying provenance validates as
-    # one instead of being accepted as a plain Dataset with the
-    # imported_from key quietly dropped.
-    datasets: list[ImportedDataset | Dataset] = Field(
+    # A plain list: Dataset itself carries ``imported_from``, so a malformed
+    # one is an error here rather than a key quietly dropped, which is what
+    # a union with a looser fallback would have done.
+    datasets: list[Dataset] = Field(
         default=[], description="The project's datasets."
     )
     figures: list[Figure] = Field(

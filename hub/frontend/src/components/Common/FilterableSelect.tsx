@@ -7,7 +7,7 @@ import {
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
-import { useState } from "react"
+import { useId, useState } from "react"
 
 import { fuzzyFilter } from "../../lib/fuzzy"
 
@@ -56,6 +56,10 @@ const FilterableSelect = ({
   const query = value ?? internal
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
+  // The list and its options need ids so the input can point a screen
+  // reader at them; `useId` keeps two of these on one page from colliding.
+  const listId = useId()
+  const optionId = (index: number) => `${listId}-option-${index}`
   const listBg = useColorModeValue("white", "gray.700")
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.100", "gray.600")
@@ -88,10 +92,16 @@ const FilterableSelect = ({
   }
   const showEmpty =
     open && !isLoading && !matches.length && Boolean(query) && emptyMessage
+  const listOpen = open && matches.length > 0
   return (
     <Box position="relative">
       <Input
         id={id}
+        role="combobox"
+        aria-expanded={listOpen}
+        aria-controls={listId}
+        aria-autocomplete="list"
+        aria-activedescendant={listOpen ? optionId(highlighted) : undefined}
         value={query}
         placeholder={isLoading ? "Loading…" : placeholder}
         autoComplete="off"
@@ -118,8 +128,10 @@ const FilterableSelect = ({
           transform="translateY(-50%)"
         />
       ) : null}
-      {open && matches.length > 0 ? (
+      {listOpen ? (
         <List
+          id={listId}
+          role="listbox"
           position="absolute"
           zIndex={10}
           mt={1}
@@ -135,6 +147,9 @@ const FilterableSelect = ({
           {matches.map((option, index) => (
             <ListItem
               key={option.value}
+              id={optionId(index)}
+              role="option"
+              aria-selected={index === highlighted}
               px={3}
               py={2}
               cursor="pointer"

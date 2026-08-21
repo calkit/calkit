@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import type { ReproCheck } from "../client"
 import {
+  type OnboardingStep,
+  applyFlagLocally,
   buildAccountSteps,
   buildProjectSteps,
   isComplete,
+  pipelineHasRun,
   progressPercent,
 } from "./onboarding"
 
@@ -33,16 +36,15 @@ const emptyReproCheck = {
   n_publications_with_import_or_stage: 0,
   n_stages_without_env: 0,
   n_stages_with_env: 0,
-} as ReproCheck
+} as unknown as ReproCheck
 
-const stepByKey = (steps: { key: string; done: boolean }[], key: string) =>
+const stepByKey = (steps: OnboardingStep[], key: string) =>
   steps.find((step) => step.key === key)
 
 describe("buildProjectSteps", () => {
   it("derives each step from project state and honors manual marks", () => {
     const emptyProject = buildProjectSteps({
       questionCount: 0,
-      localConnected: false,
       reproCheck: emptyReproCheck,
       pipelineStatus: null,
       flags: [],
@@ -50,19 +52,27 @@ describe("buildProjectSteps", () => {
     expect(emptyProject.every((step) => !step.done)).toBe(true)
     expect(isComplete(emptyProject)).toBe(false)
     expect(progressPercent(emptyProject)).toBe(0)
+    // No step depends on something we can't see: there is no "environment"
+    // or "cloned locally" item to sit unchecked forever.
+    expect(emptyProject.map((s) => s.key)).toEqual([
+      "question",
+      "dataset",
+      "figure",
+      "run",
+      "publication",
+      "editor",
+    ])
     // Each signal ticks off exactly its own step.
     const withQuestion = buildProjectSteps({
       questionCount: 2,
-      localConnected: false,
       reproCheck: emptyReproCheck,
       pipelineStatus: null,
       flags: [],
     })
     expect(stepByKey(withQuestion, "question")?.done).toBe(true)
-    expect(stepByKey(withQuestion, "environment")?.done).toBe(false)
-    const withEnvAndFigure = buildProjectSteps({
+    expect(stepByKey(withQuestion, "dataset")?.done).toBe(false)
+    const withFigure = buildProjectSteps({
       questionCount: 0,
-      localConnected: true,
       reproCheck: {
         ...emptyReproCheck,
         n_environments: 1,
@@ -71,21 +81,29 @@ describe("buildProjectSteps", () => {
         n_publications: 1,
       },
       pipelineStatus: "stale",
+      stageStatuses: { plot: { status: "stale" } },
       flags: [],
     })
-    expect(stepByKey(withEnvAndFigure, "local")?.done).toBe(true)
-    expect(stepByKey(withEnvAndFigure, "environment")?.done).toBe(true)
-    expect(stepByKey(withEnvAndFigure, "figure")?.done).toBe(true)
-    expect(stepByKey(withEnvAndFigure, "publication")?.done).toBe(true)
-    expect(stepByKey(withEnvAndFigure, "dataset")?.done).toBe(false)
+    expect(stepByKey(withFigure, "figure")?.done).toBe(true)
+    expect(stepByKey(withFigure, "publication")?.done).toBe(true)
+    expect(stepByKey(withFigure, "dataset")?.done).toBe(false)
     // A stale pipeline has run but doesn't reflect the current code, so the
-    // "run it" step stays open.
-    expect(stepByKey(withEnvAndFigure, "run")?.done).toBe(false)
+    // "run it" step stays open, worded as "again" since it has run before.
+    expect(stepByKey(withFigure, "run")?.done).toBe(false)
+    expect(stepByKey(withFigure, "run")?.title).toMatch(/again/)
+    const neverRun = buildProjectSteps({
+      questionCount: 0,
+      reproCheck: emptyReproCheck,
+      pipelineStatus: "stale",
+      stageStatuses: { plot: { status: "not-run" } },
+      flags: [],
+    })
+    expect(stepByKey(neverRun, "run")?.title).toMatch(/on your machine/)
     const upToDate = buildProjectSteps({
       questionCount: 0,
-      localConnected: false,
       reproCheck: emptyReproCheck,
       pipelineStatus: "up-to-date",
+      stageStatuses: { plot: { status: "up-to-date" } },
       flags: [],
     })
     expect(stepByKey(upToDate, "run")?.done).toBe(true)
@@ -93,20 +111,29 @@ describe("buildProjectSteps", () => {
     // editor extensions) get completed at all.
     const flagged = buildProjectSteps({
       questionCount: 0,
-      localConnected: false,
       reproCheck: emptyReproCheck,
       pipelineStatus: null,
       flags: ["editor", "question"],
     })
     expect(stepByKey(flagged, "editor")?.done).toBe(true)
     expect(stepByKey(flagged, "question")?.done).toBe(true)
-    expect(stepByKey(flagged, "environment")?.done).toBe(false)
+    expect(stepByKey(flagged, "figure")?.done).toBe(false)
+  })
+
+  it("knows whether the pipeline has ever run", () => {
+    expect(pipelineHasRun(null)).toBe(false)
+    expect(pipelineHasRun({})).toBe(false)
+    expect(pipelineHasRun({ a: { status: "not-run" } })).toBe(false)
+    expect(
+      pipelineHasRun({ a: { status: "not-run" }, b: { status: "stale" } }),
+    ).toBe(true)
+    expect(pipelineHasRun({ a: { status: "up-to-date" } })).toBe(true)
+    expect(pipelineHasRun({ a: { status: "frozen" } })).toBe(true)
   })
 
   it("distinguishes a mark the user made from something we detected", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
-      localConnected: false,
       reproCheck: emptyReproCheck,
       pipelineStatus: null,
       flags: ["editor"],
@@ -127,6 +154,17 @@ describe("buildProjectSteps", () => {
     })
     expect(account.find((s) => s.key === "github")?.manuallyDone).toBe(false)
     expect(account.find((s) => s.key === "cli")?.manuallyDone).toBe(true)
+    // A leftover mark on a step we now detect as done isn't the user's to
+    // undo either: un-marking it would leave it done and look broken.
+    const markedAndDetected = buildProjectSteps({
+      questionCount: 1,
+      reproCheck: emptyReproCheck,
+      pipelineStatus: null,
+      flags: ["question"],
+    })
+    const question = markedAndDetected.find((s) => s.key === "question")
+    expect(question?.done).toBe(true)
+    expect(question?.manuallyDone).toBe(false)
   })
 
   it("won't let a flag tick off a step our own records answer", () => {
@@ -153,19 +191,17 @@ describe("buildProjectSteps", () => {
   it("treats a missing repro check as nothing done rather than crashing", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
-      localConnected: false,
       reproCheck: null,
       flags: [],
     })
     expect(stepByKey(steps, "question")?.done).toBe(true)
-    expect(stepByKey(steps, "environment")?.done).toBe(false)
+    expect(stepByKey(steps, "dataset")?.done).toBe(false)
     expect(stepByKey(steps, "figure")?.done).toBe(false)
   })
 
   it("completes once every required step is done, optional or not", () => {
     const steps = buildProjectSteps({
       questionCount: 1,
-      localConnected: true,
       reproCheck: {
         ...emptyReproCheck,
         n_environments: 1,
@@ -174,6 +210,7 @@ describe("buildProjectSteps", () => {
         n_publications: 1,
       },
       pipelineStatus: "up-to-date",
+      stageStatuses: { plot: { status: "up-to-date" } },
       flags: [],
     })
     // "editor" is optional and still undone, and the list is complete anyway.
@@ -229,5 +266,37 @@ describe("buildAccountSteps", () => {
     })
     expect(stepByKey(markedCli, "cli")?.done).toBe(true)
     expect(isComplete(markedCli)).toBe(true)
+  })
+})
+
+describe("applyFlagLocally", () => {
+  it("adds and removes a step on the right list without touching the rest", () => {
+    // Nothing cached yet: both lists start empty.
+    const first = applyFlagLocally(undefined, null, "cli", true)
+    expect(first).toEqual({ account: ["cli"], projects: {} })
+    // Adding the same step twice doesn't duplicate it.
+    expect(applyFlagLocally(first, null, "cli", true).account).toEqual(["cli"])
+    // A project flag lands under that project and leaves the account alone.
+    const withProject = applyFlagLocally(first, "p1", "editor", true)
+    expect(withProject).toEqual({
+      account: ["cli"],
+      projects: { p1: ["editor"] },
+    })
+    // Another project's list is untouched by a change to this one.
+    const twoProjects = applyFlagLocally(withProject, "p2", "question", true)
+    expect(twoProjects.projects).toEqual({ p1: ["editor"], p2: ["question"] })
+    // Removing takes only that step off only that list.
+    const removed = applyFlagLocally(twoProjects, "p1", "editor", false)
+    expect(removed.projects).toEqual({ p1: [], p2: ["question"] })
+    expect(removed.account).toEqual(["cli"])
+    expect(applyFlagLocally(removed, null, "cli", false).account).toEqual([])
+    // Removing a step that isn't there is a no-op rather than an error.
+    expect(applyFlagLocally(removed, "p3", "editor", false).projects).toEqual({
+      p1: [],
+      p2: ["question"],
+      p3: [],
+    })
+    // The input isn't mutated, which is what a cache updater has to promise.
+    expect(twoProjects.projects?.p1).toEqual(["editor"])
   })
 })

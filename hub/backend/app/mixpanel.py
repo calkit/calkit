@@ -3,7 +3,7 @@
 from mixpanel import Mixpanel
 
 from app.config import settings
-from app.models import User
+from app.models import Project, User
 
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
 
@@ -241,5 +241,32 @@ def user_uploaded_project(
             project_name=project_name,
             n_bytes=n_bytes,
             n_dvc_objects=n_dvc_objects,
+        ),
+    )
+
+
+def user_saved_studio_figure(
+    user: User,
+    project: Project,
+    env_created: bool,
+    n_inputs: int,
+    n_packages: int,
+) -> None:
+    """A figure drafted in the browser was committed as a pipeline stage.
+
+    The save is the activation moment the studio exists for: a run in the
+    browser proves nothing, a stage in the repo does. ``env_created`` says
+    whether the studio also had to stand up the project's first Python
+    environment, which is the setup work it's meant to absorb.
+    """
+    track(
+        user,
+        "Saved studio figure",
+        add_event_info=dict(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            env_created=env_created,
+            n_inputs=n_inputs,
+            n_packages=n_packages,
         ),
     )

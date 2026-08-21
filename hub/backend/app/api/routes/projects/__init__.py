@@ -10,8 +10,11 @@ from .dvc import *  # noqa: F401,F403
 from .dvc import router as dvc_router
 from .fs import *  # noqa: F401,F403
 from .fs import router as fs_router
+from .studio import *  # noqa: F401,F403
+from .studio import router as studio_router
 
 router = APIRouter()
 router.include_router(core_router)
 router.include_router(dvc_router)
 router.include_router(fs_router)
+router.include_router(studio_router)

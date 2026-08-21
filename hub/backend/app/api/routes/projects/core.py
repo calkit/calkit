@@ -11,6 +11,7 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 import zipfile
 from copy import deepcopy
@@ -96,6 +97,7 @@ from app.git import (
     resolve_commit_sha,
     search_refs,
 )
+from app.messaging import generate_new_project_email, send_email
 from app.models import (
     Account,
     ContentsItem,
@@ -415,20 +417,32 @@ def _valid_project_upload_size(
     return content_length
 
 
-def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
-    """Unpack an uploaded project zip into a repo working directory.
+def _inside(root: str, path: str) -> bool:
+    """Whether ``path`` resolves to ``root`` itself or something beneath it.
 
-    Every member is checked to land inside ``dest``: a zip can name
-    ``../../etc/passwd`` or carry a symlink, and this runs on our server
-    against a path we control. Anything Git owns is skipped, since the repo
-    already exists and the upload is its contents, not its history.
+    Both sides go through ``realpath``, so ``..`` segments and symlinks are
+    judged by where they end up rather than how they're spelled. This is
+    the one check behind every place a path from a request body, an
+    archive, or a project's own calkit.yaml is joined under a clone on the
+    server.
     """
-    extracted = 0
-    try:
-        archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
-    except zipfile.BadZipFile:
-        raise HTTPException(400, "That file isn't a valid zip archive")
-    dest_root = os.path.realpath(dest)
+    root_real = os.path.realpath(root)
+    real = os.path.realpath(path)
+    return real == root_real or real.startswith(root_real + os.sep)
+
+
+def _iter_project_zip(
+    archive: zipfile.ZipFile,
+) -> list[tuple[zipfile.ZipInfo, str]]:
+    """Pair each member worth extracting with its path inside the project.
+
+    Every member is checked to land inside the destination: a zip can name
+    ``../../etc/passwd``, and this runs on our server against a path we
+    control. Anything Git owns is skipped, since the repo already exists and
+    the upload is its contents, not its history. Declared sizes are summed
+    against the cap here too, so a zip bomb is refused before anything is
+    created for it.
+    """
     # A single top-level folder is what most zips of a project look like, and
     # keeping it would nest the whole project one level deeper than intended.
     names = [n for n in archive.namelist() if not n.startswith("__MACOSX/")]
@@ -438,6 +452,8 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
         if len(tops) == 1 and all(n.count("/") >= 1 for n in names if n)
         else ""
     )
+    members = []
+    declared = 0
     for info in archive.infolist():
         name = info.filename
         if name.startswith("__MACOSX/") or not name.strip("/"):
@@ -450,8 +466,44 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
         # The repo's own Git data is not the uploader's to replace.
         if ".git" in parts or ".dvc" in parts:
             continue
+        # Judged from the name alone, since the destination doesn't exist
+        # yet when this runs ahead of creating the project.
+        if PurePosixPath(name).is_absolute() or ".." in parts:
+            raise HTTPException(
+                400, f"Archive contains a path outside the project: {name}"
+            )
+        if not info.is_dir():
+            declared += info.file_size
+            if declared > MAX_PROJECT_UNPACKED_BYTES:
+                raise HTTPException(
+                    400, "Archive unpacks to more than the size limit allows"
+                )
+        members.append((info, name))
+    return members
+
+
+def _open_project_zip(zip_bytes: bytes) -> zipfile.ZipFile:
+    try:
+        return zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "That file isn't a valid zip archive")
+
+
+def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
+    """Unpack an uploaded project zip into a repo working directory.
+
+    The archive is validated again here even when it already was ahead of
+    creating the project, since the check is the cheap half of the work
+    and this is what actually writes to disk. Returns the bytes written.
+    """
+    extracted = 0
+    archive = _open_project_zip(zip_bytes)
+    dest_root = os.path.realpath(dest)
+    for info, name in _iter_project_zip(archive):
         target = os.path.realpath(os.path.join(dest_root, name))
-        if not (target == dest_root or target.startswith(dest_root + os.sep)):
+        # The archive-level check can't see symlinks already present in the
+        # destination, so the resolved target is checked as well.
+        if not _inside(dest_root, target):
             raise HTTPException(
                 400, f"Archive contains a path outside the project: {name}"
             )
@@ -459,10 +511,6 @@ def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
             os.makedirs(target, exist_ok=True)
             continue
         extracted += info.file_size
-        if extracted > MAX_PROJECT_UNPACKED_BYTES:
-            raise HTTPException(
-                400, "Archive unpacks to more than the size limit allows"
-            )
         os.makedirs(os.path.dirname(target), exist_ok=True)
         with archive.open(info) as src, open(target, "wb") as dst:
             shutil.copyfileobj(src, dst)
@@ -534,6 +582,10 @@ def post_project_upload(
             f"Upload is larger than "
             f"{MAX_PROJECT_UPLOAD_BYTES // 1_000_000} MB.",
         )
+    # The archive is checked in full before anything is created for it:
+    # creating the project first and refusing the zip after would leave a
+    # row and a GitHub repo behind for an upload that never landed.
+    _iter_project_zip(_open_project_zip(zip_bytes))
     created = post_project(
         session=session,
         current_user=current_user,
@@ -577,9 +629,16 @@ def post_project_upload(
     # extension, directories of many small files), and calkit already makes
     # it. Shelling out keeps that judgment in one place rather than growing
     # a second copy here that drifts.
+    # Run as a module of this interpreter, the way app.dvc does, so it's
+    # the calkit installed alongside the app and not whatever is on PATH.
+    # `calkit add` only prompts when the directory isn't a Git repo, which
+    # this one is, but a closed stdin makes any prompt fail rather than hang
+    # the request.
     try:
         subprocess.check_call(
-            ["calkit", "add", "."], cwd=str(repo.working_dir)
+            [sys.executable, "-m", "calkit", "add", "."],
+            cwd=str(repo.working_dir),
+            stdin=subprocess.DEVNULL,
         )
     except subprocess.CalledProcessError as e:
         logger.exception(f"calkit add failed for uploaded project: {e}")
@@ -924,11 +983,9 @@ def post_project(
                     user=current_user,
                     fresh=True,
                 )
-                # Delete files that don't belong in a template
-                delete_files = ["dvc.lock"]
-                for f in delete_files:
-                    if os.path.isfile(os.path.join(repo.working_dir, f)):
-                        repo.git.rm(f, "-f")
+                # dvc.lock stays: its hashes name the template's outputs,
+                # which are copied into this project's storage below, so
+                # the figures and paper are there before the first run.
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
@@ -997,6 +1054,12 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             repo.git.push(["origin", repo.active_branch.name])
+            if project_in.template is not None:
+                _copy_template_dvc_objects(
+                    repo_dir=str(repo.working_dir),
+                    template_project=template_project,
+                    project=project,
+                )
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -1094,7 +1157,106 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
+    _maybe_send_first_project_email(
+        session=session, user=current_user, project=project
+    )
     return project  # type: ignore
+
+
+def _copy_template_dvc_objects(
+    repo_dir: str, template_project: Project, project: Project
+) -> int:
+    """Copy the template's pipeline outputs into the new project's storage.
+
+    The new repo carries the template's dvc.lock, whose hashes point at
+    objects in the template's storage. Copying them across is what lets the
+    project page show the figures and the paper immediately, and what lets
+    `calkit run` on a fresh clone find everything up to date instead of
+    rebuilding from scratch. Best-effort: a missing object only means that
+    output isn't shown until the pipeline runs. Returns how many were
+    copied.
+    """
+    lock_path = os.path.join(repo_dir, "dvc.lock")
+    if not os.path.isfile(lock_path):
+        return 0
+    try:
+        with open(lock_path) as f:
+            dvc_lock = yaml.safe_load(f) or {}
+        fs = get_object_fs()
+        outs = expand_dvc_lock_outs(
+            dvc_lock,
+            owner_name=template_project.owner_account_name,
+            project_name=template_project.name,
+            fs=fs,
+        )
+    except Exception as e:
+        logger.warning(f"Could not read template outputs for copying: {e}")
+        return 0
+    count = 0
+    for out in outs.values():
+        md5 = out.get("md5")
+        if not md5:
+            continue
+        src = make_data_fpath(
+            owner_name=template_project.owner_account_name,
+            project_name=template_project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        dst = make_data_fpath(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        try:
+            if fs.exists(dst) or not fs.exists(src):
+                continue
+            fs.copy(src, dst)
+            count += 1
+        except Exception as e:
+            logger.warning(f"Could not copy template object {md5}: {e}")
+    logger.info(
+        f"Copied {count} template objects from "
+        f"{template_project.owner_account_name}/{template_project.name} "
+        f"to {project.owner_account_name}/{project.name}"
+    )
+    return count
+
+
+def _maybe_send_first_project_email(
+    session: Session, user: User, project: Project
+) -> None:
+    """Email the clone-and-run commands after a user's first project.
+
+    Creating a project happens in the browser, but running it happens in a
+    terminal, usually later and on a different machine. Without a scheduler
+    the one moment we can reliably reach someone is right now, so the first
+    project gets a note with exactly what to type next. Best-effort.
+    """
+    if not settings.emails_enabled:
+        return
+    n_projects = session.exec(
+        select(func.count())
+        .select_from(Project)
+        .where(Project.owner_account_id == user.account.id)
+    ).one()
+    if n_projects != 1:
+        return
+    try:
+        email_data = generate_new_project_email(
+            email_to=user.email,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            project_title=project.title,
+        )
+        send_email(
+            email_to=user.email,
+            subject=email_data.subject,
+            html_content=email_data.html_content,
+        )
+    except Exception as e:
+        logger.warning(f"Could not send first-project email: {e}")
 
 
 class ProjectOptionalExtended(ProjectPublic):
@@ -4412,9 +4574,12 @@ def post_project_dataset(
             project_id=project.id,
             id=uuid.uuid4(),
             # The DB model still stores this as a string; the structured
-            # form is what lives in calkit.yaml.
+            # form is what lives in calkit.yaml, so it's sent as JSON a
+            # client can parse rather than a Python repr it can't.
             imported_from=(
-                str(ds["imported_from"]) if "imported_from" in ds else None
+                json.dumps(ds["imported_from"])
+                if "imported_from" in ds
+                else None
             ),
         )
     )
@@ -4441,6 +4606,9 @@ def post_project_dataset_upload(
     title: Annotated[str, Form()],
     description: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
+    # Email of whoever collected the data, when it's primary data rather
+    # than a file from somewhere else; recorded as the dataset's provenance.
+    collected_by: Optional[Annotated[str, Form()]] = Form(None),
 ) -> Dataset:
     logger.info(
         f"Received dataset file {path} with content type: {file.content_type}"
@@ -4493,8 +4661,14 @@ def post_project_dataset_upload(
         files_to_stage.append(gitignore)
     logger.info(f"Git-adding {files_to_stage}")
     repo.git.add(files_to_stage)
-    # Update figures
-    datasets.append(dict(path=path, title=title, description=description))
+    ds: dict = dict(path=path, title=title, description=description)
+    if collected_by:
+        ds["collected_by"] = [dict(email=collected_by.strip())]
+        try:
+            CkDataset.model_validate(ds)
+        except ValidationError as e:
+            raise HTTPException(422, f"Invalid dataset: {e}")
+    datasets.append(ds)
     ck_info["datasets"] = datasets
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
@@ -5897,7 +6071,7 @@ def _abs_path_within(root: str, rel_path: str) -> str:
     """
     root_real = os.path.realpath(root)
     resolved = os.path.realpath(os.path.join(root_real, rel_path))
-    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+    if not _inside(root_real, resolved):
         raise HTTPException(422, f"Path is outside the project: {rel_path}")
     return resolved
 
@@ -8388,6 +8562,12 @@ def _read_env_locks(
         if os.path.isabs(lock_path)
         else os.path.join(wdir, lock_path)
     )
+    # The name and path come from the project's own calkit.yaml, which
+    # anyone with write access composes, so a lock that resolves outside
+    # the clone is not a lock to go read.
+    if not _inside(wdir, full_path):
+        logger.warning(f"Lock path for {env_name} is outside the project")
+        return []
     if os.path.isdir(full_path):
         # Docker, venv, and conda lock once per platform, so this is a
         # directory of them rather than a single file.
@@ -8402,6 +8582,9 @@ def _read_env_locks(
         return []
     locks = []
     for abs_path in candidates:
+        # A symlink in the locks directory can point anywhere.
+        if not _inside(wdir, abs_path):
+            continue
         rel_path = Path(os.path.relpath(abs_path, wdir)).as_posix()
         try:
             size = os.path.getsize(abs_path)
@@ -8455,7 +8638,9 @@ def get_project_environments(
         env_path = env.get("path")
         if env_path:
             fpath = os.path.join(repo.working_dir, env_path)
-            if os.path.isfile(fpath):
+            # The path is the project's to set, not ours, so it's held to
+            # the clone the same way every other project path is.
+            if _inside(str(repo.working_dir), fpath) and os.path.isfile(fpath):
                 with open(fpath) as f:
                     env_resp["file_content"] = f.read()
         env_resp["locks"] = _read_env_locks(

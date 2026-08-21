@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
 
 import { type OnboardingFlags, UsersService } from "../client"
+import { applyFlagLocally } from "../lib/onboarding"
 import { isLoggedIn } from "./useAuth"
 
 const FLAGS_KEY = ["user", "onboarding-flags"]
@@ -27,23 +28,10 @@ const useOnboardingFlags = (projectId?: string | null) => {
   const projectFlags = projectId
     ? flagsQuery.data?.projects?.[projectId] ?? []
     : []
-  const applyLocally = (step: string, add: boolean) => {
-    queryClient.setQueryData<OnboardingFlags>(FLAGS_KEY, (old) => {
-      const account = [...(old?.account ?? [])]
-      const projects: Record<string, string[]> = { ...(old?.projects ?? {}) }
-      const steps = projectId ? [...(projects[projectId] ?? [])] : account
-      const updated = add
-        ? steps.includes(step)
-          ? steps
-          : [...steps, step]
-        : steps.filter((s) => s !== step)
-      if (projectId) {
-        projects[projectId] = updated
-        return { account, projects }
-      }
-      return { account: updated, projects }
-    })
-  }
+  const applyLocally = (step: string, add: boolean) =>
+    queryClient.setQueryData<OnboardingFlags>(FLAGS_KEY, (old) =>
+      applyFlagLocally(old, projectId, step, add),
+    )
   const setFlagMutation = useMutation({
     mutationFn: ({ step, done }: { step: string; done: boolean }) =>
       done

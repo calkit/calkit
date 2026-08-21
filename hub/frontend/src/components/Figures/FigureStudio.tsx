@@ -309,6 +309,17 @@ export function withDatasetLines(code: string, paths: string[]): string {
   return kept.join("\n")
 }
 
+/** The files a script reads with pandas, from its read_csv calls. */
+export function readCsvPaths(code: string): string[] {
+  const found: string[] = []
+  for (const match of code.matchAll(
+    /\.read_csv\(\s*[rf]?(["'])([^"'\n]+)\1/g,
+  )) {
+    if (!found.includes(match[2])) found.push(match[2])
+  }
+  return found
+}
+
 /** A plotting script for the chosen datasets, as the starting point to edit. */
 export function defaultScript({
   datasetPaths,
@@ -451,13 +462,24 @@ const FigureStudio = ({
     [environmentsQuery.data],
   )
   const envPackageNames = useMemo(() => envPackages(pythonEnv), [pythonEnv])
-  // The first CSV is the default, which on a template project is the data
-  // its own pipeline plots.
+  // The first CSV is the default for a new figure, which on a template
+  // project is the data its own pipeline plots. An existing stage's inputs
+  // are whatever they are; nothing gets picked for it.
   useEffect(() => {
-    if (!datasetPaths.length && csvDatasets.length) {
+    if (!edit && !datasetPaths.length && csvDatasets.length) {
       setDatasetPaths([initialDataset ?? csvDatasets[0]])
     }
-  }, [csvDatasets, datasetPaths.length, initialDataset])
+  }, [csvDatasets, datasetPaths.length, initialDataset, edit])
+  // What's offered: the declared CSV datasets, plus anything already
+  // selected that isn't declared as a dataset (a stage input that's the
+  // output of another stage, say), so it can be seen and unticked.
+  const datasetOptions = useMemo(
+    () => [
+      ...datasetPaths.filter((p) => !csvDatasets.includes(p)),
+      ...csvDatasets,
+    ],
+    [datasetPaths, csvDatasets],
+  )
   const primaryPath = datasetPaths[0] ?? ""
   // Editing starts from the script as committed.
   const scriptQuery = useQuery({
@@ -477,6 +499,14 @@ const FigureStudio = ({
     if (scriptQuery.data !== undefined && !code) {
       setCode(scriptQuery.data)
       setEditorKey((k) => k + 1)
+      // The script is the last word on what it reads. The stage definition
+      // is asked first, but a dvc.yaml that predates the stage, or inputs
+      // declared as another stage's outputs, can leave that list short.
+      const fromScript = readCsvPaths(scriptQuery.data)
+      setDatasetPaths((current) => [
+        ...current,
+        ...fromScript.filter((p) => !current.includes(p)),
+      ])
     }
   }, [scriptQuery.data, code])
   // Every chosen file is fetched up front and written into the in-browser
@@ -538,6 +568,9 @@ const FigureStudio = ({
     edit?.scriptPath ?? `scripts/plot-${slug(stem(figurePath || "figure"))}.py`
   const packages = useMemo(() => packagesFromImports(code), [code])
   const canRun = Boolean(dataQuery.data && figurePath && code.trim())
+  // One run on launch, as soon as the data and script are in, so the
+  // studio opens on a figure rather than on an empty pane.
+  const autoRan = useRef(false)
   const run = async () => {
     if (!dataQuery.data || !figurePath || running) return
     setRunning(true)
@@ -566,6 +599,13 @@ const FigureStudio = ({
       n_datasets: datasetPaths.length,
     })
   }
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fire once, when runnable
+  useEffect(() => {
+    if (isOpen && canRun && !autoRan.current && !running) {
+      autoRan.current = true
+      run()
+    }
+  }, [isOpen, canRun])
   const saveMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectStudioFigure({
@@ -675,7 +715,7 @@ const FigureStudio = ({
             <GridItem minW={0}>
               <FormControl mb={3}>
                 <FormLabel fontSize="sm">Data</FormLabel>
-                {csvDatasets.length ? (
+                {datasetOptions.length ? (
                   <CheckboxGroup
                     value={datasetPaths}
                     onChange={(values) => {
@@ -705,7 +745,7 @@ const FigureStudio = ({
                     }}
                   >
                     <Wrap spacing={4}>
-                      {csvDatasets.map((p) => (
+                      {datasetOptions.map((p) => (
                         <WrapItem key={p} alignItems="center">
                           <Checkbox value={p} size="sm" colorScheme="teal">
                             <Code fontSize="xs">{p}</Code>

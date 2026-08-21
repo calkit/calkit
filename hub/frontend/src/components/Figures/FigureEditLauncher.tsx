@@ -65,7 +65,18 @@ const FigureEditLauncher = ({
     enabled: Boolean(figure.stage),
     retry: false,
   })
-  if (!figure.stage || !stageQuery.data) return null
+  if (!figure.stage) return null
+  // The slot is held from the start so the panel doesn't jump when the
+  // stage arrives; the studio reads the script's own read_csv calls, so it
+  // doesn't need the pipeline to have loaded before it opens.
+  if (!stageQuery.data) {
+    if (stageQuery.isError || !userHasWriteAccess) return null
+    return (
+      <Box mt={3} pt={3} borderTopWidth={1}>
+        <Button size="sm" width="100%" isLoading loadingText="Edit" />
+      </Box>
+    )
+  }
   let stage: StageInfo = {}
   try {
     stage = (yamlLoad(stageQuery.data.yaml) as StageInfo) ?? {}
@@ -75,8 +86,13 @@ const FigureEditLauncher = ({
   const dvcStage = pipelineQuery.data?.dvc_stages?.[figure.stage] as
     | { deps?: string[] | null }
     | undefined
-  const csvDeps = (dvcStage?.deps ?? []).filter((d) =>
-    d.toLowerCase().endsWith(".csv"),
+  // Inputs from both places they can be declared: concrete deps in
+  // dvc.yaml, and plain paths in the stage's own inputs list.
+  const declared = (stage.inputs ?? []).flatMap((i) =>
+    typeof i === "string" ? [i] : i.path ? [i.path] : [],
+  )
+  const csvDeps = [...new Set([...(dvcStage?.deps ?? []), ...declared])].filter(
+    (d) => d.toLowerCase().endsWith(".csv"),
   )
   if (stage.kind === "python-script" && stage.script_path) {
     if (!userHasWriteAccess) return null

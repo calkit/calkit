@@ -5,6 +5,7 @@ import {
   defaultScript,
   envPackages,
   pickPythonEnv,
+  readCsvPaths,
   savefigPath,
   withDatasetLines,
 } from "./FigureStudio"
@@ -114,5 +115,18 @@ describe("environment mirroring", () => {
       ),
     ).toEqual(["seaborn"])
     expect(envPackages(null)).toEqual([])
+  })
+})
+
+describe("readCsvPaths", () => {
+  it("lists what the script reads, once each, in order", () => {
+    const code = [
+      'df = pd.read_csv("data/raw/data.csv")',
+      "df2 = pd.read_csv('data/other.csv', sep=';')",
+      'again = pd.read_csv("data/raw/data.csv")',
+      "x = read_csv_like()",
+    ].join("\n")
+    expect(readCsvPaths(code)).toEqual(["data/raw/data.csv", "data/other.csv"])
+    expect(readCsvPaths("print(1)")).toEqual([])
   })
 })

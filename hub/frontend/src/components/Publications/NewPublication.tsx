@@ -83,7 +83,13 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
   const path = watch("path")
   useEffect(() => {
     if (variant === "template" && !dirtyFields.stage) {
-      setValue("stage", path)
+      // A stage name, not a path: "pubs/ieee" becomes "build-pubs-ieee",
+      // the same convention the backend uses when it names one itself.
+      const slug = (path ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      setValue("stage", slug ? `build-${slug}` : "")
     }
   }, [variant, path, dirtyFields.stage, setValue])
   const mutation = useMutation({

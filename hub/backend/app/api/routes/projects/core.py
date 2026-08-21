@@ -5133,6 +5133,14 @@ def post_project_publication(
         if description is not None:
             cmd += ["--description", description]
         if stage is not None:
+            # A stage is addressed as `dvc.yaml:name` and by `calkit run
+            # name`, so a path-like name with slashes breaks both
+            if not STAGE_NAME_RE.fullmatch(stage):
+                raise HTTPException(
+                    422,
+                    "Stage names may contain letters, numbers, dashes, "
+                    "underscores, and dots",
+                )
             cmd += ["--stage", stage]
         if environment is not None:
             cmd += ["--environment", environment]
@@ -5994,14 +6002,24 @@ def get_project_pipeline(
         stream = io.StringIO()
         ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
         calkit_content = stream.getvalue()
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    dvc_pipeline = None
+    dvc_content = None
     if tree.is_file("dvc.yaml"):
         dvc_content = tree.read_text("dvc.yaml")
-        dvc_pipeline = ryaml.load(dvc_content)
-    elif (ck_info.get("pipeline") or {}).get("stages"):
-        # A Calkit pipeline can be declared before it has ever been run,
-        # e.g., right after creating a publication from a template, in which
-        # case no dvc.yaml has been compiled and committed yet. Compile in
-        # memory so the pipeline still shows up.
+        dvc_pipeline = ryaml.load(dvc_content) or {}
+    # calkit.yaml is the source of truth, and the committed dvc.yaml can lag
+    # behind it: a stage added from the hub, a publication from a template,
+    # a run not made yet. When the Calkit pipeline declares a stage the
+    # committed file doesn't have, compile in memory so what's shown is
+    # what `calkit run` would run.
+    committed = set((dvc_pipeline or {}).get("stages") or {})
+    missing = [
+        name
+        for name in ck_stages
+        if not str(name).startswith("_") and name not in committed
+    ]
+    if ck_stages and (dvc_pipeline is None or missing):
         try:
             stages = calkit.pipeline.to_dvc(
                 ck_info=ck_info,
@@ -6009,17 +6027,18 @@ def get_project_pipeline(
                 write=False,
                 manage_gitignore=False,
             )
+            dvc_pipeline = {"stages": stages}
+            stream = io.StringIO()
+            ryaml.dump(dvc_pipeline, stream)
+            dvc_content = stream.getvalue()
         except Exception as e:
             logger.warning(
                 f"Failed to compile Calkit pipeline for "
                 f"{owner_name}/{project_name}: {e}"
             )
-            return None
-        dvc_pipeline = {"stages": stages}
-        stream = io.StringIO()
-        ryaml.dump(dvc_pipeline, stream)
-        dvc_content = stream.getvalue()
-    else:
+            if dvc_pipeline is None:
+                return None
+    if dvc_pipeline is None or dvc_content is None:
         return None
     # Pop off any private stages
     for stage_name in list(dvc_pipeline.get("stages", {}).keys()):
@@ -6110,6 +6129,9 @@ def _load_ck_stage_map(stage_yaml: str) -> Any:
     return stage_map
 
 
+STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
 def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:
     """Check a stage against the models, returning the parsed stage.
 
@@ -6138,7 +6160,7 @@ def _dump_ck_stage_map(stage_map: Any) -> str:
 
 
 @router.get(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
 )
 def get_project_pipeline_stage(
     owner_name: str,
@@ -6176,7 +6198,7 @@ def get_project_pipeline_stage(
 
 
 @router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
     "/remove-defaults"
 )
 def remove_project_pipeline_stage_defaults(
@@ -6222,7 +6244,7 @@ def remove_project_pipeline_stage_defaults(
 
 
 @router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
     "/detect-inputs"
 )
 def detect_project_pipeline_stage_inputs(
@@ -6282,7 +6304,7 @@ def detect_project_pipeline_stage_inputs(
 
 
 @router.put(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
 )
 def put_project_pipeline_stage(
     owner_name: str,

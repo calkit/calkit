@@ -250,6 +250,9 @@ const mimeFor = (path: string): string => {
   if (lower.endsWith(".pdf")) return "application/pdf"
   if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg"
   if (lower.endsWith(".webp")) return "image/webp"
+  // Interactive figures: plotly's JSON, or a standalone HTML page
+  if (lower.endsWith(".json")) return "application/json"
+  if (lower.endsWith(".html")) return "text/html"
   return "image/png"
 }
 

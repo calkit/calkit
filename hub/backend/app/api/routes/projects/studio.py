@@ -34,7 +34,18 @@ router = APIRouter()
 # Environment kinds a Python script can run in, in order of preference when
 # the project has more than one.
 PYTHON_ENV_KINDS = ("uv", "uv-venv", "pixi", "conda", "venv")
-FIGURE_SUFFIXES = (".png", ".svg", ".pdf", ".jpg", ".jpeg", ".webp")
+# Raster and vector images, plus what interactive plotting libraries write:
+# plotly's figure JSON and standalone HTML
+FIGURE_SUFFIXES = (
+    ".png",
+    ".svg",
+    ".pdf",
+    ".jpg",
+    ".jpeg",
+    ".webp",
+    ".json",
+    ".html",
+)
 
 
 class StudioFigurePost(BaseModel):

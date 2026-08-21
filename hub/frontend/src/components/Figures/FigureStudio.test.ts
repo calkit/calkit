@@ -23,6 +23,13 @@ describe("savefigPath", () => {
     expect(
       savefigPath('fig.savefig("draft.png")\nfig.savefig("figures/d.png")'),
     ).toBe("figures/d.png")
+    // plotly writes JSON or HTML rather than pixels
+    expect(savefigPath('fig.write_json("figures/e.json")')).toBe(
+      "figures/e.json",
+    )
+    expect(savefigPath("fig.write_html(file='figures/f.html')")).toBe(
+      "figures/f.html",
+    )
     expect(savefigPath("plt.show()")).toBeNull()
     expect(savefigPath("")).toBeNull()
   })

@@ -54,13 +54,13 @@ import {
   useColorModeValue,
   useDisclosure,
 } from "@chakra-ui/react"
-import { ExternalLinkIcon, InfoOutlineIcon } from "@chakra-ui/icons"
+import { InfoOutlineIcon } from "@chakra-ui/icons"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Link as RouterLink, useParams } from "@tanstack/react-router"
+import { useNavigate, useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react"
 
 import {
   type Environment,
@@ -78,6 +78,9 @@ import {
   runFigureScript,
 } from "../../lib/pyodide"
 import CodeEditorPane from "../Common/CodeEditorPane"
+import PdfCanvas from "../Common/PdfCanvas"
+
+const Plot = lazy(() => import("react-plotly.js"))
 
 const MAX_DATA_BYTES = 20 * 1024 * 1024
 
@@ -255,14 +258,17 @@ function DatasetPeek({
 }
 
 /**
- * The path the script saves its figure to, read from the last savefig call.
+ * The path the script saves its figure to, read from the last save call.
  *
  * The script is the source of truth for where the figure lands, since that
- * is what the stage will run; the form only reflects it.
+ * is what the stage will run; the form only reflects it. Matplotlib's
+ * savefig and plotly's write_json / write_html / write_image all count.
  */
 export function savefigPath(code: string): string | null {
   const matches = [
-    ...code.matchAll(/\.savefig\(\s*(?:fname\s*=\s*)?[rf]?(["'])([^"'\n]+)\1/g),
+    ...code.matchAll(
+      /\.(?:savefig|write_json|write_html|write_image)\(\s*(?:(?:fname|file)\s*=\s*)?[rf]?(["'])([^"'\n]+)\1/g,
+    ),
   ]
   const last = matches.at(-1)
   return last ? last[2] : null
@@ -425,6 +431,13 @@ const FigureStudio = ({
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<RunResult | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  // A plotly figure arrives as JSON rather than pixels; it's parsed once
+  // per run and drawn with plotly.js, the way the figures page draws it.
+  const [plotSpec, setPlotSpec] = useState<{
+    data: unknown[]
+    layout: Record<string, unknown>
+  } | null>(null)
+  const [htmlDoc, setHtmlDoc] = useState<string | null>(null)
   const [showOutput, setShowOutput] = useState(false)
   // The script as first shown is not the script to auto-run: a new figure's
   // template is regenerated once the data's columns are known, and an
@@ -562,8 +575,27 @@ const FigureStudio = ({
     }
   }, [primaryPath, datasetPaths, preview, codeTouched])
   useEffect(() => {
+    setPlotSpec(null)
+    setHtmlDoc(null)
     if (!result?.image) {
       setImageUrl(null)
+      return
+    }
+    if (result.image.type === "application/json") {
+      setImageUrl(null)
+      result.image.text().then((text) => {
+        try {
+          const parsed = JSON.parse(text)
+          setPlotSpec({ data: parsed.data ?? [], layout: parsed.layout ?? {} })
+        } catch {
+          setPlotSpec(null)
+        }
+      })
+      return
+    }
+    if (result.image.type === "text/html") {
+      setImageUrl(null)
+      result.image.text().then(setHtmlDoc)
       return
     }
     const url = URL.createObjectURL(result.image)
@@ -662,13 +694,26 @@ const FigureStudio = ({
   // An edited script or a figure that rendered but was never saved is work
   // that closing would throw away; a generated script nobody touched isn't.
   const hasUnsavedWork = codeTouched || Boolean(result?.image)
-  const requestClose = () => {
+  // What "Discard" should do: close, or leave for somewhere else. A link
+  // out of the studio is the same question as closing it, so it goes
+  // through the same confirmation.
+  const pendingLeave = useRef<() => void>(onClose)
+  const requestLeave = (leave: () => void) => {
     if (hasUnsavedWork && !saveMutation.isSuccess) {
+      pendingLeave.current = leave
       discardDialog.onOpen()
       return
     }
-    onClose()
+    leave()
   }
+  const requestClose = () => requestLeave(onClose)
+  const navigate = useNavigate()
+  const goToEnvironment = () =>
+    navigate({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      to: `/${accountName}/${projectName}/environments` as any,
+      search: { name: pythonEnv?.name } as any,
+    })
   const output = [result?.stdout, result?.stderr].filter(Boolean).join("")
   const outputLines = output ? output.trimEnd().split("\n").length : 0
   return (
@@ -836,19 +881,13 @@ const FigureStudio = ({
                     <>
                       . Runs in environment{" "}
                       <Link
-                        as={RouterLink}
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        to={
-                          `/${accountName}/${projectName}/environments` as any
-                        }
-                        search={{ name: pythonEnv.name } as any}
                         variant="blue"
-                        // A new tab, since navigating this one would unmount
-                        // the studio and whatever is drafted in it.
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        cursor="pointer"
+                        // Leaving unmounts the studio, so unsaved work gets
+                        // the same confirmation as closing it would.
+                        onClick={() => requestLeave(goToEnvironment)}
                       >
-                        '{pythonEnv.name}' <ExternalLinkIcon mb={0.5} />
+                        '{pythonEnv.name}'
                       </Link>
                     </>
                   ) : environmentsQuery.isSuccess ? (
@@ -903,14 +942,68 @@ const FigureStudio = ({
                       {status || "Running"}
                     </Text>
                   </Flex>
+                ) : plotSpec ? (
+                  // At the figure's own height (plotly's default is 450px),
+                  // capped to the pane, the way the figures page draws it;
+                  // a percentage height here would let the plot's default
+                  // margins push it off center.
+                  <Box
+                    width="100%"
+                    height={`${
+                      typeof plotSpec.layout.height === "number"
+                        ? plotSpec.layout.height
+                        : 450
+                    }px`}
+                    maxH="100%"
+                  >
+                    <Suspense fallback={<Spinner />}>
+                      <Plot
+                        data={plotSpec.data as any}
+                        layout={
+                          {
+                            ...plotSpec.layout,
+                            autosize: true,
+                            height: undefined,
+                            width: undefined,
+                          } as any
+                        }
+                        config={{ displayModeBar: false, responsive: true }}
+                        style={{ width: "100%", height: "100%" }}
+                        useResizeHandler
+                        // Plotly measures its container on mount, before the
+                        // pane has settled its size, and lays the plot out
+                        // off center until something triggers a resize. A
+                        // resize event on the next frame is that something.
+                        onInitialized={() =>
+                          requestAnimationFrame(() =>
+                            window.dispatchEvent(new Event("resize")),
+                          )
+                        }
+                      />
+                    </Suspense>
+                  </Box>
+                ) : htmlDoc ? (
+                  <iframe
+                    title="Figure"
+                    srcDoc={htmlDoc}
+                    sandbox="allow-scripts"
+                    style={{ width: "100%", height: "60vh", border: 0 }}
+                  />
                 ) : imageUrl ? (
                   result?.image?.type === "application/pdf" ? (
-                    <embed
-                      src={imageUrl}
-                      type="application/pdf"
-                      width="100%"
-                      height="60vh"
-                    />
+                    // The same renderer the figures page uses, rather than
+                    // the browser's embed and its toolbar
+                    // PdfCanvas centers its pages within the height it's
+                    // given, so it gets the pane's inner height exactly: the
+                    // pane's minimum less its padding. A stretched wrapper
+                    // would leave the pages pinned to the top instead.
+                    <Box width="100%">
+                      <PdfCanvas
+                        src={imageUrl}
+                        width="100%"
+                        height="calc(92vh - 536px)"
+                      />
+                    </Box>
                   ) : (
                     <Image
                       src={imageUrl}
@@ -1027,9 +1120,9 @@ const FigureStudio = ({
             <AlertDialogBody>
               {result?.image
                 ? "The figure you made hasn't been saved to the pipeline. " +
-                  "Closing now drops it and the script."
+                  "Leaving now drops it and the script."
                 : "The script has edits that haven't been saved to the " +
-                  "pipeline. Closing now drops them."}
+                  "pipeline. Leaving now drops them."}
             </AlertDialogBody>
             <AlertDialogFooter gap={3}>
               <Button ref={keepEditingRef} onClick={discardDialog.onClose}>
@@ -1042,7 +1135,7 @@ const FigureStudio = ({
                     had_figure: Boolean(result?.image),
                   })
                   discardDialog.onClose()
-                  onClose()
+                  pendingLeave.current()
                 }}
               >
                 Discard

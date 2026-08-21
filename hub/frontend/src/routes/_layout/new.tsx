@@ -603,11 +603,8 @@ interface QuestionFormValues {
   hypothesis: string
 }
 
-const QUESTION_EXAMPLES = [
-  "Does the wake recover faster at higher tip speed ratios?",
-  "Is the atmospheric boundary layer more stable at night?",
-  "Which of these three solvers gives the best accuracy per CPU hour?",
-]
+const QUESTION_PLACEHOLDER =
+  "Does the wake recover faster at higher tip speed ratios?"
 
 /** Step 3: the question the project exists to answer. */
 function QuestionStep({
@@ -624,7 +621,6 @@ function QuestionStep({
   const {
     register,
     handleSubmit,
-    setValue,
     formState: { errors, isSubmitting },
   } = useForm<QuestionFormValues>({
     mode: "onBlur",
@@ -664,27 +660,12 @@ function QuestionStep({
         <Textarea
           id="question"
           {...register("question", { required: "A question is required." })}
-          placeholder={QUESTION_EXAMPLES[0]}
+          placeholder={QUESTION_PLACEHOLDER}
           rows={2}
         />
         {errors.question ? (
           <FormErrorMessage>{errors.question.message}</FormErrorMessage>
-        ) : (
-          <FormHelperText>
-            For example:{" "}
-            {QUESTION_EXAMPLES.map((example, index) => (
-              <span key={example}>
-                {index > 0 ? " · " : ""}
-                <Link
-                  variant="blue"
-                  onClick={() => setValue("question", example)}
-                >
-                  {example}
-                </Link>
-              </span>
-            ))}
-          </FormHelperText>
-        )}
+        ) : null}
       </FormControl>
       <FormControl mb={6}>
         <FormLabel htmlFor="hypothesis">Hypothesis (optional)</FormLabel>

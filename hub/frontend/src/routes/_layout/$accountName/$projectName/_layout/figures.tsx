@@ -50,6 +50,9 @@ const figuresSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
+  // Whether the figure editor is open, so a refresh or a link can land
+  // on it directly.
+  studio: z.boolean().optional(),
   q: z.string().optional(),
 })
 
@@ -286,7 +289,13 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
-  const studioModal = useDisclosure()
+  const { studio: studioOpen } = Route.useSearch()
+  const studioModal = {
+    isOpen: Boolean(studioOpen),
+    onOpen: () => navigate({ search: (prev) => ({ ...prev, studio: true }) }),
+    onClose: () =>
+      navigate({ search: (prev) => ({ ...prev, studio: undefined }) }),
+  }
 
   const selectedFigure = figures?.find((f) => f.path === selectedPath) ?? null
 

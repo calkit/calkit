@@ -1,10 +1,14 @@
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
   Button,
   FormControl,
   FormErrorMessage,
   FormHelperText,
   FormLabel,
   Input,
+  Link,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -16,7 +20,7 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
+import { Link as RouterLink, getRouteApi } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
@@ -105,9 +109,39 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
       >
         <ModalOverlay />
         <ModalContent as="form" onSubmit={handleSubmit(onSubmit)}>
-          <ModalHeader>Upload new figure</ModalHeader>
+          <ModalHeader>Upload a figure made outside the pipeline</ModalHeader>
           <ModalCloseButton />
           <ModalBody pb={6}>
+            {/* An upload is the right move only when no code made the
+                figure; otherwise the code is the provenance, and a stage
+                is what records it. */}
+            <Alert status="info" borderRadius="md" mb={4} fontSize="sm">
+              <AlertIcon />
+              <AlertDescription>
+                Upload only what no script or notebook produced: a photo, a
+                hand-drawn schematic, a diagram from a drawing tool. If code
+                made the figure, add a pipeline stage that runs it instead, so
+                the figure traces back to the code and data and rebuilds when
+                they change. Start from a dataset with{" "}
+                <Link
+                  as={RouterLink}
+                  to={`/${accountName}/${projectName}/figures` as any}
+                  search={{ studio: true } as any}
+                  onClick={onClose}
+                >
+                  New figure from data
+                </Link>
+                , or{" "}
+                <Link
+                  as={RouterLink}
+                  to={`/${accountName}/${projectName}/pipeline` as any}
+                  onClick={onClose}
+                >
+                  write the stage
+                </Link>{" "}
+                for an existing script or notebook.
+              </AlertDescription>
+            </Alert>
             <FormControl isRequired isInvalid={!!errors.path}>
               <FormLabel htmlFor="path">
                 Path (relative to project folder)

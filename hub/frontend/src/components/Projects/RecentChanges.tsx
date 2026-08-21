@@ -9,6 +9,7 @@ import {
   Text,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
+import { Link as RouterLink } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
 
 import { ProjectsService } from "../../client"
@@ -63,7 +64,6 @@ export function countNewCommits(
 interface RecentChangesProps {
   accountName: string
   projectName: string
-  gitRepoUrl?: string | null
   limit?: number
 }
 
@@ -72,14 +72,13 @@ interface RecentChangesProps {
  *
  * A project moves between sessions: a collaborator pushed, a pipeline run
  * landed from the CLI, a paper edit synced from Overleaf. This is the
- * "what changed while I was away" a returning user otherwise reconstructs
- * from the GitHub commit list.
+ * "what changed while I was away" a returning user would otherwise go
+ * looking for; the History page has the full list and the diffs.
  */
 const RecentChanges = ({
   accountName,
   projectName,
-  gitRepoUrl,
-  limit = 6,
+  limit = 5,
 }: RecentChangesProps) => {
   const storageKey = `${LAST_SEEN_PREFIX}${accountName}/${projectName}`
   const historyQuery = useQuery({
@@ -113,65 +112,72 @@ const RecentChanges = ({
     }
   }, [commits, storageKey])
   if (historyQuery.isError) return null
+  const historyTo = `/${accountName}/${projectName}/history`
   return (
     <Box>
-      <Flex align="center" gap={2} mb={2}>
+      <Flex align="center" gap={2} mb={2} wrap="wrap">
         <Heading size="md">Recent changes</Heading>
         {newCount > 0 ? (
           <Badge colorScheme="teal" borderRadius="full" px={2}>
-            {newCount} since your last visit
+            {newCount} new
           </Badge>
         ) : null}
       </Flex>
       {historyQuery.isPending ? (
         <>
-          <Skeleton height="16px" mb={2} />
-          <Skeleton height="16px" mb={2} />
-          <Skeleton height="16px" />
+          <Skeleton height="14px" mb={2} />
+          <Skeleton height="14px" mb={2} />
+          <Skeleton height="14px" />
         </>
       ) : commits.length === 0 ? (
         <Text fontSize="sm" color="ui.dim">
           No commits yet.
         </Text>
       ) : (
-        commits.map((commit, index) => {
-          const summary = commit.summary ?? commit.message.split("\n")[0]
-          const isNew = index < newCount
-          return (
-            <Flex
-              key={commit.hash}
-              gap={3}
-              py={1.5}
-              borderBottomWidth={index < commits.length - 1 ? 1 : 0}
-              fontSize="sm"
-              align="baseline"
-            >
-              {gitRepoUrl ? (
-                <Link
-                  href={`${gitRepoUrl}/commit/${commit.hash}`}
-                  isExternal
-                  flexShrink={0}
-                >
-                  <Code fontSize="xs">{commit.short_hash}</Code>
-                </Link>
-              ) : (
-                <Code fontSize="xs" flexShrink={0}>
-                  {commit.short_hash}
-                </Code>
-              )}
-              <Text
-                flex={1}
-                noOfLines={1}
-                fontWeight={isNew ? "semibold" : "normal"}
+        <>
+          {commits.map((commit, index) => {
+            const summary = commit.summary ?? commit.message.split("\n")[0]
+            const isNew = index < newCount
+            return (
+              <Box
+                key={commit.hash}
+                py={1.5}
+                borderBottomWidth={index < commits.length - 1 ? 1 : 0}
+                fontSize="sm"
               >
-                {summary}
-              </Text>
-              <Text color="ui.dim" fontSize="xs" flexShrink={0}>
-                {commit.author}, {timeAgo(commit.timestamp)}
-              </Text>
-            </Flex>
-          )
-        })
+                <Link
+                  as={RouterLink}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  to={historyTo as any}
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  search={{ commit: commit.hash } as any}
+                  display="block"
+                  noOfLines={1}
+                  fontWeight={isNew ? "semibold" : "normal"}
+                  title={summary}
+                >
+                  {summary}
+                </Link>
+                <Text color="ui.dim" fontSize="xs">
+                  <Code fontSize="xs" mr={1}>
+                    {commit.short_hash}
+                  </Code>
+                  {commit.author}, {timeAgo(commit.timestamp)}
+                </Text>
+              </Box>
+            )
+          })}
+          <Link
+            as={RouterLink}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            to={historyTo as any}
+            fontSize="sm"
+            display="inline-block"
+            mt={2}
+          >
+            View all changes →
+          </Link>
+        </>
       )}
     </Box>
   )

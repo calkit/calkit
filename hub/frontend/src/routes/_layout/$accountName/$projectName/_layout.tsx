@@ -44,7 +44,8 @@ import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
-import { FaGithub, FaQuestion, FaRegClone } from "react-icons/fa"
+import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
+import { SiOverleaf } from "react-icons/si"
 import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
 import { MdEdit } from "react-icons/md"
@@ -64,6 +65,8 @@ import HelpContent from "../../../../components/Projects/HelpContent"
 import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
 import NewProject from "../../../../components/Projects/NewProject"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
+import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
+import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
 import useOnboardingFlags from "../../../../hooks/useOnboarding"
 import { DISMISSED } from "../../../../lib/onboarding"
@@ -288,6 +291,13 @@ function ProjectMenu({
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
   const switchVersionModal = useDisclosure()
+  const newPubTemplateModal = useDisclosure()
+  const overleafImportModal = useDisclosure()
+  // Codespaces gives a browser editor that can also run the pipeline; the
+  // CLI signs in on its own there, so no token setup stands in the way.
+  const codespacesUrl = project.git_repo_url
+    ? `${project.git_repo_url.replace("://github.com/", "://codespaces.new/")}?quickstart=1`
+    : null
 
   return (
     <>
@@ -314,6 +324,33 @@ function ProjectMenu({
               onClick={cloneProjectModal.onOpen}
             >
               Clone to local machine
+            </MenuItem>
+            {codespacesUrl ? (
+              <MenuItem
+                icon={<FaGithub fontSize={18} />}
+                as="a"
+                href={codespacesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open in GitHub Codespace
+                <ExternalLinkIcon ml={1.5} mb={0.5} fontSize="xs" />
+              </MenuItem>
+            ) : null}
+            <MenuDivider />
+            <MenuItem
+              icon={<FaRegFileAlt fontSize={16} />}
+              onClick={newPubTemplateModal.onOpen}
+              isDisabled={!userHasWriteAccess}
+            >
+              New publication from template
+            </MenuItem>
+            <MenuItem
+              icon={<SiOverleaf fontSize={16} />}
+              onClick={overleafImportModal.onOpen}
+              isDisabled={!userHasWriteAccess}
+            >
+              Link an Overleaf publication
             </MenuItem>
             {/* The checklist hides itself once it's done or dismissed, so
                 this is the way back to it. It only renders on the project
@@ -347,6 +384,19 @@ function ProjectMenu({
           </MenuList>
         </Portal>
       </Menu>
+      {userHasWriteAccess ? (
+        <>
+          <NewPublication
+            isOpen={newPubTemplateModal.isOpen}
+            onClose={newPubTemplateModal.onClose}
+            variant="template"
+          />
+          <ImportOverleaf
+            isOpen={overleafImportModal.isOpen}
+            onClose={overleafImportModal.onClose}
+          />
+        </>
+      ) : null}
       <EditProject
         project={project}
         isOpen={editProjectModal.isOpen}

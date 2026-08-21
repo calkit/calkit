@@ -42,16 +42,14 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
 import { type QuestionEvidence, ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
-import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import FigureView from "../../../../../components/Figures/FigureView"
+import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
 import EditQuestion from "../../../../../components/Projects/EditQuestion"
 import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
-import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
-import NewPublication from "../../../../../components/Publications/NewPublication"
 import NewRelease from "../../../../../components/Releases/NewRelease"
 import useProject, {
   useProjectIssues,
@@ -340,12 +338,6 @@ function ProjectView() {
     (b.date ?? "").localeCompare(a.date ?? ""),
   )
   const topReleases = sortedReleases.slice(0, HOME_RELEASES_LIMIT)
-  const gitRepoUrl = projectRequest.data?.git_repo_url
-  const codespacesUrl = `${String(gitRepoUrl).replace("://github.com/", "://codespaces.new/")}?quickstart=1`
-  const githubDevUrl = String(gitRepoUrl).replace(
-    "://github.com/",
-    "://github.dev/",
-  )
   const removeFirstLine = (txt: any) => {
     const lines = String(txt).split("\n")
     lines.splice(0, 1)
@@ -364,8 +356,6 @@ function ProjectView() {
   }
   const newIssueModal = useDisclosure()
   const newQuestionModal = useDisclosure()
-  const newPubTemplateModal = useDisclosure()
-  const overleafImportModal = useDisclosure()
   // New release modal open state lives in the URL so a link can reopen it.
   const navigate = Route.useNavigate()
   const {
@@ -463,17 +453,6 @@ function ProjectView() {
               }
             />
           </Box>
-          {/* What moved since the last visit: pushes from the CLI, a
-              collaborator's commits, an Overleaf sync */}
-          {!ref ? (
-            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-              <RecentChanges
-                accountName={accountName}
-                projectName={projectName}
-                gitRepoUrl={gitRepoUrl}
-              />
-            </Box>
-          ) : null}
           {/* README */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
@@ -754,6 +733,16 @@ function ProjectView() {
               </>
             )}
           </Box>
+          {/* What moved since the last visit: pushes from the CLI, a
+              collaborator's commits, an Overleaf sync */}
+          {!ref ? (
+            <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
+              <RecentChanges
+                accountName={accountName}
+                projectName={projectName}
+              />
+            </Box>
+          ) : null}
           {/* Releases */}
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex>
@@ -887,63 +876,6 @@ function ProjectView() {
               </Text>
             )}
           </Box>
-          {/* Quick actions */}
-          {userHasWriteAccess ? (
-            <>
-              <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
-                <Heading size="md" mb={2}>
-                  Quick actions
-                </Heading>
-                <Text>
-                  📜{" "}
-                  <Link onClick={newPubTemplateModal.onOpen}>
-                    Create a new publication from a template
-                  </Link>
-                </Text>
-                <Text>
-                  🍃{" "}
-                  <Link onClick={overleafImportModal.onOpen}>
-                    Import/link a publication from Overleaf
-                  </Link>
-                </Text>
-                <Text>
-                  🚀{" "}
-                  <Link isExternal href={codespacesUrl}>
-                    Open in GitHub Codespace (edit and run){" "}
-                    <Icon height={"40%"} as={ExternalLinkIcon} pb={0.5} />
-                  </Link>
-                </Text>
-                <Text>
-                  ✏️{" "}
-                  <Link isExternal href={githubDevUrl}>
-                    Open in GitHub.dev (edit only){" "}
-                    <Icon height={"40%"} as={ExternalLinkIcon} pb={0.5} />
-                  </Link>
-                </Text>
-                <Text>
-                  🔒{" "}
-                  <Link
-                    as={RouterLink}
-                    to={"/settings"}
-                    search={{ tab: "tokens" } as any}
-                  >
-                    Manage Calkit personal access tokens
-                  </Link>
-                </Text>
-              </Box>
-              <NewPublication
-                isOpen={newPubTemplateModal.isOpen}
-                onClose={newPubTemplateModal.onClose}
-                variant="template"
-              />
-              <ImportOverleaf
-                isOpen={overleafImportModal.isOpen}
-                onClose={overleafImportModal.onClose}
-              />
-            </>
-          ) : (
-            ""
-          )}
         </Box>
       </Flex>
       {editorOpen && editorTexPath && (

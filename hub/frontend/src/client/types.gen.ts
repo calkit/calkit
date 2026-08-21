@@ -118,6 +118,18 @@ export type BodyProjectsPostProjectFigure = {
    * File
    */
   file?: Blob | File | null
+  /**
+   * Created By
+   */
+  created_by?: string | null
+  /**
+   * Created By Name
+   */
+  created_by_name?: string | null
+  /**
+   * Created With Ai
+   */
+  created_with_ai?: string | null
 }
 
 /**
@@ -3245,6 +3257,10 @@ export type ProjectPost = {
    * Git Repo Exists
    */
   git_repo_exists?: boolean | null
+  /**
+   * Keep Template History
+   */
+  keep_template_history?: boolean
 }
 
 /**

@@ -406,7 +406,7 @@ function ProjectFigures() {
                 </MenuButton>
                 <MenuList>
                   <MenuItem onClick={studioModal.onOpen}>
-                    Plot a dataset in the browser
+                    New figure from data
                   </MenuItem>
                   <MenuItem onClick={uploadFigureModal.onOpen}>
                     Upload new figure

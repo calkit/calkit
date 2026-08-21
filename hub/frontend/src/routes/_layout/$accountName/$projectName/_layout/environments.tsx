@@ -169,17 +169,17 @@ function ProjectEnvsView() {
 
   return (
     <>
-      <Flex align="center" mb={2}>
+      <Flex align="center" mb={4} gap={2} wrap="wrap">
         <Heading size="md">Environments</Heading>
-        {userHasWriteAccess ? (
+        {userHasWriteAccess && !ref ? (
           <>
             <IconButton
               aria-label="New environment"
+              variant="primary"
               height="25px"
-              width="28px"
-              ml={1.5}
-              icon={<FaPlus />}
-              size="xs"
+              width="9px"
+              px={1}
+              icon={<Icon as={FaPlus} fontSize="xs" />}
               onClick={openNewEnv}
             />
             <NewEnvironment

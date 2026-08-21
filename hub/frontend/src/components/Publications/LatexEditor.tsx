@@ -7,6 +7,7 @@ import {
   FormLabel,
   HStack,
   Input,
+  Kbd,
   Link,
   Modal,
   ModalBody,
@@ -530,8 +531,12 @@ const LatexEditor = ({
     }
   }
 
-  // Ctrl/Cmd+S (and the Save button) ask for a commit message before saving.
+  // Ctrl/Cmd+S, Cmd+Enter in the editor, and the Save button all ask for a
+  // commit message before saving.
   const requestSave = () => {
+    if (saveMutation.isPending) {
+      return
+    }
     // Block saving while unresolved conflict markers remain in any buffer.
     const unresolved = [...dirtyRef.current].filter((p) =>
       (buffersRef.current.get(p) ?? "").includes("<<<<<<<"),
@@ -641,6 +646,9 @@ const LatexEditor = ({
             >
               Save
             </Button>
+            <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> to save
+            </Text>
             <Button size="sm" variant="ghost" onClick={logPanel.onToggle}>
               {logPanel.isOpen ? "Hide log" : "Show log"}
             </Button>
@@ -732,6 +740,7 @@ const LatexEditor = ({
                     path={activePath}
                     viewRef={viewRef}
                     onChange={(text) => markDirty(activePath, text)}
+                    onModEnter={requestSave}
                   />
                 </Box>
                 <Box flex="1" minW={0} position="relative" bg="blackAlpha.50">

@@ -36,7 +36,7 @@ const OnboardingChecklists = () => {
   return (
     <Container maxW="full">
       <Heading size="md" py={4}>
-        Setup checklists
+        Setup
       </Heading>
       <Text mb={2}>
         The home page and each project page show what's left to set up. Steps

@@ -43,6 +43,7 @@ import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import { type QuestionEvidence, ReleasesService } from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
 import FigureView from "../../../../../components/Figures/FigureView"
+import FileEditorModal from "../../../../../components/Files/FileEditorModal"
 import ProjectChecklist from "../../../../../components/Onboarding/ProjectChecklist"
 import CreateIssue from "../../../../../components/Projects/CreateIssue"
 import CreateQuestion from "../../../../../components/Projects/CreateQuestion"
@@ -81,6 +82,9 @@ export const Route = createFileRoute(
         // reopens it. editor_tex is the .tex source path.
         editor_open: z.boolean().optional(),
         editor_tex: z.string().optional(),
+        // Path of the file open in the text editor (README.md or
+        // calkit.yaml from the cards here), so a refresh keeps it open.
+        edit_file: z.string().optional(),
       })
       .parse(search),
 })
@@ -373,7 +377,10 @@ function ProjectView() {
     expanded_question: expandedQuestion,
     editor_open: editorOpen,
     editor_tex: editorTexPath,
+    edit_file: editFile,
   } = Route.useSearch()
+  const setEditFile = (path?: string) =>
+    navigate({ search: (prev) => ({ ...prev, edit_file: path }) })
   // The editor open state (which .tex) lives in the URL; deps are a best-effort
   // optimization captured when the button is clicked (absent on a cold link).
   const latexDepsRef = useRef<string[] | null | undefined>(undefined)
@@ -433,22 +440,16 @@ function ProjectView() {
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
               <Heading size="md">Showcase</Heading>
-              {userHasWriteAccess ? (
-                <>
-                  <Link
-                    href={`https://github.dev/${accountName}/${projectName}/blob/main/calkit.yaml`}
-                    isExternal
-                  >
-                    <IconButton
-                      aria-label="Edit calkit.yaml"
-                      height="25px"
-                      width="28px"
-                      ml={1.5}
-                      icon={<MdEdit />}
-                      size={"xs"}
-                    />
-                  </Link>
-                </>
+              {userHasWriteAccess && !ref ? (
+                <IconButton
+                  aria-label="Edit calkit.yaml"
+                  height="25px"
+                  width="28px"
+                  ml={1.5}
+                  icon={<MdEdit />}
+                  size={"xs"}
+                  onClick={() => setEditFile("calkit.yaml")}
+                />
               ) : (
                 ""
               )}
@@ -466,22 +467,16 @@ function ProjectView() {
           <Box py={4} px={6} mb={4} borderRadius="lg" bg={secBgColor}>
             <Flex alignItems="center">
               <Heading size="md">README</Heading>
-              {userHasWriteAccess ? (
-                <>
-                  <Link
-                    href={`https://github.dev/${accountName}/${projectName}/blob/main/README.md`}
-                    isExternal
-                  >
-                    <IconButton
-                      aria-label="Edit README"
-                      height="25px"
-                      width="28px"
-                      ml={1.5}
-                      icon={<MdEdit />}
-                      size={"xs"}
-                    />
-                  </Link>
-                </>
+              {userHasWriteAccess && !ref ? (
+                <IconButton
+                  aria-label="Edit README"
+                  height="25px"
+                  width="28px"
+                  ml={1.5}
+                  icon={<MdEdit />}
+                  size={"xs"}
+                  onClick={() => setEditFile("README.md")}
+                />
               ) : (
                 ""
               )}
@@ -911,6 +906,15 @@ function ProjectView() {
           deps={latexDepsRef.current}
         />
       )}
+      {editFile && userHasWriteAccess && !ref ? (
+        <FileEditorModal
+          isOpen
+          onClose={() => setEditFile(undefined)}
+          ownerName={accountName}
+          projectName={projectName}
+          path={editFile}
+        />
+      ) : null}
     </>
   )
 }

@@ -244,6 +244,20 @@ describe("buildAccountSteps", () => {
     expect(stepByKey(partly, "project")?.done).toBe(true)
     expect(stepByKey(partly, "zotero")?.done).toBe(true)
     expect(stepByKey(partly, "cli")?.done).toBe(false)
+    // The browser extension can't be detected, so it's manual, and it's
+    // optional, so it never holds the checklist open.
+    const ext = stepByKey(partly, "browser_extension")
+    expect(ext?.manual).toBe(true)
+    expect(ext?.optional).toBe(true)
+    expect(ext?.done).toBe(false)
+    expect(partly.map((s) => s.key)).toEqual([
+      "github",
+      "project",
+      "cli",
+      "browser_extension",
+      "overleaf",
+      "zotero",
+    ])
     // Overleaf and Zotero are optional, so the list finishes without them.
     const done = buildAccountSteps({
       githubConnected: true,
@@ -266,6 +280,18 @@ describe("buildAccountSteps", () => {
     })
     expect(stepByKey(markedCli, "cli")?.done).toBe(true)
     expect(isComplete(markedCli)).toBe(true)
+    // Marking the extension by hand is the only way it gets done.
+    const markedExt = buildAccountSteps({
+      githubConnected: true,
+      zoteroConnected: false,
+      overleafConnected: false,
+      cliRunning: true,
+      projectCount: 1,
+      flags: ["browser_extension"],
+    })
+    const markedExtStep = stepByKey(markedExt, "browser_extension")
+    expect(markedExtStep?.done).toBe(true)
+    expect(markedExtStep?.manuallyDone).toBe(true)
   })
 })
 

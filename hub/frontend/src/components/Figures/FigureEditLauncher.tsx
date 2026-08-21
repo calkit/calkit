@@ -118,7 +118,7 @@ const FigureEditLauncher = ({
             studio.onOpen()
           }}
         >
-          Edit in figure studio
+          Edit figure
         </Button>
         {studio.isOpen ? (
           <FigureStudio

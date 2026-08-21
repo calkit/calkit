@@ -236,6 +236,18 @@ export function buildAccountSteps({
       manual: true,
     },
     {
+      key: "browser_extension",
+      title: "Install the browser extension",
+      detail:
+        "Brings Calkit into GitHub, Overleaf, and journal pages: stale " +
+        "figures on Overleaf, DVC-tracked files on GitHub, and references " +
+        "saved straight from the paper you're reading.",
+      done: false,
+      // Nothing on the server can tell whether an extension is installed.
+      manual: true,
+      optional: true,
+    },
+    {
       key: "overleaf",
       title: "Connect Overleaf",
       detail: "Link papers you're already writing to the projects behind them.",

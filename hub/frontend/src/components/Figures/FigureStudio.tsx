@@ -698,9 +698,7 @@ const FigureStudio = ({
           }
         }}
       >
-        <ModalHeader>
-          {edit ? `Figure studio: ${edit.stage}` : "Figure studio"}
-        </ModalHeader>
+        <ModalHeader>{edit ? "Edit figure" : "New figure"}</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={4}>
           <Text fontSize="sm" color="ui.dim" mb={4}>

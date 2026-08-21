@@ -681,6 +681,9 @@ class ProjectPost(ProjectBase):
     git_repo_url: str | None = Field(max_length=2048, default=None)
     template: str | None = None
     git_repo_exists: bool | None = None
+    # Whether a project made from a template keeps the template's commits.
+    # Off by default: the new project's history starts with itself.
+    keep_template_history: bool = False
 
 
 class UserProjectAccess(SQLModel, table=True):

@@ -3,7 +3,7 @@ import { Button, Link, useDisclosure } from "@chakra-ui/react"
 import { useMutation, useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
-import { FaGithub } from "react-icons/fa"
+import { FaChrome, FaGithub } from "react-icons/fa"
 import { SiOverleaf, SiZotero } from "react-icons/si"
 
 import { UsersService } from "../../client"
@@ -16,6 +16,9 @@ import { stashZoteroReturn } from "../../lib/zotero"
 import UpdateOverleafToken from "../UserSettings/UpdateOverleafToken"
 import ChecklistCard from "./ChecklistCard"
 import CommandBlock from "./CommandBlock"
+
+const CHROME_EXT_URL =
+  "https://chromewebstore.google.com/detail/idhdomgapfolnpffanajdckdaojencal"
 
 /**
  * Account setup that every project shares: the accounts Calkit talks to on
@@ -91,6 +94,18 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
           Windows and other options <ExternalLinkIcon mb={0.5} />
         </Link>
       </>
+    ),
+    browser_extension: (
+      <Button
+        size="xs"
+        as={Link}
+        href={CHROME_EXT_URL}
+        isExternal
+        leftIcon={<FaChrome />}
+        rightIcon={<ExternalLinkIcon />}
+      >
+        Get it from the Chrome Web Store
+      </Button>
     ),
     overleaf: (
       <>

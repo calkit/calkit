@@ -2,6 +2,7 @@ import {
   Button,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -11,6 +12,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
+  Text,
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -19,6 +21,7 @@ import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
+import useAuth from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
@@ -32,6 +35,7 @@ interface FigurePostWithFile {
   title: string
   description: string
   file: FileList
+  created_with_ai?: string
 }
 
 const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
@@ -39,6 +43,7 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
   const showToast = useCustomToast()
   const routeApi = getRouteApi("/_layout/$accountName/$projectName")
   const { accountName, projectName } = routeApi.useParams()
+  const { user } = useAuth()
   const {
     register,
     handleSubmit,
@@ -62,6 +67,11 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
           path: data.path,
           description: data.description,
           file: data.file[0],
+          // An uploaded figure has no stage to vouch for it, so the person
+          // uploading it does; the hub refuses the upload otherwise.
+          created_by: user?.email ?? null,
+          created_by_name: user?.full_name ?? null,
+          created_with_ai: data.created_with_ai || null,
         },
         owner_name: accountName,
         project_name: projectName,
@@ -157,6 +167,27 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
               {errors.file && (
                 <FormErrorMessage>{errors.file.message}</FormErrorMessage>
               )}
+            </FormControl>
+            <FormControl mt={4}>
+              <FormLabel htmlFor="created_with_ai">
+                Made with generative AI (optional)
+              </FormLabel>
+              <Input
+                id="created_with_ai"
+                {...register("created_with_ai")}
+                placeholder="Ex: Claude Opus 5"
+                autoComplete="off"
+              />
+              <FormHelperText>
+                An uploaded figure has no pipeline stage behind it, so it is
+                recorded as created by{" "}
+                <Text as="span" fontWeight="semibold">
+                  {user?.full_name
+                    ? `${user.full_name} (${user.email})`
+                    : user?.email}
+                </Text>
+                . Name the tool here if one helped make it.
+              </FormHelperText>
             </FormControl>
           </ModalBody>
           <ModalFooter gap={3}>

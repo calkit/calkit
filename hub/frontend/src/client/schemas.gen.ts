@@ -197,6 +197,39 @@ export const Body_projects_post_project_figureSchema = {
       ],
       title: "File",
     },
+    created_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By",
+    },
+    created_by_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By Name",
+    },
+    created_with_ai: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created With Ai",
+    },
   },
   type: "object",
   required: ["path", "title", "description"],
@@ -5613,6 +5646,11 @@ export const ProjectPostSchema = {
         },
       ],
       title: "Git Repo Exists",
+    },
+    keep_template_history: {
+      type: "boolean",
+      title: "Keep Template History",
+      default: false,
     },
   },
   type: "object",

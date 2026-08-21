@@ -185,6 +185,7 @@ from app.storage import (
 from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
 from calkit.models.core import Dataset as CkDataset
+from calkit.models.core import Figure as CkFigure
 from calkit.models.core import ImportedDataset as CkImportedDataset
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
@@ -762,7 +763,12 @@ def get_owned_projects(
     statement = (
         select(Project)
         .where(where_clause)
-        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+        # Most recently worked on first, which is what a returning user is
+        # looking for; creation order is the tie-breaker
+        .order_by(
+            sqlalchemy.desc(Project.updated).nulls_last(),  # type: ignore
+            sqlalchemy.desc(Project.created),  # type: ignore
+        )
         .offset(offset)
         .limit(limit)
     )
@@ -987,6 +993,19 @@ def post_project(
                 repo.git.pull(["upstream", repo.active_branch.name])
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
+                if not project_in.keep_template_history:
+                    # The template's commits are its history, not this
+                    # project's. Start from one commit holding its tree;
+                    # `derived_from` in calkit.yaml records where it came
+                    # from and at which revision.
+                    branch = repo.active_branch.name
+                    repo.git.checkout("--orphan", "calkit-fresh-start")
+                    repo.git.add("-A")
+                    repo.git.commit(
+                        ["-m", f"Start from template {project_in.template}"]
+                    )
+                    repo.git.branch("-D", branch)
+                    repo.git.branch("-m", branch)
                 template_repo = get_repo(
                     project=template_project,
                     session=session,
@@ -3389,8 +3408,19 @@ def post_project_figure(
     description: Annotated[str, Form()],
     stage: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
+    # Who made an uploaded figure. A figure that didn't come out of a stage
+    # has no other provenance, so the person uploading it stands behind it.
+    created_by: Optional[Annotated[str, Form()]] = Form(None),
+    created_by_name: Optional[Annotated[str, Form()]] = Form(None),
+    created_with_ai: Optional[Annotated[str, Form()]] = Form(None),
 ) -> Figure:
     path = _normalize_artifact_file_path(path)
+    if file is not None and stage is None and not created_by:
+        raise HTTPException(
+            422,
+            "An uploaded figure needs someone to stand behind it: say who "
+            "created it (created_by), or name the stage that produces it",
+        )
     file_data: bytes | None = None
     full_fig_path: str | None = None
     if file is not None:
@@ -3462,9 +3492,23 @@ def post_project_figure(
             400, "File must exist in repo if not being uploaded"
         )
     # Update figures
-    figures.append(
-        dict(path=path, title=title, description=description, stage=stage)
+    fig_entry: dict[str, Any] = dict(
+        path=path, title=title, description=description, stage=stage
     )
+    if stage is None:
+        fig_entry.pop("stage")
+    if created_by and stage is None:
+        person: dict[str, Any] = dict(email=created_by.strip())
+        if created_by_name and created_by_name.strip():
+            person["name"] = created_by_name.strip()
+        if created_with_ai and created_with_ai.strip():
+            person["with_ai"] = created_with_ai.strip()
+        fig_entry["created_by"] = person
+        try:
+            CkFigure.model_validate(fig_entry)
+        except ValidationError as e:
+            raise HTTPException(422, f"Invalid figure: {e}")
+    figures.append(fig_entry)
     ck_info["figures"] = figures
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)

@@ -135,7 +135,7 @@ const ProjectChecklist = ({
               studioModal.onOpen()
             }}
           >
-            Plot a dataset in the browser
+            New figure from data
           </Button>
           <Button
             size="xs"

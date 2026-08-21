@@ -297,6 +297,7 @@ function NameItStep({
       git_repo_url: isExisting ? "" : `https://github.com/${githubUsername}/`,
       is_public: false,
       template: isExisting ? null : "calkit/example-basic",
+      keep_template_history: false,
       git_repo_exists: isExisting,
       existing_repo: "",
     },
@@ -332,6 +333,8 @@ function NameItStep({
         // An existing repo is imported as it stands; generating it from a
         // template would overwrite the work the user came here to clean up.
         template: isExisting ? null : data.template || null,
+        keep_template_history:
+          !isExisting && Boolean(data.keep_template_history),
       }
       const gitName = String(post.git_repo_url).split("/").at(-1)
       if (gitName) {
@@ -518,6 +521,18 @@ function NameItStep({
             ))}
             <option value="">Empty repo: I'll set it up myself</option>
           </Select>
+        </FormControl>
+      ) : null}
+      {!isExisting ? (
+        <FormControl mb={4}>
+          <Checkbox {...register("keep_template_history")} colorScheme="teal">
+            Keep the template's commit history
+          </Checkbox>
+          <FormHelperText>
+            Off by default: your project starts from one commit holding the
+            template's files, and calkit.yaml records which template and
+            revision it came from.
+          </FormHelperText>
         </FormControl>
       ) : null}
       <FormControl
@@ -842,14 +857,14 @@ function FigureStep({
             setStudioOpen(true)
           }}
         >
-          {shown ? "Plot the data yourself" : "Open the figure studio"}
+          {shown ? "Make your own figure" : "New figure from data"}
         </Button>
         <Button variant={shown ? "primary" : "ghost"} onClick={onDone}>
           Continue
         </Button>
       </HStack>
       <Text fontSize="xs" color="ui.dim">
-        The studio runs Python in your browser, nothing to install. Saving a
+        The editor runs Python in your browser, nothing to install. Saving a
         plot from it adds a stage to the pipeline and an environment for it to
         run in.
       </Text>

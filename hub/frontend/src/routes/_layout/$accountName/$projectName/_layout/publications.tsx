@@ -26,7 +26,7 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { useEffect, useRef, useState } from "react"
+import { Fragment, useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
 import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
@@ -41,6 +41,9 @@ import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactC
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../../../../../components/Common/CommentsPanel"
+import InputsRow, {
+  type InputLink,
+} from "../../../../../components/Common/InputsRow"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
@@ -60,6 +63,11 @@ import useProject, {
 } from "../../../../../hooks/useProject"
 import { handleError } from "../../../../../lib/errors"
 import { getLatexSourcePath } from "../../../../../lib/latexProject"
+import {
+  classifyPublicationDeps,
+  findFeederStages,
+  getStageDeps,
+} from "../../../../../lib/provenance"
 
 const pubSearchSchema = z.object({
   path: z.string().optional(),
@@ -101,6 +109,82 @@ function PubInfo({
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
   const texPath = getLatexSourcePath(publication)
+  // What went into the publication: its stage's concrete inputs in dvc.yaml,
+  // sorted against the declared figures, plus any stage that copies files
+  // into the publication's folder (e.g., a map-paths stage).
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
+  const figuresQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "figures"],
+    queryFn: () =>
+      ProjectsService.getProjectFigures({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
+  const figureLinks: InputLink[] = []
+  const referenceLinks: InputLink[] = []
+  const otherLinks: InputLink[] = []
+  let feederStages: string[] = []
+  if (publication.stage) {
+    const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
+    // stage_info carries the deps too, so the rows can show before the
+    // pipeline has loaded
+    const stage = dvcStages[publication.stage] ?? publication.stage_info
+    const deps = getStageDeps(stage)
+    const inputs = classifyPublicationDeps(deps, figuresQuery.data?.items ?? [])
+    for (const { path, figure } of inputs.figures) {
+      figureLinks.push(
+        figure
+          ? {
+              key: path,
+              to: "../figures",
+              search: { path },
+              label: figure.title || path,
+              tooltipPath: figure.title ? path : undefined,
+              code: !figure.title,
+            }
+          : {
+              key: path,
+              to: "../files",
+              search: { path },
+              label: path,
+              code: true,
+            },
+      )
+    }
+    for (const path of inputs.references)
+      referenceLinks.push({
+        key: path,
+        to: "../files",
+        search: { path },
+        label: path,
+        code: true,
+      })
+    for (const path of inputs.other)
+      otherLinks.push({
+        key: path,
+        to: "../files",
+        search: { path },
+        label: path,
+        code: true,
+      })
+    feederStages = findFeederStages(
+      publication.stage,
+      dvcStages,
+      publication.path,
+    )
+  }
 
   const overleafSyncMutation = useMutation({
     mutationFn: () =>
@@ -204,6 +288,28 @@ function PubInfo({
           </Text>
         )}
       </Text>
+      <InputsRow label="Figures" items={figureLinks} />
+      <InputsRow label="References" items={referenceLinks} />
+      <InputsRow label="Other inputs" items={otherLinks} />
+      {feederStages.length > 0 && (
+        <Text fontSize="sm" mb={1} color="gray.500">
+          Figures copied in by stage{feederStages.length > 1 ? "s" : ""}{" "}
+          {feederStages.map((name, i) => (
+            <Fragment key={name}>
+              {i > 0 && ", "}
+              <Link
+                as={RouterLink}
+                to="../pipeline"
+                search={{ stage: name } as any}
+              >
+                <Code fontSize="xs" cursor="pointer">
+                  {name}
+                </Code>
+              </Link>
+            </Fragment>
+          ))}
+        </Text>
+      )}
       {publication.overleaf?.project_id && (
         <Box mt={2}>
           <Flex align="center" gap={1}>

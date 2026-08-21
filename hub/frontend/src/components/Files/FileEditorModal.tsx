@@ -7,6 +7,7 @@ import {
   Button,
   Flex,
   Input,
+  Kbd,
   Modal,
   ModalBody,
   ModalCloseButton,
@@ -170,6 +171,9 @@ const FileEditorModal = ({
   })
 
   const requestSave = () => {
+    if (saveMutation.isPending) {
+      return
+    }
     if (textRef.current !== baseRef.current) {
       commitModal.onOpen()
     }
@@ -229,6 +233,9 @@ const FileEditorModal = ({
             >
               Save
             </Button>
+            <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> to save
+            </Text>
             <Box flex="1" />
             <ModalCloseButton position="static" />
           </Flex>
@@ -248,6 +255,7 @@ const FileEditorModal = ({
                     textRef.current = text
                     setDirty(text !== baseRef.current)
                   }}
+                  onModEnter={requestSave}
                 />
               </Box>
             )}

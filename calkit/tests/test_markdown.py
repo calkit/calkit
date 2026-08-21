@@ -442,7 +442,7 @@ def test_extract_environments_errors():
     with pytest.raises(MarkdownParseError, match="must be one of"):
         extract_environments(
             parse_markdown(
-                "<!-- calkit environment name=a kind=conda -->\n- numpy\n"
+                "<!-- calkit environment name=a kind=docker -->\n- numpy\n"
             ),
             "README.md",
         )
@@ -797,3 +797,215 @@ def test_parse_markdown_file_cache_sees_edits(tmp_path):
     time.sleep(0.01)
     md.write_text("```python calkit stage name=SECOND\nprint(2)\n```\n")
     assert [b.name for b in parse_markdown_file(str(md))] == ["SECOND"]
+
+
+def test_parse_install_block_reads_shell_installers():
+    from calkit.markdown import parse_install_block
+
+    spec = parse_install_block("pip install numpy pandas", "sh")
+    assert spec is not None
+    assert spec.kind == "uv-venv"
+    assert spec.packages == ["numpy", "pandas"]
+    assert not spec.dev
+    # The installer, not the language, says which kind of environment
+    assert parse_install_block("uv add matplotlib", "bash").kind == "uv"
+    assert parse_install_block("conda install -c conda-forge numpy", "sh") == (
+        parse_install_block("conda install numpy", "sh")
+    )
+    # A channel is not a package
+    assert parse_install_block(
+        "conda install -c conda-forge numpy", "sh"
+    ).packages == ["numpy"]
+    # A spec file the command names is carried through
+    assert (
+        parse_install_block("pip install -r requirements.txt", "sh").spec_path
+        == "requirements.txt"
+    )
+    # Installing the working directory is a dev install
+    assert parse_install_block("pip install -e .", "sh").dev
+    assert parse_install_block("uv sync", "sh").dev
+    # Anything that isn't an install leaves the block alone
+    assert parse_install_block("git clone https://example.com/x", "sh") is None
+    assert parse_install_block("pip install numpy\nmake all", "sh") is None
+
+
+def test_parse_install_block_reads_julia_and_r():
+    from calkit.markdown import parse_install_block
+
+    spec = parse_install_block('using Pkg\nPkg.add("Plots")', "julia")
+    assert spec.kind == "julia"
+    assert spec.packages == ["Plots"]
+    assert parse_install_block(
+        'using Pkg; Pkg.add(["DataFrames", "CSV"])', "julia"
+    ).packages == ["DataFrames", "CSV"]
+    assert parse_install_block('Pkg.develop(path=".")', "julia").dev
+    # Package-mode and prompted transcripts read the same as plain calls
+    assert parse_install_block("] add Plots", "julia").packages == ["Plots"]
+    assert parse_install_block(
+        'julia> using Pkg\n\njulia> Pkg.add("Oceananigans")', "julia"
+    ).packages == ["Oceananigans"]
+    # A block that also does work is code, not a declaration
+    assert parse_install_block('Pkg.add("Plots")\nplot(1:10)', "julia") is None
+    spec = parse_install_block('install.packages(c("ggplot2", "dplyr"))', "r")
+    assert spec.kind == "renv"
+    assert spec.packages == ["ggplot2", "dplyr"]
+    # A remote is named owner/repo; the package is the repo
+    assert parse_install_block(
+        'remotes::install_github("tidyverse/dplyr")', "r"
+    ).packages == ["dplyr"]
+    assert parse_install_block("renv::restore()", "r").dev
+    assert parse_install_block("library(ggplot2)\nggplot()", "r") is None
+
+
+def test_annotate_code_blocks():
+    from calkit.markdown import annotate_code_blocks
+
+    text = (
+        "# Demo\n\n"
+        "Install it:\n\n"
+        "```sh\npip install numpy\n```\n\n"
+        "Then run it:\n\n"
+        "```python\nimport numpy as np\n\nprint(np.pi)\n```\n\n"
+        "Check it worked:\n\n"
+        "```sh\ncalkit run README.md\n```\n"
+    )
+    new, annotated = annotate_code_blocks(text, "README.md")
+    assert annotated.stages == {"py": "python"}
+    assert annotated.environments == {"readme": "python"}
+    assert "```sh calkit environment name=readme python=" in new
+    assert "```python calkit stage name=py environment=readme\n" in new
+    # A shell block that installs nothing is an instruction for a reader,
+    # not a stage
+    assert "```sh\ncalkit run README.md\n```" in new
+    # Only info strings change
+    assert [
+        line for line in new.splitlines() if not line.startswith("```")
+    ] == [line for line in text.splitlines() if not line.startswith("```")]
+
+
+def test_annotate_code_blocks_joins_blocks_and_skips_transcripts():
+    from calkit.markdown import annotate_code_blocks
+
+    text = (
+        "```python\nx = 1\n```\n\n"
+        "```python\nprint(x)\n```\n\n"
+        "```python\n>>> print(x)\n1\n```\n"
+    )
+    new, annotated = annotate_code_blocks(text, "README.md")
+    # Blocks of a language join into one stage, in document order
+    assert annotated.stages == {"py": "python"}
+    assert new.count("```python calkit stage name=py\n") == 2
+    # A transcript can't be run as it stands, so it is left alone
+    assert "```python\n>>> print(x)" in new
+
+
+def test_annotate_code_blocks_is_a_no_op_without_runnable_code():
+    from calkit.markdown import annotate_code_blocks
+
+    text = "# Docs\n\n```sh\nmake all\n```\n\n```text\nhello\n```\n"
+    new, annotated = annotate_code_blocks(text, "README.md")
+    assert not annotated
+    assert new == text
+
+
+def test_resolve_environments_dev_install_uses_the_project_spec(
+    tmp_path, monkeypatch
+):
+    from calkit.markdown import (
+        extract_environments,
+        extract_stages,
+        resolve_environments,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    text = (
+        "```sh calkit environment name=dev\npip install -e .\n```\n\n"
+        "```python calkit stage name=py environment=dev\nprint(1)\n```\n"
+    )
+    blocks = parse_markdown(text, path="README.md")
+    envs = resolve_environments(
+        extract_environments(blocks, "README.md"),
+        extract_stages(blocks, "README.md"),
+        "README.md",
+    )
+    # pip was named, but the project describes itself with a pyproject, so
+    # that is the environment---and there is nothing to generate
+    assert envs["dev"]["kind"] == "uv"
+    assert envs["dev"]["path"] == "pyproject.toml"
+    assert envs["dev"]["_spec_content"] is None
+    assert "will be overwritten" not in envs["dev"]["description"]
+
+
+def test_extract_environments_merges_install_blocks():
+    from calkit.markdown import extract_environments
+
+    text = (
+        "```sh calkit environment name=py\nuv add numpy\n```\n\n"
+        "```sh calkit environment name=py\nuv add pandas\n```\n\n"
+        # The same package fetched two ways is one dependency
+        "```sh calkit environment name=py\nuv add numpy\n```\n"
+    )
+    envs = extract_environments(parse_markdown(text), "README.md")
+    assert envs["py"]["_install"].packages == ["numpy", "pandas"]
+
+
+def test_extract_environments_still_rejects_duplicate_lists():
+    from calkit.markdown import extract_environments
+
+    with pytest.raises(MarkdownParseError, match="more than once"):
+        extract_environments(
+            parse_markdown(
+                "<!-- calkit environment name=a -->\n- numpy\n\n"
+                "<!-- calkit environment name=a -->\n- scipy\n"
+            ),
+            "README.md",
+        )
+
+
+def test_installing_the_projects_own_package_is_a_dev_install(
+    tmp_path, monkeypatch
+):
+    from calkit.markdown import (
+        extract_environments,
+        extract_stages,
+        installs_local_package,
+        local_package_source_paths,
+        parse_install_block,
+        resolve_environments,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "wave-tools"\nversion = "0.1.0"\n'
+    )
+    (tmp_path / "src" / "wave_tools").mkdir(parents=True)
+    (tmp_path / "src" / "wave_tools" / "__init__.py").write_text("")
+    # A README tells a reader to install the package from wherever it is
+    # published; inside its own repo that is the working tree
+    assert installs_local_package(
+        parse_install_block("uv add wave-tools", "sh")
+    )
+    assert installs_local_package(
+        parse_install_block(
+            "uv add git+ssh://git@github.com/me/wave-tools.git", "sh"
+        )
+    )
+    assert not installs_local_package(
+        parse_install_block("uv add numpy", "sh")
+    )
+    # The source is a dependency in its own right, because an editable
+    # install is a pointer to the working tree
+    assert local_package_source_paths("python") == ["src/wave_tools"]
+    text = (
+        "```sh calkit environment name=py\nuv add wave-tools\n```\n\n"
+        "```python calkit stage name=py environment=py\nprint(1)\n```\n"
+    )
+    blocks = parse_markdown(text, path="README.md")
+    envs = resolve_environments(
+        extract_environments(blocks, "README.md"),
+        extract_stages(blocks, "README.md"),
+        "README.md",
+    )
+    assert envs["py"]["path"] == "pyproject.toml"
+    assert envs["py"]["_spec_content"] is None

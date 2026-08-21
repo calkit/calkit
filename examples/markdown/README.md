@@ -17,16 +17,29 @@ Only annotated blocks run.
 
 ## The environment
 
-The stages below need these packages:
+A README says what its code needs by showing how to install it, so that
+is what Calkit reads:
 
+```sh calkit environment name=py python=3.13
+uv add numpy matplotlib
+```
+
+That is the command a reader would run, and it is also the declaration of
+an environment named `py`, which Calkit resolves and locks exactly as it
+would one written out in `calkit.yaml`.
+The installer says which kind of environment it is---`uv add` means a
+`uv` project, `pip install` a virtualenv, `conda install` a conda
+environment---so nothing has to spell that out.
+
+An environment can also be declared as a plain list of packages, for a
+file that would rather not show a command:
+
+```md
 <!-- calkit environment name=py python=3.13 -->
 
 - numpy
 - matplotlib
-
-That is an ordinary Markdown list, so it reads as documentation.
-Calkit turns it into a `uv` environment named `py`, resolving and
-locking it the same way it would one declared in `calkit.yaml`.
+```
 
 ## Generating some data
 
@@ -135,20 +148,35 @@ quietly winning.
 Note that the two blocks above are inside a longer fence, so they are
 shown rather than run.
 
+A project that installs itself---the usual case for a package with its
+own `pyproject.toml`, `Project.toml`, or `DESCRIPTION`---declares its
+environment by saying so:
+
+````md
+```sh calkit environment name=dev
+pip install -e .
+```
+````
+
+There is nothing for Calkit to generate there, because the project
+already describes that environment, so the environment points at the
+spec file the project keeps rather than one written under `.calkit`.
+`uv sync`, `Pkg.develop(path=".")`, and `renv::restore()` all say the
+same thing in their own languages.
+
 ## Other languages
 
 You can use Julia and R too.
 Each language gets its own environment, declared exactly the same way.
 Note that no `kind` is given below: Calkit works out that one is a Julia
-environment and the other is `renv` from the language of the code blocks
-that use them.
+environment and the other is `renv` from what the install commands are.
 
-Our Julia dependencies are:
+Our Julia dependencies get installed the Julia way:
 
-<!-- calkit environment name=jl julia=1.12 -->
-
-- CSV
-- DataFrames
+```julia calkit environment name=jl julia=1.12
+using Pkg
+Pkg.add(["CSV", "DataFrames"])
+```
 
 This Julia stage writes a second dataset:
 
@@ -167,11 +195,11 @@ println("wrote $(nrow(df)) rows")
 wrote 41 rows
 ```
 
-Our R dependencies are:
+And our R dependencies the R way:
 
-<!-- calkit environment name=r -->
-
-- ggplot2
+```r calkit environment name=r
+install.packages(c("ggplot2"))
+```
 
 And this R stage plots it, taking the Julia stage's output as its input so
 Calkit knows the order to run them in:

@@ -1363,18 +1363,35 @@ def to_dvc(
     # block covers them all, which avoids a git check-ignore subprocess
     # per path.
     if write and manage_gitignore and markdown.script_paths:
-        ignore_lines = ["/.calkit/markdown/"]
-        for env_name in sorted(markdown.environments):
-            env_dir = os.path.dirname(markdown.environments[env_name]["path"])
-            # Specs and locks are committed---that is how a Calkit project
-            # records its environments---and so is the tooling's own
-            # bootstrap (renv's activate.R and .Rprofile, which renv
-            # expects in version control). What can't be committed is the
-            # installed environment itself: it is large and holds absolute
-            # paths from the machine that built it. renv ignores its own
-            # library via renv/.gitignore; a virtualenv has nothing
-            # equivalent, so name it here.
-            ignore_lines.append(f"/{env_dir}/.venv/")
+        # Specs and locks are committed---that is how a Calkit project
+        # records its environments---and so is the tooling's own bootstrap
+        # (renv's activate.R and .Rprofile, which renv expects in version
+        # control). What can't be committed is the installed environment
+        # itself: it is large and holds absolute paths from the machine
+        # that built it. renv ignores its own library via renv/.gitignore;
+        # a virtualenv has nothing equivalent, so name it here.
+        def _env_dir(path: str) -> str:
+            # An environment described by a spec file in the project
+            # directory has no directory of its own, and its virtualenv
+            # sits beside that file
+            return Path(os.path.dirname(path) or ".").as_posix()
+
+        env_dirs = set()
+        for env in markdown.environments.values():
+            env_dirs.add(_env_dir(env["path"]))
+        # An environment the Markdown only references can live under
+        # .calkit/envs too---that is where xr puts one it builds from the
+        # code's imports---and its virtualenv needs ignoring just the same.
+        for env in (ck_info.get("environments") or {}).values():
+            if not isinstance(env, dict) or not env.get("path"):
+                continue
+            env_dir = _env_dir(env["path"])
+            if env_dir.startswith(".calkit/envs/"):
+                env_dirs.add(env_dir)
+        ignore_lines = ["/.calkit/markdown/"] + [
+            "/.venv/" if env_dir == "." else f"/{env_dir}/.venv/"
+            for env_dir in sorted(env_dirs)
+        ]
         _write_managed_gitignore_block(
             os.path.join(wdir or ".", ".gitignore"),
             marker="calkit markdown derived files",
@@ -1518,6 +1535,20 @@ def to_dvc(
             pv_full = os.path.join(wdir, pv_path) if wdir else pv_path
             if os.path.isfile(pv_full):
                 env_fpaths[env_name].append(pv_path)
+        # An environment built by installing the project itself points at
+        # the project's own spec file. That install is a pointer to the
+        # working tree, so the lock says nothing about the code it
+        # resolves to---the source has to be a dependency in its own right
+        # or editing the package would leave its stages looking current.
+        language = calkit.markdown.ENV_KIND_LANGUAGES.get(env.get("kind", ""))
+        spec_entry = calkit.markdown.LOCAL_PACKAGE_SPECS.get(language or "")
+        if spec_entry is not None and env.get("path") == spec_entry[0]:
+            for source_path in calkit.markdown.local_package_source_paths(
+                language,
+                wdir=wdir,  # type: ignore[arg-type]
+            ):
+                if source_path not in env_fpaths[env_name]:
+                    env_fpaths[env_name].append(source_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml

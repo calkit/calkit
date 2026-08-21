@@ -483,7 +483,7 @@ know Markdown was involved.
 | Kind-specific parameter | Type        | Required | Default    | Description                                                                                                      |
 | ----------------------- | ----------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
 | `environment`           | str         | no       | '\_system' | Environment used by blocks that don't name one.                                                                  |
-| `path`                  | str \| None | no       | null       | Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path. |
+| `target_path`           | str \| None | no       | null       | Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path. |
 
 ### `matlab-command`
 

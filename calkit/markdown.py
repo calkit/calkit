@@ -735,6 +735,7 @@ def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
 ENV_SPEC_FILENAMES: dict[str, str] = {
     "uv-venv": "requirements.txt",
     "uv": "pyproject.toml",
+    "conda": "environment.yml",
     "renv": "DESCRIPTION",
     "julia": "Project.toml",
 }
@@ -798,6 +799,10 @@ def render_env_spec(
         return calkit.environments.create_uv_pyproject_content(
             deps, project_name=env_name, **kwargs
         )
+    if kind == "conda":
+        return calkit.environments.create_conda_environment_content(
+            deps, project_name=env_name
+        )
     if kind == "renv":
         return calkit.environments.create_r_description_content(
             deps, project_name=env_name
@@ -831,12 +836,29 @@ def extract_environments(
                 path=path,
                 line=block.line,
             )
+        install = (
+            parse_install_block(block.content, block.language)
+            if block.source == "fence"
+            else None
+        )
         if name in envs:
-            raise MarkdownParseError(
-                f"Environment '{name}' is declared more than once",
-                path=path,
-                line=block.line,
-            )
+            # Two blocks of install commands under one name are additive:
+            # a README often installs in stages, or shows the same package
+            # fetched two ways, and both describe one environment.
+            previous = envs[name].get("_install")
+            if install is None or previous is None:
+                raise MarkdownParseError(
+                    f"Environment '{name}' is declared more than once",
+                    path=path,
+                    line=block.line,
+                )
+            if install.kind == previous.kind:
+                install = merge_install_specs([previous, install])
+            else:
+                install = previous
+            envs[name]["_install"] = install
+            envs[name]["_content"] = "\n".join(install.packages)
+            continue
         attrs = {k: v for k, v in block.attrs.items() if k != "name"}
         kind = attrs.pop("kind", None)
         if kind is not None and str(kind) not in ENV_SPEC_FILENAMES:
@@ -869,6 +891,17 @@ def extract_environments(
         env["_verbatim"] = block.source == "fence"
         env["_content"] = block.content
         env["_line"] = block.line
+        # ...unless the fence is a command that installs the packages,
+        # which is how a README normally says what its code needs. That
+        # states the same thing imperatively, so it's read as a package
+        # list, and the installer chosen says which kind of environment
+        # it is.
+        if install is not None:
+            env["_install"] = install
+            env["_verbatim"] = False
+            env["_content"] = "\n".join(install.packages)
+            if kind is None:
+                env["_kind"] = install.kind
         envs[name] = env
     return envs
 
@@ -878,6 +911,7 @@ def resolve_environments(
     specs: dict[str, MarkdownStageSpec],
     markdown_path: str,
     default_env: str | None = None,
+    wdir: str | None = None,
 ) -> dict[str, dict]:
     """Finish environment declarations, inferring kinds where they're absent.
 
@@ -943,20 +977,50 @@ def resolve_environments(
                     line=env["_line"],
                 )
             env["julia"] = julia
+        install = env.pop("_install", None)
+        # A dev install says the environment is this project, which some
+        # spec file in the project directory already describes---so point
+        # at that file rather than generating a second description of it
+        is_dev = install is not None and (
+            install.dev or installs_local_package(install, wdir=wdir)
+        )
+        dev_spec = resolve_dev_install(install, wdir=wdir) if is_dev else None
+        if dev_spec is not None:
+            kind, env["kind"] = dev_spec[0], dev_spec[0]
+            env["path"] = dev_spec[1]
+        elif install is not None and install.spec_path:
+            # ...as does a command naming a spec file, when it is there
+            spec_path = install.spec_path
+            full = os.path.join(wdir, spec_path) if wdir else spec_path
+            if os.path.isfile(full):
+                env["path"] = Path(spec_path).as_posix()
+            else:
+                env["path"] = get_env_spec_path(name, kind=kind)
+        else:
+            env["path"] = get_env_spec_path(name, kind=kind)
         env["kind"] = kind
-        env["path"] = get_env_spec_path(name, kind=kind)
-        # Say where this came from in the environment itself rather than a
-        # YAML comment, which a user could delete without the notice being
-        # restored. This mirrors the 'desc' Calkit writes on DVC stages.
-        env.setdefault(
-            "description",
-            f"Generated from {path}. Changes made here will be overwritten.",
-        )
-        env["_spec_content"] = (
-            env["_content"]
-            if env["_verbatim"]
-            else render_env_spec(kind, env["_content"], name, python=python)
-        )
+        if dev_spec is not None or env["path"] != get_env_spec_path(
+            name, kind=kind
+        ):
+            # The spec is a file the project already keeps, so leave it be
+            env["_spec_content"] = None
+            env.setdefault("description", f"Declared in {path}.")
+        elif env["_verbatim"]:
+            env["_spec_content"] = env["_content"]
+        else:
+            env["_spec_content"] = render_env_spec(
+                kind, env["_content"], name, python=python
+            )
+        if env["_spec_content"] is not None:
+            # Say where this came from in the environment itself rather
+            # than a YAML comment, which a user could delete without the
+            # notice being restored. This mirrors the 'desc' Calkit
+            # writes on DVC stages.
+            env.setdefault(
+                "description",
+                f"Generated from {path}. "
+                "Changes made here will be overwritten.",
+            )
     return envs
 
 
@@ -968,6 +1032,10 @@ def write_env_specs(envs: dict[str, dict], wdir: str | None = None) -> None:
     compile.
     """
     for env in envs.values():
+        # An environment that points at a spec file already in the project
+        # -- what a dev install declares -- has nothing to generate
+        if env.get("_spec_content") is None:
+            continue
         # uv resolves its interpreter from a .python-version in the project
         # directory. Without one the version only floats above the
         # requires-python floor, so the environment isn't really pinned.
@@ -1087,7 +1155,7 @@ def expand_ck_info(
         # Kinds can be inferred from the languages of the stages using
         # each environment, so this needs both halves read first.
         envs = resolve_environments(
-            envs, specs, md_path, default_env=default_env
+            envs, specs, md_path, default_env=default_env, wdir=wdir
         )
         for env_name, env in envs.items():
             public = {k: v for k, v in env.items() if not k.startswith("_")}
@@ -1159,6 +1227,482 @@ def expand_ck_info(
 # Languages whose dependencies Calkit can read out of the code itself.
 # Shell and MATLAB have no import statements to go on, so stages in those
 # languages keep whatever environment they were given.
+# Fence languages whose content is a shell session rather than a program.
+SHELL_LANGUAGES = frozenset(
+    {"sh", "bash", "zsh", "shell", "console", "shell-session", "terminal"}
+)
+
+# Which environment kind each installer produces, and the language whose
+# stages it therefore serves.
+INSTALLER_ENV_KINDS: dict[str, str] = {
+    "pip": "uv-venv",
+    "uv-pip": "uv-venv",
+    "uv": "uv",
+    "conda": "conda",
+    "julia": "julia",
+    "r": "renv",
+}
+ENV_KIND_LANGUAGES: dict[str, str] = {
+    "uv-venv": "python",
+    "uv": "python",
+    "conda": "python",
+    "julia": "julia",
+    "renv": "r",
+}
+
+# The spec file a dev install resolves to, in the order a language's
+# toolchains are preferred when more than one is present.
+DEV_INSTALL_SPECS: dict[str, list[tuple[str, str]]] = {
+    "python": [
+        ("uv", "pyproject.toml"),
+        ("uv-venv", "requirements.txt"),
+        ("conda", "environment.yml"),
+    ],
+    "julia": [("julia", "Project.toml")],
+    "r": [("renv", "DESCRIPTION")],
+}
+
+# Options that consume the token after them, so their value isn't mistaken
+# for a package name---``conda install -c conda-forge numpy`` asks for one
+# package, not two.
+_VALUE_OPTIONS = frozenset(
+    {
+        "-c",
+        "--channel",
+        "-n",
+        "--name",
+        "-p",
+        "--prefix",
+        "-f",
+        "--file",
+        "-r",
+        "--requirement",
+        "--python",
+        "--index-url",
+        "--extra-index-url",
+        "--find-links",
+        "--group",
+        "--target",
+        "--constraint",
+    }
+)
+_SPEC_FILE_OPTIONS = frozenset({"-r", "--requirement", "-f", "--file"})
+
+
+@dataclass
+class InstallSpec:
+    """What a block of install commands asks for."""
+
+    kind: str
+    packages: list[str] = field(default_factory=list)
+    # Set when the command installs the project in the working directory
+    # (``pip install -e .``, ``Pkg.develop(path=".")``, ``uv sync``), which
+    # is an environment already described by a spec file on disk
+    dev: bool = False
+    # Set when the command names a spec file, as ``pip install -r`` does
+    spec_path: str | None = None
+
+    @property
+    def language(self) -> str:
+        return ENV_KIND_LANGUAGES[self.kind]
+
+
+def _requirement_key(requirement: str) -> str:
+    """Reduce a requirement to the package it names, for de-duplication.
+
+    A README often shows the same install more than once---over SSH and
+    over HTTPS, say---and those are alternatives, not two dependencies.
+    """
+    req = requirement.strip()
+    # PEP 508 names the package before the URL it comes from
+    m = re.match(r"^(?P<name>[A-Za-z0-9._-]+)\s*@\s*\S+$", req)
+    if m is not None:
+        return _normalize_package_name(m.group("name"))
+    if "://" in req:
+        name = req.rstrip("/").rsplit("/", 1)[-1]
+        name = name.split("#")[0].split("?")[0]
+        return _normalize_package_name(name.removesuffix(".git"))
+    for sep in ["===", "==", ">=", "<=", "~=", "!=", ">", "<", "[", ";", "="]:
+        req = req.split(sep)[0]
+    return _normalize_package_name(req)
+
+
+def _normalize_package_name(name: str) -> str:
+    """Normalize a package name the way a package index would."""
+    return re.sub(r"[-_.]+", "-", name.strip()).lower()
+
+
+# The prompts a session transcript writes before what was typed. ``pkg>``
+# is missing on purpose: it marks Julia's package mode, so it is read
+# rather than stripped.
+_PROMPT_RE = re.compile(r"^(?:\$|%|>>>|\.\.\.|julia>|help\?>|shell>)\s+")
+# What marks a block as a transcript of a session rather than a script:
+# its output is interleaved with its input, so it can't be run as it
+# stands, and Calkit leaves it alone rather than guessing which is which.
+_TRANSCRIPT_RE = re.compile(r"^(?:>>>|\.\.\.|julia>|pkg>|help\?>|In \[\d+\]:)")
+
+
+def is_repl_transcript(content: str) -> bool:
+    """Determine whether a block is a session transcript, not a script."""
+    return any(
+        _TRANSCRIPT_RE.match(line.strip()) for line in content.splitlines()
+    )
+
+
+def _strip_prompt(line: str) -> str:
+    """Drop the prompt a session transcript writes before what was typed."""
+    stripped = line.strip()
+    return _PROMPT_RE.sub("", stripped).strip()
+
+
+def _parse_shell_install(line: str) -> InstallSpec | None:
+    """Read one shell command as an install, or return None if it isn't."""
+    import shlex
+
+    try:
+        tokens = shlex.split(line, comments=True)
+    except ValueError:
+        return None
+    while tokens and tokens[0] in ("sudo", "!"):
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+    installer: str | None = None
+    dev = False
+    rest: list[str] = []
+    if tokens[0] in ("pip", "pip3") and tokens[1:2] == ["install"]:
+        installer, rest = "pip", tokens[2:]
+    elif tokens[:4] == ["python", "-m", "pip", "install"]:
+        installer, rest = "pip", tokens[4:]
+    elif tokens[0] == "uv" and tokens[1:2] == ["add"]:
+        installer, rest = "uv", tokens[2:]
+    elif tokens[:3] == ["uv", "pip", "install"]:
+        installer, rest = "uv-pip", tokens[3:]
+    elif tokens[0] == "uv" and tokens[1:2] in (["sync"], ["lock"]):
+        # These operate on the project in the working directory, so what
+        # they declare is that project's own environment
+        installer, dev, rest = "uv", True, []
+    elif tokens[0] in ("conda", "mamba", "micromamba"):
+        if tokens[1:2] == ["install"]:
+            installer, rest = "conda", tokens[2:]
+        elif tokens[1:3] == ["env", "create"]:
+            installer, rest = "conda", tokens[3:]
+        elif tokens[1:2] == ["create"]:
+            installer, rest = "conda", tokens[2:]
+        else:
+            return None
+    if installer is None:
+        return None
+    packages: list[str] = []
+    spec_path: str | None = None
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg.startswith("-"):
+            flag, _, inline = arg.partition("=")
+            if inline:
+                if flag in _SPEC_FILE_OPTIONS:
+                    spec_path = inline
+                i += 1
+                continue
+            if flag in _VALUE_OPTIONS:
+                if flag in _SPEC_FILE_OPTIONS and i + 1 < len(rest):
+                    spec_path = rest[i + 1]
+                i += 2
+                continue
+            i += 1
+            continue
+        if arg in (".", "./") or arg.startswith(("./", "../")):
+            dev = True
+        else:
+            packages.append(arg)
+        i += 1
+    if not (packages or dev or spec_path):
+        return None
+    return InstallSpec(
+        kind=INSTALLER_ENV_KINDS[installer],
+        packages=packages,
+        dev=dev,
+        spec_path=spec_path,
+    )
+
+
+_JULIA_ADD_RE = re.compile(r"Pkg\.add\.?\((?P<args>.*)\)\s*$", re.DOTALL)
+_JULIA_DEV_RE = re.compile(r"Pkg\.(?:develop|dev)\s*\(")
+_JULIA_PKG_MODE_RE = re.compile(r"^(?:pkg>|julia>\s*\]|\])\s*(?P<rest>.*)$")
+_QUOTED_RE = re.compile(r"""["']([^"']+)["']""")
+# Statements that say "use the project here" rather than fetch something
+_JULIA_PROJECT_CALLS = ("Pkg.instantiate(", "Pkg.activate(", "Pkg.resolve(")
+_JULIA_NOOP_CALLS = ("Pkg.status(", "Pkg.precompile(", "Pkg.update(")
+
+
+def _parse_julia_install(content: str) -> InstallSpec | None:
+    """Read a Julia block as ``Pkg`` calls, or return None if it isn't one."""
+    packages: list[str] = []
+    dev = False
+    saw_install = False
+    for statement in _install_statements(content, separators=";"):
+        mode = _JULIA_PKG_MODE_RE.match(statement)
+        if mode is not None:
+            rest = mode.group("rest").split()
+            if rest[:1] == ["add"]:
+                packages += rest[1:]
+                saw_install = True
+                continue
+            if rest[:1] in (["dev"], ["develop"]):
+                dev = True
+                saw_install = True
+                continue
+            if rest[:1] in (["instantiate"], ["activate"], ["resolve"]):
+                dev = True
+                saw_install = True
+                continue
+            return None
+        if statement in ("using Pkg", "import Pkg"):
+            continue
+        if statement.startswith(_JULIA_NOOP_CALLS):
+            continue
+        if statement.startswith(_JULIA_PROJECT_CALLS):
+            dev = True
+            saw_install = True
+            continue
+        if _JULIA_DEV_RE.match(statement):
+            dev = True
+            saw_install = True
+            continue
+        m = _JULIA_ADD_RE.match(statement)
+        if m is None:
+            return None
+        found = _QUOTED_RE.findall(m.group("args"))
+        if not found:
+            return None
+        packages += found
+        saw_install = True
+    if not saw_install:
+        return None
+    return InstallSpec(kind="julia", packages=packages, dev=dev)
+
+
+_R_INSTALL_RE = re.compile(
+    r"^(?:utils::)?install\.packages\s*\((?P<args>.*)\)\s*$", re.DOTALL
+)
+_R_REMOTE_RE = re.compile(
+    r"^(?:remotes|devtools|pak)::(?:install_github|install_gitlab|pkg_install)"
+    r"\s*\((?P<args>.*)\)\s*$",
+    re.DOTALL,
+)
+_R_SELF_RE = re.compile(
+    r"^(?:renv::(?:restore|init|snapshot|hydrate)|devtools::install|"
+    r"renv::install)\s*\(\s*\)\s*$"
+)
+
+
+def _parse_r_install(content: str) -> InstallSpec | None:
+    """Read an R block as package installs, or return None if it isn't."""
+    packages: list[str] = []
+    dev = False
+    saw_install = False
+    for statement in _install_statements(content, separators=";"):
+        if _R_SELF_RE.match(statement):
+            dev = True
+            saw_install = True
+            continue
+        m = _R_INSTALL_RE.match(statement) or _R_REMOTE_RE.match(statement)
+        if m is None:
+            if statement.startswith("renv::install("):
+                m = re.match(r"^renv::install\((?P<args>.*)\)\s*$", statement)
+            if m is None:
+                return None
+        args = m.group("args")
+        found = _QUOTED_RE.findall(args)
+        if not found:
+            return None
+        for pkg in found:
+            # A GitHub remote is written owner/repo; the package is the repo
+            packages.append(pkg.rsplit("/", 1)[-1])
+        saw_install = True
+    if not saw_install:
+        return None
+    return InstallSpec(kind="renv", packages=packages, dev=dev)
+
+
+def _install_statements(content: str, separators: str = "") -> list[str]:
+    """Split block content into statements, dropping blanks and comments."""
+    statements = []
+    for line in content.splitlines():
+        line = _strip_prompt(line)
+        if not line or line.startswith("#"):
+            continue
+        parts = [line]
+        for sep in separators:
+            parts = [p for part in parts for p in part.split(sep)]
+        for part in parts:
+            part = part.strip()
+            if part and not part.startswith("#"):
+                statements.append(part)
+    return statements
+
+
+def parse_install_block(
+    content: str, language: str | None
+) -> InstallSpec | None:
+    """Read a code block as an environment declared by installing it.
+
+    A README says what a project needs by showing the command that
+    installs it, not by listing packages, so those commands are read as
+    the environment they describe. Every statement in the block has to be
+    an install for it to count: a block that also does work is code.
+    """
+    if not content.strip():
+        return None
+    lang = (language or "").lower()
+    if lang in ("julia", "jl"):
+        return _parse_julia_install(content)
+    if lang == "r":
+        return _parse_r_install(content)
+    if lang not in SHELL_LANGUAGES:
+        return None
+    specs = []
+    for statement in _install_statements(content):
+        spec = _parse_shell_install(statement)
+        if spec is None:
+            return None
+        specs.append(spec)
+    if not specs:
+        return None
+    # A block that mixes installers---pip then conda---is describing
+    # alternatives rather than one environment, so the first wins
+    kind = specs[0].kind
+    merged = InstallSpec(kind=kind)
+    for spec in specs:
+        if spec.kind != kind:
+            continue
+        merged.dev = merged.dev or spec.dev
+        merged.spec_path = merged.spec_path or spec.spec_path
+        merged.packages += spec.packages
+    return merged
+
+
+def merge_install_specs(specs: list[InstallSpec]) -> InstallSpec:
+    """Combine a language's install blocks into the environment they mean."""
+    merged = InstallSpec(kind=specs[0].kind)
+    seen: set[str] = set()
+    for spec in specs:
+        merged.dev = merged.dev or spec.dev
+        merged.spec_path = merged.spec_path or spec.spec_path
+        for package in spec.packages:
+            key = _requirement_key(package)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.packages.append(package)
+    return merged
+
+
+# Where a package of each language keeps its own spec and its source, so
+# a project can recognize an install of itself.
+LOCAL_PACKAGE_SPECS: dict[str, tuple[str, list[str]]] = {
+    # Python's source directory is named for the module, so it is worked
+    # out from the package name rather than listed here
+    "python": ("pyproject.toml", []),
+    "julia": ("Project.toml", ["src"]),
+    "r": ("DESCRIPTION", ["R"]),
+}
+
+
+def local_package_name(language: str, wdir: str | None = None) -> str | None:
+    """Return the name of the package the project itself defines, if any."""
+    entry = LOCAL_PACKAGE_SPECS.get(language)
+    if entry is None:
+        return None
+    fname = entry[0]
+    path = os.path.join(wdir, fname) if wdir else fname
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return None
+    if fname == "DESCRIPTION":
+        m = re.search(r"^Package:\s*(\S+)\s*$", text, re.MULTILINE)
+        return m.group(1) if m else None
+    try:
+        import tomllib
+
+        data = tomllib.loads(text)
+    except Exception:
+        return None
+    if fname == "Project.toml":
+        name = data.get("name")
+    else:
+        name = (data.get("project") or {}).get("name")
+    return str(name) if name else None
+
+
+def local_package_source_paths(
+    language: str, wdir: str | None = None
+) -> list[str]:
+    """Return the paths holding the source of the project's own package.
+
+    A stage running in an environment that installed the project has to
+    rerun when the project's code changes, and the lock file says nothing
+    about that---an editable install is a pointer to the working tree.
+    """
+    name = local_package_name(language, wdir=wdir)
+    entry = LOCAL_PACKAGE_SPECS.get(language)
+    if name is None or entry is None:
+        return []
+    _, source_dirs = entry
+    if language == "python":
+        # Distributions normalize the name; directories use the module
+        # spelling, which replaces separators with underscores
+        module = re.sub(r"[-.]+", "_", name)
+        candidates = [os.path.join("src", module), module]
+    else:
+        candidates = list(source_dirs)
+    found = []
+    for candidate in candidates:
+        full = os.path.join(wdir, candidate) if wdir else candidate
+        if os.path.isdir(full):
+            found.append(Path(candidate).as_posix())
+    return found
+
+
+def installs_local_package(spec: InstallSpec, wdir: str | None = None) -> bool:
+    """Determine whether an install names the project's own package.
+
+    A README tells a reader to install the package from wherever it is
+    published; read inside the package's own repo, that same line means
+    the copy in the working tree.
+    """
+    name = local_package_name(spec.language, wdir=wdir)
+    if name is None:
+        return False
+    key = _requirement_key(name)
+    return any(_requirement_key(pkg) == key for pkg in spec.packages)
+
+
+def resolve_dev_install(
+    spec: InstallSpec, wdir: str | None = None
+) -> tuple[str, str] | None:
+    """Find the spec file a dev install refers to, as (kind, path).
+
+    ``pip install -e .`` says the environment is this project, which is
+    already described by whatever spec file sits in the project
+    directory---so the environment points at that file rather than one
+    Calkit generates.
+    """
+    candidates = DEV_INSTALL_SPECS.get(spec.language, [])
+    # The installer that was named wins if its own spec file is there
+    ordered = sorted(candidates, key=lambda kp: kp[0] != spec.kind)
+    for kind, fname in ordered:
+        path = os.path.join(wdir, fname) if wdir else fname
+        if os.path.isfile(path):
+            return kind, fname
+    return None
+
+
 LANGUAGE_DETECTORS: dict[str, str] = {
     "python": "detect_python_dependencies",
     "py": "detect_python_dependencies",
@@ -1176,6 +1720,22 @@ LANGUAGE_SUFFIXES: dict[str, str] = {
     "julia": "jl",
     "jl": "jl",
 }
+
+
+# What to pin a Julia environment to when Julia isn't installed to ask.
+FALLBACK_JULIA_VERSION = "1.12"
+
+
+def detected_julia_version() -> str:
+    """Return the installed Julia's major.minor version, or a fallback."""
+    import calkit.julia
+
+    try:
+        version = calkit.julia.get_version()
+    except Exception:
+        return FALLBACK_JULIA_VERSION
+    parts = version.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else version
 
 
 def _env_base_name(markdown_path: str) -> str:
@@ -1199,6 +1759,7 @@ def detect_environments(
 
     Returns the environments and a map of stage name -> environment name.
     """
+    import calkit.environments
     from calkit import detect as _detect
 
     existing = list(existing_env_names or [])
@@ -1221,11 +1782,13 @@ def detect_environments(
             for dep in detector(code=spec.content):
                 if dep not in deps:
                     deps.append(dep)
-        name = (
-            base
-            if len(by_language) == 1
-            else (f"{base}-{LANGUAGE_SUFFIXES[language]}")
+        # Suffix when this file needs more than one environment, and also
+        # when it has already named one that way, so a file's environments
+        # are named alike whether they were declared or detected
+        suffixed = len(by_language) > 1 or any(
+            n.startswith(f"{base}-") for n in existing
         )
+        name = f"{base}-{LANGUAGE_SUFFIXES[language]}" if suffixed else base
         candidate = name
         n = 2
         while candidate in existing or candidate in envs:
@@ -1233,11 +1796,20 @@ def detect_environments(
             n += 1
         existing.append(candidate)
         kind = LANGUAGE_ENV_KINDS[language]
-        envs[candidate] = {
+        env: dict[str, Any] = {
             "kind": kind,
             "path": get_env_spec_path(candidate, kind=kind),
             "_spec_content": render_env_spec(kind, "\n".join(deps), candidate),
         }
+        if kind == "uv":
+            # Pin the interpreter rather than letting it float above the
+            # requires-python floor, so the lock means something
+            env["_python"] = calkit.environments.DEFAULT_PYTHON_VERSION
+        elif kind == "julia":
+            # A Julia environment has no default version to fall back on,
+            # so it is pinned to whatever Julia is installed here
+            env["julia"] = detected_julia_version()
+        envs[candidate] = env
         for spec in language_specs:
             assignments[spec.name] = candidate
     return envs, assignments
@@ -1273,6 +1845,176 @@ def format_attrs(attrs: dict[str, Any]) -> str:
         rendered = format_attr_value(value)
         parts.append(key if rendered == "" else f"{key}={rendered}")
     return " ".join(parts)
+
+
+# Languages a plain code fence can be turned into a stage automatically.
+# Deliberately narrower than what Calkit can run: a README's shell blocks
+# are usually instructions for the reader---install this, clone that---and
+# quietly promoting them to pipeline stages would run them.
+AUTO_STAGE_LANGUAGES = tuple(LANGUAGE_DETECTORS)
+
+
+@dataclass
+class Annotation:
+    """What annotating a plain Markdown file added to it."""
+
+    # Stage name -> language, and environment name -> the language whose
+    # stages it serves
+    stages: dict[str, str] = field(default_factory=dict)
+    environments: dict[str, str] = field(default_factory=dict)
+
+    def __bool__(self) -> bool:
+        return bool(self.stages or self.environments)
+
+
+@dataclass
+class _Fence:
+    """One code fence found while scanning a file to annotate it."""
+
+    index: int
+    indent: str
+    fence: str
+    info: str
+    ending: str
+    language: str | None
+    install: InstallSpec | None = None
+    transcript: bool = False
+
+
+def _scan_fences(lines: list[str]) -> list[_Fence]:
+    """Find the un-annotated code fences in a file, outermost first."""
+    fences: list[_Fence] = []
+    i = 0
+    while i < len(lines):
+        raw = lines[i].rstrip("\r\n")
+        m = _FENCE_RE.match(raw)
+        if m is None:
+            i += 1
+            continue
+        fence = m.group("fence")
+        info = m.group("info").strip()
+        # Find this fence's closing line first, so a longer fence's nested
+        # examples aren't mistaken for blocks of their own
+        j = i + 1
+        while j < len(lines):
+            close = _FENCE_RE.match(lines[j].rstrip("\r\n"))
+            if (
+                close is not None
+                and close.group("fence")[0] == fence[0]
+                and len(close.group("fence")) >= len(fence)
+                and not close.group("info").strip()
+            ):
+                break
+            j += 1
+        try:
+            language, annotation = _parse_fence_info(info)
+        except ValueError:
+            language, annotation = None, None
+        if annotation is None and language is not None:
+            content = "".join(lines[i + 1 : j])
+            fences.append(
+                _Fence(
+                    index=i,
+                    indent=m.group("indent"),
+                    fence=fence,
+                    info=info,
+                    ending=lines[i][len(raw) :],
+                    language=language,
+                    install=parse_install_block(content, language),
+                    transcript=is_repl_transcript(content),
+                )
+            )
+        i = j + 1
+    return fences
+
+
+def annotate_code_blocks(
+    text: str, markdown_path: str
+) -> tuple[str, Annotation]:
+    """Annotate a plain file's code fences so its blocks become a pipeline.
+
+    This is what makes ``calkit xr README.md`` work on a README nobody has
+    marked up yet. Code blocks are named for their language and so join
+    into one stage per language, in document order, because consecutive
+    blocks in a README read as one continuing script---what block two
+    imports, block one is expected to have set up.
+
+    Blocks that install packages are read as the environment those stages
+    run in, since showing the install command is how a README says what
+    its code needs.
+
+    Only info strings are touched, never prose and never code. Fences
+    that already carry a Calkit annotation are left alone.
+    """
+    import calkit.environments
+
+    lines = text.splitlines(keepends=True)
+    fences = _scan_fences(lines)
+    stage_fences = [
+        f
+        for f in fences
+        if f.install is None
+        and not f.transcript
+        and f.language is not None
+        and f.language.lower() in AUTO_STAGE_LANGUAGES
+    ]
+    install_fences = [f for f in fences if f.install is not None]
+    stage_names = {
+        LANGUAGE_SUFFIXES[f.language.lower()]  # type: ignore[union-attr]
+        for f in stage_fences
+    }
+    # An environment nothing runs in is not worth building, so only the
+    # installs for a language the file actually has code in are read
+    env_suffixes = {
+        LANGUAGE_SUFFIXES[f.install.language]  # type: ignore[union-attr]
+        for f in install_fences
+    } & stage_names
+    base = _env_base_name(markdown_path)
+    multi = len(stage_names) > 1
+    env_names = {
+        suffix: (f"{base}-{suffix}" if multi else base)
+        for suffix in sorted(env_suffixes)
+    }
+    result = Annotation()
+    for f in install_fences:
+        suffix = LANGUAGE_SUFFIXES[f.install.language]  # type: ignore
+        if suffix not in env_names:
+            continue
+        name = env_names[suffix]
+        annotation = f"calkit environment name={name}"
+        # Pin the interpreter here rather than letting it float, so what
+        # the environment resolves to doesn't depend on when it is built
+        if f.install.kind == "julia":
+            annotation += f" julia={detected_julia_version()}"
+        elif f.install.kind in ("uv", "uv-venv") and not f.install.dev:
+            annotation += (
+                f" python={calkit.environments.DEFAULT_PYTHON_VERSION}"
+            )
+        _annotate_fence(lines, f, annotation)
+        result.environments[name] = f.install.language  # type: ignore
+    for f in stage_fences:
+        suffix = LANGUAGE_SUFFIXES[f.language.lower()]  # type: ignore
+        annotation = f"calkit stage name={suffix}"
+        env_name = env_names.get(suffix)
+        if env_name is not None:
+            annotation += f" environment={env_name}"
+        _annotate_fence(lines, f, annotation)
+        result.stages[suffix] = f.language.lower()  # type: ignore
+    return "".join(lines), result
+
+
+def _annotate_fence(lines: list[str], fence: _Fence, annotation: str) -> None:
+    """Append an annotation to a fence's info string, in place."""
+    # The original info string is kept whole rather than rebuilt from the
+    # language, so any other renderer's attributes on the fence survive
+    lines[fence.index] = (
+        fence.indent
+        + fence.fence
+        + fence.info
+        + " "
+        + annotation
+        + fence.ending
+    )
 
 
 def set_stage_attrs(

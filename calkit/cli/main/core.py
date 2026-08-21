@@ -232,6 +232,21 @@ def _exec_with_version(version_spec: str) -> None:
     os.execvp(cmd[0], cmd)
 
 
+def project_is_initialized() -> bool:
+    """Determine whether the working directory is a Calkit project."""
+    import git
+    from git.exc import InvalidGitRepositoryError
+
+    # Parent directories count, since a project can be a self-contained
+    # directory inside a larger repo and so has no .git of its own. What
+    # makes it initialized is its own DVC repo and calkit.yaml.
+    try:
+        git.Repo(".", search_parent_directories=True)
+    except InvalidGitRepositoryError:
+        return False
+    return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
+
+
 @app.command(name="init")
 def init(
     force: Annotated[
@@ -244,20 +259,9 @@ def init(
     ] = False,
 ):
     """Initialize the current working directory."""
-    import git
     from git.exc import InvalidGitRepositoryError
 
-    def _project_is_initialized() -> bool:
-        # Parent directories count, since a project can be a self-contained
-        # directory inside a larger repo and so has no .git of its own. What
-        # makes it initialized is its own DVC repo and calkit.yaml.
-        try:
-            git.Repo(".", search_parent_directories=True)
-        except InvalidGitRepositoryError:
-            return False
-        return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
-
-    if _project_is_initialized() and not force:
+    if project_is_initialized() and not force:
         raise_error(
             "This project is already initialized. "
             "Use --force to re-initialize."

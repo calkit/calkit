@@ -1756,6 +1756,45 @@ end
         return {}
 
 
+def create_conda_environment_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal environment.yml for a conda environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the environment. If None, uses the detected project name.
+    python_version : str
+        Python version to request.
+
+    Returns
+    -------
+    str
+        The environment.yml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = f"name: {project_name}\n"
+    content += "channels:\n  - conda-forge\n"
+    content += "dependencies:\n"
+    content += f"  - python={python_version}\n"
+    for dep in sorted(dependencies):
+        if dep.lower().startswith("python") and dep[6:7] in (
+            "",
+            "=",
+            ">",
+            "<",
+        ):
+            continue
+        content += f"  - {dep}\n"
+    return content
+
+
 def create_julia_project_file_content(
     dependencies: list[str],
     project_name: str = "environment",

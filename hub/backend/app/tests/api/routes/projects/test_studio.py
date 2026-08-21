@@ -12,6 +12,8 @@ URL = f"{settings.API_V1_STR}/projects/o/p/figures/studio"
 SCRIPT = (
     "import matplotlib.pyplot as plt\n"
     "import pandas as pd\n"
+    # As ruff formats it, since that's how it's committed
+    "\n"
     'df = pd.read_csv("data/raw.csv")\n'
     "fig, ax = plt.subplots()\n"
     'ax.plot(df["x"], df["y"])\n'
@@ -414,12 +416,19 @@ def test_post_project_studio_figure_edits_own_stage(
             figure_path="figures/z.png",
             title="Foam",
             script_path="scripts/plot_foam.py",
+            script_content="import h5py\nx=1\nfig.savefig( 'figures/z.png' )\n",
             inputs=["data/profiles.h5", "sims/run-1"],
             packages=["h5py"],
         ),
     )
     assert resp.status_code == 200, resp.text
     data = resp.json()
+    # What's committed is the script formatted with ruff at 79 columns
+    formatted = 'import h5py\n\nx = 1\nfig.savefig("figures/z.png")\n'
+    assert data["script_content"] == formatted
+    assert (
+        tmp_path / "repo" / "scripts" / "plot_foam.py"
+    ).read_text() == formatted
     assert data["environment"] == "foam"
     assert data["environment_created"] is False
     assert data["packages_missing"] == ["h5py"]

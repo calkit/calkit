@@ -23,6 +23,7 @@ from app import mixpanel
 from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import _validate_ck_stage
 from app.core import ryaml
+from app.formatting import format_python
 from app.git import get_ck_info_from_repo, get_repo
 from app.models import Figure
 
@@ -77,6 +78,8 @@ class StudioFigure(BaseModel):
     # Packages the script imports that the environment spec doesn't list
     # and that couldn't be added automatically.
     packages_missing: list[str]
+    # The script as committed, which is the submitted one formatted
+    script_content: str
 
 
 def _clean_rel_path(path: str, what: str) -> str:
@@ -299,7 +302,7 @@ def post_project_studio_figure(
     # Script
     script_full = os.path.join(wdir, script_path)
     os.makedirs(os.path.dirname(script_full) or wdir, exist_ok=True)
-    content = req.script_content
+    content = format_python(req.script_content)
     if not content.endswith("\n"):
         content += "\n"
     with open(script_full, "w") as f:
@@ -397,4 +400,5 @@ def post_project_studio_figure(
         environment=env_name,
         environment_created=env_created,
         packages_missing=packages_missing,
+        script_content=content,
     )

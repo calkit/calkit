@@ -160,3 +160,33 @@ it("inputs that aren't CSVs get a marker line, not a pandas load", () => {
   expect(swapped).not.toContain("# Input:")
   expect(swapped).toContain('df = pd.read_csv("data/a.csv")')
 })
+
+it("keeps injected load lines at the depth of the ones they replace", () => {
+  const script = [
+    "import pandas as pd",
+    "",
+    "def main():",
+    '    df = pd.read_csv("a.csv")',
+    "    df.plot()",
+    "",
+    "main()",
+  ].join("\n")
+  expect(withDatasetLines(script, ["b.csv", "c.csv", "d.h5"])).toBe(
+    [
+      "import pandas as pd",
+      "",
+      "def main():",
+      '    df = pd.read_csv("b.csv")',
+      '    df2 = pd.read_csv("c.csv")',
+      "    # Input: d.h5",
+      "    df.plot()",
+      "",
+      "main()",
+    ].join("\n"),
+  )
+  // With no load line to replace, the lines follow the imports at their
+  // depth, which at the top of a script is none
+  expect(withDatasetLines("import pandas as pd\nprint(1)", ["a.csv"])).toBe(
+    'import pandas as pd\n\ndf = pd.read_csv("a.csv")\nprint(1)',
+  )
+})

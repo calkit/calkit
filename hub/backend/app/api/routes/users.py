@@ -1062,7 +1062,19 @@ def get_user_onboarding_flags(
             steps = projects.setdefault(str(row.project_id), [])
         if row.step not in steps:
             steps.append(row.step)
-    return OnboardingFlags(account=account, projects=projects)
+    # Tips for a first project only belong on the first one, so the page
+    # needs to know which that is rather than guessing from a count.
+    first_project = session.exec(
+        select(Project)
+        .where(Project.owner_account_id == current_user.account.id)
+        .order_by(col(Project.created))
+        .limit(1)
+    ).first()
+    return OnboardingFlags(
+        account=account,
+        projects=projects,
+        first_project_id=first_project.id if first_project else None,
+    )
 
 
 @router.post("/user/onboarding-flags")

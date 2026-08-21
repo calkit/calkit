@@ -87,6 +87,11 @@ import {
 } from "../../lib/figureScript"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfCanvas from "../Common/PdfCanvas"
+import { FaPlus } from "react-icons/fa"
+import PathPicker from "../Releases/PathPicker"
+
+const AUTO_RUN_KEY = "figure-studio-auto-run"
+const AUTO_RUN_DELAY_MS = 1200
 
 const Plot = lazy(() => import("react-plotly.js"))
 
@@ -428,6 +433,24 @@ const FigureStudio = ({
     return file ? previewCsv(bytesToText(file.data)) : null
   }, [dataQuery.data, primaryPath])
   const inputsReady = datasetPaths.length === 0 || Boolean(dataQuery.data)
+  // A new selection of inputs, from the checkboxes or the picker. An
+  // edited script keeps its edits and only has its loading lines swapped,
+  // written through the editor so undo history and cursor survive. An
+  // untouched one is regenerated wholesale by the effect above.
+  const applyInputs = (ordered: string[]) => {
+    setDatasetPaths(ordered)
+    setResult(null)
+    const view = viewRef.current
+    if (codeTouched && view) {
+      view.dispatch({
+        changes: {
+          from: 0,
+          to: view.state.doc.length,
+          insert: withDatasetLines(code, ordered),
+        },
+      })
+    }
+  }
   // Defaults follow the first dataset until the user has edited something.
   useEffect(() => {
     if (!primaryPath) return
@@ -481,10 +504,31 @@ const FigureStudio = ({
   // One run on launch, as soon as the data and script are in, so the
   // studio opens on a figure rather than on an empty pane.
   const autoRan = useRef(false)
+  // Re-run on edit, a moment after typing stops, for those who'd rather
+  // watch the figure follow the script than press a key. Remembered across
+  // sessions, since it's a way of working rather than a per-figure choice.
+  const [autoRun, setAutoRun] = useState(() => {
+    try {
+      return localStorage.getItem(AUTO_RUN_KEY) === "true"
+    } catch {
+      return false
+    }
+  })
+  const toggleAutoRun = (on: boolean) => {
+    setAutoRun(on)
+    mixpanel.track("Toggled studio auto-run", { on })
+    try {
+      localStorage.setItem(AUTO_RUN_KEY, String(on))
+    } catch {
+      // Private mode or blocked storage: the choice lasts the session
+    }
+  }
+  const lastRunCode = useRef<string | null>(null)
   const run = async () => {
     if (!inputsReady || !figurePath || running) return
     setRunning(true)
     setResult(null)
+    lastRunCode.current = code
     const started = performance.now()
     if (envPackageNames.length) {
       setStatus(`Loading ${pythonEnv?.name} packages`)
@@ -513,6 +557,19 @@ const FigureStudio = ({
       run()
     }
   }, [isOpen, canRun, codeSettled])
+  // The debounced re-run: waits out a pause in typing, then runs the
+  // script as it stands, unless that exact text already ran. A run in
+  // progress isn't interrupted; the next keystroke restarts the wait.
+  const runRef = useRef(run)
+  runRef.current = run
+  useEffect(() => {
+    if (!autoRun || !canRun || !codeSettled || !codeTouched) return
+    if (code === lastRunCode.current) return
+    const timer = setTimeout(() => {
+      if (!running) runRef.current()
+    }, AUTO_RUN_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [autoRun, code, canRun, codeSettled, codeTouched, running])
   const saveMutation = useMutation({
     mutationFn: () =>
       ProjectsService.postProjectStudioFigure({
@@ -633,7 +690,35 @@ const FigureStudio = ({
           >
             <GridItem minW={0}>
               <FormControl mb={3}>
-                <FormLabel fontSize="sm">Inputs</FormLabel>
+                <Flex align="center" mb={1}>
+                  <FormLabel fontSize="sm" mb={0} mr={1.5}>
+                    Inputs
+                  </FormLabel>
+                  {/* Anything the script reads can be an input, not only a
+                      declared dataset: another stage's output folder, a
+                      config file, a results tree. */}
+                  <PathPicker
+                    ownerName={accountName}
+                    projectName={projectName}
+                    value=""
+                    allowFolders
+                    onChange={(path) => {
+                      if (path && !datasetPaths.includes(path)) {
+                        applyInputs([...datasetPaths, path])
+                      }
+                    }}
+                    trigger={
+                      <IconButton
+                        aria-label="Add an input file or folder"
+                        icon={<FaPlus fontSize="9px" />}
+                        size="xs"
+                        variant="primary"
+                        height="16px"
+                        minW="16px"
+                      />
+                    }
+                  />
+                </Flex>
                 {datasetOptions.length ? (
                   <CheckboxGroup
                     value={datasetPaths}
@@ -641,26 +726,10 @@ const FigureStudio = ({
                       // Keep the order of selection, so the first one
                       // picked stays the one the script calls `df`.
                       const next = values.map(String)
-                      const ordered = [
+                      applyInputs([
                         ...datasetPaths.filter((p) => next.includes(p)),
                         ...next.filter((p) => !datasetPaths.includes(p)),
-                      ]
-                      setDatasetPaths(ordered)
-                      setResult(null)
-                      // An edited script keeps its edits and only has its
-                      // loading lines swapped, written through the editor
-                      // so undo history and cursor survive. An untouched
-                      // one is regenerated wholesale by the effect above.
-                      const view = viewRef.current
-                      if (codeTouched && view) {
-                        view.dispatch({
-                          changes: {
-                            from: 0,
-                            to: view.state.doc.length,
-                            insert: withDatasetLines(code, ordered),
-                          },
-                        })
-                      }
+                      ])
                     }}
                   >
                     <Wrap spacing={4}>
@@ -750,6 +819,16 @@ const FigureStudio = ({
                 <Text fontSize="xs" color="ui.dim">
                   <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd>
                 </Text>
+                <Checkbox
+                  size="sm"
+                  colorScheme="teal"
+                  isChecked={autoRun}
+                  onChange={(e) => toggleAutoRun(e.target.checked)}
+                >
+                  <Text fontSize="xs" color="ui.dim">
+                    Auto-run
+                  </Text>
+                </Checkbox>
                 <Text fontSize="xs" color="ui.dim">
                   {packages.length
                     ? `Uses ${packages.join(", ")}`
@@ -758,7 +837,6 @@ const FigureStudio = ({
                     <>
                       . Runs in environment{" "}
                       <Link
-                        variant="blue"
                         cursor="pointer"
                         // Leaving unmounts the studio, so unsaved work gets
                         // the same confirmation as closing it would.
@@ -766,6 +844,7 @@ const FigureStudio = ({
                       >
                         '{runEnvName}'
                       </Link>
+                      .
                     </>
                   ) : environmentsQuery.isSuccess ? (
                     ". A Python environment will be created on save"

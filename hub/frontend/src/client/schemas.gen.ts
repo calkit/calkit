@@ -3746,6 +3746,18 @@ export const OnboardingFlagsSchema = {
       title: "Projects",
       default: {},
     },
+    first_project_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "First Project Id",
+    },
   },
   type: "object",
   title: "OnboardingFlags",
@@ -8516,6 +8528,10 @@ export const StudioFigureSchema = {
       type: "array",
       title: "Packages Missing",
     },
+    script_content: {
+      type: "string",
+      title: "Script Content",
+    },
   },
   type: "object",
   required: [
@@ -8524,6 +8540,7 @@ export const StudioFigureSchema = {
     "environment",
     "environment_created",
     "packages_missing",
+    "script_content",
   ],
   title: "StudioFigure",
 } as const

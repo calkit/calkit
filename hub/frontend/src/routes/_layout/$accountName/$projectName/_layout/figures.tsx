@@ -43,6 +43,7 @@ import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
 import useProject from "../../../../../hooks/useProject"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 const figuresSearchSchema = z.object({
   ref: z.string().optional(),
@@ -500,12 +501,20 @@ function ProjectFigures() {
               pointerEvents={isPlaceholderData ? "none" : undefined}
               aria-busy={isPlaceholderData}
             >
-              {figures!.map((figure) => (
-                <FigureThumbnail
+              {figures!.map((figure, i) => (
+                <TipBubble
                   key={figure.path}
-                  figure={figure}
-                  onClick={() => openFigure(figure)}
-                />
+                  tip="edit-figure"
+                  where="page"
+                  when={i === 0 && !selectedPath}
+                  markOnClick={false}
+                  display="block"
+                >
+                  <FigureThumbnail
+                    figure={figure}
+                    onClick={() => openFigure(figure)}
+                  />
+                </TipBubble>
               ))}
             </SimpleGrid>
             {isPlaceholderData && (

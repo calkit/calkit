@@ -2200,6 +2200,10 @@ export type OnboardingFlags = {
   projects?: {
     [key: string]: Array<string>
   }
+  /**
+   * First Project Id
+   */
+  first_project_id?: string | null
 }
 
 /**
@@ -4873,6 +4877,10 @@ export type StudioFigure = {
    * Packages Missing
    */
   packages_missing: Array<string>
+  /**
+   * Script Content
+   */
+  script_content: string
 }
 
 /**

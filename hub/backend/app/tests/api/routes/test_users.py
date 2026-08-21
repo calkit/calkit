@@ -697,7 +697,7 @@ def test_onboarding_flags_round_trip(
 ) -> None:
     """Account and project flags are set, listed, and cleared separately."""
     from app.models import Project
-    from app.tests import create_random_user
+    from app.tests import authentication_token_from_email, create_random_user
 
     base = f"{settings.API_V1_STR}/user/onboarding-flags"
     # Start from a known state, since the normal user is shared by tests.
@@ -743,6 +743,14 @@ def test_onboarding_flags_round_trip(
     assert response.status_code == 200
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["projects"][str(project.id)] == ["editor"]
+    # The owner's first project is named, for tips that belong only there;
+    # this user doesn't own it, so it isn't theirs
+    owner_headers = authentication_token_from_email(
+        client=client, email=owner.email, db=db
+    )
+    owner_body = client.get(base, headers=owner_headers).json()
+    assert owner_body["first_project_id"] == str(project.id)
+    assert body.get("first_project_id") != str(project.id)
     # The account list is untouched by a project-scoped flag.
     assert body["account"] == ["cli"]
     # Two requests for the same flag at once (a double-click) both pass the

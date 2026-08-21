@@ -70,6 +70,7 @@ import {
   declaredInputs,
   findFeederStages,
 } from "../../../../../lib/provenance"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 const pubSearchSchema = z.object({
   path: z.string().optional(),
@@ -453,16 +454,18 @@ function Publications() {
           </Tooltip>
         )}
         {canEditLatex && (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() =>
-              navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
-            }
-          >
-            <Icon as={MdEdit} mr={1} />
-            Edit LaTeX
-          </Button>
+          <TipBubble tip="edit-latex" where="page" placement="bottom">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
+              }
+            >
+              <Icon as={MdEdit} mr={1} />
+              Edit LaTeX
+            </Button>
+          </TipBubble>
         )}
       </HStack>
     ) : undefined
@@ -557,16 +560,18 @@ function Publications() {
               {userHasWriteAccess && (
                 <>
                   <Menu>
-                    <MenuButton
-                      as={Button}
-                      variant="primary"
-                      height="25px"
-                      width="9px"
-                      px={1}
-                      ml={2}
-                    >
-                      <Icon as={FaPlus} fontSize="xs" />
-                    </MenuButton>
+                    <TipBubble tip="publication" where="page">
+                      <MenuButton
+                        as={Button}
+                        variant="primary"
+                        height="25px"
+                        width="9px"
+                        px={1}
+                        ml={2}
+                      >
+                        <Icon as={FaPlus} fontSize="xs" />
+                      </MenuButton>
+                    </TipBubble>
                     <Portal>
                       <MenuList zIndex="popover">
                         <MenuItem onClick={newPubTemplateModal.onOpen}>

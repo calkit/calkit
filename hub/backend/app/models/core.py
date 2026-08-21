@@ -816,6 +816,8 @@ class OnboardingFlags(SQLModel):
 
     account: list[str] = []
     projects: dict[str, list[str]] = {}
+    # The user's earliest-created project, where first-project tips show
+    first_project_id: uuid.UUID | None = None
 
 
 class OnboardingFlagPost(SQLModel):

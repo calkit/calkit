@@ -111,16 +111,20 @@ export function withDatasetLines(code: string, paths: string[]): string {
   const lines = code.split("\n")
   const first = lines.findIndex(isLoadLine)
   const kept = lines.filter((line) => !isLoadLine(line))
-  const fresh = loadLines(paths)
+  // The new lines sit where the old ones did, at the same depth: a load
+  // inside a function stays inside it.
+  const indentOf = (line: string | undefined) => line?.match(/^\s*/)?.[0] ?? ""
   if (first !== -1) {
-    kept.splice(first, 0, ...fresh)
+    const indent = indentOf(lines[first])
+    kept.splice(first, 0, ...loadLines(paths).map((l) => indent + l))
     return kept.join("\n")
   }
   let lastImport = -1
   kept.forEach((line, i) => {
     if (/^\s*(import|from)\s/.test(line)) lastImport = i
   })
-  kept.splice(lastImport + 1, 0, "", ...fresh)
+  const indent = indentOf(kept[lastImport])
+  kept.splice(lastImport + 1, 0, "", ...loadLines(paths).map((l) => indent + l))
   return kept.join("\n")
 }
 

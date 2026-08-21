@@ -2109,7 +2109,11 @@ def test_post_and_put_reference_item(
         r = client.post(
             f"{base}/references/items",
             headers=headers,
-            json={"path": "references.bib", "key": "smith2020"},
+            json={
+                "path": "references.bib",
+                "key": "smith2020",
+                "fields": {"title": "Another"},
+            },
         )
         assert r.status_code == 409
         # Edit the original entry, renaming its key and a field; its note

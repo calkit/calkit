@@ -14,7 +14,7 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
@@ -25,6 +25,9 @@ import { handleError } from "../../lib/errors"
 interface UploadDatasetProps {
   isOpen: boolean
   onClose: () => void
+  /** Supplied when rendered outside the project route. */
+  ownerName?: string
+  projectName?: string
 }
 
 interface DatasetPostWithFile {
@@ -34,11 +37,20 @@ interface DatasetPostWithFile {
   file: FileList
 }
 
-const UploadDataset = ({ isOpen, onClose }: UploadDatasetProps) => {
+const UploadDataset = ({
+  isOpen,
+  onClose,
+  ownerName,
+  projectName: projectNameProp,
+}: UploadDatasetProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
+  const routeParams = useParams({ strict: false }) as {
+    accountName?: string
+    projectName?: string
+  }
+  const accountName = ownerName ?? routeParams.accountName ?? ""
+  const projectName = projectNameProp ?? routeParams.projectName ?? ""
   const {
     register,
     handleSubmit,

@@ -28,6 +28,7 @@ import { FaPlus } from "react-icons/fa"
 import { FiDatabase } from "react-icons/fi"
 
 import Markdown from "../../../../../components/Common/Markdown"
+import BrowseDatasets from "../../../../../components/Datasets/BrowseDatasets"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
 import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadDataset from "../../../../../components/Datasets/UploadDataset"
@@ -196,6 +197,8 @@ const datasetsSearchSchema = z.object({
   source: z.enum(["primary", "enter", "url", "doi", "git_repo"]).optional(),
   // Dataset the figure studio is open on, so the studio survives a refresh.
   studio: z.string().optional(),
+  // The "find a dataset on Calkit" browser.
+  browse: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -220,7 +223,10 @@ function ProjectDataView() {
     new_dataset_open: newDatasetOpen,
     source,
     studio: studioDataset,
+    browse: browseOpen,
   } = Route.useSearch()
+  const setBrowseOpen = (open: boolean) =>
+    navigate({ search: (prev) => ({ ...prev, browse: open || undefined }) })
   const setStudioDataset = (path: string | undefined) =>
     navigate({ search: (prev) => ({ ...prev, studio: path }) })
   // Which figures each dataset feeds: a figure's stage lists its concrete
@@ -308,6 +314,9 @@ function ProjectDataView() {
                 <MenuItem onClick={() => openNewDataset("git_repo")}>
                   Fetch from a Git repo
                 </MenuItem>
+                <MenuItem onClick={() => setBrowseOpen(true)}>
+                  Find a dataset on Calkit
+                </MenuItem>
               </MenuList>
             </Menu>
             {/* Keyed on the source so switching between menu entries
@@ -320,6 +329,10 @@ function ProjectDataView() {
               defaultSource={source ?? "primary"}
             />
             <UploadDataset onClose={closeAll} isOpen={Boolean(uploadOpen)} />
+            <BrowseDatasets
+              isOpen={Boolean(browseOpen)}
+              onClose={() => setBrowseOpen(false)}
+            />
             {studioDataset ? (
               <FigureStudio
                 isOpen

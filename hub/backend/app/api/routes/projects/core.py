@@ -4310,6 +4310,11 @@ def get_project_dataset(
             break
     if ds is None:
         raise HTTPException(404, f"Dataset at path {path} does not exist")
+    # The import model keeps imported_from as a string; a structured origin
+    # (DOI, URL, Git) is carried as JSON rather than dropped
+    ds = dict(ds)
+    if isinstance(ds.get("imported_from"), dict):
+        ds["imported_from"] = json.dumps(dict(ds["imported_from"]))
     # Is this dataset tracked with Git?
     # If so, our response will be different
     git_files = repo.git.ls_files(path)
@@ -4640,6 +4645,122 @@ def post_project_dataset(
     # that needs it.
     fetch_kind = req.imported_from.kind() if req.imported_from else None
     storage: str | None = None
+    if fetch_kind == "project":
+        # The same thing `calkit import dataset` does: DVC-tracked data
+        # becomes a .dvc pointer at the source project's remote, so the
+        # bytes stay in one place and `dvc pull` fetches them; Git-tracked
+        # files are copied in. Either way the path is real afterwards.
+        assert req.imported_from is not None
+        wdir = str(repo.working_dir)
+        src_spec = str(req.imported_from.project)
+        try:
+            src_owner, src_project = src_spec.strip("/").split("/", 1)
+        except ValueError:
+            raise HTTPException(422, "Project should be given as owner/name")
+        src_path = req.imported_from.path or req.path
+        if os.path.exists(os.path.join(wdir, req.path)) or os.path.isfile(
+            os.path.join(wdir, req.path + ".dvc")
+        ):
+            raise HTTPException(400, f"'{req.path}' already exists")
+        info = get_project_dataset(
+            path=src_path,
+            owner_name=src_owner,
+            project_name=src_project,
+            current_user=current_user,
+            session=session,
+            filter_paths=None,
+            ref=None,
+        )
+        if info.dvc_import is not None:
+            remote_name = f"calkit:{src_owner}/{src_project}"
+            run_dvc_command(
+                [
+                    "remote",
+                    "add",
+                    "-f",
+                    remote_name,
+                    f"ck://{src_owner}/{src_project}",
+                ],
+                wdir=wdir,
+                check=True,
+            )
+            repo.git.add(".dvc/config")
+            dvc_fpath = req.path + ".dvc"
+            dvc_dir = os.path.dirname(dvc_fpath)
+            os.makedirs(os.path.join(wdir, dvc_dir) or wdir, exist_ok=True)
+            dvc_import = info.dvc_import.model_dump()
+            outs = dvc_import.get("outs") or []
+            # Paths in a .dvc file are relative to the file itself
+            if len(outs) > 1:
+                for out in outs:
+                    out["path"] = os.path.relpath(out["path"], dvc_dir or ".")
+                    out["remote"] = remote_name
+            elif outs:
+                outs[0]["path"] = os.path.basename(req.path)
+                outs[0]["remote"] = remote_name
+            dvc_import["outs"] = outs
+            with open(os.path.join(wdir, dvc_fpath), "w") as f:
+                ryaml.dump(dvc_import, f)
+            repo.git.add(dvc_fpath)
+            gitignore_path = os.path.join(wdir, ".gitignore")
+            existing_ignore = (
+                open(gitignore_path).read()
+                if os.path.isfile(gitignore_path)
+                else ""
+            )
+            if req.path not in existing_ignore.split("\n"):
+                with open(gitignore_path, "w") as f:
+                    f.write(existing_ignore.rstrip() + "\n" + req.path + "\n")
+                repo.git.add(".gitignore")
+            storage = "dvc-import"
+        elif info.git_import is not None:
+            src_repo = get_repo(
+                project=app.projects.get_project(
+                    session=session,
+                    owner_name=src_owner,
+                    project_name=src_project,
+                    current_user=current_user,
+                    min_access_level="read",
+                ),
+                user=current_user,
+                session=session,
+                ttl=DEFAULT_REPO_TTL,
+            )
+            files = info.git_import.files
+            for f_rel in files:
+                src_file = os.path.join(str(src_repo.working_dir), f_rel)
+                if len(files) == 1 and f_rel == src_path:
+                    dest_file = os.path.join(wdir, req.path)
+                else:
+                    dest_file = os.path.join(
+                        wdir, req.path, os.path.relpath(f_rel, src_path)
+                    )
+                os.makedirs(os.path.dirname(dest_file) or wdir, exist_ok=True)
+                shutil.copy2(src_file, dest_file)
+            size = calkit.get_size(os.path.join(wdir, req.path))
+            if size < calkit.core.DVC_SIZE_THRESH_BYTES:
+                storage = "git"
+                repo.git.add(req.path)
+            else:
+                storage = "dvc"
+                if not os.path.isdir(os.path.join(wdir, ".dvc")):
+                    run_dvc_command(["init"], wdir=wdir, check=True)
+                run_dvc_command(["add", req.path], wdir=wdir, check=True)
+                repo.git.add([req.path + ".dvc"])
+                gitignore = os.path.join(
+                    os.path.dirname(req.path), ".gitignore"
+                )
+                if os.path.isfile(os.path.join(wdir, gitignore)):
+                    repo.git.add(gitignore)
+        else:
+            raise HTTPException(
+                400, f"{src_spec}/{src_path} has nothing to import"
+            )
+        ds["imported_from"] = dict(
+            project=f"{src_owner}/{src_project}",
+            path=src_path,
+            git_rev=info.git_rev,
+        )
     if fetch_kind in ("url", "doi", "git"):
         wdir = str(repo.working_dir)
         assert req.imported_from is not None
@@ -7591,6 +7712,12 @@ def post_project_reference_item(
     """
     if not req.key.strip():
         raise HTTPException(422, "A citation key is required")
+    # bibtexparser drops an entry with no fields when the file is read back
+    # (and writes it out as a comment), so one would vanish without a trace
+    if not any(v.strip() for v in req.fields.values()):
+        raise HTTPException(
+            422, "A reference needs at least one field, usually a title"
+        )
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -7698,6 +7825,12 @@ def put_project_reference_item(
             entry[field] = value.strip()
         else:
             entry.pop(field, None)
+    # Same rule as adding: an entry stripped of every field would be lost on
+    # the next read, which is not what clearing fields should mean
+    if not any(k not in ("ENTRYTYPE", "ID") for k in entry):
+        raise HTTPException(
+            422, "A reference needs at least one field, usually a title"
+        )
     # Push the edit to Zotero first for a linked collection (this also follows a
     # key rename in the item map); a failure aborts before the local write.
     # Skip the push when nothing actually changed, so a redundant save doesn't

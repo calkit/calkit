@@ -171,6 +171,28 @@ def test_post_project_dataset_fetches_imports(
         }
         assert by_path["data/wind.csv"]["imported_from"]["git"]["rev"] == rev
         assert "data/multi" in by_path and "data/multi.csv" not in by_path
+        # Importing from another Calkit project copies Git-tracked files
+        # and pins the source revision. (get_project/get_repo are patched to
+        # the same project here, which exercises the Git-tracked branch.)
+        resp = client.post(
+            URL,
+            json={
+                "path": "data/wind-copy.csv",
+                "imported_from": {"project": "o/p", "path": "data/wind.csv"},
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert (tmp_path / "repo" / "data" / "wind-copy.csv").read_text() == (
+            "u,v\n1,2\n"
+        )
+        ck = yaml.safe_load((tmp_path / "repo" / "calkit.yaml").read_text())
+        copied = next(
+            d for d in ck["datasets"] if d["path"] == "data/wind-copy.csv"
+        )
+        assert copied["imported_from"]["project"] == "o/p"
+        assert copied["imported_from"]["path"] == "data/wind.csv"
+        assert len(copied["imported_from"]["git_rev"]) == 40
         # A path that's already there is refused rather than overwritten
         resp = client.post(
             URL,

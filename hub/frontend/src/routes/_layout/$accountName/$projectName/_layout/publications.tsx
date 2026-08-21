@@ -5,20 +5,23 @@ import {
   Button,
   Code,
   Flex,
-  HStack,
   Heading,
+  HStack,
   Icon,
   Link,
+  ListItem,
   Menu,
   MenuButton,
   MenuItem,
   MenuList,
   Portal,
   Text,
-  VStack,
+  UnorderedList,
   useColorModeValue,
   useDisclosure,
+  VStack,
 } from "@chakra-ui/react"
+import { load as yamlLoad } from "js-yaml"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Link as RouterLink,
@@ -26,7 +29,7 @@ import {
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
-import { Fragment, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
 import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
@@ -67,6 +70,7 @@ import {
   classifyPublicationDeps,
   findFeederStages,
   getStageDeps,
+  getStageOuts,
 } from "../../../../../lib/provenance"
 
 const pubSearchSchema = z.object({
@@ -90,6 +94,39 @@ interface PubInfoProps {
   projectName: string
   userHasWriteAccess: boolean
   onOpenCompare: () => void
+}
+
+/**
+ * A stage's inputs as its author declared them, with another stage's
+ * outputs expanded to the paths they are. Empty when the stage hasn't
+ * loaded or declares none.
+ */
+function declaredInputs(
+  stageYaml: string | undefined,
+  dvcStages: Record<string, unknown>,
+): string[] {
+  if (!stageYaml) return []
+  let parsed: { inputs?: unknown } = {}
+  try {
+    parsed = (yamlLoad(stageYaml) as { inputs?: unknown }) ?? {}
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed.inputs)) return []
+  const paths: string[] = []
+  for (const input of parsed.inputs) {
+    if (typeof input === "string") {
+      paths.push(input)
+    } else if (input && typeof input === "object") {
+      const item = input as { path?: string; from_stage_outputs?: string }
+      if (item.from_stage_outputs) {
+        paths.push(...getStageOuts(dvcStages[item.from_stage_outputs] as any))
+      } else if (item.path) {
+        paths.push(item.path)
+      }
+    }
+  }
+  return paths.filter((p) => p && !p.startsWith(".calkit/"))
 }
 
 function PubInfo({
@@ -132,6 +169,21 @@ function PubInfo({
     enabled: Boolean(publication.stage),
     retry: false,
   })
+  // The stage as declared in calkit.yaml: its inputs are what the author
+  // meant, whereas dvc.yaml's deps also carry what Calkit adds for itself
+  // (environment locks, the script). `from_stage_outputs` is expanded
+  // through the compiled pipeline.
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", publication.stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: publication.stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
   const figureLinks: InputLink[] = []
   const referenceLinks: InputLink[] = []
   const otherLinks: InputLink[] = []
@@ -141,7 +193,9 @@ function PubInfo({
     // stage_info carries the deps too, so the rows can show before the
     // pipeline has loaded
     const stage = dvcStages[publication.stage] ?? publication.stage_info
-    const deps = getStageDeps(stage)
+    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages).length
+      ? declaredInputs(stageQuery.data?.yaml, dvcStages)
+      : getStageDeps(stage).filter((d) => !d.startsWith(".calkit/"))
     const inputs = classifyPublicationDeps(deps, figuresQuery.data?.items ?? [])
     for (const { path, figure } of inputs.figures) {
       figureLinks.push(
@@ -292,23 +346,26 @@ function PubInfo({
       <InputsRow label="References" items={referenceLinks} />
       <InputsRow label="Other inputs" items={otherLinks} />
       {feederStages.length > 0 && (
-        <Text fontSize="sm" mb={1} color="gray.500">
-          Figures copied in by stage{feederStages.length > 1 ? "s" : ""}{" "}
-          {feederStages.map((name, i) => (
-            <Fragment key={name}>
-              {i > 0 && ", "}
-              <Link
-                as={RouterLink}
-                to="../pipeline"
-                search={{ stage: name } as any}
-              >
-                <Code fontSize="xs" cursor="pointer">
-                  {name}
-                </Code>
-              </Link>
-            </Fragment>
-          ))}
-        </Text>
+        <Box fontSize="sm" mb={1}>
+          <Text as="span" fontWeight="semibold">
+            Copied in by stages:
+          </Text>
+          <UnorderedList mt={0.5} mb={0} pl={1}>
+            {feederStages.map((name) => (
+              <ListItem key={name}>
+                <Link
+                  as={RouterLink}
+                  to="../pipeline"
+                  search={{ stage: name } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {name}
+                  </Code>
+                </Link>
+              </ListItem>
+            ))}
+          </UnorderedList>
+        </Box>
       )}
       {publication.overleaf?.project_id && (
         <Box mt={2}>

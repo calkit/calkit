@@ -55,6 +55,9 @@ import {
   UsersService,
 } from "../../client"
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
+import BrowseDatasets from "../../components/Datasets/BrowseDatasets"
+import NewDataset from "../../components/Datasets/NewDataset"
+import UploadDataset from "../../components/Datasets/UploadDataset"
 import FilterableSelect from "../../components/Common/FilterableSelect"
 import FigureStudio from "../../components/Figures/FigureStudio"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
@@ -90,6 +93,11 @@ const searchSchema = z.object({
   overleaf_open: z.boolean().optional().catch(undefined),
   zotero_open: z.boolean().optional().catch(undefined),
   studio_open: z.boolean().optional().catch(undefined),
+  // Which data dialog is open on the data step.
+  data_open: z
+    .enum(["enter", "upload", "import", "browse"])
+    .optional()
+    .catch(undefined),
 })
 
 // Which start path the visitor picked before they had an account. The
@@ -129,6 +137,7 @@ type StepKey =
   | "name"
   | "audit"
   | "question"
+  | "data"
   | "figure"
   | "paper"
   | "machine"
@@ -139,9 +148,9 @@ type StepKey =
 // project gets looked at before anything is asked of it. A project that
 // starts from a paper links the paper before anything else.
 const STEPS_BY_PATH: Record<StartPath, StepKey[]> = {
-  fresh: ["path", "name", "question", "figure", "paper", "machine"],
+  fresh: ["path", "name", "question", "data", "figure", "paper", "machine"],
   existing: ["path", "name", "audit", "question", "machine"],
-  overleaf: ["path", "name", "paper", "question", "machine"],
+  overleaf: ["path", "name", "paper", "question", "data", "machine"],
 }
 
 const STEP_TITLES: Record<StepKey, string> = {
@@ -149,7 +158,8 @@ const STEP_TITLES: Record<StepKey, string> = {
   name: "Name it",
   audit: "What we found",
   question: "The question",
-  figure: "Data and a figure",
+  data: "Your data",
+  figure: "A figure",
   paper: "Paper and references",
   machine: "Your machine",
 }
@@ -731,6 +741,158 @@ function AuditStep({
   )
 }
 
+/** Where the data comes from: typed in, uploaded, imported, or found. */
+function DataStep({
+  accountName,
+  projectName,
+  onDone,
+}: {
+  accountName: string
+  projectName: string
+  onDone: () => void
+}) {
+  const cardBg = useColorModeValue("white", "ui.darkSlate")
+  const borderColor = useColorModeValue("gray.200", "gray.600")
+  const { data_open: dataOpen } = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const setDataOpen = (
+    value: "enter" | "upload" | "import" | "browse" | undefined,
+  ) => navigate({ search: (prev) => ({ ...prev, data_open: value }) })
+  const datasetsQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "datasets"],
+    queryFn: () =>
+      ProjectsService.getProjectDatasets({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    retry: false,
+  })
+  const datasets = datasetsQuery.data ?? []
+  const options: {
+    key: "enter" | "upload" | "import" | "browse"
+    title: string
+    body: string
+  }[] = [
+    {
+      key: "enter",
+      title: "Type it in",
+      body: "Readings, a tally, a table from a paper. A small grid that saves as a CSV you collected.",
+    },
+    {
+      key: "upload",
+      title: "Upload a file",
+      body: "A CSV, a spreadsheet, an HDF5 file, an archive. Small files go in Git, large ones in DVC.",
+    },
+    {
+      key: "import",
+      title: "Import by DOI, URL, or Git",
+      body: "Zenodo, Figshare, a download link, or a path in a repo at a pinned commit. Fetched now, origin recorded.",
+    },
+    {
+      key: "browse",
+      title: "Find a dataset on Calkit",
+      body: "Data another project on this hub already published, linked back to where it came from.",
+    },
+  ]
+  return (
+    <>
+      <Heading size="lg" mb={2}>
+        Bring in your data
+      </Heading>
+      <Text color="ui.dim" mb={5}>
+        Every figure traces back to data, so the data comes first. Each of these
+        records where it came from, which is what lets anyone follow a result
+        back to its source later. Data your pipeline produces doesn't need
+        adding here; its stage is its source.
+      </Text>
+      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3} mb={5}>
+        {options.map((option) => (
+          <Box
+            key={option.key}
+            as="button"
+            type="button"
+            textAlign="left"
+            borderWidth={1}
+            borderColor={borderColor}
+            borderRadius="lg"
+            bg={cardBg}
+            p={4}
+            _hover={{ borderColor: "ui.main", shadow: "md" }}
+            onClick={() => {
+              mixpanel.track("Chose data source in wizard", {
+                source: option.key,
+              })
+              setDataOpen(option.key)
+            }}
+          >
+            <Heading size="sm" mb={1}>
+              {option.title}
+            </Heading>
+            <Text fontSize="sm" color="ui.dim">
+              {option.body}
+            </Text>
+          </Box>
+        ))}
+      </SimpleGrid>
+      {datasets.length ? (
+        <Box mb={5} fontSize="sm">
+          <Text fontWeight="semibold" mb={1}>
+            In the project so far
+          </Text>
+          {datasets.map((d) => (
+            <Flex key={d.path} gap={2} align="center">
+              <Icon as={CheckCircleIcon} color="ui.success" boxSize={3} />
+              <Text>
+                {d.title || d.path}
+                {d.title ? (
+                  <Text as="span" color="ui.dim">
+                    {" "}
+                    ({d.path})
+                  </Text>
+                ) : null}
+              </Text>
+            </Flex>
+          ))}
+        </Box>
+      ) : null}
+      <HStack spacing={3}>
+        <Button variant="primary" onClick={onDone}>
+          Continue
+        </Button>
+        <Text fontSize="sm" color="ui.dim">
+          You can add more from the datasets page any time.
+        </Text>
+      </HStack>
+      {dataOpen === "enter" || dataOpen === "import" ? (
+        <NewDataset
+          key={dataOpen}
+          isOpen
+          onClose={() => setDataOpen(undefined)}
+          ownerName={accountName}
+          projectName={projectName}
+          defaultSource={dataOpen === "enter" ? "enter" : "doi"}
+        />
+      ) : null}
+      {dataOpen === "upload" ? (
+        <UploadDataset
+          isOpen
+          onClose={() => setDataOpen(undefined)}
+          ownerName={accountName}
+          projectName={projectName}
+        />
+      ) : null}
+      {dataOpen === "browse" ? (
+        <BrowseDatasets
+          isOpen
+          onClose={() => setDataOpen(undefined)}
+          ownerName={accountName}
+          projectName={projectName}
+        />
+      ) : null}
+    </>
+  )
+}
+
 /**
  * For a fresh project: the figure the template already produced, and the
  * studio to make the next one.
@@ -1178,6 +1340,14 @@ function NewProjectWizard() {
   } else if (current === "question") {
     body = (
       <QuestionStep
+        accountName={accountName}
+        projectName={projectName}
+        onDone={advance}
+      />
+    )
+  } else if (current === "data") {
+    body = (
+      <DataStep
         accountName={accountName}
         projectName={projectName}
         onDone={advance}

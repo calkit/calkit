@@ -249,6 +249,7 @@ class Stage(BaseModel):
         "word-to-pdf",
         "map-paths",
         "marimo-html-wasm",
+        "markdown",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1752,6 +1753,37 @@ class MarimoHtmlWasmStage(Stage):
         return cmd
 
 
+class MarkdownStage(Stage):
+    """A stage sourced from a Markdown file's annotated code blocks.
+
+    This stands in for however many stages the file declares. It is
+    replaced by them at compile time (see
+    ``Pipeline.expand_markdown_stages``), so nothing downstream needs to
+    know Markdown was involved.
+    """
+
+    kind: Literal["markdown"] = "markdown"
+    # Named to match the other stages that compile a document, e.g. latex
+    target_path: RelativeChildPathString | None = Field(
+        default=None,
+        description="Path to the Markdown file. Defaults to the stage name, "
+        "since a Markdown stage is normally keyed by its own path.",
+    )
+    # A Markdown stage never runs as itself, so it needs no environment of
+    # its own; this is the fallback for blocks that don't name one.
+    environment: str = Field(
+        default="_system",
+        description="Environment used by blocks that don't name one.",
+    )
+
+    @property
+    def markdown_path(self) -> str:
+        path = self.target_path if self.target_path is not None else self.name
+        if path is None:
+            raise ValueError("Markdown stage has no path")
+        return Path(path).as_posix()
+
+
 class Pipeline(BaseModel):
     """The project's reproducible pipeline."""
 
@@ -1777,6 +1809,7 @@ class Pipeline(BaseModel):
                 | SBatchStage
                 | MapPathsStage
                 | MarimoHtmlWasmStage
+                | MarkdownStage
             ),
             Discriminator("kind"),
         ],
@@ -1794,6 +1827,29 @@ class Pipeline(BaseModel):
                     f"'{stage_name}'"
                 )
             stage.name = stage_name
+        return self
+
+    @model_validator(mode="after")
+    def check_markdown_stage_paths(self) -> Pipeline:
+        """Check that markdown stages point at a Markdown file.
+
+        This runs at the pipeline level because a stage's name is only
+        filled in from its key above, and the name is where the path
+        normally comes from.
+        """
+        for stage_name, stage in self.stages.items():
+            if stage.kind != "markdown":
+                continue
+            path = (
+                stage.target_path
+                if stage.target_path is not None
+                else stage_name
+            )
+            if not str(path).endswith(".md"):
+                raise ValueError(
+                    f"Markdown stage '{stage_name}' needs a 'target_path' "
+                    "ending in .md, or a name that is one"
+                )
         return self
 
     def set_stage_scheduler_options(
@@ -1977,21 +2033,26 @@ class Pipeline(BaseModel):
             converted[name] = calkit_yaml_stage
         return converted
 
-    def ensure_env_lock_paths_are_inputs(
-        self, env_lock_fpaths: dict[str, str]
+    def ensure_env_paths_are_inputs(
+        self, env_fpaths: dict[str, list[str]]
     ) -> None:
-        """Ensure that all environment lock file paths are included as inputs
-        to each stage.
+        """Ensure each environment's defining files are inputs to its stages.
+
+        That is normally just the lock file, but a ``uv`` environment also
+        has a ``.python-version``, which is what actually selects the
+        interpreter: ``uv.lock`` records only a ``requires-python`` floor,
+        so a changed pin would otherwise leave every stage in that
+        environment looking up to date.
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
-        contributes its lock file as a stage dependency.
+        contributes its files as stage dependencies.
         """
         for _, stage in self.stages.items():
             for env_name in (
                 stage.inner_environment,
                 stage.outer_environment,
             ):
-                lock_fpath = env_lock_fpaths.get(env_name)
-                if lock_fpath is not None and lock_fpath not in stage.inputs:
-                    stage.inputs.append(lock_fpath)
+                for fpath in env_fpaths.get(env_name, []):
+                    if fpath not in stage.inputs:
+                        stage.inputs.append(fpath)

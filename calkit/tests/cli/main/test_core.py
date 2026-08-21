@@ -2341,3 +2341,97 @@ def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
         os.environ["CALKIT_ENV"] = "test"
         _warn_on_stale_calkit_env()
         assert capsys.readouterr().err == ""
+
+
+def test_stage_stdout_from_log_content():
+    """Stage output is read back out of the run log, not captured twice."""
+    from calkit.cli.main.core import (
+        STAGE_OUTPUT_END,
+        STAGE_OUTPUT_START,
+        _stage_stdout_from_log_content,
+    )
+
+    log = "\n".join(
+        [
+            "2025-01-01T00:00:00 - INFO - Running stage 'README.md/a':",
+            STAGE_OUTPUT_START,
+            "hello",
+            "world" + STAGE_OUTPUT_END,
+            "2025-01-01T00:00:01 - INFO - Running stage 'README.md/b':",
+            STAGE_OUTPUT_START,
+            STAGE_OUTPUT_END,
+            "2025-01-01T00:00:02 - INFO - Stage 'other' didn't change, "
+            "skipping",
+        ]
+    )
+    res = _stage_stdout_from_log_content(log)
+    # Output lacking a final newline shares its line with the end marker
+    assert res["README.md/a"] == "hello\nworld"
+    # A stage that ran but printed nothing is still recorded, so its block
+    # can be emptied rather than left stale
+    assert res["README.md/b"] == ""
+    # A skipped stage produced no output this run, so it must not be
+    # listed---its block should keep what it has
+    assert "other" not in res
+
+
+def test_run_refuses_outside_a_project(tmp_dir):
+    """``calkit run`` must not initialize anything outside a project.
+
+    It initializes Git and DVC as needed, so a wrong working directory
+    would otherwise scatter a .dvc directory into an unrelated folder ---
+    and inside an existing Git repo that now succeeds, since DVC is told
+    the project is a subdirectory.
+    """
+    import subprocess
+
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "no calkit.yaml or dvc.yaml" in result.stderr.lower()
+    assert not os.path.exists(".dvc")
+    # Same inside an existing Git repo, which is the case that would now
+    # otherwise succeed rather than failing on DVC's own check
+    subprocess.check_call(["git", "init", "-q", "."])
+    os.makedirs("sub")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert not os.path.exists(os.path.join("sub", ".dvc"))
+    # A project with only a dvc.yaml is still a project
+    with open(os.path.join("sub", "dvc.yaml"), "w") as f:
+        f.write("stages: {}\n")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert "no calkit.yaml or dvc.yaml" not in result.stderr.lower()
+
+
+def test_project_dir_option(tmp_dir):
+    """``-C`` changes directory before anything reads the filesystem."""
+    import subprocess
+
+    os.makedirs("proj")
+    with open(os.path.join("proj", "calkit.yaml"), "w") as f:
+        f.write("name: from-subdir\n")
+    subprocess.check_call(["git", "init", "-q", "."])
+    # The project is initialized inside proj, not wherever we were standing
+    result = subprocess.run(
+        ["calkit", "-C", "proj", "init"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.path.isdir(os.path.join("proj", ".dvc"))
+    assert not os.path.isdir(".dvc")
+    # The long spelling matches make/tar/git/uv, which all mean chdir
+    result = subprocess.run(
+        ["calkit", "--directory", "proj", "status"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    # A missing directory is reported rather than silently ignored
+    result = subprocess.run(
+        ["calkit", "-C", "nope", "status"], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "does not exist" in result.stderr

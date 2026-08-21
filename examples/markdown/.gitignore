@@ -1,0 +1,6 @@
+# >>> calkit markdown derived files (managed by calkit) >>>
+/.calkit/markdown/
+/.calkit/envs/jl/.venv/
+/.calkit/envs/py/.venv/
+/.calkit/envs/r/.venv/
+# <<< calkit markdown derived files <<<

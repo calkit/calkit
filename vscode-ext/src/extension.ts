@@ -37,6 +37,12 @@ import {
   resolveImageRefToRepoRelative,
 } from "./figures/core";
 import {
+  findMarkdownStageBlocks,
+  markdownStagePath,
+  splitMarkdownStageName,
+} from "./markdown/core";
+import { MarkdownStageCodeLensProvider } from "./markdown/view";
+import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
 } from "./figures/view";
@@ -52,6 +58,7 @@ const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_RUN_MARKDOWN_STAGE = "calkit-vscode.runMarkdownStage";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
 const COMMAND_NEW_STAGE = "calkit-vscode.newStage";
@@ -419,6 +426,19 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_MARKDOWN_STAGE,
+      (stageName?: string, projectDir?: string) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !stageName) {
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName, projectDir);
       },
     ),
   );
@@ -1323,6 +1343,19 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // Puts a "Run stage" action above each stage a Markdown file declares
+  const markdownStageCodeLensProvider = new MarkdownStageCodeLensProvider({
+    getWorkspaceRoot,
+    readCalkitConfig,
+    runMarkdownStageCommand: COMMAND_RUN_MARKDOWN_STAGE,
+  });
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { scheme: "file", pattern: "**/*.md" },
+      markdownStageCodeLensProvider,
+    ),
+  );
+
   // Set up PDF auto-refresh watchers for PDF-producing stages now and whenever
   // the pipeline config changes (the latter picks up newly added stages).
   const workspaceRootForPdfWatchers = getWorkspaceRoot();
@@ -1334,6 +1367,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
     figureCodeLensProvider.refresh();
+    // A file only gets stage lenses once calkit.yaml declares it, so these
+    // have to be recomputed when that changes
+    markdownStageCodeLensProvider.refresh();
     const root = getWorkspaceRoot();
     if (root) {
       void setupStagePdfRefreshWatchers(context, root);
@@ -3449,10 +3485,22 @@ function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
   return vscode.window.createTerminal({ name, cwd });
 }
 
-function runStageInTerminal(workspaceRoot: string, stageName: string): void {
+function runStageInTerminal(
+  workspaceRoot: string,
+  stageName: string,
+  projectDir?: string,
+): void {
   const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
   terminal.show();
-  terminal.sendText(`calkit run ${shQuote(stageName)}`);
+  // A project can live in a subdirectory of the workspace without being
+  // declared as a subproject, so point the CLI at it rather than assuming
+  // the terminal is already in the right place.
+  const rel =
+    projectDir && path.relative(workspaceRoot, projectDir)
+      ? path.relative(workspaceRoot, projectDir).replace(/\\/g, "/")
+      : undefined;
+  const prefix = rel ? `calkit -C ${shQuote(rel)}` : "calkit";
+  terminal.sendText(`${prefix} run ${shQuote(stageName)}`);
 }
 
 function isLatexWorkshopInstalled(): boolean {
@@ -3551,6 +3599,29 @@ async function openStageSourceFile(
   workspaceRoot: string,
   stageName: string,
 ): Promise<void> {
+  // A stage declared in a Markdown file has no source file of its own, so
+  // open the file that declares it and go to the block
+  const md = splitMarkdownStageName(stageName, currentCalkitConfig);
+  if (md) {
+    const mdPath = markdownStagePath(currentCalkitConfig, md.markdownStageName);
+    if (mdPath) {
+      const uri = vscode.Uri.file(path.join(workspaceRoot, mdPath));
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const block = findMarkdownStageBlocks(doc.getText()).find(
+        (b) => b.name === md.blockName,
+      );
+      const editor = await vscode.window.showTextDocument(doc);
+      if (block) {
+        const pos = new vscode.Position(block.line, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenter,
+        );
+      }
+      return;
+    }
+  }
   const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
   const filePath =
     (typeof stage?.notebook_path === "string"
@@ -3630,6 +3701,14 @@ async function findStageForFile(
       stage.script_path === relPath ||
       stage.target_path === relPath ||
       pipelineStageOutputPaths(stage).includes(relPath)
+    ) {
+      return stageName;
+    }
+    // A markdown stage stands in for the stages its blocks declare, and is
+    // normally keyed by the path of the file itself
+    if (
+      stage.kind === "markdown" &&
+      (stage.target_path ?? stageName).replace(/\\/g, "/") === relPath
     ) {
       return stageName;
     }

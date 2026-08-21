@@ -402,7 +402,12 @@ const NotebookRunner = ({
       isCentered
     >
       <ModalOverlay />
-      <ModalContent maxW={{ base: "100%", lg: "92vw" }} h="92vh" maxH="92vh">
+      {/* A notebook reads best at a page's width, not a table's */}
+      <ModalContent
+        maxW={{ base: "100%", lg: "min(1100px, 85vw)" }}
+        h="92vh"
+        maxH="92vh"
+      >
         <ModalHeader pb={1}>
           Notebook: <Code fontSize="md">{path}</Code>
           <Flex gap={3} fontSize="xs" color="ui.dim" fontWeight="normal" mt={1}>
@@ -542,16 +547,7 @@ const NotebookRunner = ({
                           fontSize="xs"
                           color="ui.dim"
                         >
-                          <IconButton
-                            aria-label="Run cell"
-                            title="Run cell (⌘+Enter)"
-                            icon={<FaPlay />}
-                            size="xs"
-                            variant="primary"
-                            onClick={() => run(cell)}
-                            isLoading={state === "running"}
-                          />
-                          <Text mt={1} fontFamily="mono">
+                          <Text mb={1} fontFamily="mono">
                             [
                             {state === "running"
                               ? "*"
@@ -560,6 +556,18 @@ const NotebookRunner = ({
                                 : " "}
                             ]
                           </Text>
+                          <IconButton
+                            aria-label="Run cell"
+                            title="Run cell (⌘+Enter)"
+                            icon={<FaPlay />}
+                            size="xs"
+                            height="22px"
+                            minW="22px"
+                            fontSize="9px"
+                            variant="primary"
+                            onClick={() => run(cell)}
+                            isLoading={state === "running"}
+                          />
                         </Flex>
                         <Box
                           flex={1}

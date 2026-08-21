@@ -52,7 +52,9 @@ class LatexTemplate(Template):
 TEMPLATES = {
     "latex": {
         "article": LatexTemplate(name="article"),
+        "ieee-conference": LatexTemplate(name="ieee-conference"),
         "jfm": LatexTemplate(name="jfm"),
+        "report": LatexTemplate(name="report"),
     },
     "project": {},
 }

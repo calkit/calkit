@@ -51,6 +51,7 @@ import calkit.detect
 import calkit.environments
 import calkit.latex
 import calkit.resources
+import calkit.templates
 from app import (
     arxiv,
     github,
@@ -5097,8 +5098,9 @@ def post_project_publication(
         logger.info(f"Git-adding {files_to_stage}")
         repo.git.add(files_to_stage)
     elif template is not None:
-        # TODO: Centralize template names
-        if template not in ["latex/article", "latex/jfm"]:
+        try:
+            calkit.templates.get_template(template)
+        except ValueError:
             raise HTTPException(422, "Invalid template name")
         cmd = [
             "calkit",

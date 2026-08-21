@@ -45,7 +45,11 @@ calkit new publication paper --template latex/jfm --stage paper \
     --environment tex --kind journal-article --title "A cool paper"
 ```
 
-Available templates are `latex/article` and `latex/jfm`.
+Available templates are `latex/article` (generic), `latex/ieee-conference`
+(IEEEtran), `latex/jfm` (Journal of Fluid Mechanics), and `latex/report`
+(chapters, for a thesis or technical report). Each uses packages that ship
+with TeX Live, so the `texlive/texlive:latest-full` Docker environment
+builds all of them.
 
 ## Inputs
 

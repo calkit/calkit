@@ -99,5 +99,27 @@ A DOI can be written bare, as `doi:10.5281/zenodo.1234567`, or as the
 `imported_from` on the same dataset is an error, since data is either
 something you produced or something you got.
 
+## Entering data by hand
+
+Some data is typed in rather than downloaded: readings off an instrument, a
+tally, a table copied out of a paper. On the hub, the dataset dialog's
+"I'll type it in now" option opens a small grid for exactly this. Paste a
+block from a spreadsheet to fill many cells at once. Saving writes a CSV at
+the path you choose, tracks it with DVC, and records you as its collector,
+so it gets the same provenance as any other primary data:
+
+```yaml
+datasets:
+  - path: data/readings.csv
+    title: Bench readings
+    description: Voltage and current at each load step, 2026-08-20
+    collected_by:
+      - email: me@myorg.edu
+```
+
+Treat it the way you would a lab notebook page. If the grid was a stand-in
+while real data was on its way, replace the file rather than leaving the
+placeholder declared as collected data.
+
 For attributing files that aren't datasets, and for disclosing generative
 AI, see [provenance](provenance.md).

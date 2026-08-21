@@ -91,6 +91,18 @@ A figure obtained from elsewhere takes the same `imported_from` forms a
 dataset does, and publications do too; `created_by` and `imported_from`
 can't both be set on one entry.
 
+### Drafting a figure in the browser
+
+The hub's figure studio runs Python in the browser, so a plot can be
+iterated on before anything is installed. A run there proves nothing about
+reproducibility, and the studio doesn't pretend otherwise: nothing is
+recorded until you save, and saving commits the script, declares a
+`python-script` stage that reads the data and writes the figure, and creates
+a Python environment for the stage if the project has none. From then on the
+figure is a pipeline output like any other, and the real provenance is the
+stage's next run on a real environment, not the preview you saw in the
+browser.
+
 ## Disclosing generative AI
 
 If a generative AI tool helped produce a figure or a `misc` artifact, the

@@ -135,8 +135,8 @@ def _add_packages_to_spec(
 
 
 def _choose_environment(
-    ck_info: dict, requested: str | None
-) -> tuple[str | None, dict | None]:
+    ck_info: dict[str, Any], requested: str | None
+) -> tuple[str | None, dict[str, Any] | None]:
     envs = ck_info.get("environments") or {}
     if requested is not None:
         if requested not in envs:

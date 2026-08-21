@@ -27,25 +27,23 @@ const LAST_SEEN_PREFIX = "last_seen_commit:"
 /** "3 hours ago", without pulling in a date library for one label. */
 export function timeAgo(iso: string, now: Date = new Date()): string {
   const seconds = Math.max(0, (now.getTime() - new Date(iso).getTime()) / 1000)
+  // Largest unit that fits, rounded, so two years minus a leap day still
+  // reads as two years rather than one.
   const units: [number, string][] = [
-    [60, "second"],
+    [31557600, "year"],
+    [2629800, "month"],
+    [604800, "week"],
+    [86400, "day"],
+    [3600, "hour"],
     [60, "minute"],
-    [24, "hour"],
-    [7, "day"],
-    [4.35, "week"],
-    [12, "month"],
-    [Number.POSITIVE_INFINITY, "year"],
   ]
-  let value = seconds
-  let label = "second"
-  for (const [size, name] of units) {
-    label = name
-    if (value < size) break
-    value /= size
+  for (const [size, label] of units) {
+    if (seconds >= size) {
+      const n = Math.round(seconds / size)
+      return `${n} ${label}${n === 1 ? "" : "s"} ago`
+    }
   }
-  const rounded = Math.floor(value)
-  if (label === "second") return "just now"
-  return `${rounded} ${label}${rounded === 1 ? "" : "s"} ago`
+  return "just now"
 }
 
 /**

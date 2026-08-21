@@ -12,11 +12,18 @@ import {
   ModalHeader,
   ModalOverlay,
   Tab,
+  Table as ChakraTable,
+  TableContainer,
   TabList,
   TabPanel,
   TabPanels,
   Tabs,
+  Tbody,
+  Td,
   Text,
+  Th,
+  Thead,
+  Tr,
   useColorModeValue,
 } from "@chakra-ui/react"
 import { ChevronLeftIcon, ChevronRightIcon } from "@chakra-ui/icons"
@@ -377,6 +384,89 @@ function TextFile({ item }: { item: any }) {
   )
 }
 
+const formatSize = (size: number | null | undefined) => {
+  if (size == null) return ""
+  if (size < 1024) return `${size} B`
+  if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KB`
+  if (size < 1024 ** 3) return `${(size / 1024 ** 2).toFixed(1)} MB`
+  return `${(size / 1024 ** 3).toFixed(2)} GB`
+}
+
+/**
+ * A folder dataset as a table of what's in it.
+ *
+ * A dataset is often a directory of files (one per run, per case, per
+ * sensor), and the question "what's in it?" shouldn't need a trip to the
+ * files page. Folders sort first; each name goes to the file itself.
+ */
+function FolderListing({
+  ownerName,
+  projectName,
+  item,
+}: {
+  ownerName: string
+  projectName: string
+  item: any
+}) {
+  const headBg = useColorModeValue("gray.50", "gray.700")
+  const entries = [...((item?.dir_items ?? []) as any[])].sort((a, b) => {
+    const da = a.type === "dir" ? 0 : 1
+    const db = b.type === "dir" ? 0 : 1
+    return da - db || String(a.name).localeCompare(String(b.name))
+  })
+  const filesTo = `/${ownerName}/${projectName}/files`
+  if (!entries.length) {
+    return (
+      <Text fontSize="sm" color="ui.dim">
+        This folder is empty, or its contents haven't been pushed yet.
+      </Text>
+    )
+  }
+  return (
+    <TableContainer
+      borderWidth={1}
+      borderRadius="md"
+      maxH="70vh"
+      overflowY="auto"
+    >
+      <ChakraTable size="sm" variant="simple">
+        <Thead position="sticky" top={0} bg={headBg} zIndex={1}>
+          <Tr>
+            <Th>Name</Th>
+            <Th>Type</Th>
+            <Th isNumeric>Size</Th>
+            <Th>Storage</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
+          {entries.map((e) => (
+            <Tr key={e.path}>
+              <Td>
+                <Link
+                  as={RouterLink}
+                  to={filesTo as any}
+                  search={{ path: e.path } as any}
+                >
+                  {e.type === "dir" ? `${e.name}/` : e.name}
+                </Link>
+              </Td>
+              <Td color="ui.dim">
+                {e.type === "dir"
+                  ? "folder"
+                  : (String(e.name).split(".").pop() ?? "").toLowerCase()}
+              </Td>
+              <Td isNumeric fontFamily="mono" fontSize="xs">
+                {formatSize(e.size)}
+              </Td>
+              <Td color="ui.dim">{e.storage ?? (e.in_repo ? "git" : "")}</Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </ChakraTable>
+    </TableContainer>
+  )
+}
+
 interface DatasetViewerProps {
   isOpen: boolean
   onClose: () => void
@@ -495,13 +585,16 @@ const DatasetViewer = ({
             </Text>
           ) : isText && item ? (
             <TextFile item={item} />
+          ) : item?.type === "dir" ? (
+            <FolderListing
+              ownerName={ownerName}
+              projectName={projectName}
+              item={item}
+            />
           ) : (
             <Box fontSize="sm">
               <Text color={subtle}>
-                {item?.type === "dir"
-                  ? "This dataset is a folder."
-                  : "No viewer for this file type."}{" "}
-                Browse it on the{" "}
+                No viewer for this file type. Browse it on the{" "}
                 <Link
                   as={RouterLink}
                   to={`/${ownerName}/${projectName}/files` as any}

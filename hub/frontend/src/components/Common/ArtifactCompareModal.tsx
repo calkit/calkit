@@ -54,7 +54,7 @@ import {
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { httpStatus } from "../../lib/api"
-import { getStageDeps, matchDepsToDatasets } from "../../lib/provenance"
+import { declaredInputs, matchDepsToDatasets } from "../../lib/provenance"
 import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
@@ -333,9 +333,25 @@ function FigureInfo({
     enabled: Boolean(figure.stage),
     retry: false,
   })
+  // The stage as declared in calkit.yaml: its inputs are the data the
+  // author named, whereas dvc.yaml's deps also carry environment locks
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", figure.stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: figure.stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
   const dataLinks: InputLink[] = []
   if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
-    const deps = getStageDeps(pipelineQuery.data.dvc_stages[figure.stage])
+    const deps = declaredInputs(
+      stageQuery.data?.yaml,
+      pipelineQuery.data.dvc_stages,
+    )
     if (figure.dataset && !deps.includes(figure.dataset))
       deps.push(figure.dataset)
     const inputs = matchDepsToDatasets(deps, datasetsQuery.data)

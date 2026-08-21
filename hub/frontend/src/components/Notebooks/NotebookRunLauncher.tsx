@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
-import { getStageDeps } from "../../lib/provenance"
+import { declaredInputs, getStageDeps } from "../../lib/provenance"
 import NotebookRunner from "./NotebookRunner"
 
 /**
@@ -19,6 +19,8 @@ const NotebookRunLauncher = ({
   path,
   stage,
   source,
+  isOpen,
+  onOpenChange,
 }: {
   ownerName: string
   projectName: string
@@ -26,8 +28,19 @@ const NotebookRunLauncher = ({
   stage?: string | null
   /** Where the button lives, for telemetry. */
   source: string
+  /** Controlled open state, when the page keeps it in the URL. */
+  isOpen?: boolean
+  onOpenChange?: (open: boolean) => void
 }) => {
-  const runner = useDisclosure()
+  const local = useDisclosure()
+  const runner =
+    isOpen !== undefined && onOpenChange
+      ? {
+          isOpen,
+          onOpen: () => onOpenChange(true),
+          onClose: () => onOpenChange(false),
+        }
+      : local
   const pipelineQuery = useQuery({
     queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
     queryFn: () =>
@@ -38,9 +51,31 @@ const NotebookRunLauncher = ({
     enabled: Boolean(stage),
     retry: false,
   })
+  // The inputs the author declared in calkit.yaml, with other stages'
+  // outputs expanded; dvc.yaml's deps also list what the CLI generates on
+  // the fly (the cleaned notebook, environment locks), which isn't in the
+  // repo to fetch.
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(stage),
+    retry: false,
+  })
   if (!path.toLowerCase().endsWith(".ipynb")) return null
-  const dvcStage = stage ? pipelineQuery.data?.dvc_stages?.[stage] : undefined
-  const inputs = getStageDeps(dvcStage as any).filter((d) => d !== path)
+  const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
+  const declared = declaredInputs(stageQuery.data?.yaml, dvcStages)
+  const inputs = (
+    declared.length
+      ? declared
+      : getStageDeps((stage ? dvcStages[stage] : undefined) as any).filter(
+          (d) => !d.startsWith(".calkit/"),
+        )
+  ).filter((d) => d !== path)
   return (
     <Box mt={3} pt={3} borderTopWidth={1}>
       <Button

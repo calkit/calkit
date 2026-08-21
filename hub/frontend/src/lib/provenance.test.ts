@@ -9,6 +9,7 @@ import {
   isPathUnder,
   matchDepsToDatasets,
   normalizePath,
+  declaredInputs,
 } from "./provenance"
 
 const datasets = [
@@ -190,5 +191,31 @@ describe("findFeederStages", () => {
     expect(findFeederStages("missing", dvcStages, "paper/paper.pdf")).toEqual(
       [],
     )
+  })
+})
+
+describe("declaredInputs", () => {
+  it("reads calkit.yaml inputs and expands another stage's outputs", () => {
+    const dvcStages = {
+      "figs-to-paper": { cmd: "x", outs: ["paper/figures/a.png"] },
+    }
+    const yaml = [
+      "kind: latex",
+      "inputs:",
+      "  - paper/references.bib",
+      "  - from_stage_outputs: figs-to-paper",
+      "  - path: data/raw.csv",
+      "outputs:",
+      "  - paper/paper.pdf",
+    ].join("\n")
+    expect(declaredInputs(yaml, dvcStages)).toEqual([
+      "paper/references.bib",
+      "paper/figures/a.png",
+      "data/raw.csv",
+    ])
+    // Nothing declared, not loaded, or unparseable: nothing listed
+    expect(declaredInputs("kind: latex\n", dvcStages)).toEqual([])
+    expect(declaredInputs(undefined, dvcStages)).toEqual([])
+    expect(declaredInputs("::not yaml", dvcStages)).toEqual([])
   })
 })

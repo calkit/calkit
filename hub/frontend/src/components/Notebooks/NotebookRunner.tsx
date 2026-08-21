@@ -10,6 +10,7 @@ import {
   Code,
   Flex,
   HStack,
+  IconButton,
   Image,
   Kbd,
   Link,
@@ -31,6 +32,7 @@ import type { AxiosError } from "axios"
 import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { FaPlay } from "react-icons/fa"
 
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
@@ -56,33 +58,106 @@ import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
 import { envPackages, pickPythonEnv } from "../Figures/FigureStudio"
 
-const MAX_INPUT_BYTES = 50 * 1024 * 1024
+// Inputs are what the code reads, so the caps are about what a browser can
+// hold, not about tidiness: a profiler's sqlite or a results HDF5 can run
+// to hundreds of megabytes and still be exactly what's needed.
+const MAX_INPUT_BYTES = 512 * 1024 * 1024
+const MAX_TOTAL_INPUT_BYTES = 1536 * 1024 * 1024
+const MAX_INPUT_FILES = 5000
 
-/** A repo file's bytes, from inline content or its storage URL. */
-async function fetchFileBytes(
-  ownerName: string,
-  projectName: string,
-  path: string,
-): Promise<Uint8Array | null> {
-  const item = await ProjectsService.getProjectContents({
-    owner_name: ownerName,
-    project_name: projectName,
-    path,
-  }).then((response) => response.data as any)
-  if (!item || item.type === "dir") return null
-  if (item.size && item.size > MAX_INPUT_BYTES) return null
+const bytesOf = (item: any): Promise<Uint8Array | null> => {
   if (item.content) {
     const binary = atob(item.content)
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    return bytes
+    return Promise.resolve(bytes)
   }
   if (item.url) {
-    const resp = await fetch(String(item.url))
-    if (!resp.ok) return null
-    return new Uint8Array(await resp.arrayBuffer())
+    return fetch(String(item.url)).then(async (resp) =>
+      resp.ok ? new Uint8Array(await resp.arrayBuffer()) : null,
+    )
   }
-  return null
+  return Promise.resolve(null)
+}
+
+/**
+ * Every file under a repo path, as bytes at their repo paths.
+ *
+ * A stage input is as often a directory (a stage's output folder, a
+ * results tree) as a single file, and a notebook reading from it expects
+ * the files inside. Missing a file is worse than it looks: sqlite, for
+ * one, quietly creates an empty database at a path that isn't there.
+ */
+async function fetchTree(
+  ownerName: string,
+  projectName: string,
+  path: string,
+  budget: { bytes: number; files: number },
+  onStatus: (status: string) => void,
+  problems: string[],
+): Promise<{ path: string; data: Uint8Array }[]> {
+  let item: any
+  try {
+    item = await ProjectsService.getProjectContents({
+      owner_name: ownerName,
+      project_name: projectName,
+      path,
+    }).then((response) => response.data as any)
+  } catch {
+    problems.push(`${path}: not found in the project`)
+    return []
+  }
+  if (!item) return []
+  if (item.type === "dir") {
+    const out: { path: string; data: Uint8Array }[] = []
+    for (const child of (item.dir_items ?? []) as any[]) {
+      if (budget.files <= 0 || budget.bytes <= 0) {
+        problems.push(`${path}: not fully loaded, the input budget ran out`)
+        break
+      }
+      out.push(
+        ...(await fetchTree(
+          ownerName,
+          projectName,
+          String(child.path),
+          budget,
+          onStatus,
+          problems,
+        )),
+      )
+    }
+    return out
+  }
+  if (item.size && item.size > MAX_INPUT_BYTES) {
+    problems.push(
+      `${path}: ${(item.size / 1e6).toFixed(0)} MB is over the ${
+        MAX_INPUT_BYTES / 1024 / 1024
+      } MB per-file limit`,
+    )
+    return []
+  }
+  if (!item.content && !item.url) {
+    problems.push(
+      `${path}: this version isn't in the hub's storage; ` +
+        "push it with `calkit dvc push` (against this hub) and reopen",
+    )
+    return []
+  }
+  onStatus(`Loading ${path}`)
+  let data: Uint8Array | null = null
+  try {
+    data = await bytesOf(item)
+  } catch (e) {
+    problems.push(`${path}: download failed (${(e as Error).message})`)
+    return []
+  }
+  if (!data) {
+    problems.push(`${path}: download failed`)
+    return []
+  }
+  budget.files -= 1
+  budget.bytes -= data.length
+  return [{ path, data }]
 }
 
 interface NotebookRunnerProps {
@@ -125,10 +200,37 @@ const NotebookRunner = ({
   const [parsed, setParsed] = useState<ParsedNotebook | null>(null)
   const [cells, setCells] = useState<NotebookCell[]>([])
   const [runs, setRuns] = useState<Record<string, CellRun | "running">>({})
+  // Execution counts as Jupyter shows them: the order cells were run in,
+  // not their position, so a re-run cell gets a new number.
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const execCounter = useRef(0)
   const [status, setStatus] = useState("")
   const [ready, setReady] = useState(false)
   const [runningAll, setRunningAll] = useState(false)
+  // Inputs that couldn't be put in place, shown rather than swallowed: a
+  // missing file fails in ways that don't name it (sqlite makes an empty
+  // database, pandas finds an empty folder).
+  const [inputProblems, setInputProblems] = useState<string[]>([])
   const viewRefs = useRef<Record<string, EditorView | null>>({})
+  // Markdown cells render until clicked; then they edit like code cells
+  // and render again on Shift+Enter or ⌘+Enter, as in Jupyter.
+  const [editingMarkdown, setEditingMarkdown] = useState<Set<string>>(new Set())
+  const setMarkdownEditing = (id: string, editing: boolean) =>
+    setEditingMarkdown((prev) => {
+      const next = new Set(prev)
+      if (editing) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  // Shift+Enter runs a cell and moves to the next one, which means
+  // focusing the next editor (and opening a markdown cell for editing if
+  // that's what's next, since that's where the cursor lands in Jupyter).
+  const focusCell = (index: number) => {
+    const next = cells[index]
+    if (!next) return
+    if (next.type === "markdown") setMarkdownEditing(next.id, true)
+    requestAnimationFrame(() => viewRefs.current[next.id]?.focus())
+  }
   const discardDialog = useDisclosure()
   const keepEditingRef = useRef<HTMLButtonElement>(null)
   const notebookQuery = useQuery({
@@ -178,17 +280,23 @@ const NotebookRunner = ({
       await preloadPackages(envPackageNames)
     }
     const files: { path: string; data: Uint8Array }[] = []
-    // Every input the stage declares, as is: these are what the code reads,
-    // not a list for a person, so nothing is filtered out here.
+    // Every input the stage declares, as is, directories walked: these are
+    // what the code reads, not a list for a person, so nothing is filtered.
+    const budget = { bytes: MAX_TOTAL_INPUT_BYTES, files: MAX_INPUT_FILES }
+    const problems: string[] = []
     for (const inputPath of inputs) {
-      setStatus(`Loading ${inputPath}`)
-      try {
-        const data = await fetchFileBytes(ownerName, projectName, inputPath)
-        if (data) files.push({ path: inputPath, data })
-      } catch {
-        // A missing input surfaces as the cell's own error when it's read.
-      }
+      files.push(
+        ...(await fetchTree(
+          ownerName,
+          projectName,
+          inputPath,
+          budget,
+          setStatus,
+          problems,
+        )),
+      )
     }
+    setInputProblems(problems)
     writeProjectFiles(pyodide, files)
     await pyodide.runPythonAsync(PRELUDE)
     // Jupyter runs a notebook in its own folder, and so does the pipeline's
@@ -211,6 +319,9 @@ const NotebookRunner = ({
     setRuns((r) => ({ ...r, [cell.id]: "running" }))
     const pyodide = (await prepare()) ?? (await getPyodide())
     const result = await runCell(pyodide, cell.source)
+    execCounter.current += 1
+    const n = execCounter.current
+    setCounts((c) => ({ ...c, [cell.id]: n }))
     setRuns((r) => ({ ...r, [cell.id]: result }))
     mixpanel.track("Ran notebook cell", {
       ok: result.error === null,
@@ -274,6 +385,14 @@ const NotebookRunner = ({
   }
   const setSource = (id: string, source: string) =>
     setCells((cs) => cs.map((c) => (c.id === id ? { ...c, source } : c)))
+  const editorRef = (id: string) => ({
+    get current() {
+      return viewRefs.current[id] ?? null
+    },
+    set current(view: EditorView | null) {
+      viewRefs.current[id] = view
+    },
+  })
   return (
     <Modal
       isOpen={isOpen}
@@ -325,7 +444,8 @@ const NotebookRunner = ({
               Run all
             </Button>
             <Text fontSize="xs" color="ui.dim">
-              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> runs a cell
+              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> runs a cell, <Kbd>Shift</Kbd>+
+              <Kbd>Enter</Kbd> runs and moves on
             </Text>
             {status && !runningAll ? (
               <Text fontSize="xs" color="ui.dim">
@@ -337,6 +457,25 @@ const NotebookRunner = ({
               pipeline's run is the one that counts.
             </Text>
           </HStack>
+          {inputProblems.length ? (
+            <Box
+              mb={3}
+              p={3}
+              borderRadius="md"
+              borderWidth={1}
+              borderColor="orange.300"
+              fontSize="sm"
+            >
+              <Text fontWeight="semibold" mb={1}>
+                Some inputs couldn't be loaded
+              </Text>
+              {inputProblems.map((p) => (
+                <Text key={p} fontFamily="mono" fontSize="xs">
+                  {p}
+                </Text>
+              ))}
+            </Box>
+          ) : null}
           {notebookQuery.isPending || (!parsed && !notebookQuery.isError) ? (
             <LoadingSpinner height="40vh" />
           ) : notebookQuery.isError ? (
@@ -357,9 +496,34 @@ const NotebookRunner = ({
                   overflow="hidden"
                 >
                   {cell.type === "markdown" ? (
-                    <Box px={4} py={2} sx={{ "& p": { my: 1 } }}>
-                      <Markdown>{cell.source}</Markdown>
-                    </Box>
+                    editingMarkdown.has(cell.id) ? (
+                      <Box minH="60px" maxH="50vh" overflow="auto">
+                        <CodeEditorPane
+                          initialDoc={cell.source}
+                          path={`${cell.id}.md`}
+                          viewRef={editorRef(cell.id)}
+                          onChange={(text) => setSource(cell.id, text)}
+                          onModEnter={() => setMarkdownEditing(cell.id, false)}
+                          onShiftEnter={() => {
+                            setMarkdownEditing(cell.id, false)
+                            focusCell(index + 1)
+                          }}
+                        />
+                      </Box>
+                    ) : (
+                      <Box
+                        px={4}
+                        py={2}
+                        sx={{ "& p": { my: 1 } }}
+                        cursor="text"
+                        title="Click to edit"
+                        onClick={() => setMarkdownEditing(cell.id, true)}
+                      >
+                        <Markdown>
+                          {cell.source || "*Empty markdown cell*"}
+                        </Markdown>
+                      </Box>
+                    )
                   ) : cell.type === "raw" ? (
                     <Box px={4} py={2} fontFamily="mono" fontSize="sm">
                       <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
@@ -378,16 +542,24 @@ const NotebookRunner = ({
                           fontSize="xs"
                           color="ui.dim"
                         >
-                          <Text>[{index + 1}]</Text>
-                          <Button
+                          <IconButton
+                            aria-label="Run cell"
+                            title="Run cell (⌘+Enter)"
+                            icon={<FaPlay />}
                             size="xs"
-                            variant="ghost"
-                            mt={1}
+                            variant="primary"
                             onClick={() => run(cell)}
                             isLoading={state === "running"}
-                          >
-                            Run
-                          </Button>
+                          />
+                          <Text mt={1} fontFamily="mono">
+                            [
+                            {state === "running"
+                              ? "*"
+                              : counts[cell.id] !== undefined
+                                ? counts[cell.id]
+                                : " "}
+                            ]
+                          </Text>
                         </Flex>
                         <Box
                           flex={1}
@@ -399,16 +571,13 @@ const NotebookRunner = ({
                           <CodeEditorPane
                             initialDoc={cell.source}
                             path={`${cell.id}.py`}
-                            viewRef={{
-                              get current() {
-                                return viewRefs.current[cell.id] ?? null
-                              },
-                              set current(view) {
-                                viewRefs.current[cell.id] = view
-                              },
-                            }}
+                            viewRef={editorRef(cell.id)}
                             onChange={(text) => setSource(cell.id, text)}
                             onModEnter={() => run(cell)}
+                            onShiftEnter={() => {
+                              run(cell)
+                              focusCell(index + 1)
+                            }}
                           />
                         </Box>
                       </Flex>

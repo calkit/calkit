@@ -33,6 +33,9 @@ const notebookSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  // Whether the notebook runner is open on the selected notebook, so a
+  // link can land in it.
+  run: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -49,6 +52,8 @@ function NotebookInfo({
   gitRef,
   onOpenCompare,
   canRun,
+  runOpen,
+  onRunOpenChange,
 }: {
   notebook: Notebook
   accountName: string
@@ -57,6 +62,8 @@ function NotebookInfo({
   onOpenCompare: () => void
   /** Whether the viewer may run and edit it (write access, default ref). */
   canRun?: boolean
+  runOpen?: boolean
+  onRunOpenChange?: (open: boolean) => void
 }) {
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
 
@@ -141,6 +148,8 @@ function NotebookInfo({
           path={notebook.path}
           stage={notebook.stage}
           source="notebooks-page"
+          isOpen={Boolean(runOpen)}
+          onOpenChange={onRunOpenChange}
         />
       ) : null}
     </Box>
@@ -151,6 +160,7 @@ function Notebooks() {
   const { accountName, projectName } = Route.useParams()
   const {
     ref,
+    run,
     path: selectedPath,
     compare_open,
     base_ref,
@@ -275,6 +285,12 @@ function Notebooks() {
             <Box w="240px" flexShrink={0}>
               <NotebookInfo
                 canRun={userHasWriteAccess && !ref}
+                runOpen={Boolean(run)}
+                onRunOpenChange={(open) =>
+                  navigate({
+                    search: (prev) => ({ ...prev, run: open || undefined }),
+                  })
+                }
                 notebook={selectedNotebook}
                 accountName={accountName}
                 projectName={projectName}

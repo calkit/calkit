@@ -734,3 +734,31 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
             app.projects.get_repo_tree_for_ref(repo, None)
         )
     )
+
+
+def test_drop_stale_lock_stages() -> None:
+    from app.projects import drop_stale_lock_stages
+
+    lock = {
+        "schema": "2.0",
+        "stages": {
+            "baseline-nsys": {"outs": [{"path": "r/b.sqlite", "md5": "live"}]},
+            "baseline-nsys-to-sqlite": {
+                "outs": [{"path": "r/b.sqlite", "md5": "stale"}]
+            },
+            "plot@0": {"outs": [{"path": "f/0.png", "md5": "a"}]},
+            "plot@1": {"outs": [{"path": "f/1.png", "md5": "b"}]},
+            "gone@0": {"outs": [{"path": "f/x.png", "md5": "c"}]},
+        },
+    }
+    dvc_yaml = {"stages": {"baseline-nsys": {}, "plot": {"foreach": [0, 1]}}}
+    pruned = drop_stale_lock_stages(lock, dvc_yaml)
+    # Live stages stay, foreach instances count under their base name, and
+    # the renamed stage's leftover entry is gone, so the path resolves to
+    # the live hash
+    assert set(pruned["stages"]) == {"baseline-nsys", "plot@0", "plot@1"}
+    assert pruned["schema"] == "2.0"
+    # Nothing to prune returns the same object; odd inputs pass through
+    assert drop_stale_lock_stages(pruned, dvc_yaml) is pruned
+    assert drop_stale_lock_stages(lock, {}) is lock
+    assert drop_stale_lock_stages({}, dvc_yaml) == {}

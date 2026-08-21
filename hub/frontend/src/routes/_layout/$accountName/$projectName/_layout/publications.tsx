@@ -21,7 +21,6 @@ import {
   useDisclosure,
   VStack,
 } from "@chakra-ui/react"
-import { load as yamlLoad } from "js-yaml"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Link as RouterLink,
@@ -68,9 +67,8 @@ import { handleError } from "../../../../../lib/errors"
 import { getLatexSourcePath } from "../../../../../lib/latexProject"
 import {
   classifyPublicationDeps,
+  declaredInputs,
   findFeederStages,
-  getStageDeps,
-  getStageOuts,
 } from "../../../../../lib/provenance"
 
 const pubSearchSchema = z.object({
@@ -94,39 +92,6 @@ interface PubInfoProps {
   projectName: string
   userHasWriteAccess: boolean
   onOpenCompare: () => void
-}
-
-/**
- * A stage's inputs as its author declared them, with another stage's
- * outputs expanded to the paths they are. Empty when the stage hasn't
- * loaded or declares none.
- */
-function declaredInputs(
-  stageYaml: string | undefined,
-  dvcStages: Record<string, unknown>,
-): string[] {
-  if (!stageYaml) return []
-  let parsed: { inputs?: unknown } = {}
-  try {
-    parsed = (yamlLoad(stageYaml) as { inputs?: unknown }) ?? {}
-  } catch {
-    return []
-  }
-  if (!Array.isArray(parsed.inputs)) return []
-  const paths: string[] = []
-  for (const input of parsed.inputs) {
-    if (typeof input === "string") {
-      paths.push(input)
-    } else if (input && typeof input === "object") {
-      const item = input as { path?: string; from_stage_outputs?: string }
-      if (item.from_stage_outputs) {
-        paths.push(...getStageOuts(dvcStages[item.from_stage_outputs] as any))
-      } else if (item.path) {
-        paths.push(item.path)
-      }
-    }
-  }
-  return paths.filter((p) => p && !p.startsWith(".calkit/"))
 }
 
 function PubInfo({
@@ -190,12 +155,9 @@ function PubInfo({
   let feederStages: string[] = []
   if (publication.stage) {
     const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
-    // stage_info carries the deps too, so the rows can show before the
-    // pipeline has loaded
-    const stage = dvcStages[publication.stage] ?? publication.stage_info
-    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages).length
-      ? declaredInputs(stageQuery.data?.yaml, dvcStages)
-      : getStageDeps(stage).filter((d) => !d.startsWith(".calkit/"))
+    // What the author declared in calkit.yaml, with other stages' outputs
+    // expanded; dvc.yaml's deps also carry environment locks and the like
+    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages)
     const inputs = classifyPublicationDeps(deps, figuresQuery.data?.items ?? [])
     for (const { path, figure } of inputs.figures) {
       figureLinks.push(

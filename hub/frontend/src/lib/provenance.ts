@@ -3,6 +3,7 @@
  * stage's concrete inputs (the deps compiled into dvc.yaml) rather than
  * anything the artifact declares about itself.
  */
+import { load as yamlLoad } from "js-yaml"
 import type {
   Dataset,
   DvcForeachStage,
@@ -213,4 +214,45 @@ export function findFeederStages(
     if (looksLikeCopy) feeders.push(name)
   }
   return feeders.sort()
+}
+
+/**
+ * A stage's inputs as its author declared them in calkit.yaml, with
+ * another stage's outputs expanded to the paths they are.
+ *
+ * This is the list to show a person. dvc.yaml's deps also carry what
+ * Calkit adds for itself (environment locks, the script), which is why
+ * they aren't used here. Empty when the stage hasn't loaded or declares
+ * none.
+ */
+export function declaredInputs(
+  stageYaml: string | undefined | null,
+  dvcStages: Record<string, unknown> | undefined | null,
+): string[] {
+  if (!stageYaml) return []
+  let parsed: { inputs?: unknown } = {}
+  try {
+    parsed = (yamlLoad(stageYaml) as { inputs?: unknown }) ?? {}
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed.inputs)) return []
+  const paths: string[] = []
+  for (const input of parsed.inputs) {
+    if (typeof input === "string") {
+      paths.push(input)
+    } else if (input && typeof input === "object") {
+      const item = input as { path?: string; from_stage_outputs?: string }
+      if (item.from_stage_outputs) {
+        paths.push(
+          ...getStageOuts(
+            (dvcStages ?? {})[item.from_stage_outputs] as DvcStage | undefined,
+          ),
+        )
+      } else if (item.path) {
+        paths.push(item.path)
+      }
+    }
+  }
+  return paths.filter((p) => Boolean(p)).map(normalizePath)
 }

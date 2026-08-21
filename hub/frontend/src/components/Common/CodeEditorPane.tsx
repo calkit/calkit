@@ -121,6 +121,8 @@ interface CodeEditorPaneProps {
   // default binding inserts a blank line, which is wrong in an editor whose
   // surroundings treat the chord as "go".
   onModEnter?: () => void
+  // Shift+Enter, for "run and move on" in a notebook.
+  onShiftEnter?: () => void
 }
 
 const CodeEditorPane = ({
@@ -129,10 +131,13 @@ const CodeEditorPane = ({
   viewRef,
   onChange,
   onModEnter,
+  onShiftEnter,
 }: CodeEditorPaneProps) => {
   const ref = useRef<HTMLDivElement>(null)
   const onModEnterRef = useRef(onModEnter)
   onModEnterRef.current = onModEnter
+  const onShiftEnterRef = useRef(onShiftEnter)
+  onShiftEnterRef.current = onShiftEnter
   // The listener below is built once and would otherwise close over the first
   // render's onChange, so callbacks reading state (e.g. an auto-compile
   // toggle) would keep seeing that render's values. Go through a ref instead.
@@ -156,6 +161,14 @@ const CodeEditorPane = ({
               run: () => {
                 if (!onModEnterRef.current) return false
                 onModEnterRef.current()
+                return true
+              },
+            },
+            {
+              key: "Shift-Enter",
+              run: () => {
+                if (!onShiftEnterRef.current) return false
+                onShiftEnterRef.current()
                 return true
               },
             },

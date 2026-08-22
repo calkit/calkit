@@ -6,6 +6,7 @@ from typing import Callable
 from pydantic import BaseModel, computed_field
 
 import calkit
+from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, has_provenance
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "
@@ -20,27 +21,6 @@ def _bool_to_check_x(val: bool | int) -> str:
         return "✅"
     else:
         return "❌"
-
-
-# The artifact kinds whose provenance is checked. Each entry must say where
-# it came from: a pipeline stage, an import, or the person who collected or
-# created it.
-PROVENANCE_ARTIFACT_TYPES = ["datasets", "figures", "publications", "misc"]
-
-
-def has_provenance(artifact: dict) -> bool:
-    """Return whether an artifact entry records where it came from.
-
-    A stage and an import are the stronger forms, but ``collected_by`` and
-    ``created_by`` count too: a dataset someone measured, or a schematic
-    someone drew, is accounted for even though there's nothing upstream to
-    point at. The field names in :class:`ReproCheck` predate the latter two
-    and are kept so callers reading them keep working.
-    """
-    return any(
-        artifact.get(key) is not None
-        for key in ["stage", "imported_from", "collected_by", "created_by"]
-    )
 
 
 class ReproCheck(BaseModel):

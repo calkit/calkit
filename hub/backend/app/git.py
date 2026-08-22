@@ -14,6 +14,7 @@ import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
+from datetime import timezone
 from typing import Any
 
 import git
@@ -413,7 +414,32 @@ def get_repo(
     # read, which would be pure overhead.
     if user is not None and did_refresh:
         _configure_committer(repo, user, session=session)
+    if did_refresh:
+        record_project_update(project, repo, session)
     return repo
+
+
+def record_project_update(
+    project: Project, repo: git.Repo, session: Session
+) -> None:
+    """Move the project's "last updated" up to its head commit, if newer.
+
+    The time follows the repo rather than the database row: a push from
+    the CLI, a collaborator's commit, an Overleaf sync, or a commit the
+    hub itself just made. It's recorded lazily, whenever something sees a
+    newer head, which is what "most recently worked on" should mean on
+    the projects list.
+    """
+    try:
+        head_dt = repo.head.commit.committed_datetime.astimezone(
+            timezone.utc
+        ).replace(tzinfo=None)
+        if project.updated is None or head_dt > project.updated:
+            project.updated = head_dt
+            session.add(project)
+            session.commit()
+    except Exception as e:
+        logger.warning(f"Could not record project update time: {e}")
 
 
 def _detect_full_name_from_history(repo: git.Repo, email: str) -> str | None:

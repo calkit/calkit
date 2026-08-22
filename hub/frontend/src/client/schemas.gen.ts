@@ -120,6 +120,40 @@ export const Body_projects_post_project_dataset_uploadSchema = {
       format: "binary",
       title: "File",
     },
+    collected_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By",
+    },
+    collected_by_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By Name",
+    },
+    storage: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["git", "dvc"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Storage",
+    },
   },
   type: "object",
   required: ["path", "title", "description", "file"],
@@ -162,6 +196,39 @@ export const Body_projects_post_project_figureSchema = {
         },
       ],
       title: "File",
+    },
+    created_by: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By",
+    },
+    created_by_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By Name",
+    },
+    created_with_ai: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created With Ai",
     },
   },
   type: "object",
@@ -379,6 +446,43 @@ export const Body_projects_post_project_publicationSchema = {
   title: "Body_projects-post_project_publication",
 } as const
 
+export const Body_projects_post_project_uploadSchema = {
+  properties: {
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    file: {
+      type: "string",
+      format: "binary",
+      title: "File",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    is_public: {
+      type: "boolean",
+      title: "Is Public",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["title", "name", "file"],
+  title: "Body_projects-post_project_upload",
+} as const
+
 export const Body_projects_put_project_contentsSchema = {
   properties: {
     file: {
@@ -471,6 +575,48 @@ export const CollaboratorSchema = {
   title: "Collaborator",
 } as const
 
+export const CollectorPostSchema = {
+  properties: {
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    orcid: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Orcid",
+    },
+  },
+  type: "object",
+  title: "CollectorPost",
+  description:
+    "Someone credited with collecting a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
+} as const
+
 export const CommentHighlightSchema = {
   properties: {
     position: {
@@ -524,6 +670,11 @@ export const ConnectedAccountsSchema = {
     zotero: {
       type: "boolean",
       title: "Zotero",
+    },
+    cli: {
+      type: "boolean",
+      title: "Cli",
+      default: false,
     },
   },
   type: "object",
@@ -936,6 +1087,205 @@ export const DatasetForImportSchema = {
   type: "object",
   required: ["path", "git_rev"],
   title: "DatasetForImport",
+} as const
+
+export const DatasetPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    tabular: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Tabular",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    collected_by: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/CollectorPost",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/ImportedFromPost",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "DatasetPost",
+  description:
+    "A dataset to declare, however it came to be part of the project.",
+} as const
+
+export const DatasetPublicSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    tabular: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Tabular",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    project_id: {
+      type: "string",
+      format: "uuid",
+      title: "Project Id",
+    },
+    imported_from_info: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From Info",
+    },
+    collected_by: {
+      anyOf: [
+        {
+          items: {
+            additionalProperties: true,
+            type: "object",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Collected By",
+    },
+  },
+  type: "object",
+  required: ["path", "id", "project_id"],
+  title: "DatasetPublic",
+  description:
+    "A dataset as the API returns it, with its provenance spelled out.\n\nThe table keeps ``imported_from`` as a project path for the one kind of\nimport the hub can resolve itself; the structured origin (DOI, URL, Git\nrepo, project) and the collectors come straight from calkit.yaml, which\nis where they're authored.",
 } as const
 
 export const DatasetResponseSchema = {
@@ -1570,10 +1920,40 @@ export const EnvironmentSchema = {
       ],
       title: "File Content",
     },
+    locks: {
+      items: {
+        $ref: "#/components/schemas/EnvironmentLock",
+      },
+      type: "array",
+      title: "Locks",
+      default: [],
+    },
   },
   type: "object",
   required: ["name", "kind", "all_attrs"],
   title: "Environment",
+} as const
+
+export const EnvironmentLockSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["path", "content"],
+  title: "EnvironmentLock",
+  description: "A lock file pinning what an environment actually resolved to.",
 } as const
 
 export const ExistsResultSchema = {
@@ -1712,6 +2092,179 @@ export const FeatureVoteStatusSchema = {
   title: "FeatureVoteStatus",
   description:
     "Vote tally for a feature plus whether the current user has voted.",
+} as const
+
+export const FeatureVoteSummarySchema = {
+  properties: {
+    feature: {
+      type: "string",
+      title: "Feature",
+    },
+    count: {
+      type: "integer",
+      title: "Count",
+    },
+    voters: {
+      items: {
+        $ref: "#/components/schemas/FeatureVoter",
+      },
+      type: "array",
+      title: "Voters",
+    },
+  },
+  type: "object",
+  required: ["feature", "count", "voters"],
+  title: "FeatureVoteSummary",
+  description:
+    "Every vote for one feature, for the admin page: demand is only\nuseful alongside who's asking, which is what feedback shows too.",
+} as const
+
+export const FeatureVoterSchema = {
+  properties: {
+    email: {
+      type: "string",
+      title: "Email",
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    account_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Account Name",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+  },
+  type: "object",
+  required: ["email", "created"],
+  title: "FeatureVoter",
+} as const
+
+export const FeedbackPatchSchema = {
+  properties: {
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+  },
+  type: "object",
+  required: ["resolved"],
+  title: "FeedbackPatch",
+} as const
+
+export const FeedbackPostSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["feedback", "bug", "help"],
+      title: "Kind",
+      default: "feedback",
+    },
+    message: {
+      type: "string",
+      maxLength: 5000,
+      minLength: 1,
+      title: "Message",
+    },
+    page: {
+      anyOf: [
+        {
+          type: "string",
+          maxLength: 2048,
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Page",
+    },
+  },
+  type: "object",
+  required: ["message"],
+  title: "FeedbackPost",
+} as const
+
+export const FeedbackPublicSchema = {
+  properties: {
+    id: {
+      type: "string",
+      format: "uuid",
+      title: "Id",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    message: {
+      type: "string",
+      title: "Message",
+    },
+    page: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Page",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+    resolved: {
+      type: "boolean",
+      title: "Resolved",
+    },
+    user_email: {
+      type: "string",
+      title: "User Email",
+    },
+    user_full_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "User Full Name",
+    },
+  },
+  type: "object",
+  required: [
+    "id",
+    "kind",
+    "message",
+    "page",
+    "created",
+    "resolved",
+    "user_email",
+    "user_full_name",
+  ],
+  title: "FeedbackPublic",
 } as const
 
 export const FigureSchema = {
@@ -2493,6 +3046,40 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
+export const GitSourcePostSchema = {
+  properties: {
+    repo_url: {
+      type: "string",
+      title: "Repo Url",
+    },
+    rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Rev",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+  },
+  type: "object",
+  required: ["repo_url"],
+  title: "GitSourcePost",
+} as const
+
 export const GithubPullRequestSchema = {
   properties: {
     number: {
@@ -2537,6 +3124,71 @@ export const HTTPValidationErrorSchema = {
   },
   type: "object",
   title: "HTTPValidationError",
+} as const
+
+export const Hdf5KeySchema = {
+  properties: {
+    key: {
+      type: "string",
+      title: "Key",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    shape: {
+      anyOf: [
+        {
+          items: {
+            type: "integer",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Shape",
+    },
+    dtype: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Dtype",
+    },
+    tabular: {
+      type: "boolean",
+      title: "Tabular",
+      default: false,
+    },
+  },
+  type: "object",
+  required: ["key", "kind"],
+  title: "Hdf5Key",
+} as const
+
+export const Hdf5ListingSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    keys: {
+      items: {
+        $ref: "#/components/schemas/Hdf5Key",
+      },
+      type: "array",
+      title: "Keys",
+    },
+  },
+  type: "object",
+  required: ["path", "keys"],
+  title: "Hdf5Listing",
 } as const
 
 export const HttpRequestAccessSchema = {
@@ -2639,6 +3291,92 @@ export const ImportInfoSchema = {
   type: "object",
   required: ["project_owner", "project_name", "path"],
   title: "ImportInfo",
+} as const
+
+export const ImportedFromPostSchema = {
+  properties: {
+    project: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project",
+    },
+    path: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Path",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    url: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Url",
+    },
+    doi: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Doi",
+    },
+    git: {
+      anyOf: [
+        {
+          $ref: "#/components/schemas/GitSourcePost",
+        },
+        {
+          type: "null",
+        },
+      ],
+    },
+    date: {
+      anyOf: [
+        {
+          type: "string",
+          format: "date",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Date",
+    },
+  },
+  type: "object",
+  title: "ImportedFromPost",
+  description:
+    "Where a dataset came from, as one of four mutually exclusive kinds.\n\nSent flat rather than as a tagged union so the generated client has one\nshape to build; exactly which kind it is falls out of which field is\nset, and that's checked below rather than trusted.",
 } as const
 
 export const InfoResultSchema = {
@@ -2808,71 +3546,86 @@ export const ItemLockSchema = {
   title: "ItemLock",
 } as const
 
-export const LabelDatasetPostSchema = {
+export const MapPathEntrySchema = {
   properties: {
-    imported_from: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Imported From",
-    },
-    path: {
+    src: {
       type: "string",
-      title: "Path",
+      title: "Src",
     },
-    title: {
+    dest: {
+      type: "string",
+      title: "Dest",
+    },
+    kind: {
       anyOf: [
         {
           type: "string",
+          enum: [
+            "file-to-file",
+            "file-to-dir",
+            "dir-to-dir-merge",
+            "dir-to-dir-replace",
+          ],
         },
         {
           type: "null",
         },
       ],
-      title: "Title",
-    },
-    tabular: {
-      anyOf: [
-        {
-          type: "boolean",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Tabular",
-    },
-    stage: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Stage",
-    },
-    description: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Description",
+      title: "Kind",
     },
   },
   type: "object",
-  required: ["path"],
-  title: "LabelDatasetPost",
+  required: ["src", "dest"],
+  title: "MapPathEntry",
+} as const
+
+export const MapPathsPostSchema = {
+  properties: {
+    paths: {
+      items: {
+        $ref: "#/components/schemas/MapPathEntry",
+      },
+      type: "array",
+      minItems: 1,
+      title: "Paths",
+    },
+    stage_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Name",
+    },
+    target_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Stage",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["paths"],
+  title: "MapPathsPost",
 } as const
 
 export const MessageSchema = {
@@ -3097,6 +3850,72 @@ export const OAuthCodeExchangeSchema = {
   type: "object",
   required: ["code", "redirect_uri"],
   title: "OAuthCodeExchange",
+} as const
+
+export const OnboardingFlagPostSchema = {
+  properties: {
+    step: {
+      type: "string",
+      maxLength: 64,
+      minLength: 1,
+      title: "Step",
+    },
+    project_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Project Id",
+    },
+  },
+  type: "object",
+  required: ["step"],
+  title: "OnboardingFlagPost",
+} as const
+
+export const OnboardingFlagsSchema = {
+  properties: {
+    account: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Account",
+      default: [],
+    },
+    projects: {
+      additionalProperties: {
+        items: {
+          type: "string",
+        },
+        type: "array",
+      },
+      type: "object",
+      title: "Projects",
+      default: {},
+    },
+    first_project_id: {
+      anyOf: [
+        {
+          type: "string",
+          format: "uuid",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "First Project Id",
+    },
+  },
+  type: "object",
+  title: "OnboardingFlags",
+  description:
+    "Every onboarding flag a user has set, in one response.\n\nBoth checklists are read on pages that are already fetching plenty, so\nthey share a single query rather than each adding one: ``account`` holds\nthe account-level steps, and ``projects`` maps a project ID to the steps\nflagged on it.",
 } as const
 
 export const OperationResultSchema = {
@@ -5058,6 +5877,11 @@ export const ProjectPostSchema = {
       ],
       title: "Git Repo Exists",
     },
+    keep_template_history: {
+      type: "boolean",
+      title: "Keep Template History",
+      default: false,
+    },
   },
   type: "object",
   required: ["name", "title"],
@@ -5639,6 +6463,17 @@ export const QuestionPostSchema = {
     question: {
       type: "string",
       title: "Question",
+    },
+    hypothesis: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Hypothesis",
     },
   },
   type: "object",
@@ -7336,6 +8171,16 @@ export const ReproCheckSchema = {
       type: "integer",
       title: "N Publications No Import Or Stage",
     },
+    n_misc: {
+      type: "integer",
+      title: "N Misc",
+      default: 0,
+    },
+    n_misc_no_import_or_stage: {
+      type: "integer",
+      title: "N Misc No Import Or Stage",
+      default: 0,
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -7366,6 +8211,11 @@ export const ReproCheckSchema = {
     n_publications_with_import_or_stage: {
       type: "integer",
       title: "N Publications With Import Or Stage",
+      readOnly: true,
+    },
+    n_misc_with_import_or_stage: {
+      type: "integer",
+      title: "N Misc With Import Or Stage",
       readOnly: true,
     },
     n_stages_without_env: {
@@ -7403,6 +8253,7 @@ export const ReproCheckSchema = {
     "n_datasets_with_import_or_stage",
     "n_figures_with_import_or_stage",
     "n_publications_with_import_or_stage",
+    "n_misc_with_import_or_stage",
     "n_stages_without_env",
     "n_stages_with_env",
   ],
@@ -7806,6 +8657,129 @@ export const StorageUsageSchema = {
   title: "StorageUsage",
 } as const
 
+export const StudioFigureSchema = {
+  properties: {
+    figure: {
+      $ref: "#/components/schemas/Figure",
+    },
+    stage_name: {
+      type: "string",
+      title: "Stage Name",
+    },
+    environment: {
+      type: "string",
+      title: "Environment",
+    },
+    environment_created: {
+      type: "boolean",
+      title: "Environment Created",
+    },
+    packages_missing: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Packages Missing",
+    },
+    script_content: {
+      type: "string",
+      title: "Script Content",
+    },
+  },
+  type: "object",
+  required: [
+    "figure",
+    "stage_name",
+    "environment",
+    "environment_created",
+    "packages_missing",
+    "script_content",
+  ],
+  title: "StudioFigure",
+} as const
+
+export const StudioFigurePostSchema = {
+  properties: {
+    figure_path: {
+      type: "string",
+      title: "Figure Path",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    script_path: {
+      type: "string",
+      title: "Script Path",
+    },
+    script_content: {
+      type: "string",
+      title: "Script Content",
+    },
+    inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Inputs",
+    },
+    packages: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Packages",
+    },
+    environment: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Environment",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["figure_path", "title", "script_path", "script_content"],
+  title: "StudioFigurePost",
+} as const
+
 export const SubscriptionPlanSchema = {
   properties: {
     name: {
@@ -7957,6 +8931,70 @@ export const TableSchema = {
   title: "Table",
   description:
     "Tabular data the project publishes, resolved for display.\n\nCarries content like a figure does rather than metadata alone: a table\nis only useful once its rows can be read, and the files are small\nenough to inline. Large or DVC-tracked ones come back as a ``url``\ninstead, exactly as figures do.",
+} as const
+
+export const TableTextSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    content: {
+      type: "string",
+      title: "Content",
+    },
+    columns: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Columns",
+    },
+    n_rows: {
+      type: "integer",
+      title: "N Rows",
+    },
+    n_cols: {
+      type: "integer",
+      title: "N Cols",
+    },
+    row_offset: {
+      type: "integer",
+      title: "Row Offset",
+    },
+    row_limit: {
+      type: "integer",
+      title: "Row Limit",
+    },
+    col_offset: {
+      type: "integer",
+      title: "Col Offset",
+    },
+    col_limit: {
+      type: "integer",
+      title: "Col Limit",
+    },
+    truncated: {
+      type: "boolean",
+      title: "Truncated",
+    },
+  },
+  type: "object",
+  required: [
+    "path",
+    "content",
+    "columns",
+    "n_rows",
+    "n_cols",
+    "row_offset",
+    "row_limit",
+    "col_offset",
+    "col_limit",
+    "truncated",
+  ],
+  title: "TableText",
+  description:
+    "A window of a table as CSV, which is what the table viewer reads.\n\nA table can be wider or longer than a browser can hold (a 2D array in\nan HDF5 file with thousands of columns, say), so the response is a\nwindow in both dimensions and says where it sits in the whole.",
 } as const
 
 export const TextDiffSchema = {
@@ -8361,6 +9399,11 @@ export const UserPublicSchema = {
       format: "uuid",
       title: "Id",
     },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
     github_username: {
       anyOf: [
         {
@@ -8384,7 +9427,7 @@ export const UserPublicSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "github_username", "subscription"],
+  required: ["email", "id", "created", "github_username", "subscription"],
   title: "UserPublic",
 } as const
 
@@ -9455,6 +10498,16 @@ export const ReproCheckWritableSchema = {
       type: "integer",
       title: "N Publications No Import Or Stage",
     },
+    n_misc: {
+      type: "integer",
+      title: "N Misc",
+      default: 0,
+    },
+    n_misc_no_import_or_stage: {
+      type: "integer",
+      title: "N Misc No Import Or Stage",
+      default: 0,
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -9549,6 +10602,11 @@ export const UserPublicWritableSchema = {
       format: "uuid",
       title: "Id",
     },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
     github_username: {
       anyOf: [
         {
@@ -9572,7 +10630,7 @@ export const UserPublicWritableSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "github_username", "subscription"],
+  required: ["email", "id", "created", "github_username", "subscription"],
   title: "UserPublic",
 } as const
 

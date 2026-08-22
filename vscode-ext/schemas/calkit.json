@@ -271,7 +271,43 @@
       "type": "object"
     },
     "Dataset": {
+      "not": {
+        "properties": {
+          "collected_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "collected_by"
+        ]
+      },
       "properties": {
+        "collected_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Person"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Person"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who collected or measured this data for this project, which is what marks it as a primary artifact. Primary data has no upstream source to point at, so saying who produced it is the only way to tell it apart from data whose provenance was never recorded.",
+          "title": "Collected By"
+        },
         "description": {
           "anyOf": [
             {
@@ -284,6 +320,28 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -782,7 +840,44 @@
       "type": "object"
     },
     "Figure": {
+      "description": "A figure, usually produced by a pipeline stage.\n\nCarries attribution for the ones that aren't: a schematic drawn by hand\nor laid out with a generative AI tool has no stage to point at, and is\nexactly the kind of thing a reader wants told. One obtained from\nelsewhere records ``imported_from`` instead, like a dataset does.",
+      "not": {
+        "properties": {
+          "created_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "created_by"
+        ]
+      },
       "properties": {
+        "created_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Person"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Person"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
+          "title": "Created By"
+        },
         "description": {
           "anyOf": [
             {
@@ -795,6 +890,28 @@
           "default": null,
           "description": "A longer description.",
           "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "path": {
           "description": "Path to the file, relative to the project root.",
@@ -3167,6 +3284,118 @@
       "title": "MatlabScriptStage",
       "type": "object"
     },
+    "MiscArtifact": {
+      "description": "A path worth attributing that isn't one of the typed artifacts.\n\nMost files in a project are neither a dataset nor a figure nor a paper:\na photograph, a slide someone drew, a config a colleague sent over. They\nstill have an origin, and without somewhere to record it the honest\nanswer is missing rather than merely absent.",
+      "not": {
+        "properties": {
+          "created_by": {
+            "type": [
+              "object",
+              "array"
+            ]
+          },
+          "imported_from": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "imported_from",
+          "created_by"
+        ]
+      },
+      "properties": {
+        "created_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_Person"
+            },
+            {
+              "items": {
+                "$ref": "#/$defs/_Person"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Who made this, for something produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
+          "title": "Created By"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A longer description.",
+          "title": "Description"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
+        },
+        "path": {
+          "description": "Path to the file, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the pipeline stage that produces this.",
+          "title": "Stage"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A human-readable title.",
+          "title": "Title"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "MiscArtifact",
+      "type": "object"
+    },
     "NixEnvironment": {
       "properties": {
         "description": {
@@ -3935,6 +4164,28 @@
           ],
           "default": null,
           "title": "Doi"
+        },
+        "imported_from": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/_ImportedFromProject"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromUrl"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDoi"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where this came from, if imported.",
+          "title": "Imported From"
         },
         "is_published": {
           "default": false,
@@ -7119,6 +7370,240 @@
       ],
       "title": "WordToPdfStage",
       "type": "object"
+    },
+    "_GitSource": {
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path within that repo, if it isn't the whole thing.",
+          "title": "Path"
+        },
+        "repo_url": {
+          "description": "Clone URL of the repo the data came from.",
+          "title": "Repo Url",
+          "type": "string"
+        },
+        "rev": {
+          "description": "The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent.",
+          "title": "Rev",
+          "type": "string"
+        }
+      },
+      "required": [
+        "repo_url",
+        "rev"
+      ],
+      "title": "_GitSource",
+      "type": "object"
+    },
+    "_ImportedFromDoi": {
+      "description": "Data published under a DOI, which is a citation, not just a link.\n\nKept apart from a URL so it can be cited and resolved as a DOI rather\nthan being one more address that happens to start with https.",
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded.",
+          "title": "Date"
+        },
+        "doi": {
+          "description": "The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or doi: prefix is accepted and stripped.",
+          "title": "Doi",
+          "type": "string"
+        }
+      },
+      "required": [
+        "doi"
+      ],
+      "title": "_ImportedFromDoi",
+      "type": "object"
+    },
+    "_ImportedFromGit": {
+      "description": "Data from a Git repo that isn't a Calkit project.",
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded.",
+          "title": "Date"
+        },
+        "git": {
+          "$ref": "#/$defs/_GitSource"
+        }
+      },
+      "required": [
+        "git"
+      ],
+      "title": "_ImportedFromGit",
+      "type": "object"
+    },
+    "_ImportedFromProject": {
+      "properties": {
+        "filter_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filter Paths"
+        },
+        "git_rev": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Git Rev"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "title": "_ImportedFromProject",
+      "type": "object"
+    },
+    "_ImportedFromUrl": {
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit.",
+          "title": "Date"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "_ImportedFromUrl",
+      "type": "object"
+    },
+    "_Person": {
+      "additionalProperties": false,
+      "description": "A person credited with producing something in the project.\n\nExtra keys are refused rather than ignored: a mistyped ``oricd``, or a\n``with_ai`` on something that doesn't take one, should say so instead of\nvanishing and leaving the author thinking they recorded it.",
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Email address of the person.",
+          "title": "Email"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Their name, if worth recording here.",
+          "title": "Name"
+        },
+        "orcid": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL.",
+          "title": "Orcid"
+        },
+        "with_ai": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Generative AI tools this person used, e.g. 'Claude Opus 5'. Recorded against the person rather than the file, so a disclosure can't exist without someone answering for it.",
+          "title": "With Ai"
+        }
+      },
+      "title": "_Person",
+      "type": "object"
     }
   },
   "$id": "https://docs.calkit.org/schemas/calkit.json",
@@ -7356,6 +7841,15 @@
       "default": null,
       "description": "Base URL of the Calkit Hub on which the project is shared, backed up, and collaborated on, e.g., 'calkit.io'. The scheme can be omitted, in which case https is inferred, or http for a local host. Each project belongs to at most one hub, which makes 'ck://' paths resolvable against a known instance. Projects with no hub set are assumed to belong to 'calkit.io'.",
       "title": "Hub"
+    },
+    "misc": {
+      "default": [],
+      "description": "Paths worth attributing that aren't one of the typed artifacts, e.g. an image someone sent over or a file produced with help from a generative AI tool.",
+      "items": {
+        "$ref": "#/$defs/MiscArtifact"
+      },
+      "title": "Misc",
+      "type": "array"
     },
     "name": {
       "anyOf": [

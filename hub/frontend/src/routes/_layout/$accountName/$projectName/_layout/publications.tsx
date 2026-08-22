@@ -5,19 +5,21 @@ import {
   Button,
   Code,
   Flex,
-  HStack,
   Heading,
+  HStack,
   Icon,
   Link,
+  ListItem,
   Menu,
   MenuButton,
   MenuItem,
   MenuList,
   Portal,
   Text,
-  VStack,
+  UnorderedList,
   useColorModeValue,
   useDisclosure,
+  VStack,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -28,7 +30,7 @@ import {
 } from "@tanstack/react-router"
 import { useEffect, useRef, useState } from "react"
 import { FaCodeBranch, FaPlus, FaSync } from "react-icons/fa"
-import { FiFile } from "react-icons/fi"
+import { FiBookOpen, FiFile } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { SiOverleaf } from "react-icons/si"
 import { z } from "zod"
@@ -41,7 +43,11 @@ import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactC
 import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../../../../../components/Common/CommentsPanel"
+import InputsRow, {
+  type InputLink,
+} from "../../../../../components/Common/InputsRow"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
@@ -59,6 +65,12 @@ import useProject, {
 } from "../../../../../hooks/useProject"
 import { handleError } from "../../../../../lib/errors"
 import { getLatexSourcePath } from "../../../../../lib/latexProject"
+import {
+  classifyPublicationDeps,
+  declaredInputs,
+  findFeederStages,
+} from "../../../../../lib/provenance"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 const pubSearchSchema = z.object({
   path: z.string().optional(),
@@ -100,6 +112,97 @@ function PubInfo({
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
   const texPath = getLatexSourcePath(publication)
+  // What went into the publication: its stage's concrete inputs in dvc.yaml,
+  // sorted against the declared figures, plus any stage that copies files
+  // into the publication's folder (e.g., a map-paths stage).
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
+  const figuresQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "figures"],
+    queryFn: () =>
+      ProjectsService.getProjectFigures({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
+  // The stage as declared in calkit.yaml: its inputs are what the author
+  // meant, whereas dvc.yaml's deps also carry what Calkit adds for itself
+  // (environment locks, the script). `from_stage_outputs` is expanded
+  // through the compiled pipeline.
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", publication.stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: publication.stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.stage),
+    retry: false,
+  })
+  const figureLinks: InputLink[] = []
+  const referenceLinks: InputLink[] = []
+  const otherLinks: InputLink[] = []
+  let feederStages: string[] = []
+  if (publication.stage) {
+    const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
+    const calkitYaml = pipelineQuery.data?.calkit_yaml
+    // What the author declared in calkit.yaml, with other stages' outputs
+    // expanded; dvc.yaml's deps also carry environment locks and the like
+    const deps = declaredInputs(stageQuery.data?.yaml, dvcStages, calkitYaml)
+    const inputs = classifyPublicationDeps(deps, figuresQuery.data?.items ?? [])
+    for (const { path, figure } of inputs.figures) {
+      figureLinks.push(
+        figure
+          ? {
+              key: path,
+              to: "../figures",
+              search: { path },
+              label: figure.title || path,
+              tooltipPath: figure.title ? path : undefined,
+              code: !figure.title,
+            }
+          : {
+              key: path,
+              to: "../files",
+              search: { path },
+              label: path,
+              code: true,
+            },
+      )
+    }
+    for (const path of inputs.references)
+      referenceLinks.push({
+        key: path,
+        to: "../files",
+        search: { path },
+        label: path,
+        code: true,
+      })
+    for (const path of inputs.other)
+      otherLinks.push({
+        key: path,
+        to: "../files",
+        search: { path },
+        label: path,
+        code: true,
+      })
+    feederStages = findFeederStages(
+      publication.stage,
+      dvcStages,
+      publication.path,
+    )
+  }
 
   const overleafSyncMutation = useMutation({
     mutationFn: () =>
@@ -143,6 +246,7 @@ function PubInfo({
           projectName={projectName}
           texPath={texPath}
           deps={publication.stage_info?.deps ?? undefined}
+          stage={publication.stage}
         />
       )}
       <Text fontSize="sm" mb={1}>
@@ -203,6 +307,31 @@ function PubInfo({
           </Text>
         )}
       </Text>
+      <InputsRow label="Figures" items={figureLinks} />
+      <InputsRow label="References" items={referenceLinks} />
+      <InputsRow label="Other inputs" items={otherLinks} />
+      {feederStages.length > 0 && (
+        <Box fontSize="sm" mb={1}>
+          <Text as="span" fontWeight="semibold">
+            Copied in by stages:
+          </Text>
+          <UnorderedList mt={0.5} mb={0} pl={1}>
+            {feederStages.map((name) => (
+              <ListItem key={name}>
+                <Link
+                  as={RouterLink}
+                  to="../pipeline"
+                  search={{ stage: name } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer">
+                    {name}
+                  </Code>
+                </Link>
+              </ListItem>
+            ))}
+          </UnorderedList>
+        </Box>
+      )}
       {publication.overleaf?.project_id && (
         <Box mt={2}>
           <Flex align="center" gap={1}>
@@ -326,16 +455,18 @@ function Publications() {
           </Tooltip>
         )}
         {canEditLatex && (
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() =>
-              navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
-            }
-          >
-            <Icon as={MdEdit} mr={1} />
-            Edit LaTeX
-          </Button>
+          <TipBubble tip="edit-latex" where="page" placement="bottom">
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() =>
+                navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
+              }
+            >
+              <Icon as={MdEdit} mr={1} />
+              Edit LaTeX
+            </Button>
+          </TipBubble>
         )}
       </HStack>
     ) : undefined
@@ -430,16 +561,18 @@ function Publications() {
               {userHasWriteAccess && (
                 <>
                   <Menu>
-                    <MenuButton
-                      as={Button}
-                      variant="primary"
-                      height="25px"
-                      width="9px"
-                      px={1}
-                      ml={2}
-                    >
-                      <Icon as={FaPlus} fontSize="xs" />
-                    </MenuButton>
+                    <TipBubble tip="publication" where="page">
+                      <MenuButton
+                        as={Button}
+                        variant="primary"
+                        height="25px"
+                        width="9px"
+                        px={1}
+                        ml={2}
+                      >
+                        <Icon as={FaPlus} fontSize="xs" />
+                      </MenuButton>
+                    </TipBubble>
                     <Portal>
                       <MenuList zIndex="popover">
                         <MenuItem onClick={newPubTemplateModal.onOpen}>
@@ -536,14 +669,12 @@ function Publications() {
               // until a manual refresh.
               <LoadingSpinner height="300px" />
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-              >
-                <Text>No publications found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={FiBookOpen}
+                title="No publications found"
+                hint="Start one from a template, or link the Overleaf project you're already writing in."
+                docsUrl="https://docs.calkit.org/latex/"
+              />
             )}
           </Box>
 

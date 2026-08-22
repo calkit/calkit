@@ -32,6 +32,36 @@ def _check_path_dir(path: str):
         os.makedirs(dirname, exist_ok=True)
 
 
+def _person_from_options(
+    option: str, email: str | None, orcid: str | None, with_ai: list[str]
+) -> dict | None:
+    """Build a ``collected_by``/``created_by`` entry from CLI options.
+
+    Returns ``None`` when none were given. Validated through the model so
+    a mistyped ORCID or a ``--with-ai`` with nobody to answer for it is
+    refused here rather than by the next ``calkit.yaml`` validation.
+    """
+    from pydantic import ValidationError
+
+    from calkit.models.core import _Person
+
+    if email is None and orcid is None and not with_ai:
+        return None
+    # One tool stays a scalar rather than a one-item list, which is what
+    # the docs show and what reads best in calkit.yaml
+    tools: str | list[str] | None = with_ai or None
+    if len(with_ai) == 1:
+        tools = with_ai[0]
+    try:
+        person = _Person(email=email, orcid=orcid, with_ai=tools)
+    except ValidationError as e:
+        raise_error(
+            f"Invalid --{option}: "
+            + "; ".join(str(err["msg"]) for err in e.errors())
+        )
+    return person.model_dump(exclude_none=True)
+
+
 @new_app.command(name="project", cls=_NewProjectCommand)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
@@ -540,6 +570,32 @@ def new_figure(
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
+    created_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-email",
+            help=(
+                "Email of whoever made this figure, for one drawn by hand "
+                "rather than produced by a stage."
+            ),
+        ),
+    ] = None,
+    created_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by-orcid", help="ORCID of whoever made this figure."
+        ),
+    ] = None,
+    created_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--created-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     overwrite: Annotated[
         bool,
@@ -566,11 +622,16 @@ def new_figure(
         raise_error("Command must be provided")
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
-    obj = dict(path=path, title=title)
+    created_by = _person_from_options(
+        "created-by", created_by_email, created_by_orcid, created_with_ai
+    )
+    obj: dict = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
     if stage_name is not None:
         obj["stage"] = stage_name
+    if created_by is not None:
+        obj["created_by"] = created_by
     if cmd:
         if outs_from_stage:
             pipeline = calkit.dvc.read_pipeline()
@@ -1137,6 +1198,33 @@ def new_dataset(
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
+    collected_by_email: Annotated[
+        str | None,
+        typer.Option(
+            "--collected-by-email",
+            help=(
+                "Email of whoever collected this data for the project, "
+                "which marks it as primary rather than imported or computed."
+            ),
+        ),
+    ] = None,
+    collected_by_orcid: Annotated[
+        str | None,
+        typer.Option(
+            "--collected-by-orcid",
+            help="ORCID of whoever collected this data.",
+        ),
+    ] = None,
+    collected_with_ai: Annotated[
+        list[str],
+        typer.Option(
+            "--collected-with-ai",
+            help=(
+                "Generative AI tool they used, e.g. 'Claude Opus 5'. "
+                "Repeat for several."
+            ),
+        ),
+    ] = [],
     no_commit: Annotated[bool, typer.Option("--no-commit")] = False,
     overwrite: Annotated[
         bool,
@@ -1163,11 +1251,19 @@ def new_dataset(
         raise_error("Command must be provided")
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
-    obj = dict(path=path, title=title)
+    collected_by = _person_from_options(
+        "collected-by",
+        collected_by_email,
+        collected_by_orcid,
+        collected_with_ai,
+    )
+    obj: dict = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
     if stage_name is not None:
         obj["stage"] = stage_name
+    if collected_by is not None:
+        obj["collected_by"] = collected_by
     if cmd:
         if outs_from_stage:
             pipeline = calkit.dvc.read_pipeline()

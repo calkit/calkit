@@ -4,13 +4,15 @@ import logging
 import secrets
 import uuid
 from datetime import datetime, timedelta
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
 import requests
+import sqlalchemy
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.exc import DataError
-from sqlmodel import Field, func, select
+from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.orm import selectinload
+from sqlmodel import Field, col, func, or_, select
 
 import app.projects
 import app.stripe
@@ -22,13 +24,19 @@ from app.api.deps import (
     SessionDep,
     get_current_active_superuser,
 )
+from app.api.routes.login import CLI_LOGIN_DESCRIPTION
 from app.config import settings
 from app.core import utcnow
 from app.github import token_resp_text_to_dict
 from app.messaging import generate_new_account_email, send_email
 from app.models import (
+    Account,
     DiscountCode,
     Message,
+    OnboardingFlagPost,
+    OnboardingFlags,
+    Project,
+    RefreshToken,
     StorageUsage,
     SubscriptionUpdate,
     Token,
@@ -36,6 +44,7 @@ from app.models import (
     UpdateSubscriptionResponse,
     User,
     UserCreate,
+    UserOnboardingFlag,
     UserPublic,
     UserRegister,
     UsersPublic,
@@ -61,13 +70,69 @@ router = APIRouter()
 
 @router.get("/users", dependencies=[Depends(get_current_active_superuser)])
 def read_users(
-    session: SessionDep, skip: int = 0, limit: int = 100
+    session: SessionDep,
+    skip: int = 0,
+    limit: int = 100,
+    search_for: str | None = None,
+    sort_by: Literal["created", "email", "full_name"] = "created",
+    descending: bool = True,
 ) -> UsersPublic:
-    """Retrieve users."""
-    count_statement = select(func.count()).select_from(User)
+    """Retrieve users, optionally searched and sorted.
+
+    Sorted newest-first by default: the reason to open this page is usually
+    to see who just signed up, which is the one thing an unordered page of
+    a few hundred users can't tell you.
+    """
+    where_clause = None
+    if search_for:
+        # The search is a substring, so LIKE's own wildcards in it are
+        # characters to find, not patterns to match.
+        escaped = (
+            search_for.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
+        )
+        pattern = f"%{escaped}%"
+        where_clause = or_(
+            col(User.email).ilike(pattern, escape="\\"),
+            col(User.full_name).ilike(pattern, escape="\\"),
+            # The GitHub username lives on the account, not the user.
+            col(Account.github_name).ilike(pattern, escape="\\"),
+            col(Account.name).ilike(pattern, escape="\\"),
+        )
+    # Signup time and GitHub name live on the account, which is created with
+    # the user, so both searching and ordering need the join. The count
+    # takes the same one so the two can't disagree.
+    count_statement = (
+        select(func.count())
+        .select_from(User)
+        .outerjoin(Account, col(Account.user_id) == col(User.id))
+    )
+    statement = (
+        select(User)
+        .outerjoin(Account, col(Account.user_id) == col(User.id))
+        # Each user's signup time and GitHub name come off the account,
+        # which would otherwise be a query per row of the page.
+        .options(
+            selectinload(User.account),  # type: ignore[arg-type]
+            selectinload(User.subscription),  # type: ignore[arg-type]
+        )
+    )
+    if where_clause is not None:
+        count_statement = count_statement.where(where_clause)
+        statement = statement.where(where_clause)
     count = session.exec(count_statement).one()
-    statement = select(User).offset(skip).limit(limit)
-    users = session.exec(statement).all()
+    order_column = {
+        "created": Account.created,
+        "email": User.email,
+        "full_name": User.full_name,
+    }[sort_by]
+    statement = statement.order_by(
+        sqlalchemy.desc(order_column)  # type: ignore
+        if descending
+        else sqlalchemy.asc(order_column)  # type: ignore
+    )
+    users = session.exec(statement.offset(skip).limit(limit)).all()
     return UsersPublic(data=users, count=count)
 
 
@@ -249,23 +314,99 @@ def delete_user(
     return Message(message="User deleted successfully")
 
 
+# Enough to cover any realistic account without pulling on forever; the
+# picker filters client-side, so what isn't fetched can't be found.
+MAX_GITHUB_REPO_PAGES = 5
+
+
 @router.get("/user/github/repos")
 def get_user_github_repos(
     session: SessionDep,
     current_user: CurrentUser,
-    per_page: int = 30,
-    page: int = 1,
-) -> list[dict]:
+    per_page: int = 100,
+    page: int | None = None,
+    # Repos the user merely collaborates on are excluded, and not only to
+    # cut noise: creating a project for one fails, since project creation
+    # allows your own repos and your orgs' repos and nothing else. Listing
+    # them would be offering choices that can't work.
+    affiliation: str = "owner,organization_member",
+    # GitHub sorts by full_name when asked for nothing, so the first page is
+    # whatever happens to start with "a". Recently touched is what someone
+    # bringing an in-progress project over is looking for.
+    sort: Literal["updated", "created", "pushed", "full_name"] = "updated",
+    # A name search across everything the user owns or belongs to, for
+    # accounts with more repos than the listing cap reaches.
+    search: str | None = None,
+) -> list[dict[str, Any]]:
+    """List the GitHub repos this user could create a project for.
+
+    Pages through to the cap when no page is given, since callers filter the
+    list themselves and can only filter what they were sent.
+    """
     # See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-repositories-for-the-authenticated-user
     access_token = users.get_github_token(session=session, user=current_user)
     url = "https://api.github.com/user/repos"
     headers = {"Authorization": f"Bearer {access_token}"}
-    resp = requests.get(
-        url, headers=headers, params=dict(page=page, per_page=per_page)
-    )
-    if not resp.status_code == 200:
-        raise HTTPException(400, f"GitHub request failed: {resp.text}")
-    return resp.json()
+    if search and search.strip():
+        # Several user:/org: qualifiers are ORed by GitHub search, so one
+        # query covers the user's own repos and every org they belong to
+        orgs_resp = requests.get(
+            "https://api.github.com/user/orgs",
+            headers=headers,
+            params=dict(per_page=100),
+        )
+        org_logins = (
+            [o["login"] for o in orgs_resp.json()]
+            if orgs_resp.status_code == 200
+            else []
+        )
+        scope = " ".join(
+            [f"user:{current_user.github_username}"]
+            + [f"org:{o}" for o in org_logins]
+        )
+        term = " ".join(search.split())
+        search_resp = requests.get(
+            "https://api.github.com/search/repositories",
+            headers=headers,
+            params=dict(
+                q=f"{term} in:name {scope}",
+                sort="updated",
+                order="desc",
+                per_page=min(per_page, 100),
+            ),
+        )
+        if search_resp.status_code != 200:
+            raise HTTPException(
+                400, f"GitHub search failed: {search_resp.text}"
+            )
+        items: list[dict[str, Any]] = search_resp.json().get("items", [])
+        return items
+
+    def fetch(page_number: int) -> list[dict[str, Any]]:
+        resp = requests.get(
+            url,
+            headers=headers,
+            params=dict(
+                page=page_number,
+                per_page=per_page,
+                affiliation=affiliation,
+                sort=sort,
+            ),
+        )
+        if resp.status_code != 200:
+            raise HTTPException(400, f"GitHub request failed: {resp.text}")
+        result: list[dict[str, Any]] = resp.json()
+        return result
+
+    if page is not None:
+        return fetch(page)
+    repos: list[dict[str, Any]] = []
+    for page_number in range(1, MAX_GITHUB_REPO_PAGES + 1):
+        batch = fetch(page_number)
+        repos.extend(batch)
+        if len(batch) < per_page:
+            break
+    return repos
 
 
 @router.put("/user/subscription")
@@ -520,6 +661,10 @@ class ConnectedAccounts(BaseModel):
     overleaf: bool
     google: bool
     zotero: bool
+    # Whether a Calkit CLI has ever authenticated as this user, which is the
+    # only reliable way to know the CLI is installed: the local server it
+    # would otherwise be detected by is usually not running.
+    cli: bool = False
 
 
 @router.get("/user/connected-accounts")
@@ -553,12 +698,38 @@ def get_user_connected_accounts(
     )
     # Zotero API keys don't expire, so there's nothing to refresh
     zotero_cred = current_user.get_external_credential(provider="zotero")
+    # Two ways a CLI can be authenticated: the device flow, which leaves a
+    # labeled refresh token, and a personal access token, which only counts
+    # once something has actually authenticated with it.
+    cli_connected = (
+        session.exec(
+            select(func.count())
+            .select_from(RefreshToken)
+            .where(
+                RefreshToken.user_id == current_user.id,
+                col(RefreshToken.description).startswith(
+                    CLI_LOGIN_DESCRIPTION
+                ),
+            )
+        ).one()
+        > 0
+        or session.exec(
+            select(func.count())
+            .select_from(UserToken)
+            .where(
+                UserToken.user_id == current_user.id,
+                col(UserToken.last_used).is_not(None),
+            )
+        ).one()
+        > 0
+    )
     return ConnectedAccounts(
         github=github_connected,
         zenodo=zenodo_connected,
         overleaf=overleaf_connected,
         google=google_connected,
         zotero=zotero_cred is not None,
+        cli=cli_connected,
     )
 
 
@@ -750,13 +921,15 @@ def post_user_github_auth(
                 f"'{current_github_username}'"
             ),
         )
-    # The account name is left alone; it identifies the account in URLs and
-    # need not match the GitHub username
-    current_user.account.github_name = github_username
-    session.add(current_user.account)
-    session.commit()
-    session.refresh(current_user)
-    logger.info(f"Linked GitHub account {github_username}")
+    # The account takes the GitHub name too when nothing points at the old
+    # one yet, so `calkit clone owner/project` and the GitHub URL agree.
+    renamed = users.link_github_account(
+        session=session, user=current_user, github_username=github_username
+    )
+    logger.info(
+        f"Linked GitHub account {github_username}"
+        + (" and renamed the account to match" if renamed else "")
+    )
     users.save_github_token(
         session=session, user=current_user, github_resp=github_resp
     )
@@ -863,3 +1036,144 @@ def get_user_storage(
         raise HTTPException(404, "User does not have a subscription")
     limit = current_user.subscription.storage_limit
     return StorageUsage(limit_gb=limit, used_gb=used)
+
+
+@router.get("/user/onboarding-flags")
+def get_user_onboarding_flags(
+    session: SessionDep, current_user: CurrentUser
+) -> OnboardingFlags:
+    """Return every onboarding step this user has dismissed or marked done.
+
+    Both checklists come back together because the pages that show them are
+    already making several requests, and one small response shared between
+    them beats a second round trip per project.
+    """
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id
+        )
+    ).all()
+    account: list[str] = []
+    projects: dict[str, list[str]] = {}
+    for row in rows:
+        if row.project_id is None:
+            steps = account
+        else:
+            steps = projects.setdefault(str(row.project_id), [])
+        if row.step not in steps:
+            steps.append(row.step)
+    # Tips for a first project only belong on the first one, so the page
+    # needs to know which that is rather than guessing from a count.
+    first_project = session.exec(
+        select(Project)
+        .where(Project.owner_account_id == current_user.account.id)
+        .order_by(col(Project.created))
+        .limit(1)
+    ).first()
+    return OnboardingFlags(
+        account=account,
+        projects=projects,
+        first_project_id=first_project.id if first_project else None,
+    )
+
+
+@router.post("/user/onboarding-flags")
+def post_user_onboarding_flag(
+    req: OnboardingFlagPost, session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Dismiss a checklist, or mark a step done that we can't detect."""
+    if req.project_id is not None:
+        # Checked so a flag can't be attached to a project the user can't
+        # see, which would otherwise leak that the project exists. Access
+        # lives in get_project, which takes owner and name, so resolve the
+        # ID to those rather than reimplementing the checks here.
+        project = session.get(Project, req.project_id)
+        if project is None:
+            raise HTTPException(404, "Project not found")
+        app.projects.get_project(
+            session=session,
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            current_user=current_user,
+            min_access_level="read",
+        )
+    existing = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id,
+            UserOnboardingFlag.project_id == req.project_id,
+            UserOnboardingFlag.step == req.step,
+        )
+    ).first()
+    if existing is not None:
+        return Message(message="Success")
+    session.add(
+        UserOnboardingFlag(
+            user_id=current_user.id,
+            project_id=req.project_id,
+            step=req.step,
+        )
+    )
+    try:
+        session.commit()
+    except IntegrityError:
+        # Two requests for the same flag (a double-click) can both pass the
+        # check above, and the unique constraint settles it. Losing that
+        # race means the flag is set, which is what was asked for.
+        session.rollback()
+        return Message(message="Success")
+    mixpanel.user_set_onboarding_flag(
+        user=current_user,
+        step=req.step,
+        project_id=str(req.project_id) if req.project_id else None,
+        done=True,
+    )
+    return Message(message="Success")
+
+
+@router.delete("/user/onboarding-flags/all")
+def delete_all_user_onboarding_flags(
+    session: SessionDep, current_user: CurrentUser
+) -> Message:
+    """Bring every onboarding checklist back, everywhere.
+
+    Its own route rather than a bare DELETE on the collection, so clearing
+    the lot can't be what a request that merely forgot its ``step`` does.
+    """
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    mixpanel.user_reset_onboarding(user=current_user, n_flags=len(rows))
+    return Message(message=f"Reset {len(rows)} onboarding flags")
+
+
+@router.delete("/user/onboarding-flags")
+def delete_user_onboarding_flag(
+    step: str,
+    session: SessionDep,
+    current_user: CurrentUser,
+    project_id: uuid.UUID | None = None,
+) -> Message:
+    """Undo a dismissal, e.g. to bring a checklist back."""
+    rows = session.exec(
+        select(UserOnboardingFlag).where(
+            UserOnboardingFlag.user_id == current_user.id,
+            UserOnboardingFlag.project_id == project_id,
+            UserOnboardingFlag.step == step,
+        )
+    ).all()
+    for row in rows:
+        session.delete(row)
+    session.commit()
+    if rows:
+        mixpanel.user_set_onboarding_flag(
+            user=current_user,
+            step=step,
+            project_id=str(project_id) if project_id else None,
+            done=False,
+        )
+    return Message(message="Success")

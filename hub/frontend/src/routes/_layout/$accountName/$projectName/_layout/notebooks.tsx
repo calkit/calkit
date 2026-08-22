@@ -17,11 +17,14 @@ import { FaCodeBranch } from "react-icons/fa"
 import { SiJupyter, SiPython } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
 import { type Notebook, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import useProject from "../../../../../hooks/useProject"
 import NotebookView from "../../../../../components/Notebooks/NotebookView"
 
 const notebookSearchSchema = z.object({
@@ -30,6 +33,9 @@ const notebookSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  // Whether the notebook runner is open on the selected notebook, so a
+  // link can land in it.
+  run: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -45,12 +51,19 @@ function NotebookInfo({
   projectName,
   gitRef,
   onOpenCompare,
+  canRun,
+  runOpen,
+  onRunOpenChange,
 }: {
   notebook: Notebook
   accountName: string
   projectName: string
   gitRef?: string
   onOpenCompare: () => void
+  /** Whether the viewer may run and edit it (write access, default ref). */
+  canRun?: boolean
+  runOpen?: boolean
+  onRunOpenChange?: (open: boolean) => void
 }) {
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
 
@@ -126,6 +139,19 @@ function NotebookInfo({
         <Icon as={FaCodeBranch} mr={1} />
         Browse history
       </Button>
+      {/* Jupyter notebooks run in the browser; a marimo notebook is a
+          different runtime and waits for its own runner */}
+      {canRun ? (
+        <NotebookRunLauncher
+          ownerName={accountName}
+          projectName={projectName}
+          path={notebook.path}
+          stage={notebook.stage}
+          source="notebooks-page"
+          isOpen={Boolean(runOpen)}
+          onOpenChange={onRunOpenChange}
+        />
+      ) : null}
     </Box>
   )
 }
@@ -134,11 +160,13 @@ function Notebooks() {
   const { accountName, projectName } = Route.useParams()
   const {
     ref,
+    run,
     path: selectedPath,
     compare_open,
     base_ref,
     compare_ref,
   } = Route.useSearch()
+  const { userHasWriteAccess } = useProject(accountName, projectName)
   const navigate = useNavigate({ from: Route.fullPath })
   const setSelectedPath = (p: string) =>
     navigate({ search: (prev) => ({ ...prev, path: p }) })
@@ -243,23 +271,26 @@ function Notebooks() {
                 </Box>
               </>
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-                direction="column"
-                gap={3}
-              >
-                <Icon as={SiJupyter} fontSize="4xl" color="orange.300" />
-                <Text>No notebooks found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={SiJupyter}
+                iconColor="orange.300"
+                title="No notebooks found"
+                hint="Add a .ipynb to the repo, or declare one in calkit.yaml to show it here."
+                docsUrl="https://docs.calkit.org/notebooks/"
+              />
             )}
           </Box>
           {/* Right: info */}
           {selectedNotebook && (
             <Box w="240px" flexShrink={0}>
               <NotebookInfo
+                canRun={userHasWriteAccess && !ref}
+                runOpen={Boolean(run)}
+                onRunOpenChange={(open) =>
+                  navigate({
+                    search: (prev) => ({ ...prev, run: open || undefined }),
+                  })
+                }
                 notebook={selectedNotebook}
                 accountName={accountName}
                 projectName={projectName}

@@ -895,3 +895,87 @@ def test_find_stage_for_path_prefers_current_stages():
     )
     # Omitting valid_stages keeps the old any-match behaviour.
     assert find_stage_for_path("figures/a.png", dvc_lock) == "plot"
+
+
+def test_cleaned_notebook_dep_tracks_the_notebook(tmp_path):
+    import json
+
+    # The stage depends on the cleaned copy calkit makes on the fly, which
+    # is never committed; its hash has to come from the notebook itself
+    def notebook(source: str, outputs: list) -> str:
+        return json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": [source],
+                        "outputs": outputs,
+                        "execution_count": 3,
+                        "metadata": {"tags": ["keep"], "scrolled": True},
+                    }
+                ],
+                "metadata": {"kernelspec": {"name": "python3"}},
+                "nbformat": 4,
+            }
+        )
+
+    cleaned_dep = ".calkit/notebooks/cleaned/notebook.ipynb"
+    lock_md5 = hashlib.md5(
+        json.dumps(
+            {
+                "cells": [
+                    {
+                        "cell_type": "code",
+                        "source": ["x = 1"],
+                        "outputs": [],
+                        "execution_count": None,
+                        "metadata": {"tags": ["keep"]},
+                    }
+                ],
+                "metadata": {},
+                "nbformat": 4,
+            },
+            indent=2,
+        ).encode()
+    ).hexdigest()
+    repo = _init_repo(tmp_path / "repo")
+    dvc_yaml = {
+        "stages": {
+            "run": {
+                "cmd": "calkit nb execute notebook.ipynb",
+                "deps": [cleaned_dep],
+                "outs": ["out.txt"],
+            }
+        }
+    }
+    dvc_lock = {
+        "stages": {
+            "run": {
+                "cmd": "calkit nb execute notebook.ipynb",
+                "deps": [{"path": cleaned_dep, "md5": lock_md5}],
+                "outs": [{"path": "out.txt", "md5": _md5("result\n")}],
+            }
+        }
+    }
+    # Same code, new outputs: the cleaned copy is unchanged, so not stale
+    _commit(
+        repo,
+        {
+            "notebook.ipynb": notebook("x = 1", [{"output_type": "stream"}]),
+            "out.txt": "result\n",
+        },
+        "init",
+    )
+    tree = get_repo_tree_for_ref(repo, None)
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS()
+    )
+    assert statuses["run"].status == "up-to-date"
+    # An edit to a cell changes the cleaned copy, so the stage is stale
+    _commit(repo, {"notebook.ipynb": notebook("x = 2", [])}, "edit")
+    tree = get_repo_tree_for_ref(repo, None)
+    statuses = compute_stage_statuses(
+        dvc_yaml, dvc_lock, tree, "o", "p", FakeFS()
+    )
+    assert statuses["run"].status == "stale"
+    assert cleaned_dep in statuses["run"].modified_inputs

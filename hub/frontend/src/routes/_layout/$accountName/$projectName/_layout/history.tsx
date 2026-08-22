@@ -81,6 +81,9 @@ interface CommitDetail extends CommitHistory {
 
 const historySearchSchema = z.object({
   ref: z.string().optional(),
+  // The commit whose detail is open, so a link can land on it expanded and
+  // a refresh or the back button keeps it open.
+  commit: z.string().optional(),
 })
 
 export const Route = createFileRoute(
@@ -198,25 +201,31 @@ function CommitDetailModal({
   onClose,
   ownerName,
   projectName,
-  commit,
+  commitHash,
+  commit: listed,
 }: {
   isOpen: boolean
   onClose: () => void
   ownerName: string
   projectName: string
+  commitHash: string | null
+  // The commit as it appears in the loaded list, when it's there. A deep
+  // link can name a commit the list hasn't paged to, in which case the
+  // detail request supplies the header too.
   commit: CommitHistory | null
 }) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const detailQuery = useQuery({
-    queryKey: ["projects", ownerName, projectName, "commit", commit?.hash],
+    queryKey: ["projects", ownerName, projectName, "commit", commitHash],
     queryFn: async () =>
       (await ProjectsService.getProjectCommit({
         owner_name: ownerName,
         project_name: projectName,
-        commit_hash: commit!.hash,
+        commit_hash: commitHash!,
       }).then((response) => response.data)) as unknown as CommitDetail,
-    enabled: isOpen && Boolean(commit),
+    enabled: isOpen && Boolean(commitHash),
   })
+  const commit: CommitHistory | null = listed ?? detailQuery.data ?? null
 
   return (
     <Modal
@@ -336,10 +345,9 @@ function History() {
   const [page, setPage] = useState(0)
   const [allCommits, setAllCommits] = useState<CommitHistory[]>([])
   const [hasMore, setHasMore] = useState(true)
-  const [selectedCommit, setSelectedCommit] = useState<CommitHistory | null>(
-    null,
-  )
-  const [detailOpen, setDetailOpen] = useState(false)
+  // Which commit is expanded lives in the URL (see historySearchSchema).
+  const { commit: selectedHash } = Route.useSearch()
+  const selectedCommit = allCommits.find((c) => c.hash === selectedHash) ?? null
 
   // Reset pagination when ref changes
   useEffect(() => {
@@ -428,10 +436,10 @@ function History() {
     navigate({ search: (prev) => ({ ...prev, ref: undefined }) })
   }
 
-  const openCommit = (commit: CommitHistory) => {
-    setSelectedCommit(commit)
-    setDetailOpen(true)
-  }
+  const openCommit = (commit: CommitHistory) =>
+    navigate({ search: (prev) => ({ ...prev, commit: commit.hash }) })
+  const closeCommit = () =>
+    navigate({ search: (prev) => ({ ...prev, commit: undefined }) })
 
   const historyLabel = selectedRef
     ? `History: ${selectedRef}`
@@ -707,10 +715,11 @@ function History() {
       </Box>
 
       <CommitDetailModal
-        isOpen={detailOpen}
-        onClose={() => setDetailOpen(false)}
+        isOpen={Boolean(selectedHash)}
+        onClose={closeCommit}
         ownerName={accountName}
         projectName={projectName}
+        commitHash={selectedHash ?? null}
         commit={selectedCommit}
       />
     </Flex>

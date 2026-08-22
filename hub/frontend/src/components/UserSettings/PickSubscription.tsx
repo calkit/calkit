@@ -325,6 +325,7 @@ const PickSubscription = ({
           <Flex mb={4} justify={"center"} align={"center"}>
             <Text mr={2}>GitHub org name:</Text>
             <Input
+              autoComplete="off"
               width="150px"
               placeholder="Ex: my-lab"
               mr={2}
@@ -416,6 +417,7 @@ const PickSubscription = ({
                 <>
                   <Flex align={"center"}>
                     <Input
+                      autoComplete="off"
                       value={discountCode}
                       onChange={({ target }) => setDiscountCode(target.value)}
                       placeholder="Enter discount code here"

@@ -97,6 +97,7 @@ const UploadFile = ({ isOpen, onClose, path }: UploadFileProps) => {
                 Path (relative to project folder)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",

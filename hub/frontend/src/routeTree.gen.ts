@@ -26,7 +26,7 @@ import { Route as AuthGoogleRouteImport } from './routes/auth/google'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutOrgsRouteImport } from './routes/_layout/orgs'
-import { Route as LayoutLearnRouteImport } from './routes/_layout/learn'
+import { Route as LayoutNewRouteImport } from './routes/_layout/new'
 import { Route as LayoutDatasetsRouteImport } from './routes/_layout/datasets'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutAccountNameIndexRouteImport } from './routes/_layout/$accountName/index'
@@ -131,9 +131,9 @@ const LayoutOrgsRoute = LayoutOrgsRouteImport.update({
   path: '/orgs',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutLearnRoute = LayoutLearnRouteImport.update({
-  id: '/learn',
-  path: '/learn',
+const LayoutNewRoute = LayoutNewRouteImport.update({
+  id: '/new',
+  path: '/new',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutDatasetsRoute = LayoutDatasetsRouteImport.update({
@@ -296,7 +296,7 @@ export interface FileRoutesByFullPath {
   '/signup': typeof SignupRoute
   '/admin': typeof LayoutAdminRoute
   '/datasets': typeof LayoutDatasetsRoute
-  '/learn': typeof LayoutLearnRoute
+  '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -338,7 +338,7 @@ export interface FileRoutesByTo {
   '/signup': typeof SignupRoute
   '/admin': typeof LayoutAdminRoute
   '/datasets': typeof LayoutDatasetsRoute
-  '/learn': typeof LayoutLearnRoute
+  '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -380,7 +380,7 @@ export interface FileRoutesById {
   '/signup': typeof SignupRoute
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/datasets': typeof LayoutDatasetsRoute
-  '/_layout/learn': typeof LayoutLearnRoute
+  '/_layout/new': typeof LayoutNewRoute
   '/_layout/orgs': typeof LayoutOrgsRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -425,7 +425,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/datasets'
-    | '/learn'
+    | '/new'
     | '/orgs'
     | '/projects'
     | '/settings'
@@ -467,7 +467,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/admin'
     | '/datasets'
-    | '/learn'
+    | '/new'
     | '/orgs'
     | '/projects'
     | '/settings'
@@ -508,7 +508,7 @@ export interface FileRouteTypes {
     | '/signup'
     | '/_layout/admin'
     | '/_layout/datasets'
-    | '/_layout/learn'
+    | '/_layout/new'
     | '/_layout/orgs'
     | '/_layout/projects'
     | '/_layout/settings'
@@ -666,11 +666,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutOrgsRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/learn': {
-      id: '/_layout/learn'
-      path: '/learn'
-      fullPath: '/learn'
-      preLoaderRoute: typeof LayoutLearnRouteImport
+    '/_layout/new': {
+      id: '/_layout/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof LayoutNewRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/datasets': {
@@ -963,7 +963,7 @@ const LayoutAccountNameProjectNameRouteWithChildren =
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
   LayoutDatasetsRoute: typeof LayoutDatasetsRoute
-  LayoutLearnRoute: typeof LayoutLearnRoute
+  LayoutNewRoute: typeof LayoutNewRoute
   LayoutOrgsRoute: typeof LayoutOrgsRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
@@ -975,7 +975,7 @@ interface LayoutRouteChildren {
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutDatasetsRoute: LayoutDatasetsRoute,
-  LayoutLearnRoute: LayoutLearnRoute,
+  LayoutNewRoute: LayoutNewRoute,
   LayoutOrgsRoute: LayoutOrgsRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,

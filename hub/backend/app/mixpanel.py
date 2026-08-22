@@ -3,7 +3,7 @@
 from mixpanel import Mixpanel
 
 from app.config import settings
-from app.models import User
+from app.models import Project, User
 
 mp = Mixpanel(settings.MIXPANEL_TOKEN)
 
@@ -122,5 +122,151 @@ def user_performed_fs_op(
             owner_name=owner_name,
             project_name=project_name,
             operation=operation,
+        ),
+    )
+
+
+def user_created_environment(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    kind: str,
+    n_packages: int,
+) -> None:
+    """An environment declared, and what it was made of.
+
+    ``kind`` is the activation question here: whether the defaults steer
+    people toward uv, or whether they keep reaching for conda.
+    """
+    track(
+        user,
+        "Created environment",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            kind=kind,
+            n_packages=n_packages,
+        ),
+    )
+
+
+def user_added_dataset(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    source: str,
+) -> None:
+    """A dataset declared, by where it came from.
+
+    ``source`` is one of collected/url/doi/git/project, which is what says
+    whether recording provenance is something people actually do.
+    """
+    track(
+        user,
+        "Added dataset",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            source=source,
+        ),
+    )
+
+
+def user_sent_feedback(user: User, kind: str, page: str | None) -> None:
+    track(
+        user,
+        "Sent feedback",
+        add_event_info=dict(kind=kind, page=page),
+    )
+
+
+def user_set_onboarding_flag(
+    user: User, step: str, project_id: str | None, done: bool
+) -> None:
+    """A checklist step marked done or a checklist dismissed.
+
+    Tracked server-side because this is funnel data, and the browser events
+    that mirror it are the ones ad blockers drop.
+    """
+    track(
+        user,
+        "Set onboarding flag",
+        add_event_info=dict(
+            step=step,
+            scope="project" if project_id else "account",
+            done=done,
+        ),
+    )
+
+
+def user_reset_onboarding(user: User, n_flags: int) -> None:
+    track(
+        user,
+        "Reset onboarding checklists",
+        add_event_info=dict(n_flags=n_flags),
+    )
+
+
+def user_added_question(
+    user: User, owner_name: str, project_name: str, has_hypothesis: bool
+) -> None:
+    track(
+        user,
+        "Added question",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            has_hypothesis=has_hypothesis,
+        ),
+    )
+
+
+def user_uploaded_project(
+    user: User,
+    owner_name: str,
+    project_name: str,
+    n_bytes: int,
+    n_dvc_objects: int,
+) -> None:
+    """A project brought in as a zip rather than from a GitHub repo.
+
+    ``n_dvc_objects`` says how much of it was big enough to land in DVC,
+    which is the thing the upload path is really for.
+    """
+    track(
+        user,
+        "Uploaded project",
+        add_event_info=dict(
+            owner_name=owner_name,
+            project_name=project_name,
+            n_bytes=n_bytes,
+            n_dvc_objects=n_dvc_objects,
+        ),
+    )
+
+
+def user_saved_studio_figure(
+    user: User,
+    project: Project,
+    env_created: bool,
+    n_inputs: int,
+    n_packages: int,
+) -> None:
+    """A figure drafted in the browser was committed as a pipeline stage.
+
+    The save is the activation moment the studio exists for: a run in the
+    browser proves nothing, a stage in the repo does. ``env_created`` says
+    whether the studio also had to stand up the project's first Python
+    environment, which is the setup work it's meant to absorb.
+    """
+    track(
+        user,
+        "Saved studio figure",
+        add_event_info=dict(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            env_created=env_created,
+            n_inputs=n_inputs,
+            n_packages=n_packages,
         ),
     )

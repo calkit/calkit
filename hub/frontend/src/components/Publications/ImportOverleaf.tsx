@@ -28,7 +28,7 @@ import {
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
+import { useParams } from "@tanstack/react-router"
 import { useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
@@ -40,6 +40,10 @@ import { handleError } from "../../lib/errors"
 interface ImportOverleafProps {
   isOpen: boolean
   onClose: () => void
+  // Supplied when the modal is opened outside a project route, e.g. from the
+  // new-project wizard, which has the project but isn't rendered under it.
+  ownerName?: string
+  projectName?: string
 }
 
 interface OverleafImportPost {
@@ -63,11 +67,22 @@ interface OverleafImportPost {
   file?: FileList
 }
 
-const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
+const ImportOverleaf = ({
+  isOpen,
+  onClose,
+  ownerName,
+  projectName: projectNameProp,
+}: ImportOverleafProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
+  // Non-strict so this reads as empty rather than throwing when the modal is
+  // rendered outside the project route.
+  const routeParams = useParams({ strict: false }) as {
+    accountName?: string
+    projectName?: string
+  }
+  const accountName = ownerName ?? routeParams.accountName ?? ""
+  const projectName = projectNameProp ?? routeParams.projectName ?? ""
   const connectedAccountsQuery = useQuery({
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
@@ -181,6 +196,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
               <FormLabel htmlFor="overleaf_url">Overleaf project URL</FormLabel>
               <HStack>
                 <Input
+                  autoComplete="off"
                   id="overleaf_url"
                   {...register("overleaf_url", {
                     validate: (value) => {
@@ -242,6 +258,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
               >
                 <FormLabel htmlFor="overleaf_token">Overleaf token</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="overleaf_token"
                   {...register("overleaf_token", {
                     validate: (value) => {
@@ -267,6 +284,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
             <FormControl mt={4} isRequired isInvalid={!!errors.path}>
               <FormLabel htmlFor="path">Destination folder</FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -363,6 +381,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                     Target TeX file path
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="target_path"
                     {...register("target_path")}
                     placeholder={"Ex: main.tex"}
@@ -380,6 +399,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                     Docker environment name
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="environment"
                     {...register("environment")}
                     placeholder="Ex: tex"
@@ -395,6 +415,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                 <FormControl mt={4} isInvalid={!!errors.stage}>
                   <FormLabel htmlFor="stage">Pipeline stage name</FormLabel>
                   <Input
+                    autoComplete="off"
                     id="stage"
                     {...register("stage")}
                     placeholder="Ex: build-paper"

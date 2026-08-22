@@ -44,9 +44,11 @@ import mixpanel from "mixpanel-browser"
 import { useEffect, useState } from "react"
 import { BsThreeDots } from "react-icons/bs"
 import { FaCodeBranch } from "react-icons/fa"
-import { FaGithub, FaQuestion, FaRegClone } from "react-icons/fa"
+import { FaGithub, FaQuestion, FaRegClone, FaRegFileAlt } from "react-icons/fa"
+import { SiOverleaf } from "react-icons/si"
+import { FiCheckSquare } from "react-icons/fi"
 import { LuCopyPlus } from "react-icons/lu"
-import { MdEdit } from "react-icons/md"
+import { MdEdit, MdOutlineLightbulb } from "react-icons/md"
 import { z } from "zod"
 
 import {
@@ -63,9 +65,14 @@ import HelpContent from "../../../../components/Projects/HelpContent"
 import MakeProjectPublic from "../../../../components/Projects/MakeProjectPublic"
 import NewProject from "../../../../components/Projects/NewProject"
 import ProjectStatus from "../../../../components/Projects/ProjectStatus"
+import ImportOverleaf from "../../../../components/Publications/ImportOverleaf"
+import NewPublication from "../../../../components/Publications/NewPublication"
 import useAuth from "../../../../hooks/useAuth"
+import useOnboardingFlags from "../../../../hooks/useOnboarding"
+import { DISMISSED } from "../../../../lib/onboarding"
 import useProject from "../../../../hooks/useProject"
 import { isAuthenticationError } from "../../../../lib/auth"
+import useTips from "../../../../hooks/useTips"
 
 interface CommitHistory {
   hash: string
@@ -152,6 +159,7 @@ function SwitchVersionModal({
         <ModalCloseButton />
         <ModalBody pb={4}>
           <Input
+            autoComplete="off"
             placeholder="Search branches or commits…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -278,10 +286,21 @@ function ProjectMenu({
   projectName,
 }: ProjectMenuProps) {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  // Clearing the flag is what brings the checklist back on the home page.
+  const { setFlag } = useOnboardingFlags(project.id)
+  const tips = useTips(project.id, userHasWriteAccess)
   const editProjectModal = useDisclosure()
   const newProjectModal = useDisclosure()
   const cloneProjectModal = useDisclosure()
   const switchVersionModal = useDisclosure()
+  const newPubTemplateModal = useDisclosure()
+  const overleafImportModal = useDisclosure()
+  // Codespaces gives a browser editor that can also run the pipeline; the
+  // CLI signs in on its own there, so no token setup stands in the way.
+  const codespacesUrl = project.git_repo_url
+    ? `${project.git_repo_url.replace("://github.com/", "://codespaces.new/")}?quickstart=1`
+    : null
 
   return (
     <>
@@ -309,6 +328,63 @@ function ProjectMenu({
             >
               Clone to local machine
             </MenuItem>
+            {codespacesUrl ? (
+              <MenuItem
+                icon={<FaGithub fontSize={18} />}
+                as="a"
+                href={codespacesUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Open in GitHub Codespace
+                <ExternalLinkIcon ml={1.5} mb={0.5} fontSize="xs" />
+              </MenuItem>
+            ) : null}
+            <MenuDivider />
+            <MenuItem
+              icon={<FaRegFileAlt fontSize={16} />}
+              onClick={newPubTemplateModal.onOpen}
+              isDisabled={!userHasWriteAccess}
+            >
+              New publication from template
+            </MenuItem>
+            <MenuItem
+              icon={<SiOverleaf fontSize={16} />}
+              onClick={overleafImportModal.onOpen}
+              isDisabled={!userHasWriteAccess}
+            >
+              Link an Overleaf publication
+            </MenuItem>
+            {/* The checklist hides itself once it's done or dismissed, so
+                this is the way back to it. It only renders on the project
+                home at the default ref, so clearing the flag alone would
+                leave this doing nothing visible from anywhere else. */}
+            {userHasWriteAccess ? (
+              <MenuItem
+                icon={<FiCheckSquare fontSize={16} />}
+                onClick={() => {
+                  mixpanel.track("Restored onboarding checklist", {
+                    source: "project-menu",
+                  })
+                  setFlag(DISMISSED, false)
+                  onSetRef(undefined)
+                  navigate({
+                    to: "/$accountName/$projectName",
+                    params: { accountName, projectName },
+                  })
+                }}
+              >
+                Show setup checklist
+              </MenuItem>
+            ) : null}
+            {userHasWriteAccess ? (
+              <MenuItem
+                icon={<MdOutlineLightbulb fontSize={18} />}
+                onClick={tips.showing ? tips.dismissAll : tips.resetAll}
+              >
+                {tips.showing ? "Hide tips" : "Show tips again"}
+              </MenuItem>
+            ) : null}
             <MenuDivider />
             <MenuItem
               icon={<FaCodeBranch fontSize={16} />}
@@ -319,6 +395,19 @@ function ProjectMenu({
           </MenuList>
         </Portal>
       </Menu>
+      {userHasWriteAccess ? (
+        <>
+          <NewPublication
+            isOpen={newPubTemplateModal.isOpen}
+            onClose={newPubTemplateModal.onClose}
+            variant="template"
+          />
+          <ImportOverleaf
+            isOpen={overleafImportModal.isOpen}
+            onClose={overleafImportModal.onClose}
+          />
+        </>
+      ) : null}
       <EditProject
         project={project}
         isOpen={editProjectModal.isOpen}
@@ -362,9 +451,12 @@ function ProjectLayout() {
   // A session/token 403 (an expired token that briefly slipped through) is not
   // a missing project — don't render NotFound for it; the auth layer refreshes
   // or logs out. Only a real 404 or a genuine permission denial is NotFound.
+  // The status lives on the response; the message is axios's generic
+  // "Request failed with status code 404", so it can't be matched on.
+  const errorStatus = (error as any)?.response?.status ?? (error as any)?.status
   if (
-    error?.message === "Not Found" ||
-    (error?.message === "Forbidden" && !isAuthenticationError(error))
+    errorStatus === 404 ||
+    (errorStatus === 403 && !isAuthenticationError(error))
   ) {
     throw notFound()
   }

@@ -101,6 +101,7 @@ const LabelAsFigure = ({ isOpen, onClose }: LabelFigureProps) => {
                 Path (relative to project folder)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -115,6 +116,7 @@ const LabelAsFigure = ({ isOpen, onClose }: LabelFigureProps) => {
             <FormControl mt={4} isRequired isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...register("title")}
                 placeholder="Title"

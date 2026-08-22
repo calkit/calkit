@@ -17,6 +17,7 @@ import Appearance from "../../components/UserSettings/Appearance"
 import ChangePassword from "../../components/UserSettings/ChangePassword"
 import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
+import OnboardingChecklists from "../../components/UserSettings/OnboardingChecklists"
 import UserInformation from "../../components/UserSettings/UserInformation"
 import UserTokens from "../../components/UserSettings/UserTokens"
 import Subscription from "../../components/UserSettings/Subscription"
@@ -33,6 +34,7 @@ const tabsConfig = [
   { title: "Subscription", component: Subscription, slug: "subscription" },
   { title: "Password", component: ChangePassword, slug: "password" },
   { title: "Appearance", component: Appearance, slug: "appearance" },
+  { title: "Setup", component: OnboardingChecklists, slug: "setup" },
   { title: "Tokens", component: UserTokens, slug: "tokens" },
   { title: "Danger zone", component: DeleteAccount, slug: "delete-account" },
 ]
@@ -59,10 +61,12 @@ function UserSettings() {
     : tabsConfig
   const { tab } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
+  // The setup tab used to be called "checklists"; old links still land on it.
+  const requestedTab = tab === "checklists" ? "setup" : tab
   let initialTabIndex = 0
-  if (tab) {
+  if (requestedTab) {
     finalTabs.forEach((tabDef, index) => {
-      if (tab === tabDef.slug) {
+      if (requestedTab === tabDef.slug) {
         initialTabIndex = index
       }
     })

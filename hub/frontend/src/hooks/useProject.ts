@@ -24,7 +24,8 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
       if (isAuthenticationError(error)) {
         return failureCount < 2
       }
-      if (error.message === "Not Found" || error.message === "Forbidden") {
+      const status = (error as any)?.response?.status ?? (error as any)?.status
+      if (status === 404 || status === 403) {
         return false
       }
       return failureCount < 3

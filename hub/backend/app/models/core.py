@@ -227,6 +227,25 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    feedback: list["Feedback"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+
+    @computed_field
+    @property
+    def created(self) -> datetime:
+        """When this user signed up.
+
+        Read off the account rather than stored again here: the two are
+        created in the same transaction, so a column on the user would be a
+        second copy of the same fact, free to drift from it.
+        """
+        return self.account.created
 
     @computed_field
     @property
@@ -249,6 +268,7 @@ class User(UserBase, table=True):
 # Properties to return via API, id is always required
 class UserPublic(UserBase):
     id: uuid.UUID
+    created: datetime
     github_username: str | None
     subscription: Union["UserSubscription", None]
 
@@ -579,6 +599,9 @@ class Project(ProjectBase, table=True):
     releases: list["Release"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -658,6 +681,9 @@ class ProjectPost(ProjectBase):
     git_repo_url: str | None = Field(max_length=2048, default=None)
     template: str | None = None
     git_repo_exists: bool | None = None
+    # Whether a project made from a template keeps the template's commits.
+    # Off by default: the new project's history starts with itself.
+    keep_template_history: bool = False
 
 
 class UserProjectAccess(SQLModel, table=True):
@@ -703,6 +729,100 @@ class UserProjectAccess(SQLModel, table=True):
     @property
     def role_name(self) -> str | None:
         return ROLE_NAMES[self.role_id] if self.role_id is not None else None
+
+
+class Feedback(SQLModel, table=True):
+    """A message a user sent from the in-app help form.
+
+    Stored rather than only emailed: email is fire-and-forget, and a relay
+    that's misconfigured or down would otherwise lose the message and tell
+    the user their feedback failed. The row is the record; the email is a
+    notification about it.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    kind: str = Field(default="feedback", max_length=32)
+    message: str = Field(max_length=5000)
+    # Where the user was when they sent it, so a bug report doesn't cost a
+    # round trip to ask which page.
+    page: str | None = Field(default=None, max_length=2048)
+    created: datetime = Field(default_factory=utcnow)
+    resolved: bool = Field(default=False)
+    # Relationships
+    user: User = Relationship(back_populates="feedback")
+
+
+class FeedbackPublic(SQLModel):
+    id: uuid.UUID
+    kind: str
+    message: str
+    page: str | None
+    created: datetime
+    resolved: bool
+    user_email: str
+    user_full_name: str | None
+
+
+class FeedbackPatch(SQLModel):
+    resolved: bool
+
+
+class UserOnboardingFlag(SQLModel, table=True):
+    """A checklist step a user has dismissed or marked done by hand.
+
+    The onboarding checklists themselves are derived from real state --
+    whether the project has questions, an environment, a pipeline that has
+    run -- so nothing here decides whether a step is complete. This table
+    only holds what that state can't answer: a step done off-hub (an editor
+    extension installed), and a checklist the user is finished with.
+
+    ``project_id`` is null for the account-level checklist. Postgres treats
+    nulls as distinct in a unique constraint, so the account-level rows
+    aren't actually deduped by it; the API checks before inserting and reads
+    collapse to a set, which makes a duplicate harmless either way.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "user_id",
+            "project_id",
+            "step",
+            name="uq_useronboardingflag_user_project_step",
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    project_id: uuid.UUID | None = Field(
+        foreign_key="project.id", default=None
+    )
+    step: str = Field(min_length=1, max_length=64)
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    user: User = Relationship(back_populates="onboarding_flags")
+    project: Union["Project", None] = Relationship(
+        back_populates="onboarding_flags"
+    )
+
+
+class OnboardingFlags(SQLModel):
+    """Every onboarding flag a user has set, in one response.
+
+    Both checklists are read on pages that are already fetching plenty, so
+    they share a single query rather than each adding one: ``account`` holds
+    the account-level steps, and ``projects`` maps a project ID to the steps
+    flagged on it.
+    """
+
+    account: list[str] = []
+    projects: dict[str, list[str]] = {}
+    # The user's earliest-created project, where first-project tips show
+    first_project_id: uuid.UUID | None = None
+
+
+class OnboardingFlagPost(SQLModel):
+    step: str = Field(min_length=1, max_length=64)
+    project_id: uuid.UUID | None = None
 
 
 class ProjectInvitation(SQLModel, table=True):
@@ -1061,6 +1181,21 @@ class Dataset(DatasetBase, table=True):
     project: Project = Relationship(back_populates="datasets")
 
 
+class DatasetPublic(DatasetBase):
+    """A dataset as the API returns it, with its provenance spelled out.
+
+    The table keeps ``imported_from`` as a project path for the one kind of
+    import the hub can resolve itself; the structured origin (DOI, URL, Git
+    repo, project) and the collectors come straight from calkit.yaml, which
+    is where they're authored.
+    """
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    imported_from_info: dict[str, Any] | None = None
+    collected_by: list[dict[str, Any]] | None = None
+
+
 class DVCOut(BaseModel):
     md5: str
     size: int
@@ -1320,6 +1455,22 @@ class FeatureVoteStatus(SQLModel):
     feature: str
     count: int
     has_voted: bool
+
+
+class FeatureVoter(SQLModel):
+    email: str
+    full_name: str | None = None
+    account_name: str | None = None
+    created: datetime
+
+
+class FeatureVoteSummary(SQLModel):
+    """Every vote for one feature, for the admin page: demand is only
+    useful alongside who's asking, which is what feedback shows too."""
+
+    feature: str
+    count: int
+    voters: list[FeatureVoter]
 
 
 class GitRef(BaseModel):

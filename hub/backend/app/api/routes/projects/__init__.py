@@ -10,8 +10,17 @@ from .dvc import *  # noqa: F401,F403
 from .dvc import router as dvc_router
 from .fs import *  # noqa: F401,F403
 from .fs import router as fs_router
+from .map_paths import *  # noqa: F401,F403
+from .map_paths import router as map_paths_router
+from .studio import *  # noqa: F401,F403
+from .studio import router as studio_router
+from .tables import *  # noqa: F401,F403
+from .tables import router as tables_router
 
 router = APIRouter()
 router.include_router(core_router)
 router.include_router(dvc_router)
 router.include_router(fs_router)
+router.include_router(map_paths_router)
+router.include_router(studio_router)
+router.include_router(tables_router)

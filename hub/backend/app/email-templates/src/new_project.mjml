@@ -1,0 +1,15 @@
+<mjml>
+  <mj-body background-color="#fafbfc">
+    <mj-section background-color="#fff" padding="40px 20px">
+      <mj-column vertical-align="middle" width="100%">
+        <mj-text align="center" padding="35px" font-size="20px" color="#333">{{ project_title }} is ready to run</mj-text>
+        <mj-text align="left" font-size="16px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555">Your project <b>{{ project_slug }}</b> is set up. Everything on its page comes from a Git repo you own, and the pipeline runs on your own machine. Three commands get you there:</mj-text>
+        <mj-text align="left" font-size="14px" padding-left="25px" padding-right="25px" font-family="Menlo, Consolas, monospace" color="#333"><span style="display:block;background:#f4f4f4;padding:8px 12px;border-radius:6px;margin-bottom:8px;">{{ install_command }}</span><span style="display:block;background:#f4f4f4;padding:8px 12px;border-radius:6px;margin-bottom:8px;">{{ clone_command }}</span><span style="display:block;background:#f4f4f4;padding:8px 12px;border-radius:6px;">{{ run_command }}</span></mj-text>
+        <mj-text align="left" font-size="14px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#555">The first command installs the CLI (Windows, pip, and uv options are in the <a href="{{ docs_link }}/installation/" style="color:#009688">docs</a>). The second clones the project and signs you in. The third runs the pipeline and pushes what it produced back to the project page.</mj-text>
+        <mj-button align="center" font-size="18px" background-color="#009688" border-radius="8px" color="#fff" href="{{ project_link }}" padding="15px 30px">Open the project</mj-button>
+        <mj-text align="center" font-size="12px" padding-left="25px" padding-right="25px" font-family="Arial, Helvetica, sans-serif" color="#999">Sent once, to {{ email }}, because this is your first Calkit project.</mj-text>
+        <mj-divider border-color="#ccc" border-width="2px"></mj-divider>
+      </mj-column>
+    </mj-section>
+  </mj-body>
+</mjml>

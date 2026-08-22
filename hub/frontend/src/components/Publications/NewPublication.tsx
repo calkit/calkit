@@ -24,6 +24,15 @@ import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
+// Mirrors calkit.templates.TEMPLATES["latex"]; the backend validates against
+// that registry, so an entry here without one there is rejected on submit.
+const LATEX_TEMPLATES = [
+  { value: "latex/article", label: "Article (generic)" },
+  { value: "latex/ieee-conference", label: "IEEE conference paper" },
+  { value: "latex/jfm", label: "Journal of Fluid Mechanics" },
+  { value: "latex/report", label: "Report or thesis (chapters)" },
+] as const
+
 interface NewPublicationProps {
   isOpen: boolean
   onClose: () => void
@@ -41,7 +50,7 @@ interface PublicationPostWithFile {
     | "poster"
     | "report"
     | "book"
-  template?: "latex/article" | "latex/jfm"
+  template?: (typeof LATEX_TEMPLATES)[number]["value"]
   stage?: string
   environment?: string
   file?: FileList
@@ -74,7 +83,13 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
   const path = watch("path")
   useEffect(() => {
     if (variant === "template" && !dirtyFields.stage) {
-      setValue("stage", path)
+      // A stage name, not a path: "pubs/ieee" becomes "build-pubs-ieee",
+      // the same convention the backend uses when it names one itself.
+      const slug = (path ?? "")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+      setValue("stage", slug ? `build-${slug}` : "")
     }
   }, [variant, path, dirtyFields.stage, setValue])
   const mutation = useMutation({
@@ -134,6 +149,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                 Path (relative to project folder)
               </FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
                 {...register("path", {
                   required: "Path is required",
@@ -162,8 +178,11 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                     required: "Template is required",
                   })}
                 >
-                  <option value="latex/article">latex/article</option>
-                  <option value="latex/jfm">latex/jfm</option>
+                  {LATEX_TEMPLATES.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
                 </Select>
                 {errors.template && (
                   <FormErrorMessage>
@@ -194,6 +213,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
             <FormControl mt={4} isRequired isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...register("title")}
                 placeholder="Title"
@@ -223,6 +243,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
                   Docker environment name
                 </FormLabel>
                 <Input
+                  autoComplete="off"
                   id="environment"
                   {...register("environment")}
                   placeholder="Ex: tex"
@@ -242,6 +263,7 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
               <FormControl mt={4} isRequired isInvalid={!!errors.stage}>
                 <FormLabel htmlFor="title">Pipeline stage name</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="stage"
                   {...register("stage")}
                   placeholder="Ex: build-paper"

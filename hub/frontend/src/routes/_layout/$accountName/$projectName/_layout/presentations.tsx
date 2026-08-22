@@ -20,7 +20,7 @@ import {
   useSearch,
 } from "@tanstack/react-router"
 import { useRef, useState } from "react"
-import { FiDownload, FiFile } from "react-icons/fi"
+import { FiDownload, FiFile, FiMonitor } from "react-icons/fi"
 import { z } from "zod"
 import Tooltip from "../../../../../components/Common/Tooltip"
 
@@ -30,6 +30,7 @@ import CommentsPanel, {
   projectCommentToPanelComment,
 } from "../../../../../components/Common/CommentsPanel"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import PresentationView from "../../../../../components/Presentations/PresentationView"
 import PdfAnnotator, {
@@ -298,14 +299,12 @@ function Presentations() {
                 </Box>
               )
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-              >
-                <Text>No presentations found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={FiMonitor}
+                title="No presentations found"
+                hint="Declare slides or a poster in calkit.yaml to show them here."
+                docsUrl="https://docs.calkit.org/calkit-yaml/"
+              />
             )}
           </Box>
 

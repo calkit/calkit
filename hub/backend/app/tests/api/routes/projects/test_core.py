@@ -2109,7 +2109,11 @@ def test_post_and_put_reference_item(
         r = client.post(
             f"{base}/references/items",
             headers=headers,
-            json={"path": "references.bib", "key": "smith2020"},
+            json={
+                "path": "references.bib",
+                "key": "smith2020",
+                "fields": {"title": "Another"},
+            },
         )
         assert r.status_code == 409
         # Edit the original entry, renaming its key and a field; its note
@@ -2763,6 +2767,9 @@ def test_project_pipeline_stage_edit(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
             side_effect=fake_ck_info,
         ),
+        # Saving recompiles dvc.yaml from the whole project, which this
+        # stand-in repo can't support; the compile has its own tests
+        patch("app.api.routes.projects.core.calkit.pipeline.to_dvc"),
     ):
         # Reading a stage hands it back as written: nothing reordered and
         # nothing removed, since tidying is the user's call
@@ -3544,3 +3551,607 @@ def test_evidence_citing_an_undeclared_key_resolves_to_nothing() -> None:
             result_value_cache={},
         )
     assert evidence[0].result is None
+
+
+def test_get_featured_projects(client: TestClient, db: Session) -> None:
+    """Curated order, public only, and unknown slugs skipped."""
+    public_project, _ = _make_owner_with_project(db, client)
+    public_project.is_public = True
+    private_project, _ = _make_owner_with_project(db, client)
+    private_project.is_public = False
+    db.add(public_project)
+    db.add(private_project)
+    db.commit()
+    db.refresh(public_project)
+    db.refresh(private_project)
+    public_slug = f"{public_project.owner_account.name}/{public_project.name}"
+    private_slug = (
+        f"{private_project.owner_account.name}/{private_project.name}"
+    )
+    # A slug for a project nobody can see, and one that doesn't exist at
+    # all, both drop out rather than erroring or leaking their existence.
+    with patch.object(
+        settings,
+        "FEATURED_PROJECTS",
+        [private_slug, public_slug, "nobody/nothing"],
+    ):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert response.status_code == 200
+    body = response.json()
+    slugs = [f"{p['owner_account_name']}/{p['name']}" for p in body["data"]]
+    assert slugs == [public_slug]
+    assert body["count"] == 1
+    # Configured order is the order returned, not creation order.
+    second_public, _ = _make_owner_with_project(db, client)
+    second_public.is_public = True
+    db.add(second_public)
+    db.commit()
+    db.refresh(second_public)
+    second_slug = f"{second_public.owner_account.name}/{second_public.name}"
+    with patch.object(
+        settings, "FEATURED_PROJECTS", [second_slug, public_slug]
+    ):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert [
+        f"{p['owner_account_name']}/{p['name']}"
+        for p in response.json()["data"]
+    ] == [second_slug, public_slug]
+    # An empty configuration is an empty section, not an error.
+    with patch.object(settings, "FEATURED_PROJECTS", []):
+        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+    assert response.status_code == 200
+    assert response.json() == {"data": [], "count": 0}
+
+
+def test_post_project_when_account_name_differs_from_github(
+    client: TestClient, db: Session
+) -> None:
+    """A private project for yourself isn't mistaken for one for an org.
+
+    Linking GitHub to an account created through Google or email leaves the
+    Calkit account name alone, so the two names routinely differ. Deciding
+    ownership from the account name sent those users down the org path,
+    where creating a project for themselves failed on an org lookup.
+    """
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"mismatch-{suffix}@example.com",
+            password="testpassword123",
+            # The two names deliberately differ, as they do after linking.
+            account_name=f"account{suffix}",
+            github_username=f"ghname{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    repo = f"https://github.com/ghname{suffix}/proj-{suffix}"
+    with (
+        patch(
+            "app.api.routes.projects.core.users.get_github_token",
+            return_value="gh-token",
+        ),
+        patch(
+            "app.api.routes.projects.core.orgs.get_org_by_github_name"
+        ) as get_org,
+        # A 404 from GitHub means "repo doesn't exist yet", and the create
+        # that follows is where this test stops caring.
+        patch(
+            "app.api.routes.projects.core.requests.get",
+            return_value=SimpleNamespace(
+                status_code=404, json=lambda: {}, text=""
+            ),
+        ),
+        patch(
+            "app.api.routes.projects.core.requests.post",
+            return_value=SimpleNamespace(
+                status_code=500, json=lambda: {}, text="stop here"
+            ),
+        ),
+    ):
+        resp = client.post(
+            f"{settings.API_V1_STR}/projects",
+            headers=headers,
+            json={
+                "name": f"proj-{suffix}",
+                "title": "A private project for myself",
+                "is_public": False,
+                "git_repo_url": repo,
+            },
+        )
+    # The org path is never taken, so no org lookup and no "Could not fetch
+    # org from GitHub". What it fails on instead is the stubbed repo create.
+    get_org.assert_not_called()
+    assert "org" not in resp.text.lower()
+
+
+def test_post_project_dataset_provenance(
+    client: TestClient, db: Session
+) -> None:
+    """Each way a dataset joins a project writes the right calkit.yaml."""
+    project, headers = _make_owner_with_project(db, client)
+    url = (
+        f"{settings.API_V1_STR}/projects/{project.owner_account.name}/"
+        f"{project.name}/datasets"
+    )
+    written: list[dict] = []
+
+    class FakeRepo:
+        working_dir = "/tmp/does-not-matter"
+        git = SimpleNamespace(
+            add=lambda *a, **k: None,
+            commit=lambda *a, **k: None,
+            push=lambda *a, **k: None,
+        )
+        active_branch = SimpleNamespace(name="main")
+
+    def post(body: dict, existing_path: bool = False):
+        ck_info: dict = {"datasets": list(written)}
+        with (
+            patch(
+                "app.api.routes.projects.core.get_repo",
+                return_value=FakeRepo(),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_ck_info_from_repo",
+                return_value=ck_info,
+            ),
+            # This test is about what gets written to calkit.yaml; the
+            # fetching of imports has its own test with a real repo
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_files",
+                side_effect=lambda files, wdir, path: (path, [path]),
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.fetch_git_path",
+                return_value="c0ffee0123456789c0ffee0123456789c0ffee01",
+            ),
+            patch(
+                "app.api.routes.projects.core.app.imports.resolve_doi_files",
+                return_value={"x.csv": "https://example.org/x.csv"},
+            ),
+            patch(
+                "app.api.routes.projects.core.calkit.get_size",
+                return_value=0,
+            ),
+            patch(
+                "app.api.routes.projects.core.get_zip_path_map_from_repo",
+                return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "get_repo_tree_for_ref",
+                return_value=None,
+            ),
+            patch(
+                "app.api.routes.projects.core.app.projects."
+                "dvc_outputs_from_tree",
+                return_value={},
+            ),
+            patch(
+                "app.api.routes.projects.core.os.path.isfile",
+                return_value=existing_path,
+            ),
+            patch("builtins.open", new_callable=lambda: _fake_open),
+            patch("app.api.routes.projects.core.mixpanel.track"),
+        ):
+            resp = client.post(url, headers=headers, json=body)
+        if resp.status_code == 200:
+            written[:] = ck_info["datasets"]
+        return resp
+
+    import contextlib
+    import io
+
+    @contextlib.contextmanager
+    def _fake_open(*args, **kwargs):
+        yield io.StringIO()
+
+    # A DOI, the most durable provenance there is.
+    resp = post(
+        {
+            "path": "data/doi.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1",
+                "date": "2026-01-02",
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {
+        "doi": "10.5281/zenodo.1",
+        "date": "2026-01-02",
+    }
+    # The DB shape holds this as a string, so the response carries it as
+    # JSON a client can parse rather than a Python repr.
+    import json
+
+    assert (
+        json.loads(resp.json()["imported_from"])
+        == written[-1]["imported_from"]
+    )
+    # A Git repo pinned to a revision.
+    resp = post(
+        {
+            "path": "data/repo.csv",
+            "imported_from": {
+                "git": {
+                    "repo_url": "https://github.com/a/b",
+                    "rev": "deadbeef",
+                    "path": "out.csv",
+                }
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    # What was actually fetched is what's written, whatever was asked for
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # No revision means the default branch's head, recorded by its commit
+    resp = post(
+        {
+            "path": "data/head.csv",
+            "imported_from": {
+                "git": {"repo_url": "https://github.com/a/b", "path": "h.csv"}
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # A branch or tag moves, so it can't be what's recorded; asked for, it
+    # is resolved at fetch time and the commit it pointed at is written
+    resp = post(
+        {
+            "path": "data/branch.csv",
+            "imported_from": {
+                "git": {"repo_url": "https://github.com/a/b", "rev": "main"}
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # A plain URL.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/d.csv"},
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert written[-1]["imported_from"] == {"url": "https://example.org/d.csv"}
+    # Data collected here: needs a title and description, and the path has
+    # to already exist, since nothing will fetch it.
+    resp = post(
+        {"path": "data/mine.csv", "collected_by": [{"email": "me@x.edu"}]}
+    )
+    assert resp.status_code == 400
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "collected_by": [{"email": "me@x.edu"}],
+            "title": "Mine",
+            "description": "Collected in the lab",
+        }
+    )
+    # Not tracked by Git or DVC, so there is nothing to label.
+    assert resp.status_code == 400
+    assert "not tracked by Git or DVC" in resp.text
+    resp = post(
+        {
+            "path": "data/mine.csv",
+            "collected_by": [{"email": "me@x.edu"}],
+            "title": "Mine",
+            "description": "Collected in the lab",
+        },
+        existing_path=True,
+    )
+    assert resp.status_code == 200, resp.text
+    # One collector reads better as a mapping than a one-item list.
+    assert written[-1]["collected_by"] == {"email": "me@x.edu"}
+    assert "imported_from" not in written[-1]
+    # Produced by a stage: doesn't exist until the pipeline runs.
+    resp = post(
+        {
+            "path": "data/derived.csv",
+            "stage": "collect",
+            "title": "Derived",
+            "description": "From the pipeline",
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    # Two sources at once is ambiguous provenance, which is worse than none.
+    resp = post(
+        {
+            "path": "data/ambiguous.csv",
+            "imported_from": {
+                "doi": "10.1/x",
+                "url": "https://example.org/x",
+            },
+        }
+    )
+    assert resp.status_code == 422
+    # Collected here and imported from elsewhere can't both be true.
+    resp = post(
+        {
+            "path": "data/both.csv",
+            "collected_by": [{"email": "me@x.edu"}],
+            "imported_from": {"doi": "10.1/x"},
+        }
+    )
+    assert resp.status_code == 422
+    # The same path twice would make the entry ambiguous.
+    resp = post(
+        {
+            "path": "data/url.csv",
+            "imported_from": {"url": "https://example.org/again.csv"},
+        }
+    )
+    assert resp.status_code == 400
+
+
+def test_extract_project_zip(tmp_path) -> None:
+    """Unpacking is confined to the target directory."""
+    import io
+    import zipfile
+
+    from fastapi import HTTPException
+
+    from app.api.routes.projects.core import _extract_project_zip
+
+    def make_zip(entries: dict[str, str]) -> bytes:
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            for name, content in entries.items():
+                z.writestr(name, content)
+        return buf.getvalue()
+
+    dest = tmp_path / "repo"
+    dest.mkdir()
+    _extract_project_zip(
+        make_zip({"data/raw.csv": "a,b\n", "analyze.py": "print(1)\n"}),
+        str(dest),
+    )
+    assert (dest / "data" / "raw.csv").read_text() == "a,b\n"
+    assert (dest / "analyze.py").exists()
+    # A zip of a project usually has one folder at the top; keeping it would
+    # bury the project a level deeper than the user meant.
+    nested = tmp_path / "nested"
+    nested.mkdir()
+    _extract_project_zip(
+        make_zip({"my-project/README.md": "hi", "my-project/src/a.py": "x"}),
+        str(nested),
+    )
+    assert (nested / "README.md").read_text() == "hi"
+    assert (nested / "src" / "a.py").exists()
+    assert not (nested / "my-project").exists()
+    # Git's own data belongs to the repo that already exists.
+    skipped = tmp_path / "skipped"
+    skipped.mkdir()
+    _extract_project_zip(
+        make_zip({".git/config": "nope", "keep.txt": "yes"}), str(skipped)
+    )
+    assert not (skipped / ".git").exists()
+    assert (skipped / "keep.txt").exists()
+    # macOS resource forks are noise, not project files.
+    mac = tmp_path / "mac"
+    mac.mkdir()
+    _extract_project_zip(
+        make_zip({"__MACOSX/._x": "junk", "x": "real"}), str(mac)
+    )
+    assert not (mac / "__MACOSX").exists()
+    # A zip naming a path outside the destination is refused outright: this
+    # runs on our server, against a directory we control.
+    escape = tmp_path / "escape"
+    escape.mkdir()
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(
+            make_zip({"../../escaped.txt": "pwned"}), str(escape)
+        )
+    assert excinfo.value.status_code == 400
+    assert not (tmp_path.parent / "escaped.txt").exists()
+    # Something that isn't a zip is a message, not a traceback.
+    with pytest.raises(HTTPException) as excinfo:
+        _extract_project_zip(b"not a zip at all", str(escape))
+    assert excinfo.value.status_code == 400
+
+
+def test_post_project_upload_validates_before_creating(
+    client: TestClient, db: Session
+) -> None:
+    """A bad archive is refused before any project exists for it."""
+    import io
+    import zipfile
+
+    suffix = uuid.uuid4().hex[:8]
+    owner = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"upload-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"upload{suffix}",
+            github_username=f"upload{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=owner.email, db=db
+    )
+    url = f"{settings.API_V1_STR}/projects/upload"
+
+    def upload(name: str, content: bytes):
+        with patch(
+            "app.api.routes.projects.core.post_project"
+        ) as post_project:
+            resp = client.post(
+                url,
+                headers=headers,
+                data={"title": "Uploaded", "name": name},
+                files={"file": (f"{name}.zip", content, "application/zip")},
+            )
+        return resp, post_project
+
+    def no_project(name: str) -> bool:
+        return (
+            db.exec(select(Project).where(Project.name == name)).first()
+            is None
+        )
+
+    # Not a zip at all.
+    name = f"notzip-{suffix}"
+    resp, post_project = upload(name, b"this is not a zip archive")
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # A zip naming a path outside the project.
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("../../escaped.txt", "pwned")
+    name = f"escape-{suffix}"
+    resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+    # One whose members declare more than the unpacked cap allows.
+    from app.api.routes.projects import core as core_mod
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("big.bin", "x")
+    name = f"bomb-{suffix}"
+    with patch.object(core_mod, "MAX_PROJECT_UNPACKED_BYTES", 0):
+        resp, post_project = upload(name, buf.getvalue())
+    assert resp.status_code == 400, resp.text
+    post_project.assert_not_called()
+    assert no_project(name)
+
+
+def test_get_project_environments_stays_inside_repo(
+    client: TestClient, tmp_path
+) -> None:
+    """Spec and lock reads stay in the clone, whatever calkit.yaml says."""
+    # The repo is one directory under tmp_path, so tmp_path itself is what
+    # a traversal lands in.
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    secret = tmp_path / "secret.txt"
+    secret.write_text("not yours\n")
+    (repo_dir / "pyproject.toml").write_text("[project]\n")
+    (repo_dir / "uv.lock").write_text("version = 1\n")
+    lock_dir = repo_dir / ".calkit" / "env-locks" / "py"
+    lock_dir.mkdir(parents=True)
+    (lock_dir / "linux-64.txt").write_text("numpy==2.0\n")
+    # A symlink in the locks directory pointing out of the repo.
+    (lock_dir / "osx-arm64.txt").symlink_to(secret)
+    envs = {
+        # Legitimate: spec in the repo, lock next to it.
+        "main": {"kind": "uv", "path": "pyproject.toml"},
+        # Legitimate directory of locks, one entry of which is a symlink out.
+        "py": {"kind": "venv", "path": "requirements.txt"},
+        # A Docker env named to make its lock "directory" the repo's parent.
+        "../../..": {"kind": "docker", "image": "x"},
+        # A spec path that is absolute and exists, plus the classic.
+        "abs": {"kind": "uv", "path": str(secret)},
+        "passwd": {"kind": "uv", "path": "/etc/passwd"},
+        # A relative spec path climbing out of the repo.
+        "climb": {"kind": "uv", "path": "../secret.txt"},
+    }
+    fake_project = SimpleNamespace(
+        owner_account_name="o", name="p", file_locks=[]
+    )
+    fake_repo = SimpleNamespace(working_dir=str(repo_dir))
+    with (
+        patch(
+            "app.api.routes.projects.core.app.projects.get_project",
+            return_value=fake_project,
+        ),
+        patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
+        patch(
+            "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
+            return_value={"environments": envs},
+        ),
+    ):
+        resp = client.get(f"{settings.API_V1_STR}/projects/o/p/environments")
+    assert resp.status_code == 200, resp.text
+    by_name = {e["name"]: e for e in resp.json()}
+    assert by_name["main"]["file_content"] == "[project]\n"
+    assert [lk["path"] for lk in by_name["main"]["locks"]] == ["uv.lock"]
+    # Only the lock that's really in the repo is returned.
+    assert [lk["path"] for lk in by_name["py"]["locks"]] == [
+        ".calkit/env-locks/py/linux-64.txt"
+    ]
+    assert by_name["../../.."]["locks"] == []
+    for name in ["abs", "passwd", "climb"]:
+        assert by_name[name]["file_content"] is None, name
+        assert by_name[name]["locks"] == [], name
+    # Nothing anywhere in the response came from outside the clone.
+    assert "not yours" not in resp.text
+    assert "root:" not in resp.text
+
+
+def test_push_dvc_cache_to_storage(tmp_path) -> None:
+    """Every cached object is copied, directory outputs included."""
+    import io as _io
+
+    from app.api.routes.projects.core import _push_dvc_cache_to_storage
+
+    repo_dir = tmp_path / "repo"
+    cache = repo_dir / ".dvc" / "cache" / "files" / "md5"
+    (cache / "ab").mkdir(parents=True)
+    (cache / "cd").mkdir(parents=True)
+    (cache / "ab" / "cdef0123").write_bytes(b"file contents")
+    # A directory output's listing is an object too, and a pointer to it
+    # dangles without this.
+    (cache / "cd" / "ef456789.dir").write_bytes(b'[{"md5": "abcdef0123"}]')
+    written: dict[str, bytes] = {}
+
+    class FakeFS:
+        def open(self, path, mode="rb"):
+            buf = _io.BytesIO()
+            original_close = buf.close
+
+            def close():
+                written[path] = buf.getvalue()
+                original_close()
+
+            buf.close = close  # type: ignore[method-assign]
+            return buf
+
+    with (
+        patch(
+            "app.api.routes.projects.core.get_object_fs",
+            return_value=FakeFS(),
+        ),
+        patch("app.config.settings.ENVIRONMENT", "local"),
+    ):
+        count = _push_dvc_cache_to_storage(
+            repo_dir=str(repo_dir),
+            owner_name="someone",
+            project_name="a-project",
+        )
+    assert count == 2
+    assert sorted(p.split("/")[-2:] for p in written) == [
+        ["ab", "cdef0123"],
+        ["cd", "ef456789.dir"],
+    ]
+    assert list(written.values())[0] == b"file contents"
+    # A repo with nothing in DVC has nothing to push, and that isn't an error.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    with patch("app.api.routes.projects.core.get_object_fs") as fs:
+        assert (
+            _push_dvc_cache_to_storage(
+                repo_dir=str(empty), owner_name="a", project_name="b"
+            )
+            == 0
+        )
+    fs.assert_not_called()

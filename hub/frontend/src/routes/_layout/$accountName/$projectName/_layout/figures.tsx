@@ -33,14 +33,17 @@ import { useDebounce } from "use-debounce"
 import { z } from "zod"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 
 import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
+import FigureStudio from "../../../../../components/Figures/FigureStudio"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
 import useProject from "../../../../../hooks/useProject"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 const figuresSearchSchema = z.object({
   ref: z.string().optional(),
@@ -48,6 +51,11 @@ const figuresSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   page: z.coerce.number().int().min(1).optional(),
+  // Whether the figure editor is open, so a refresh or a link can land
+  // on it directly.
+  studio: z.boolean().optional(),
+  // The figure editor, open on the figure at `path`
+  edit: z.boolean().optional(),
   q: z.string().optional(),
 })
 
@@ -284,6 +292,13 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
+  const { studio: studioOpen, edit: editOpen } = Route.useSearch()
+  const studioModal = {
+    isOpen: Boolean(studioOpen),
+    onOpen: () => navigate({ search: (prev) => ({ ...prev, studio: true }) }),
+    onClose: () =>
+      navigate({ search: (prev) => ({ ...prev, studio: undefined }) }),
+  }
 
   const selectedFigure = figures?.find((f) => f.path === selectedPath) ?? null
 
@@ -299,6 +314,7 @@ function ProjectFigures() {
         path: undefined,
         base_ref: undefined,
         compare_ref: undefined,
+        edit: undefined,
       }),
     })
 
@@ -402,6 +418,9 @@ function ProjectFigures() {
                   <Icon as={FaPlus} fontSize="xs" />
                 </MenuButton>
                 <MenuList>
+                  <MenuItem onClick={studioModal.onOpen}>
+                    New figure from data
+                  </MenuItem>
                   <MenuItem onClick={uploadFigureModal.onOpen}>
                     Upload new figure
                   </MenuItem>
@@ -418,6 +437,12 @@ function ProjectFigures() {
                 isOpen={labelFigureModal.isOpen}
                 onClose={labelFigureModal.onClose}
               />
+              {studioModal.isOpen ? (
+                <FigureStudio
+                  isOpen={studioModal.isOpen}
+                  onClose={studioModal.onClose}
+                />
+              ) : null}
             </>
           ) : null}
           <ClearableInput
@@ -438,25 +463,18 @@ function ProjectFigures() {
           <LoadingSpinner height="300px" />
         ) : pageSize === 0 ? (
           debouncedSearch ? (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title={`No figures match "${debouncedSearch}"`}
               height="200px"
-              color="gray.500"
-            >
-              <Text>No figures match "{debouncedSearch}"</Text>
-            </Flex>
+            />
           ) : (
-            <Flex
-              direction="column"
-              align="center"
-              justify="center"
-              height="300px"
-              color="gray.500"
+            <NoArtifactFound
+              icon={FaRegFileImage}
+              title="No figures found"
+              hint="Declare one in calkit.yaml, or add a pipeline stage that produces an image."
+              docsUrl="https://docs.calkit.org/calkit-yaml/"
             >
-              <Icon as={FaRegFileImage} fontSize="4xl" mb={3} />
-              <Text>No figures found</Text>
               {ref && (
                 <Button
                   mt={3}
@@ -467,7 +485,7 @@ function ProjectFigures() {
                   Clear ref filter
                 </Button>
               )}
-            </Flex>
+            </NoArtifactFound>
           )
         ) : (
           // The previous page stays mounted while the next one loads so the
@@ -483,12 +501,20 @@ function ProjectFigures() {
               pointerEvents={isPlaceholderData ? "none" : undefined}
               aria-busy={isPlaceholderData}
             >
-              {figures!.map((figure) => (
-                <FigureThumbnail
+              {figures!.map((figure, i) => (
+                <TipBubble
                   key={figure.path}
-                  figure={figure}
-                  onClick={() => openFigure(figure)}
-                />
+                  tip="edit-figure"
+                  where="page"
+                  when={i === 0 && !selectedPath}
+                  markOnClick={false}
+                  display="block"
+                >
+                  <FigureThumbnail
+                    figure={figure}
+                    onClick={() => openFigure(figure)}
+                  />
+                </TipBubble>
               ))}
             </SimpleGrid>
             {isPlaceholderData && (
@@ -560,6 +586,12 @@ function ProjectFigures() {
           initialRef={base_ref ?? ref}
           initialRef2={compare_ref}
           initialArtifact={selectedFigure ?? undefined}
+          editOpen={Boolean(editOpen)}
+          onEditOpenChange={(open) =>
+            navigate({
+              search: (prev) => ({ ...prev, edit: open || undefined }),
+            })
+          }
           onRefsChange={(r1, r2) =>
             navigate({
               search: (prev) => ({

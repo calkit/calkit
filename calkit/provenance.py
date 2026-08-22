@@ -1,6 +1,5 @@
 """Functionality for handling artifact provenance."""
 
-# TODO: Provenance stuff belongs in its own module
 # The artifact kinds whose provenance is checked. Each entry must say where
 # it came from: a pipeline stage, an import, or the person who collected or
 # created it.

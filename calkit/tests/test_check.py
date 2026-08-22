@@ -51,6 +51,13 @@ def test_check_reproducibility(tmp_dir):
             {"path": "solver.toml", "imported_from": {"url": "https://x"}},
             {"path": "mystery.bin"},
         ],
+        "tables": [
+            {"path": "results.csv", "stage": "summarize"},
+            {"path": "mystery.csv"},
+        ],
+        "presentations": [
+            {"path": "talk.pdf", "stage": "build-talk"},
+        ],
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -64,7 +71,14 @@ def test_check_reproducibility(tmp_dir):
     assert res.n_misc == 3
     assert res.n_misc_no_import_or_stage == 1
     assert res.n_misc_with_import_or_stage == 2
+    assert res.n_tables == 2
+    assert res.n_tables_no_import_or_stage == 1
+    assert res.n_tables_with_import_or_stage == 1
+    assert res.n_presentations == 1
+    assert res.n_presentations_no_import_or_stage == 0
+    assert res.n_presentations_with_import_or_stage == 1
     assert "Misc with provenance recorded" in res.to_pretty()
+    assert "Tables with provenance recorded" in res.to_pretty()
 
 
 def test_check_call():

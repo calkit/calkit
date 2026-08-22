@@ -43,6 +43,12 @@ class ReproCheck(BaseModel):
     n_publications_no_import_or_stage: int
     n_misc: int = 0
     n_misc_no_import_or_stage: int = 0
+    # Defaults so a check written before these types were counted still
+    # loads
+    n_tables: int = 0
+    n_tables_no_import_or_stage: int = 0
+    n_presentations: int = 0
+    n_presentations_no_import_or_stage: int = 0
     n_dvc_remotes: int
     # TODO: Check calkit remotes are authenticated
 
@@ -129,6 +135,16 @@ class ReproCheck(BaseModel):
     @property
     def n_misc_with_import_or_stage(self) -> int:
         return self.n_misc - self.n_misc_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_tables_with_import_or_stage(self) -> int:
+        return self.n_tables - self.n_tables_no_import_or_stage
+
+    @computed_field
+    @property
+    def n_presentations_with_import_or_stage(self) -> int:
+        return self.n_presentations - self.n_presentations_no_import_or_stage
 
     @computed_field
     @property

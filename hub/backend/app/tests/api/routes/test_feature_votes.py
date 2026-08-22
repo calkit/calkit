@@ -70,3 +70,34 @@ def test_remove_feature_vote(
     )
     assert r.status_code == 200
     assert r.json()["has_voted"] is False
+
+
+def test_get_feature_votes_for_admin(
+    client: TestClient,
+    normal_user_token_headers: dict[str, str],
+    superuser_token_headers: dict[str, str],
+) -> None:
+    base = f"{settings.API_V1_STR}/feature-votes"
+    resp = client.post(
+        f"{base}/local-workspace-compute", headers=normal_user_token_headers
+    )
+    assert resp.status_code == 200, resp.text
+    # Only an admin sees the tally with names
+    resp = client.get(base, headers=normal_user_token_headers)
+    assert resp.status_code == 403
+    resp = client.get(base, headers=superuser_token_headers)
+    assert resp.status_code == 200, resp.text
+    by_feature = {f["feature"]: f for f in resp.json()}
+    # Every feature on offer is listed, voted for or not
+    assert "external-releases-in-app" in by_feature
+    votes = by_feature["local-workspace-compute"]
+    assert votes["count"] >= 1
+    voter = next(v for v in votes["voters"] if v["email"])
+    assert set(voter) == {"email", "full_name", "account_name", "created"}
+    # Unvoting takes the user off the list
+    client.delete(
+        f"{base}/local-workspace-compute", headers=normal_user_token_headers
+    )
+    resp = client.get(base, headers=superuser_token_headers)
+    after = {f["feature"]: f for f in resp.json()}["local-workspace-compute"]
+    assert after["count"] == votes["count"] - 1

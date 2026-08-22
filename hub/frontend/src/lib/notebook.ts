@@ -1,4 +1,5 @@
 // Just enough of the .ipynb format to edit sources and run cells.
+import { load as yamlLoad } from "js-yaml"
 
 export type CellType = "code" | "markdown" | "raw"
 
@@ -87,4 +88,53 @@ export function serializeNotebook(
     return next
   })
   return `${JSON.stringify({ ...parsed.raw, cells: rawCells }, null, 1)}\n`
+}
+
+/** Environment kinds whose notebooks the browser can run: Python ones, and
+ * Docker images, which usually wrap a Python too. */
+const BROWSER_ENV_KINDS = new Set([
+  "uv",
+  "uv-venv",
+  "venv",
+  "conda",
+  "pixi",
+  "docker",
+])
+
+/**
+ * Whether a notebook can be run in the browser, and if not, why.
+ *
+ * The in-browser kernel is Pyodide, so a Julia or R notebook has nothing
+ * to run on; offering a button that fails on the first cell helps no one.
+ * (Running such notebooks on a connected local workspace is a separate,
+ * later capability.) Unknown environments get the benefit of the doubt.
+ */
+export function browserRunnable(
+  stageYaml: string | null | undefined,
+  envKind: string | null | undefined,
+): { ok: boolean; reason?: string } {
+  let language: string | undefined
+  if (stageYaml) {
+    try {
+      const stage = yamlLoad(stageYaml) as { language?: string } | null
+      language = stage?.language
+    } catch {
+      // An unparseable stage says nothing either way
+    }
+  }
+  if (language && language !== "python") {
+    return {
+      ok: false,
+      reason: `This notebook is ${language === "julia" ? "Julia" : language}, and the browser only runs Python.`,
+    }
+  }
+  if (envKind && !BROWSER_ENV_KINDS.has(envKind)) {
+    const name =
+      envKind === "julia" ? "Julia" : envKind === "renv" ? "R" : envKind
+    return {
+      ok: false,
+      reason: `This notebook's environment is ${name}, and the browser only runs Python.`,
+    }
+  }
+  return { ok: true }
 }

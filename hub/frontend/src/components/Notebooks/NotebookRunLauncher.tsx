@@ -3,6 +3,10 @@ import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 
 import { ProjectsService } from "../../client"
+import { load as yamlLoad } from "js-yaml"
+
+import { browserRunnable } from "../../lib/notebook"
+import FeatureVoteButton from "../Common/FeatureVoteButton"
 import { declaredInputs } from "../../lib/provenance"
 import NotebookRunner from "./NotebookRunner"
 
@@ -66,7 +70,41 @@ const NotebookRunLauncher = ({
     enabled: Boolean(stage),
     retry: false,
   })
+  // The stage's environment decides whether the browser can run this at
+  // all: the kernel here is Python, so a Julia or R notebook isn't offered
+  const environmentsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "environments"],
+    queryFn: () =>
+      ProjectsService.getProjectEnvironments({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(stage),
+  })
   if (!path.toLowerCase().endsWith(".ipynb")) return null
+  let envName: string | undefined
+  try {
+    envName = (yamlLoad(stageQuery.data?.yaml ?? "") as any)?.environment
+  } catch {
+    envName = undefined
+  }
+  const envKind = environmentsQuery.data?.find((e) => e.name === envName)?.kind
+  const runnable = browserRunnable(stageQuery.data?.yaml, envKind)
+  if (!runnable.ok) {
+    return (
+      <Box mt={3} pt={3} borderTopWidth={1}>
+        <Text fontSize="xs" color="ui.dim" mb={2}>
+          {runnable.reason} Running it from here on your own machine is
+          something we're weighing.
+        </Text>
+        <FeatureVoteButton
+          feature="local-workspace-compute"
+          size="xs"
+          showCount={false}
+        />
+      </Box>
+    )
+  }
   const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
   const calkitYaml = pipelineQuery.data?.calkit_yaml
   // calkit.yaml is the source of what the notebook reads; the compiled

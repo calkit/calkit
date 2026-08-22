@@ -28,6 +28,7 @@ import { z } from "zod"
 import { type UserPublic, UsersService } from "../../client"
 import AddUser from "../../components/Admin/AddUser"
 import ClearableInput from "../../components/Common/ClearableInput"
+import FeatureVotesTable from "../../components/Admin/FeatureVotesTable"
 import FeedbackTable from "../../components/Admin/FeedbackTable"
 import ActionsMenu from "../../components/Common/ActionsMenu"
 import { isLoggedIn } from "../../hooks/useAuth"
@@ -373,6 +374,7 @@ function Admin() {
       </Heading>
       <UsersTable />
       <FeedbackTable />
+      <FeatureVotesTable />
     </Container>
   )
 }

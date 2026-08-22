@@ -89,6 +89,7 @@ import type {
   GetDiscountCodeErrors,
   GetDiscountCodeResponses,
   GetFeaturedProjectsResponses,
+  GetFeatureVotesResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
   GetFeedbackErrors,
@@ -8471,6 +8472,30 @@ export class FeatureVotesService {
       url: "/feature-votes/{feature}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Feature Votes
+   *
+   * Every feature's votes with who cast them, for the admin page.
+   *
+   * Listed alongside feedback, since both answer the same question: what
+   * do users want that isn't there yet? Features nobody has voted for
+   * still appear, at zero, so the list is the full set on offer.
+   */
+  public static getFeatureVotes<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeatureVotesResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetFeatureVotesResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feature-votes",
+      ...options,
     })
   }
 }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { parseNotebook, serializeNotebook, splitSource } from "./notebook"
+import {
+  browserRunnable,
+  parseNotebook,
+  serializeNotebook,
+  splitSource,
+} from "./notebook"
 
 const nb = JSON.stringify({
   cells: [
@@ -78,4 +83,20 @@ it("keeps cell ids unique even when a fallback would collide", () => {
   )
   const out = JSON.parse(serializeNotebook(parsed, edited))
   expect(out.cells.map((c: any) => c.source)).toEqual(["a", "b", ["changed"]])
+})
+
+it("only offers a browser run for Python notebooks", () => {
+  expect(browserRunnable(undefined, "uv-venv").ok).toBe(true)
+  expect(browserRunnable("kind: jupyter-notebook\n", "docker").ok).toBe(true)
+  expect(browserRunnable(undefined, undefined).ok).toBe(true)
+  expect(browserRunnable(undefined, "julia")).toEqual({
+    ok: false,
+    reason:
+      "This notebook's environment is Julia, and the browser only runs Python.",
+  })
+  expect(browserRunnable(undefined, "renv").reason).toContain("is R")
+  expect(
+    browserRunnable("kind: jupyter-notebook\nlanguage: julia\n", "uv").ok,
+  ).toBe(false)
+  expect(browserRunnable("kind: [", "uv").ok).toBe(true)
 })

@@ -23,7 +23,7 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Literal
+from typing import Any, Literal
 
 import ruamel.yaml
 from pydantic import BaseModel, Field
@@ -343,7 +343,56 @@ def _resolve_current_dep_md5(
         return _hash_tree_file(tree, path)
     if path in outs_index:
         return outs_index[path]
+    cleaned = _cleaned_notebook_md5(path, tree)
+    if cleaned is not None:
+        return cleaned
     return None
+
+
+CLEANED_NOTEBOOKS_DIR = ".calkit/notebooks/cleaned/"
+
+
+def clean_notebook(nb: dict[str, Any]) -> dict[str, Any]:
+    """A notebook with outputs and metadata stripped, as calkit cleans it.
+
+    What a notebook stage depends on is the cleaned copy, so that re-saving
+    a notebook with fresh outputs doesn't make its stage stale while an
+    edit to a cell does. This mirrors ``calkit.notebooks.clean_notebook_outputs``
+    field for field (and the hash below mirrors its ``json.dump`` with
+    ``indent=2``), which is what makes the hub's hash match the lock's.
+    """
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+        if "tags" in cell.get("metadata", {}):
+            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
+        else:
+            cell["metadata"] = {}
+    nb["metadata"] = {}
+    return nb
+
+
+def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
+    """The md5 a cleaned-notebook dep would have, from the source notebook.
+
+    Cleaned notebooks are generated on the fly by ``calkit run`` and never
+    committed, so the dep can't be read; but its content is a function of
+    the committed notebook, so its hash can be computed. Without this an
+    edit to a notebook in the app never showed its stage as stale.
+    """
+    if not path.startswith(CLEANED_NOTEBOOKS_DIR):
+        return None
+    source = path[len(CLEANED_NOTEBOOKS_DIR) :]
+    if not tree.is_file(source):
+        return None
+    try:
+        nb = json.loads(tree.read_bytes(source))
+    except Exception as e:
+        logger.warning(f"Could not parse notebook {source}: {e}")
+        return None
+    text = json.dumps(clean_notebook(nb), indent=2)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
 def _get_nested(data: dict | None, dotted_key: str):

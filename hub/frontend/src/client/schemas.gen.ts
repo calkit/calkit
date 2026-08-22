@@ -2094,6 +2094,70 @@ export const FeatureVoteStatusSchema = {
     "Vote tally for a feature plus whether the current user has voted.",
 } as const
 
+export const FeatureVoteSummarySchema = {
+  properties: {
+    feature: {
+      type: "string",
+      title: "Feature",
+    },
+    count: {
+      type: "integer",
+      title: "Count",
+    },
+    voters: {
+      items: {
+        $ref: "#/components/schemas/FeatureVoter",
+      },
+      type: "array",
+      title: "Voters",
+    },
+  },
+  type: "object",
+  required: ["feature", "count", "voters"],
+  title: "FeatureVoteSummary",
+  description:
+    "Every vote for one feature, for the admin page: demand is only\nuseful alongside who's asking, which is what feedback shows too.",
+} as const
+
+export const FeatureVoterSchema = {
+  properties: {
+    email: {
+      type: "string",
+      title: "Email",
+    },
+    full_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Full Name",
+    },
+    account_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Account Name",
+    },
+    created: {
+      type: "string",
+      format: "date-time",
+      title: "Created",
+    },
+  },
+  type: "object",
+  required: ["email", "created"],
+  title: "FeatureVoter",
+} as const
+
 export const FeedbackPatchSchema = {
   properties: {
     resolved: {

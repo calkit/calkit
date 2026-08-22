@@ -1457,6 +1457,22 @@ class FeatureVoteStatus(SQLModel):
     has_voted: bool
 
 
+class FeatureVoter(SQLModel):
+    email: str
+    full_name: str | None = None
+    account_name: str | None = None
+    created: datetime
+
+
+class FeatureVoteSummary(SQLModel):
+    """Every vote for one feature, for the admin page: demand is only
+    useful alongside who's asking, which is what feedback shows too."""
+
+    feature: str
+    count: int
+    voters: list[FeatureVoter]
+
+
 class GitRef(BaseModel):
     """Represents a Git reference (commit, tag, or branch)."""
 

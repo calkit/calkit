@@ -1178,6 +1178,49 @@ export type FeatureVoteStatus = {
 }
 
 /**
+ * FeatureVoteSummary
+ *
+ * Every vote for one feature, for the admin page: demand is only
+ * useful alongside who's asking, which is what feedback shows too.
+ */
+export type FeatureVoteSummary = {
+  /**
+   * Feature
+   */
+  feature: string
+  /**
+   * Count
+   */
+  count: number
+  /**
+   * Voters
+   */
+  voters: Array<FeatureVoter>
+}
+
+/**
+ * FeatureVoter
+ */
+export type FeatureVoter = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Account Name
+   */
+  account_name?: string | null
+  /**
+   * Created
+   */
+  created: string
+}
+
+/**
  * FeedbackPatch
  */
 export type FeedbackPatch = {
@@ -13333,3 +13376,22 @@ export type PostFeatureVoteResponses = {
 
 export type PostFeatureVoteResponse =
   PostFeatureVoteResponses[keyof PostFeatureVoteResponses]
+
+export type GetFeatureVotesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/feature-votes"
+}
+
+export type GetFeatureVotesResponses = {
+  /**
+   * Response Feature Votes-Get Feature Votes
+   *
+   * Successful Response
+   */
+  200: Array<FeatureVoteSummary>
+}
+
+export type GetFeatureVotesResponse =
+  GetFeatureVotesResponses[keyof GetFeatureVotesResponses]

@@ -23,7 +23,12 @@ from app.api.routes.projects.core import (
 )
 from app.api.routes.projects.studio import _clean_rel_path
 from app.core import ryaml
-from app.git import get_ck_info_from_repo, get_repo, get_repo_tree_for_ref
+from app.git import (
+    get_ck_info_from_repo,
+    get_repo,
+    get_repo_tree_for_ref,
+    record_project_update,
+)
 from app.models import PipelineStage
 
 router = APIRouter()
@@ -153,6 +158,8 @@ def post_project_map_paths(
     ck_info.setdefault("pipeline", {})["stages"] = stages
     copied = ", ".join(p.src for p in req.paths)
     _commit_pipeline(
+        project,
+        session,
         repo,
         ck_info,
         legacy_target,
@@ -213,6 +220,8 @@ def delete_project_map_paths(
                 inputs.remove(link)
     ck_info.setdefault("pipeline", {})["stages"] = stages
     _commit_pipeline(
+        project,
+        session,
         repo,
         ck_info,
         legacy_target,
@@ -247,6 +256,8 @@ def _legacy_target(
 
 
 def _commit_pipeline(
+    project: Any,
+    session: Any,
     repo: Any,
     ck_info: dict[str, Any],
     legacy_target: str | None,
@@ -283,3 +294,4 @@ def _commit_pipeline(
     if repo.is_dirty():
         repo.git.commit(["-m", message])
         repo.git.push(["origin", repo.active_branch.name])
+        record_project_update(project, repo, session)

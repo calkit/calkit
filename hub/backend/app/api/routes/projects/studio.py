@@ -24,7 +24,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.api.routes.projects.core import _validate_ck_stage
 from app.core import ryaml
 from app.formatting import format_python
-from app.git import get_ck_info_from_repo, get_repo
+from app.git import get_ck_info_from_repo, get_repo, record_project_update
 from app.models import Figure
 
 logger = logging.getLogger(__name__)
@@ -382,6 +382,7 @@ def post_project_studio_figure(
     )
     repo.git.commit(["-m", message])
     repo.git.push(["origin", repo.active_branch.name])
+    record_project_update(project, repo, session)
     mixpanel.user_saved_studio_figure(
         user=current_user,
         project=project,

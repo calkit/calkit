@@ -103,6 +103,7 @@ from app.git import (
     get_repo,
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
+    record_project_update,
     resolve_commit_sha,
     search_refs,
 )
@@ -391,7 +392,12 @@ def get_projects(
         .distinct()
         .join(Project.user_access_records, isouter=True)  # type: ignore
         .where(where_clause)
-        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+        # Most recently active first; a project never touched since
+        # creation sorts by when it was made
+        .order_by(
+            sqlalchemy.desc(Project.updated).nulls_last(),  # type: ignore
+            sqlalchemy.desc(Project.created),  # type: ignore
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -6628,6 +6634,7 @@ def put_project_pipeline_stage(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]
         )
         repo.git.push(["origin", repo.active_branch.name])
+        record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
 
 

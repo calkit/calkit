@@ -46,6 +46,11 @@ export const Route = createFileRoute("/_layout/")({
   component: Home,
 })
 
+// A calendar date, as 2026-08-21, is what "last updated" means in a list;
+// the project's history page has the full timestamps.
+const formatDate = (value?: string | null) =>
+  value ? new Date(value).toISOString().slice(0, 10) : ""
+
 const PER_PAGE = 5
 
 function getOwnedProjectsQueryOptions({
@@ -112,6 +117,7 @@ function ProjectsTable() {
               <Th>Title</Th>
               <Th>GitHub URL</Th>
               <Th>Description</Th>
+              <Th>Last updated</Th>
               <Th>Visibility</Th>
               <Th>Actions</Th>
             </Tr>
@@ -119,7 +125,7 @@ function ProjectsTable() {
           {isPending ? (
             <Tbody>
               <Tr>
-                {new Array(4).fill(null).map((_, index) => (
+                {new Array(5).fill(null).map((_, index) => (
                   <Td key={index}>
                     <SkeletonText noOfLines={1} paddingBlock="16px" />
                   </Td>
@@ -149,6 +155,9 @@ function ProjectsTable() {
                     maxWidth="150px"
                   >
                     {project.description || "N/A"}
+                  </Td>
+                  <Td whiteSpace="nowrap">
+                    {formatDate(project.updated ?? project.created)}
                   </Td>
                   <Td>{project.is_public ? "Public" : "Private"}</Td>
                   <Td>

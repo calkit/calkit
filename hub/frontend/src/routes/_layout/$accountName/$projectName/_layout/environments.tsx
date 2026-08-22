@@ -210,7 +210,9 @@ function ProjectEnvsView() {
           hint="An environment pins what your code needs to run, so a collaborator, a reviewer, or you in a year gets the same numbers back."
           docsUrl="https://docs.calkit.org/environments/"
         >
-          {userHasWriteAccess ? (
+          {/* The modal only mounts at the default ref, so the button
+              would do nothing on a historical view */}
+          {userHasWriteAccess && !ref ? (
             <Button mt={3} size="sm" variant="primary" onClick={openNewEnv}>
               Create an environment
             </Button>

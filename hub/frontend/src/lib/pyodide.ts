@@ -13,9 +13,13 @@ export const PROJECT_DIR = "/project"
 
 interface PyodideFS {
   mkdirTree: (path: string) => void
+  readdir: (path: string) => string[]
+  stat: (path: string) => { mode: number }
+  isDir: (mode: number) => boolean
+  rmdir: (path: string) => void
+  unlink: (path: string) => void
   writeFile: (path: string, data: Uint8Array | string) => void
   readFile: (path: string) => Uint8Array
-  unlink: (path: string) => void
   analyzePath: (path: string) => { exists: boolean }
 }
 
@@ -264,10 +268,38 @@ const mimeFor = (path: string): string => {
 const dirname = (path: string) => path.split("/").slice(0, -1).join("/")
 
 /** Write repo files into the in-browser filesystem at their repo paths. */
+/** Remove everything under a directory in the in-browser filesystem. */
+function clearDir(fs: PyodideInterface["FS"], dir: string): void {
+  let names: string[] = []
+  try {
+    names = fs.readdir(dir).filter((n: string) => n !== "." && n !== "..")
+  } catch {
+    return
+  }
+  for (const name of names) {
+    const full = `${dir}/${name}`
+    if (fs.isDir(fs.stat(full).mode)) {
+      clearDir(fs, full)
+      fs.rmdir(full)
+    } else {
+      fs.unlink(full)
+    }
+  }
+}
+
+/**
+ * Put a workspace's files in place, and nothing else.
+ *
+ * The runtime is shared across everything run in the tab, so the project
+ * directory is emptied first: a file from an earlier notebook or project
+ * must not stand in for a missing input, nor be readable by code run for
+ * a different project.
+ */
 export function writeProjectFiles(
   pyodide: PyodideInterface,
   files: { path: string; data: Uint8Array | string }[],
 ): void {
+  clearDir(pyodide.FS, PROJECT_DIR)
   for (const file of files) {
     const full = `${PROJECT_DIR}/${file.path}`
     const dir = dirname(full)

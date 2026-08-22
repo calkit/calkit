@@ -3,6 +3,7 @@ import mixpanel from "mixpanel-browser"
 import { FaGithub, FaGoogle } from "react-icons/fa"
 
 import { startGitHubOAuth } from "../../lib/github"
+import { setPostLoginRedirect } from "../../lib/auth"
 import { startGoogleOAuth } from "../../lib/google"
 
 interface OAuthButtonsProps {
@@ -33,6 +34,7 @@ const OAuthButtons = ({
       isLoading={githubLoading}
       onClick={() => {
         mixpanel.track("Clicked login", { provider: "github", page })
+        if (page === "signup") setPostLoginRedirect("/new")
         startGitHubOAuth()
       }}
       rightIcon={<FaGithub />}
@@ -44,6 +46,7 @@ const OAuthButtons = ({
       isLoading={googleLoading}
       onClick={() => {
         mixpanel.track("Clicked Google login", { page })
+        if (page === "signup") setPostLoginRedirect("/new")
         startGoogleOAuth()
       }}
       rightIcon={<FaGoogle />}

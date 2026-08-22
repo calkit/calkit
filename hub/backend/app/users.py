@@ -145,8 +145,24 @@ def create_user(*, session: Session, user_create: UserCreate) -> User:
     existing = session.exec(
         select(Account).where(Account.name == account_name.lower())
     ).first()
-    if existing is not None:
+    if existing is not None and user_create.account_name:
         raise HTTPException(422, "Account name is already taken")
+    if existing is not None:
+        # A name nobody chose (the email's local part, or a GitHub name
+        # already used here) shouldn't block signup: a second alex@ gets
+        # alex-2, and can rename from settings
+        base = account_name
+        for n in range(2, 1000):
+            account_name = f"{base}-{n}"
+            if (
+                session.exec(
+                    select(Account).where(Account.name == account_name.lower())
+                ).first()
+                is None
+            ):
+                break
+        else:
+            raise HTTPException(422, "Account name is already taken")
     user = User.model_validate(
         user_create,
         update={

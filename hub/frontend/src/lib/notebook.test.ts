@@ -57,3 +57,25 @@ describe("notebook", () => {
     expect(unchanged.cells[1].outputs).toHaveLength(1)
   })
 })
+
+it("keeps cell ids unique even when a fallback would collide", () => {
+  const text = JSON.stringify({
+    cells: [
+      { cell_type: "code", source: "a" },
+      { cell_type: "code", source: "b", id: "cell-0" },
+      { cell_type: "code", source: "c", id: "cell-0" },
+    ],
+  })
+  const parsed = parseNotebook(text)
+  expect(parsed.cells.map((c) => c.id)).toEqual([
+    "cell-0",
+    "cell-0-2",
+    "cell-0-3",
+  ])
+  // An edit lands on the cell it was made in, not a namesake
+  const edited = parsed.cells.map((c) =>
+    c.id === "cell-0-3" ? { ...c, source: "changed" } : c,
+  )
+  const out = JSON.parse(serializeNotebook(parsed, edited))
+  expect(out.cells.map((c: any) => c.source)).toEqual(["a", "b", ["changed"]])
+})

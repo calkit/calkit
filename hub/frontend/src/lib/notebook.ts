@@ -27,12 +27,32 @@ export const splitSource = (text: string): string[] => {
     .filter((line, i, arr) => !(i === arr.length - 1 && line === ""))
 }
 
+/**
+ * An id per raw cell, unique within the notebook.
+ *
+ * A cell's own id is used when it has one; a generated fallback, or a
+ * duplicate of an earlier id, gets a suffix, so that what the UI keys by
+ * can never point at two cells. Parsing and serializing both go through
+ * this, so the ids line up.
+ */
+export function cellIds(raw: any): string[] {
+  const seen = new Set<string>()
+  return ((raw.cells ?? []) as any[]).map((cell, index) => {
+    const base = String(cell.id ?? `cell-${index}`)
+    let id = base
+    for (let n = 2; seen.has(id); n++) id = `${base}-${n}`
+    seen.add(id)
+    return id
+  })
+}
+
 /** The cells of a notebook, each with a stable id for the UI. */
 export function parseNotebook(text: string): ParsedNotebook {
   const raw = JSON.parse(text)
+  const ids = cellIds(raw)
   const cells: NotebookCell[] = (raw.cells ?? []).map(
     (cell: any, index: number) => ({
-      id: String(cell.id ?? `cell-${index}`),
+      id: ids[index],
       type: (cell.cell_type as CellType) ?? "code",
       source: joinSource(cell.source),
     }),
@@ -53,8 +73,9 @@ export function serializeNotebook(
 ): string {
   const byId = new Map(cells.map((c) => [c.id, c]))
   const originalById = new Map(parsed.cells.map((c) => [c.id, c]))
+  const ids = cellIds(parsed.raw)
   const rawCells = (parsed.raw.cells ?? []).map((cell: any, index: number) => {
-    const id = String(cell.id ?? `cell-${index}`)
+    const id = ids[index]
     const edited = byId.get(id)
     const original = originalById.get(id)
     if (!edited || !original || edited.source === original.source) return cell

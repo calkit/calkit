@@ -9,6 +9,8 @@ import base64
 import io
 import logging
 import posixpath
+import tempfile
+from typing import Any
 
 import git
 import polars as pl
@@ -118,58 +120,76 @@ def _read_project_file(
     return data
 
 
-def read_table(data: bytes, path: str) -> pl.DataFrame:
-    """Parse a tabular file by its suffix."""
+def scan_table(fpath: str, path: str) -> pl.LazyFrame:
+    """A lazy frame over a tabular file, by its suffix.
+
+    Lazy so that a window is cut at read time: a 500 MB CSV on a public
+    project shouldn't be parsed whole, several times over for concurrent
+    readers, to hand back a thousand rows.
+    """
     suffix = posixpath.splitext(path)[1].lower()
-    buf = io.BytesIO(data)
     try:
         if suffix == ".parquet":
-            return pl.read_parquet(buf)
+            return pl.scan_parquet(fpath)
         if suffix == ".tsv":
-            return pl.read_csv(
-                buf,
+            return pl.scan_csv(
+                fpath,
                 separator="\t",
                 infer_schema_length=1000,
                 ignore_errors=True,
             )
         if suffix in (".jsonl", ".ndjson"):
-            return pl.read_ndjson(buf)
-        return pl.read_csv(buf, infer_schema_length=1000, ignore_errors=True)
+            return pl.scan_ndjson(fpath)
+        return pl.scan_csv(fpath, infer_schema_length=1000, ignore_errors=True)
     except Exception as e:
         raise HTTPException(422, f"Could not read '{path}' as a table: {e}")
 
 
-def window_table(
-    df: pl.DataFrame,
+def read_table_window(
+    data: bytes,
     path: str,
     row_offset: int,
     row_limit: int,
     col_offset: int,
     col_limit: int,
 ) -> TableText:
-    """One window of a frame as CSV, with its place in the whole."""
-    cols = df.columns[col_offset : col_offset + col_limit]
-    window = (
-        df.select(cols).slice(row_offset, row_limit) if cols else df.head(0)
-    )
-    text = window.write_csv()
-    truncated = (
-        col_offset > 0
-        or row_offset > 0
-        or len(df.columns) > col_offset + col_limit
-        or df.height > row_offset + row_limit
-    )
+    """One window of a tabular file, read without materializing the rest."""
+    suffix = posixpath.splitext(path)[1].lower() or ".csv"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        tmp.write(data)
+        tmp.flush()
+        lf = scan_table(tmp.name, path)
+        try:
+            names = lf.collect_schema().names()
+            cols = names[col_offset : col_offset + col_limit]
+            n_rows = int(lf.select(pl.len()).collect().item())
+            window = (
+                lf.select(cols).slice(row_offset, row_limit).collect()
+                if cols
+                else pl.DataFrame()
+            )
+        except Exception as e:
+            raise HTTPException(
+                422, f"Could not read '{path}' as a table: {e}"
+            )
     return TableText(
         path=path,
-        content=base64.b64encode(text.encode("utf-8")).decode("ascii"),
+        content=base64.b64encode(window.write_csv().encode("utf-8")).decode(
+            "ascii"
+        ),
         columns=list(cols),
-        n_rows=df.height,
-        n_cols=len(df.columns),
+        n_rows=n_rows,
+        n_cols=len(names),
         row_offset=row_offset,
         row_limit=row_limit,
         col_offset=col_offset,
         col_limit=col_limit,
-        truncated=truncated,
+        truncated=(
+            col_offset > 0
+            or row_offset > 0
+            or len(names) > col_offset + col_limit
+            or n_rows > row_offset + row_limit
+        ),
     )
 
 
@@ -210,8 +230,9 @@ def get_project_dataset_csv(
     data = _read_project_file(
         project, repo, path, ref, MAX_TABLE_BYTES, session, current_user
     )
-    df = read_table(data, path)
-    return window_table(df, path, row_offset, row_limit, col_offset, col_limit)
+    return read_table_window(
+        data, path, row_offset, row_limit, col_offset, col_limit
+    )
 
 
 HDF5_SUFFIXES = {".h5", ".hdf5", ".hdf", ".he5"}
@@ -257,43 +278,66 @@ def _hdf5_keys(data: bytes) -> list[Hdf5Key]:
     return keys
 
 
-def _hdf5_dataset_frame(data: bytes, key: str) -> pl.DataFrame:
-    """One HDF5 dataset as a frame: columns for 2D, one column for 1D,
-    fields for a compound dtype. Scalars and higher ranks aren't tables."""
-    import h5py  # type: ignore[import-not-found,import-untyped,unused-ignore]
-    import numpy as np
+def _hdf5_window(
+    data: bytes,
+    key: str,
+    row_offset: int,
+    row_limit: int,
+    col_offset: int,
+    col_limit: int,
+) -> tuple[pl.DataFrame, int, int, list[str]]:
+    """A window of one HDF5 dataset, with the full shape it was cut from.
 
+    Columns for 2D, one column for 1D, fields for a compound dtype; the
+    slice is taken on the h5py dataset itself, so a window of a large
+    array never reads more than the window. Scalars and higher ranks
+    aren't tables. Returns the frame, total rows, total columns, and
+    every column name.
+    """
+    import h5py  # type: ignore[import-not-found,import-untyped,unused-ignore]
+
+    rows = slice(row_offset, row_offset + row_limit)
     with h5py.File(io.BytesIO(data), "r") as f:
         if key not in f or not isinstance(f[key], h5py.Dataset):
             raise HTTPException(404, f"'{key}' is not a dataset in the file")
         ds = f[key]
+
+        def decode(v: Any) -> Any:
+            return v.decode() if isinstance(v, bytes) else v
+
         if ds.dtype.names is not None:
-            arr = ds[()]
-            return pl.DataFrame(
+            names = list(ds.dtype.names)
+            cols = names[col_offset : col_offset + col_limit]
+            arr = ds[rows]
+            frame = pl.DataFrame(
                 {
-                    name: [
-                        v.decode() if isinstance(v, bytes) else v
-                        for v in arr[name].tolist()
-                    ]
-                    for name in ds.dtype.names
+                    name: [decode(v) for v in arr[name].tolist()]
+                    for name in cols
                 }
             )
-        arr = np.asarray(ds[()])
-        if arr.ndim == 0:
-            return pl.DataFrame({"value": [arr.item()]})
-        if arr.ndim == 1:
-            values = arr.tolist()
-            if arr.dtype.kind in ("S", "O"):
-                values = [
-                    v.decode() if isinstance(v, bytes) else v for v in values
-                ]
-            return pl.DataFrame({key.split("/")[-1]: values})
-        if arr.ndim == 2:
-            return pl.DataFrame(
-                {f"col{j}": arr[:, j].tolist() for j in range(arr.shape[1])}
+            return frame, int(ds.shape[0]), len(names), names
+        if ds.ndim == 0:
+            names = ["value"]
+            frame = pl.DataFrame({"value": [decode(ds[()].item())]})
+            return frame, 1, 1, names
+        if ds.ndim == 1:
+            names = [key.split("/")[-1]]
+            cols = names[col_offset : col_offset + col_limit]
+            values = [decode(v) for v in ds[rows].tolist()] if cols else []
+            frame = (
+                pl.DataFrame({names[0]: values}) if cols else pl.DataFrame()
             )
+            return frame, int(ds.shape[0]), 1, names
+        if ds.ndim == 2:
+            names = [f"col{j}" for j in range(ds.shape[1])]
+            cols = names[col_offset : col_offset + col_limit]
+            arr = ds[rows, col_offset : col_offset + col_limit]
+            frame = pl.DataFrame(
+                {cols[j]: arr[:, j].tolist() for j in range(len(cols))}
+            )
+            return frame, int(ds.shape[0]), int(ds.shape[1]), names
         raise HTTPException(
-            415, f"'{key}' has {arr.ndim} dimensions; only 1D and 2D show here"
+            415, f"'{key}' has {ds.ndim} dimensions; only 1D and 2D show here"
         )
 
 
@@ -335,11 +379,29 @@ def get_project_dataset_hdf5(
     try:
         if key is None:
             return Hdf5Listing(path=path, keys=_hdf5_keys(data))
-        df = _hdf5_dataset_frame(data, key)
+        window, n_rows, n_cols, names = _hdf5_window(
+            data, key, row_offset, row_limit, col_offset, col_limit
+        )
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(422, f"Could not read '{path}': {e}")
-    return window_table(
-        df, f"{path}:{key}", row_offset, row_limit, col_offset, col_limit
+    return TableText(
+        path=f"{path}:{key}",
+        content=base64.b64encode(window.write_csv().encode("utf-8")).decode(
+            "ascii"
+        ),
+        columns=list(window.columns),
+        n_rows=n_rows,
+        n_cols=n_cols,
+        row_offset=row_offset,
+        row_limit=row_limit,
+        col_offset=col_offset,
+        col_limit=col_limit,
+        truncated=(
+            col_offset > 0
+            or row_offset > 0
+            or n_cols > col_offset + col_limit
+            or n_rows > row_offset + row_limit
+        ),
     )

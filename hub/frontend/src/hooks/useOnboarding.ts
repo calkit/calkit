@@ -47,6 +47,9 @@ const useOnboardingFlags = (projectId?: string | null) => {
   })
   const setFlag = (step: string, done: boolean) =>
     setFlagMutation.mutate({ step, done })
+  // For callers that need one write to land before the next is made
+  const setFlagAsync = (step: string, done: boolean) =>
+    setFlagMutation.mutateAsync({ step, done })
   // Clears every flag the user has, on every project -- what "reset my
   // checklists" means from account settings, where no one project is in view.
   const resetAllMutation = useMutation({
@@ -72,6 +75,7 @@ const useOnboardingFlags = (projectId?: string | null) => {
     accountFlags,
     projectFlags,
     setFlag,
+    setFlagAsync,
     resetAllMutation,
     flagCount,
   }

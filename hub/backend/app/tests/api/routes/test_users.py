@@ -2,6 +2,8 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
@@ -1028,3 +1030,35 @@ def test_get_user_github_repos_search(
     assert q.startswith("boundary layer in:name user:")
     assert "org:calkit" in q
     assert search_call[1]["sort"] == "updated"
+
+
+def test_create_user_derived_account_name_gets_suffix(db: Session) -> None:
+    from app import users
+    from app.models import UserCreate
+
+    tag = uuid.uuid4().hex[:8]
+    first = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"same-{tag}@one.example", password="password123"
+        ),
+    )
+    second = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"same-{tag}@two.example", password="password123"
+        ),
+    )
+    assert first.account.name == f"same-{tag}"
+    assert second.account.name == f"same-{tag}-2"
+    # A name the user picked is theirs to get wrong
+    with pytest.raises(HTTPException) as excinfo:
+        users.create_user(
+            session=db,
+            user_create=UserCreate(
+                email=f"other-{tag}@three.example",
+                password="password123",
+                account_name=f"same-{tag}",
+            ),
+        )
+    assert excinfo.value.status_code == 422

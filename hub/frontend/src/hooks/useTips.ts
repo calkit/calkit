@@ -46,15 +46,19 @@ const useTips = (projectId?: string | null, canAct = true) => {
     project.setFlag(TIPS_DISMISSED, true)
   }
   // Clears every tip flag on this project and pins tips to it, so they
-  // come back here even when it isn't the first project.
-  const resetAll = () => {
+  // come back here even when it isn't the first project. The writes run
+  // in order: an old pin's delete landing after the new pin's create
+  // would leave the project unpinned.
+  const resetAll = async () => {
     mixpanel.track("Reset onboarding tips", { source: "project-menu" })
-    project.setFlag(TIPS_DISMISSED, false)
-    for (const t of TIPS) project.setFlag(tipDoneFlag(t.id), false)
+    await project.setFlagAsync(TIPS_DISMISSED, false)
+    for (const t of TIPS) await project.setFlagAsync(tipDoneFlag(t.id), false)
     for (const flag of account.accountFlags) {
-      if (flag.startsWith(TIPS_PROJECT_PREFIX)) account.setFlag(flag, false)
+      if (flag.startsWith(TIPS_PROJECT_PREFIX)) {
+        await account.setFlagAsync(flag, false)
+      }
     }
-    account.setFlag(`${TIPS_PROJECT_PREFIX}${projectId}`, true)
+    await account.setFlagAsync(`${TIPS_PROJECT_PREFIX}${projectId}`, true)
   }
   return {
     tip,

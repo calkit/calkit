@@ -82,6 +82,10 @@ export async function fetchTree(
     }
     return out
   }
+  if (budget.files <= 0 || budget.bytes <= 0) {
+    problems.push(`${path}: not loaded, the input budget ran out`)
+    return []
+  }
   if (item.size && item.size > MAX_INPUT_BYTES) {
     problems.push(
       `${path}: ${(item.size / 1e6).toFixed(0)} MB is over the ${
@@ -107,6 +111,14 @@ export async function fetchTree(
   }
   if (!data) {
     problems.push(`${path}: download failed`)
+    return []
+  }
+  // What actually arrived is what counts; the listing's size can be
+  // missing or stale
+  if (data.length > MAX_INPUT_BYTES || data.length > budget.bytes) {
+    problems.push(
+      `${path}: ${(data.length / 1e6).toFixed(0)} MB doesn't fit the input budget`,
+    )
     return []
   }
   budget.files -= 1

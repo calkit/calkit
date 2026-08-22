@@ -45,6 +45,8 @@ import type {
   DeleteProjectFileLockResponses,
   DeleteProjectInvitationErrors,
   DeleteProjectInvitationResponses,
+  DeleteProjectMapPathsErrors,
+  DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
   DeleteProjectNativeCollaboratorResponses,
   DeleteProjectReferenceItemErrors,
@@ -248,6 +250,7 @@ import type {
   LoginWithGithubTokenResponses,
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
+  MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
   MarkNotificationReadResponses,
@@ -323,6 +326,8 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectMapPathsErrors,
+  PostProjectMapPathsResponses,
   PostProjectOverleafPublicationErrors,
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
@@ -6979,6 +6984,108 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/fs/ops/batch",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete Project Map Paths
+   *
+   * Take one copy out of a map-paths stage.
+   *
+   * The last copy takes the stage with it, and any stage that read from it
+   * stops doing so, so nothing is left pointing at a stage that's gone.
+   */
+  public static deleteProjectMapPaths<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      src: string
+      dest: string
+      target_stage?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectMapPathsResponses,
+    DeleteProjectMapPathsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "stage_name" },
+            { in: "query", key: "src" },
+            { in: "query", key: "dest" },
+            { in: "query", key: "target_stage" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectMapPathsResponses,
+      DeleteProjectMapPathsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Map Paths
+   *
+   * Add copies to a map-paths stage, creating the stage if needed.
+   *
+   * The stage is committed to calkit.yaml and dvc.yaml is recompiled, so
+   * the next run makes the copies; when a target stage is named, it now
+   * depends on them.
+   */
+  public static postProjectMapPaths<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      mapPathsPost: MapPathsPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectMapPathsResponses,
+    PostProjectMapPathsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "mapPathsPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectMapPathsResponses,
+      PostProjectMapPathsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
       ...options,
       ...params,
       headers: {

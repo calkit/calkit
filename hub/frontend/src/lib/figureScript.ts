@@ -29,6 +29,11 @@ export function pickPythonEnv(envs: Environment[]): Environment | null {
 export function envPackages(env: Environment | null): string[] {
   const text = env?.file_content ?? ""
   const names = new Set<string>()
+  // The lock is what the environment actually resolved to, and it names
+  // what the spec only implies (pytables behind a pandas HDF read, say).
+  for (const lock of env?.locks ?? []) {
+    for (const name of lockPackages(lock.content)) names.add(name)
+  }
   // YAML specs (conda) list channels and dependencies as sibling lists;
   // only the dependencies are packages.
   let section = ""
@@ -84,19 +89,25 @@ export const slug = (text: string) =>
     .replace(/^-+|-+$/g, "") || "figure"
 
 export const isCsvPath = (path: string) => path.toLowerCase().endsWith(".csv")
+export const isHdfPath = (path: string) => /\.(h5|hdf5|hdf|he5)$/i.test(path)
+/** A file pandas reads straight into a frame. */
+const isFramePath = (path: string) => isCsvPath(path) || isHdfPath(path)
 
 // The lines the studio owns: a pandas load per CSV, and a marker naming
 // every other input, since what opens an HDF5 file or a results folder is
 // the script's business, not something to guess at.
 const isLoadLine = (line: string) =>
-  /^\s*df\d*\s*=\s*pd\.read_csv\(/.test(line) || /^\s*# Input: /.test(line)
+  /^\s*df\d*\s*=\s*pd\.read_(csv|hdf)\(/.test(line) ||
+  /^\s*# Input: /.test(line)
 
 const loadLines = (paths: string[]) => {
-  const csvs = paths.filter(isCsvPath)
+  const frames = paths.filter(isFramePath)
   return paths.map((path) => {
-    if (!isCsvPath(path)) return `# Input: ${path}`
-    const i = csvs.indexOf(path)
-    return `${i === 0 ? "df" : `df${i + 1}`} = pd.read_csv(${JSON.stringify(path)})`
+    if (!isFramePath(path)) return `# Input: ${path}`
+    const i = frames.indexOf(path)
+    const name = i === 0 ? "df" : `df${i + 1}`
+    const reader = isHdfPath(path) ? "read_hdf" : "read_csv"
+    return `${name} = pd.${reader}(${JSON.stringify(path)})`
   })
 }
 
@@ -128,15 +139,40 @@ export function withDatasetLines(code: string, paths: string[]): string {
   return kept.join("\n")
 }
 
-/** The files a script reads with pandas, from its read_csv calls. */
-export function readCsvPaths(code: string): string[] {
+/** The files a script reads with pandas, from its read_csv/read_hdf calls. */
+export function readDataPaths(code: string): string[] {
   const found: string[] = []
   for (const match of code.matchAll(
-    /\.read_csv\(\s*[rf]?(["'])([^"'\n]+)\1/g,
+    /\.read_(?:csv|hdf)\(\s*[rf]?(["'])([^"'\n]+)\1/g,
   )) {
     if (!found.includes(match[2])) found.push(match[2])
   }
   return found
+}
+
+/**
+ * Package names pinned in a lock file, whatever its format.
+ *
+ * uv.lock is TOML with one `name = "x"` per package; conda-lock is YAML
+ * with `- name: x` entries; a pip freeze or conda explicit list has one
+ * `x==1.2` or `x=1.2=build` per line. Anything else yields nothing rather
+ * than guesses.
+ */
+export function lockPackages(content: string): string[] {
+  const names = new Set<string>()
+  for (const raw of content.split("\n")) {
+    const line = raw.trim()
+    if (!line || line.startsWith("#") || line.startsWith("@")) continue
+    const match =
+      line.match(/^name\s*=\s*"([A-Za-z0-9][A-Za-z0-9._-]*)"$/) ??
+      line.match(/^-?\s*name:\s*["']?([A-Za-z0-9][A-Za-z0-9._-]*)["']?$/) ??
+      line.match(/^(?:-\s*)?([A-Za-z0-9][A-Za-z0-9._-]*)\s*==?[^=\s]/)
+    if (!match) continue
+    const name = match[1].toLowerCase()
+    if (["python", "pip", "setuptools", "wheel"].includes(name)) continue
+    names.add(name)
+  }
+  return [...names]
 }
 
 /** A plotting script for the chosen datasets, as the starting point to edit. */
@@ -162,7 +198,7 @@ export function defaultScript({
       `ax.set_xlabel(${JSON.stringify(x)})`,
       `ax.set_ylabel(${JSON.stringify(y)})`,
     )
-  } else if (first && isCsvPath(first)) {
+  } else if (first && isFramePath(first)) {
     lines.push(
       "# Pick the columns to plot; df.columns lists them.",
       "df.plot(ax=ax)",

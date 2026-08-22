@@ -3475,6 +3475,88 @@ export const ItemLockSchema = {
   title: "ItemLock",
 } as const
 
+export const MapPathEntrySchema = {
+  properties: {
+    src: {
+      type: "string",
+      title: "Src",
+    },
+    dest: {
+      type: "string",
+      title: "Dest",
+    },
+    kind: {
+      anyOf: [
+        {
+          type: "string",
+          enum: [
+            "file-to-file",
+            "file-to-dir",
+            "dir-to-dir-merge",
+            "dir-to-dir-replace",
+          ],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Kind",
+    },
+  },
+  type: "object",
+  required: ["src", "dest"],
+  title: "MapPathEntry",
+} as const
+
+export const MapPathsPostSchema = {
+  properties: {
+    paths: {
+      items: {
+        $ref: "#/components/schemas/MapPathEntry",
+      },
+      type: "array",
+      minItems: 1,
+      title: "Paths",
+    },
+    stage_name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Name",
+    },
+    target_stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Target Stage",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["paths"],
+  title: "MapPathsPost",
+} as const
+
 export const MessageSchema = {
   properties: {
     message: {

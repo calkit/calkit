@@ -246,6 +246,7 @@ function PubInfo({
           projectName={projectName}
           texPath={texPath}
           deps={publication.stage_info?.deps ?? undefined}
+          stage={publication.stage}
         />
       )}
       <Text fontSize="sm" mb={1}>

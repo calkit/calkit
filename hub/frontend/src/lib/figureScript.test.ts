@@ -4,8 +4,9 @@ import type { Environment } from "../client"
 import {
   defaultScript,
   envPackages,
+  lockPackages,
   pickPythonEnv,
-  readCsvPaths,
+  readDataPaths,
   savefigPath,
   withDatasetLines,
 } from "./figureScript"
@@ -125,7 +126,7 @@ describe("environment mirroring", () => {
   })
 })
 
-describe("readCsvPaths", () => {
+describe("readDataPaths", () => {
   it("lists what the script reads, once each, in order", () => {
     const code = [
       'df = pd.read_csv("data/raw/data.csv")',
@@ -133,26 +134,26 @@ describe("readCsvPaths", () => {
       'again = pd.read_csv("data/raw/data.csv")',
       "x = read_csv_like()",
     ].join("\n")
-    expect(readCsvPaths(code)).toEqual(["data/raw/data.csv", "data/other.csv"])
-    expect(readCsvPaths("print(1)")).toEqual([])
+    expect(readDataPaths(code)).toEqual(["data/raw/data.csv", "data/other.csv"])
+    expect(readDataPaths("print(1)")).toEqual([])
   })
 })
 
 it("inputs that aren't CSVs get a marker line, not a pandas load", () => {
-  const paths = ["data/profiles.h5", "data/a.csv", "sims/run-1", "data/b.csv"]
+  const paths = ["config.yaml", "data/a.csv", "sims/run-1", "data/b.csv"]
   const script = defaultScript({ datasetPaths: paths, figurePath: "f.png" })
-  expect(script).toContain("# Input: data/profiles.h5")
+  expect(script).toContain("# Input: config.yaml")
   expect(script).toContain("# Input: sims/run-1")
   // CSVs count from df regardless of where the other inputs sit
   expect(script).toContain('df = pd.read_csv("data/a.csv")')
   expect(script).toContain('df2 = pd.read_csv("data/b.csv")')
   expect(script).not.toContain("df3")
-  // No CSV at all leaves nothing to plot by default, only the markers
+  // No frame at all leaves nothing to plot by default, only the markers
   const h5Only = defaultScript({
-    datasetPaths: ["data/profiles.h5"],
+    datasetPaths: ["sims/run-1"],
     figurePath: "f.png",
   })
-  expect(h5Only).toContain("# Input: data/profiles.h5")
+  expect(h5Only).toContain("# Input: sims/run-1")
   expect(h5Only).not.toContain("df.plot")
   expect(h5Only).toContain("Load the inputs named above")
   // Reselecting swaps marker lines along with the load lines
@@ -171,14 +172,14 @@ it("keeps injected load lines at the depth of the ones they replace", () => {
     "",
     "main()",
   ].join("\n")
-  expect(withDatasetLines(script, ["b.csv", "c.csv", "d.h5"])).toBe(
+  expect(withDatasetLines(script, ["b.csv", "c.csv", "d.yaml"])).toBe(
     [
       "import pandas as pd",
       "",
       "def main():",
       '    df = pd.read_csv("b.csv")',
       '    df2 = pd.read_csv("c.csv")',
-      "    # Input: d.h5",
+      "    # Input: d.yaml",
       "    df.plot()",
       "",
       "main()",
@@ -189,4 +190,41 @@ it("keeps injected load lines at the depth of the ones they replace", () => {
   expect(withDatasetLines("import pandas as pd\nprint(1)", ["a.csv"])).toBe(
     'import pandas as pd\n\ndf = pd.read_csv("a.csv")\nprint(1)',
   )
+})
+
+it("reads HDF5 inputs with pandas and names pytables from the lock", () => {
+  const script = defaultScript({
+    datasetPaths: ["data/profiles.h5", "data/a.csv"],
+    figurePath: "f.png",
+  })
+  expect(script).toContain('df = pd.read_hdf("data/profiles.h5")')
+  expect(script).toContain('df2 = pd.read_csv("data/a.csv")')
+  expect(script).toContain("df.plot(ax=ax)")
+  expect(readDataPaths(script)).toEqual(["data/profiles.h5", "data/a.csv"])
+  // Reselecting swaps HDF loads the same as CSV ones
+  expect(withDatasetLines(script, ["data/b.hdf5"])).toContain(
+    'df = pd.read_hdf("data/b.hdf5")',
+  )
+  expect(withDatasetLines(script, ["data/b.hdf5"])).not.toContain("profiles")
+  expect(
+    lockPackages(
+      'version = 1\n[[package]]\nname = "pandas"\nversion = "2.2"\n[[package]]\nname = "tables"\n',
+    ),
+  ).toEqual(["pandas", "tables"])
+  expect(
+    lockPackages(
+      "package:\n  - name: numpy\n    version: 1.0\n  - name: python\n",
+    ),
+  ).toEqual(["numpy"])
+  expect(lockPackages("# pip freeze\nh5py==3.10\ntables=3.9=py312\n")).toEqual([
+    "h5py",
+    "tables",
+  ])
+  const env = {
+    name: "py",
+    kind: "uv",
+    file_content: '[project]\ndependencies = [\n    "pandas",\n]\n',
+    locks: [{ path: "uv.lock", content: '[[package]]\nname = "tables"\n' }],
+  } as unknown as Parameters<typeof envPackages>[0]
+  expect(envPackages(env)).toEqual(["tables", "pandas"])
 })

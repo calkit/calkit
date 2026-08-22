@@ -79,7 +79,7 @@ import {
   envPackages,
   isCsvPath,
   pickPythonEnv,
-  readCsvPaths,
+  readDataPaths,
   savefigPath,
   slug,
   stem,
@@ -382,7 +382,7 @@ const FigureStudio = ({
       // The script is the last word on what it reads. The stage definition
       // is asked first, but a dvc.yaml that predates the stage, or inputs
       // declared as another stage's outputs, can leave that list short.
-      const fromScript = readCsvPaths(scriptQuery.data)
+      const fromScript = readDataPaths(scriptQuery.data)
       setDatasetPaths((current) => [
         ...current,
         ...fromScript.filter((p) => !current.includes(p)),

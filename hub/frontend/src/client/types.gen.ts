@@ -2031,6 +2031,51 @@ export type ItemLock = {
 }
 
 /**
+ * MapPathEntry
+ */
+export type MapPathEntry = {
+  /**
+   * Src
+   */
+  src: string
+  /**
+   * Dest
+   */
+  dest: string
+  /**
+   * Kind
+   */
+  kind?:
+    | "file-to-file"
+    | "file-to-dir"
+    | "dir-to-dir-merge"
+    | "dir-to-dir-replace"
+    | null
+}
+
+/**
+ * MapPathsPost
+ */
+export type MapPathsPost = {
+  /**
+   * Paths
+   */
+  paths: Array<MapPathEntry>
+  /**
+   * Stage Name
+   */
+  stage_name?: string | null
+  /**
+   * Target Stage
+   */
+  target_stage?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * Message
  */
 export type Message = {
@@ -11925,6 +11970,95 @@ export type PostProjectFsBatchOpResponses = {
 
 export type PostProjectFsBatchOpResponse =
   PostProjectFsBatchOpResponses[keyof PostProjectFsBatchOpResponses]
+
+export type DeleteProjectMapPathsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Stage Name
+     */
+    stage_name: string
+    /**
+     * Src
+     */
+    src: string
+    /**
+     * Dest
+     */
+    dest: string
+    /**
+     * Target Stage
+     */
+    target_stage?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/map-paths"
+}
+
+export type DeleteProjectMapPathsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectMapPathsError =
+  DeleteProjectMapPathsErrors[keyof DeleteProjectMapPathsErrors]
+
+export type DeleteProjectMapPathsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type DeleteProjectMapPathsResponse =
+  DeleteProjectMapPathsResponses[keyof DeleteProjectMapPathsResponses]
+
+export type PostProjectMapPathsData = {
+  body: MapPathsPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/map-paths"
+}
+
+export type PostProjectMapPathsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectMapPathsError =
+  PostProjectMapPathsErrors[keyof PostProjectMapPathsErrors]
+
+export type PostProjectMapPathsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectMapPathsResponse =
+  PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
 export type PostProjectStudioFigureData = {
   body: StudioFigurePost

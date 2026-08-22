@@ -198,6 +198,11 @@ export function packagesFromImports(code: string): string[] {
     if (STDLIB.has(top)) continue
     found.add(MODULE_TO_PACKAGE[top] ?? top)
   }
+  // What pandas needs behind its readers, which no import line names
+  if (/\bread_hdf\(/.test(code)) found.add("tables")
+  if (/\bread_parquet\(/.test(code) && !found.has("fastparquet")) {
+    found.add("pyarrow")
+  }
   return [...found].sort()
 }
 

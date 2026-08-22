@@ -2989,7 +2989,14 @@ export const GitSourcePostSchema = {
       title: "Repo Url",
     },
     rev: {
-      type: "string",
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
       title: "Rev",
     },
     path: {
@@ -3005,7 +3012,7 @@ export const GitSourcePostSchema = {
     },
   },
   type: "object",
-  required: ["repo_url", "rev"],
+  required: ["repo_url"],
   title: "GitSourcePost",
 } as const
 

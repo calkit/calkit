@@ -183,12 +183,18 @@ def fetch_files(
 
 
 def fetch_git_path(
-    repo_url: str, rev: str, src_path: str | None, repo_dir: str, dest: str
-) -> list[str]:
+    repo_url: str,
+    rev: str | None,
+    src_path: str | None,
+    repo_dir: str,
+    dest: str,
+) -> str:
     """Copy a path (or the whole tree) from another Git repo at a commit.
 
-    A shallow, blobless clone keeps this cheap for a large repo; the checkout
-    of the one path is what actually pulls bytes.
+    A blobless clone keeps this cheap for a large repo; the checkout of the
+    one path is what actually pulls bytes. With no ``rev`` the default
+    branch's head is used. Returns the commit actually checked out, which
+    is what gets recorded: a branch name would drift, a commit doesn't.
     """
     with tempfile.TemporaryDirectory() as tmp:
         clone = os.path.join(tmp, "src")
@@ -208,12 +214,27 @@ def fetch_git_path(
                 timeout=DOWNLOAD_TIMEOUT_S,
             )
             subprocess.run(
-                ["git", "-C", clone, "checkout", rev, "--", src_path or "."],
+                [
+                    "git",
+                    "-C",
+                    clone,
+                    "checkout",
+                    rev or "HEAD",
+                    "--",
+                    src_path or ".",
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
                 timeout=DOWNLOAD_TIMEOUT_S,
             )
+            commit = subprocess.run(
+                ["git", "-C", clone, "rev-parse", rev or "HEAD"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=DOWNLOAD_TIMEOUT_S,
+            ).stdout.strip()
         except subprocess.CalledProcessError as e:
             raise HTTPException(
                 400,
@@ -238,4 +259,4 @@ def fetch_git_path(
             )
         else:
             shutil.copy2(source, target)
-    return [dest]
+    return commit

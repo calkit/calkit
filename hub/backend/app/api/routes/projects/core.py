@@ -4447,7 +4447,9 @@ def get_project_dataset(
 
 class GitSourcePost(BaseModel):
     repo_url: str
-    rev: str
+    # None means the default branch's current head, which is fetched and
+    # then recorded by its commit, so the entry is pinned either way
+    rev: str | None = None
     path: str | None = None
 
 
@@ -4785,9 +4787,15 @@ def post_project_dataset(
         else:
             git_src = req.imported_from.git
             assert git_src is not None
-            app.imports.fetch_git_path(
+            commit = app.imports.fetch_git_path(
                 git_src.repo_url, git_src.rev, git_src.path, wdir, req.path
             )
+            # What's recorded is the commit that was fetched: a request
+            # without one (the default branch's head) is pinned from here
+            # on, like any other
+            git_entry = (ds.get("imported_from") or {}).get("git")
+            if isinstance(git_entry, dict):
+                git_entry["rev"] = commit
         if landed != req.path:
             if landed in [d.get("path") for d in datasets] or os.path.exists(
                 os.path.join(wdir, landed + ".dvc")

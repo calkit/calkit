@@ -3707,7 +3707,7 @@ def test_post_project_dataset_provenance(
             ),
             patch(
                 "app.api.routes.projects.core.app.imports.fetch_git_path",
-                side_effect=lambda *a, **k: [a[-1]],
+                return_value="c0ffee0123456789c0ffee0123456789c0ffee01",
             ),
             patch(
                 "app.api.routes.projects.core.app.imports.resolve_doi_files",
@@ -3787,9 +3787,27 @@ def test_post_project_dataset_provenance(
         }
     )
     assert resp.status_code == 200, resp.text
-    assert written[-1]["imported_from"]["git"]["rev"] == "deadbeef"
-    # A branch or tag moves, so it can't stand in for a revision. This is
-    # enforced by the model that owns calkit.yaml, not just the form.
+    # What was actually fetched is what's written, whatever was asked for
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # No revision means the default branch's head, recorded by its commit
+    resp = post(
+        {
+            "path": "data/head.csv",
+            "imported_from": {
+                "git": {"repo_url": "https://github.com/a/b", "path": "h.csv"}
+            },
+        }
+    )
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
+    # A branch or tag moves, so it can't be what's recorded; asked for, it
+    # is resolved at fetch time and the commit it pointed at is written
     resp = post(
         {
             "path": "data/branch.csv",
@@ -3798,7 +3816,11 @@ def test_post_project_dataset_provenance(
             },
         }
     )
-    assert resp.status_code == 422
+    assert resp.status_code == 200, resp.text
+    assert (
+        written[-1]["imported_from"]["git"]["rev"]
+        == "c0ffee0123456789c0ffee0123456789c0ffee01"
+    )
     # A plain URL.
     resp = post(
         {

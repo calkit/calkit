@@ -33,7 +33,6 @@ import DatasetViewer from "../../../../../components/Datasets/DatasetViewer"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
 import FigureStudio from "../../../../../components/Figures/FigureStudio"
-import UploadDataset from "../../../../../components/Datasets/UploadDataset"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
@@ -217,9 +216,10 @@ const DatasetSource = ({
 }
 
 const datasetsSearchSchema = z.object({
-  upload_open: z.boolean().optional(),
   new_dataset_open: z.boolean().optional(),
-  source: z.enum(["primary", "enter", "url", "doi", "git_repo"]).optional(),
+  source: z
+    .enum(["primary", "upload", "enter", "url", "doi", "git_repo"])
+    .optional(),
   // Dataset the figure studio is open on, so the studio survives a refresh.
   studio: z.string().optional(),
   // The "find a dataset on Calkit" browser.
@@ -246,7 +246,6 @@ function ProjectDataView() {
   const { datasetsRequest } = useProjectDatasets(accountName, projectName, ref)
   const { isPending: dataPending, data: datasets } = datasetsRequest
   const {
-    upload_open: uploadOpen,
     new_dataset_open: newDatasetOpen,
     source,
     studio: studioDataset,
@@ -292,10 +291,8 @@ function ProjectDataView() {
       )
     })
   const navigate = useNavigate({ from: Route.fullPath })
-  const openUpload = () =>
-    navigate({ search: (prev) => ({ ...prev, upload_open: true }) })
   const openNewDataset = (
-    nextSource: "primary" | "enter" | "url" | "git_repo",
+    nextSource: "primary" | "upload" | "enter" | "url" | "git_repo",
   ) =>
     navigate({
       search: (prev) => ({
@@ -308,7 +305,6 @@ function ProjectDataView() {
     navigate({
       search: (prev) => ({
         ...prev,
-        upload_open: undefined,
         new_dataset_open: undefined,
         source: undefined,
       }),
@@ -332,10 +328,12 @@ function ProjectDataView() {
                 <Icon as={FaPlus} fontSize="xs" />
               </MenuButton>
               <MenuList>
+                <MenuItem onClick={() => openNewDataset("upload")}>
+                  Upload data I collected myself
+                </MenuItem>
                 <MenuItem onClick={() => openNewDataset("enter")}>
                   Enter data by hand
                 </MenuItem>
-                <MenuItem onClick={openUpload}>Upload new dataset</MenuItem>
                 <MenuItem onClick={() => openNewDataset("primary")}>
                   Label an existing file or folder
                 </MenuItem>
@@ -357,9 +355,12 @@ function ProjectDataView() {
               key={source ?? "primary"}
               onClose={closeAll}
               isOpen={Boolean(newDatasetOpen)}
-              defaultSource={source ?? "primary"}
+              // "upload" is the primary source on its upload variant
+              defaultSource={
+                source === "upload" ? "primary" : source ?? "primary"
+              }
+              defaultPrimaryMode={source === "upload" ? "upload" : "existing"}
             />
-            <UploadDataset onClose={closeAll} isOpen={Boolean(uploadOpen)} />
             <BrowseDatasets
               isOpen={Boolean(browseOpen)}
               onClose={() => setBrowseOpen(false)}

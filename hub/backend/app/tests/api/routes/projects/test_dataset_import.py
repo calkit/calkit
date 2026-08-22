@@ -152,6 +152,25 @@ def test_post_project_dataset_fetches_imports(
         assert (tmp_path / "repo" / "data" / "wind.csv").read_text() == (
             "u,v\n1,2\n"
         )
+        # Without a revision, the default branch's head is fetched and its
+        # commit is what gets recorded
+        resp = client.post(
+            URL,
+            json={
+                "path": "data/wind-head.csv",
+                "imported_from": {
+                    "git": {
+                        "repo_url": str(tmp_path / "src"),
+                        "path": "data/wind.csv",
+                    }
+                },
+            },
+            headers=normal_user_token_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert (tmp_path / "repo" / "data" / "wind-head.csv").read_text() == (
+            "u,v\n1,2\n"
+        )
         # Everything small went into Git, each with its declaration, and
         # was pushed
         assert not repo.is_dirty(untracked_files=True)
@@ -170,6 +189,9 @@ def test_post_project_dataset_fetches_imports(
             "doi": "10.5281/zenodo.1234567"
         }
         assert by_path["data/wind.csv"]["imported_from"]["git"]["rev"] == rev
+        assert (
+            by_path["data/wind-head.csv"]["imported_from"]["git"]["rev"] == rev
+        )
         assert "data/multi" in by_path and "data/multi.csv" not in by_path
         # Importing from another Calkit project copies Git-tracked files
         # and pins the source revision. (get_project/get_repo are patched to

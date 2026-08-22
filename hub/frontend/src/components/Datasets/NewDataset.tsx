@@ -55,7 +55,13 @@ interface NewDatasetProps {
   projectName?: string
   /** Which source to open on, when the caller already knows which it is. */
   defaultSource?: Source
+  /** For "I collected this myself": whether the file is already in the
+   * repo or is being uploaded now. */
+  defaultPrimaryMode?: PrimaryMode
 }
+
+/** How data someone collected themselves gets into the project. */
+type PrimaryMode = "existing" | "upload"
 
 /**
  * Where the data came from, in the words someone would use themselves.
@@ -69,7 +75,7 @@ const SOURCES: { value: Source; label: string; help: string }[] = [
   {
     value: "primary",
     label: "I collected this myself",
-    help: "Measured or generated for this project, so there's no upstream source.",
+    help: "Measured or generated for this project, so there's no upstream source. Upload the file (a CSV, a spreadsheet) or point at one already in the repo.",
   },
   {
     value: "enter",
@@ -88,8 +94,8 @@ const SOURCES: { value: Source; label: string; help: string }[] = [
   },
   {
     value: "git_repo",
-    label: "I got it from a Git repo",
-    help: "Pinned to a commit, so it's the same data next time.",
+    label: "Download from a Git repo",
+    help: "Fetched at the commit you give, or at the default branch's current head, which is then pinned so it's the same data next time.",
   },
 ]
 
@@ -118,6 +124,7 @@ const NewDataset = ({
   ownerName,
   projectName: projectNameProp,
   defaultSource = "primary",
+  defaultPrimaryMode = "existing",
 }: NewDatasetProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
@@ -129,6 +136,9 @@ const NewDataset = ({
   const accountName = ownerName ?? routeParams.accountName ?? ""
   const projectName = projectNameProp ?? routeParams.projectName ?? ""
   const [source, setSource] = useState<Source>(defaultSource)
+  const [primaryMode, setPrimaryMode] =
+    useState<PrimaryMode>(defaultPrimaryMode)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [table, setTable] = useState<TableData>(EMPTY_TABLE)
   // Only fetched for the source that needs it: data collected here has to
   // already be in the repo, while an import names a path that doesn't
@@ -147,6 +157,8 @@ const NewDataset = ({
     handleSubmit,
     reset,
     control,
+    getValues,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<DatasetForm>({
     mode: "onBlur",
@@ -191,6 +203,29 @@ const NewDataset = ({
           },
         }).then((response) => response.data)
       }
+      if (source === "primary" && primaryMode === "upload") {
+        if (!uploadFile) {
+          return Promise.reject(new Error("Choose a file to upload."))
+        }
+        // The collector is whoever is named, defaulting to the uploader;
+        // the hub decides Git or DVC from the size, as `calkit add` would
+        return ProjectsService.postProjectDatasetUpload({
+          "content-length": uploadFile.size,
+          owner_name: accountName,
+          project_name: projectName,
+          bodyProjectsPostProjectDatasetUpload: {
+            path: data.path,
+            title: data.title,
+            description: data.description,
+            file: uploadFile,
+            collected_by: data.collected_by || currentUser?.email || null,
+            collected_by_name:
+              data.collected_by && data.collected_by !== currentUser?.email
+                ? null
+                : currentUser?.full_name ?? null,
+          },
+        }).then((response) => response.data)
+      }
       const post: DatasetPost = {
         path: data.path,
         title: data.title || null,
@@ -212,7 +247,9 @@ const NewDataset = ({
           post.imported_from = {
             git: {
               repo_url: data.repo_url,
-              rev: data.repo_rev,
+              // Blank means the default branch's head, which the hub
+              // resolves and records
+              rev: data.repo_rev || null,
               path: data.repo_path || null,
             },
             date: retrieved,
@@ -236,6 +273,8 @@ const NewDataset = ({
       )
       reset()
       setSource(defaultSource)
+      setPrimaryMode(defaultPrimaryMode)
+      setUploadFile(null)
       setTable(EMPTY_TABLE)
       onClose()
     },
@@ -324,28 +363,28 @@ const NewDataset = ({
                   <FormErrorMessage>{errors.repo_url.message}</FormErrorMessage>
                 ) : null}
               </FormControl>
-              <FormControl isRequired isInvalid={!!errors.repo_rev} mb={4}>
+              <FormControl isInvalid={!!errors.repo_rev} mb={4}>
                 <FormLabel htmlFor="repo_rev">Revision</FormLabel>
                 <Input
                   id="repo_rev"
                   {...register("repo_rev", {
-                    required: "A commit hash is required.",
                     pattern: {
                       value: /^[0-9a-fA-F]{7,40}$/,
                       message:
-                        "Must be a commit hash. A branch or tag can move, " +
+                        "Must be a commit hash, or blank for the default " +
+                        "branch's current head. A branch or tag can move, " +
                         "which would change the data under you.",
                     },
                   })}
-                  placeholder="Ex: 4f2c1ab or the full 40-character hash"
+                  placeholder="Blank for the latest commit on the default branch"
                   autoComplete="off"
                 />
                 {errors.repo_rev ? (
                   <FormErrorMessage>{errors.repo_rev.message}</FormErrorMessage>
                 ) : (
                   <FormHelperText>
-                    A hash, not a branch or tag: those move, and the point of
-                    recording this is that the data doesn't.
+                    Optional. Left blank, the head of the default branch is
+                    fetched and its commit recorded, so the data stays pinned.
                   </FormHelperText>
                 )}
               </FormControl>
@@ -396,6 +435,42 @@ const NewDataset = ({
           ) : null}
           {source === "primary" ? (
             <FormControl mb={4}>
+              <FormLabel>The data</FormLabel>
+              <RadioGroup
+                value={primaryMode}
+                onChange={(value) => setPrimaryMode(value as PrimaryMode)}
+              >
+                <Stack direction={{ base: "column", md: "row" }} spacing={4}>
+                  <Radio value="upload">Upload a file</Radio>
+                  <Radio value="existing">It's already in the repo</Radio>
+                </Stack>
+              </RadioGroup>
+            </FormControl>
+          ) : null}
+          {source === "primary" && primaryMode === "upload" ? (
+            <FormControl isRequired mb={4}>
+              <FormLabel htmlFor="dataset_file">File</FormLabel>
+              <Input
+                id="dataset_file"
+                type="file"
+                p={1}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] ?? null
+                  setUploadFile(file)
+                  // A sensible path from the file name, unless one was typed
+                  if (file && !getValues("path")) {
+                    setValue("path", `data/${file.name}`)
+                  }
+                }}
+              />
+              <FormHelperText>
+                A CSV, a spreadsheet, an instrument export: whatever holds what
+                you collected. Small files go in Git, large ones in DVC.
+              </FormHelperText>
+            </FormControl>
+          ) : null}
+          {source === "primary" ? (
+            <FormControl mb={4}>
               <FormLabel htmlFor="collected_by">Collected by</FormLabel>
               <Input
                 id="collected_by"
@@ -412,7 +487,7 @@ const NewDataset = ({
           ) : null}
           <FormControl isRequired isInvalid={!!errors.path} mb={4}>
             <FormLabel htmlFor="path">Path in this project</FormLabel>
-            {source === "primary" ? (
+            {source === "primary" && primaryMode === "existing" ? (
               <Controller
                 control={control}
                 name="path"
@@ -445,7 +520,9 @@ const NewDataset = ({
             ) : (
               <FormHelperText>
                 {source === "primary"
-                  ? "Must already exist in the repo."
+                  ? primaryMode === "upload"
+                    ? "Where the file is saved."
+                    : "Must already exist in the repo."
                   : source === "enter"
                     ? "Where the CSV will be written."
                     : source === "git_repo"

@@ -1730,7 +1730,7 @@ export type GitSourcePost = {
   /**
    * Rev
    */
-  rev: string
+  rev?: string | null
   /**
    * Path
    */

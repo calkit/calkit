@@ -58,7 +58,6 @@ import {
 import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
 import BrowseDatasets from "../../components/Datasets/BrowseDatasets"
 import NewDataset from "../../components/Datasets/NewDataset"
-import UploadDataset from "../../components/Datasets/UploadDataset"
 import FilterableSelect from "../../components/Common/FilterableSelect"
 import FigureStudio from "../../components/Figures/FigureStudio"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
@@ -968,11 +967,14 @@ function DataStep({
         />
       ) : null}
       {dataOpen === "upload" ? (
-        <UploadDataset
+        <NewDataset
+          key="upload"
           isOpen
           onClose={() => setDataOpen(undefined)}
           ownerName={accountName}
           projectName={projectName}
+          defaultSource="primary"
+          defaultPrimaryMode="upload"
         />
       ) : null}
       {dataOpen === "browse" ? (

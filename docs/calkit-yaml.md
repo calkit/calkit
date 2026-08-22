@@ -1,11 +1,15 @@
 # The `calkit.yaml` file
 
 The `calkit.yaml` file serves as a small "database"
-for the project's important metadata, which includes its:
+for the project's important metadata, where certain files came from,
+and the relationships between various component.
+It include the project's:
 
+- Owner, name, title, description, Calkit Hub URL
 - Global or system-level [requirements](requirements.md)
   (applications, environmental variables, or other configuration steps)
-- [Questions](questions.md) the project seeks to answer
+- [Questions](questions.md) the project seeks to answer, along with associated
+  hypotheses, answers, and evidence
 - [Environments](environments.md)
 - [The pipeline](pipeline/index.md)
 - [Datasets](datasets.md)
@@ -22,25 +26,6 @@ for the project's important metadata, which includes its:
 Objects can be imported from other projects,
 which produces a chain of reference to allow tracking reuse
 and reduce redundant storage.
-
-## Showcase
-
-The project showcase is a list of elements that best represent the project,
-shown on the project homepage on the hub.
-For example:
-
-```yaml
-showcase:
-  - text: Here is some text.
-  - figure: figures/my-figure.png
-  - text: There is a figure above.
-  - markdown: "### This is a Markdown heading"
-  - publication: paper/paper.pdf
-```
-
-[This project](https://calkit.io/petebachant/strava-analysis)
-has a showcase that includes Plotly figures saved as JSON,
-which render interactively.
 
 ## Declaring artifacts
 
@@ -165,6 +150,25 @@ per-column types and units belong.
     maps. Nothing names a figure, dataset, publication, presentation, result,
     table, or question; they're referred to by path, or not at all, so those
     are lists.
+
+## Showcase
+
+The project showcase is a list of elements that best represent the project,
+shown on the project's homepage.
+For example:
+
+```yaml
+showcase:
+  - text: Here is some text.
+  - figure: figures/my-figure.png
+  - text: There is a figure above.
+  - markdown: "### This is a Markdown heading"
+  - publication: paper/paper.pdf
+```
+
+[This project](https://calkit.io/petebachant/strava-analysis)
+has a showcase that includes Plotly figures saved as JSON,
+which render interactively.
 
 ## Schema, validation, and autocompletion
 

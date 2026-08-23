@@ -56,7 +56,8 @@ np.savetxt("data/data.csv", np.linspace(0, 1, 10))
 The annotation is `calkit stage` followed by `key=value` attributes.
 Values are YAML, so anything a stage accepts in `calkit.yaml` can be
 written inline, e.g., `outputs=[{path: fig.png, storage: git}]`.
-A bare key with no `=` is a flag, e.g., `always_run`.
+A boolean can be written either way: `always_run=true`, or just
+`always_run`, since a bare key with no `=` means `true`.
 
 Names are used as path components (for the script extracted from the block),
 so they may only contain letters, digits, `.`, `_`, and `-`.
@@ -80,7 +81,7 @@ and deliberately wrong examples in the same file.
 
 ### One stage across several blocks
 
-Blocks sharing a name are joined, in document order, into one script.
+Blocks sharing a stage name are joined, in document order, into one script.
 This is what lets an example be narrated across several code blocks:
 
 ````md

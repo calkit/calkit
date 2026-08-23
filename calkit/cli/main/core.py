@@ -279,11 +279,7 @@ def init(
         needs_own_repo = True
     if needs_own_repo:
         subprocess.run(["git", "init"])
-    # DVC refuses to initialize inside an existing Git repo unless told the
-    # project is a subdirectory of one, so work out which case this is.
-    result = calkit.dvc.run_dvc_command(
-        calkit.dvc.make_dvc_init_args() + (["--force"] if force else [])
-    )
+    result = calkit.dvc.init(force=force)
     if result != 0:
         raise_error("Failed to initialize DVC")
     # Ensure autostage is enabled for DVC
@@ -526,9 +522,7 @@ def get_status(
         if not os.path.isfile(os.path.join(".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                result = calkit.dvc.run_dvc_command(
-                    calkit.dvc.make_dvc_init_args() + ["-q"]
-                )
+                result = calkit.dvc.init(quiet=True)
                 if result != 0:
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
@@ -2372,7 +2366,7 @@ def run(
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        result = calkit.dvc.run_dvc_command(calkit.dvc.make_dvc_init_args())
+        result = calkit.dvc.init()
         if result != 0:
             raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names

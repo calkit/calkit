@@ -541,12 +541,22 @@ def enclosing_repo_ignores(path: str | None = None) -> bool:
         return False
 
 
-def make_dvc_init_args(wdir: str | None = None) -> list[str]:
-    """Return the arguments for initializing a DVC repo in ``wdir``."""
+def init(
+    wdir: str | None = None, force: bool = False, quiet: bool = False
+) -> int:
+    """Initialize a DVC repo in ``wdir``, returning the exit code.
+
+    Works out for itself whether DVC needs telling that the project is a
+    subdirectory of a larger Git repo.
+    """
     args = ["init"]
     if dvc_init_needs_subdir(wdir=wdir):
         args.append("--subdir")
-    return args
+    if force:
+        args.append("--force")
+    if quiet:
+        args.append("--quiet")
+    return run_dvc_command(args, cwd=wdir)
 
 
 def run_dvc_command(

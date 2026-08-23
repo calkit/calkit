@@ -760,7 +760,10 @@ def test_xr_markdown(tmp_dir):
     # and the output block now says what the stage actually printed
     with open("README.md") as f:
         readme = f.read()
-    assert "```python calkit stage name=demo environment=readme\n" in readme
+    assert (
+        "```python calkit stage name=demo outputs=[results.json] "
+        "environment=readme\n"
+    ) in readme
     assert '{"hello": "markdown"}\n```' in readme
     assert "stale" not in readme
     # Values in the prose come from the results file the stage wrote

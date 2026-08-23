@@ -9,7 +9,7 @@ import useOnboardingFlags from "../../hooks/useOnboarding"
 import { useProjectQuestions } from "../../hooks/useProject"
 import { DISMISSED, buildProjectSteps } from "../../lib/onboarding"
 import NewDataset from "../Datasets/NewDataset"
-import FigureStudio from "../Figures/FigureStudio"
+import FigureEditor from "../Figures/FigureEditor"
 import ImportOverleaf from "../Publications/ImportOverleaf"
 import NewPublication from "../Publications/NewPublication"
 import CreateQuestion from "../Projects/CreateQuestion"
@@ -69,7 +69,7 @@ const ProjectChecklist = ({
   const newQuestionModal = useDisclosure()
   const newDatasetModal = useDisclosure()
   const enterDataModal = useDisclosure()
-  const studioModal = useDisclosure()
+  const editorModal = useDisclosure()
   const newPubTemplateModal = useDisclosure()
   const overleafImportModal = useDisclosure()
   const steps = buildProjectSteps({
@@ -131,8 +131,8 @@ const ProjectChecklist = ({
             size="xs"
             variant="primary"
             onClick={() => {
-              mixpanel.track("Opened figure studio", { source: "checklist" })
-              studioModal.onOpen()
+              mixpanel.track("Opened figure editor", { source: "checklist" })
+              editorModal.onOpen()
             }}
           >
             New figure from data
@@ -153,10 +153,10 @@ const ProjectChecklist = ({
             Writing a stage <ExternalLinkIcon mb={0.5} />
           </Link>
         </HStack>
-        {studioModal.isOpen ? (
-          <FigureStudio
-            isOpen={studioModal.isOpen}
-            onClose={studioModal.onClose}
+        {editorModal.isOpen ? (
+          <FigureEditor
+            isOpen={editorModal.isOpen}
+            onClose={editorModal.onClose}
             ownerName={accountName}
             projectName={projectName}
           />

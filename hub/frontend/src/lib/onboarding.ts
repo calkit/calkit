@@ -66,7 +66,7 @@ export function pipelineHasRun(
  * The path from a fresh project to a reproducible one, as a checklist.
  *
  * It follows the loop a project moves through: ask, collect, analyze, run,
- * write. Environments don't get a step of their own; the figure studio
+ * write. Environments don't get a step of their own; the figure editor
  * creates one as part of saving a figure, which is when it's needed and
  * the only time most people want to think about it. Every step here can
  * be detected, so the list never holds an item open that the user has in

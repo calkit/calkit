@@ -38,7 +38,7 @@ import Tooltip from "../Common/Tooltip"
 
 import type { AxiosError } from "axios"
 import {
-  FeatureVotesService,
+  FeedbackService,
   type ReleasePublic,
   ReleasesService,
 } from "../../client"
@@ -180,7 +180,7 @@ const NewRelease = ({
   const { data: voteStatus } = useQuery({
     queryKey: ["feature-votes", EXTERNAL_RELEASE_FEATURE],
     queryFn: () =>
-      FeatureVotesService.getFeatureVoteStatus({
+      FeedbackService.getFeatureVoteStatus({
         feature: EXTERNAL_RELEASE_FEATURE,
       }).then((response) => response.data),
     enabled: isOpen,
@@ -188,10 +188,10 @@ const NewRelease = ({
   const voteMutation = useMutation({
     mutationFn: (voted: boolean) =>
       voted
-        ? FeatureVotesService.deleteFeatureVote({
+        ? FeedbackService.deleteFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
           }).then((response) => response.data)
-        : FeatureVotesService.postFeatureVote({
+        : FeedbackService.postFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
           }).then((response) => response.data),
     onSuccess: (data) =>

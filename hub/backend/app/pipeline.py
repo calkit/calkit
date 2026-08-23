@@ -23,11 +23,12 @@ import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Literal
+from typing import Literal
 
 import ruamel.yaml
 from pydantic import BaseModel, Field
 
+import calkit.notebooks
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
 from app.storage import get_data_prefix_for_owner
@@ -352,27 +353,6 @@ def _resolve_current_dep_md5(
 CLEANED_NOTEBOOKS_DIR = ".calkit/notebooks/cleaned/"
 
 
-def clean_notebook(nb: dict[str, Any]) -> dict[str, Any]:
-    """A notebook with outputs and metadata stripped, as calkit cleans it.
-
-    What a notebook stage depends on is the cleaned copy, so that re-saving
-    a notebook with fresh outputs doesn't make its stage stale while an
-    edit to a cell does. This mirrors ``calkit.notebooks.clean_notebook_outputs``
-    field for field (and the hash below mirrors its ``json.dump`` with
-    ``indent=2``), which is what makes the hub's hash match the lock's.
-    """
-    for cell in nb.get("cells", []):
-        if cell.get("cell_type") == "code":
-            cell["outputs"] = []
-            cell["execution_count"] = None
-        if "tags" in cell.get("metadata", {}):
-            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
-        else:
-            cell["metadata"] = {}
-    nb["metadata"] = {}
-    return nb
-
-
 def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
     """The md5 a cleaned-notebook dep would have, from the source notebook.
 
@@ -391,7 +371,9 @@ def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
     except Exception as e:
         logger.warning(f"Could not parse notebook {source}: {e}")
         return None
-    text = json.dumps(clean_notebook(nb), indent=2)
+    # The same cleaning and the same ``json.dump(indent=2)`` as ``calkit
+    # run`` uses, which is what makes this hash match the lock's
+    text = json.dumps(calkit.notebooks.clean_notebook(nb), indent=2)
     return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 

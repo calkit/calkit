@@ -17,7 +17,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useState } from "react"
 
-import { MiscService } from "../../client"
+import { FeedbackService } from "../../client"
 import { formatTimestamp } from "../../lib/strings"
 
 const KIND_LABELS: Record<string, { label: string; scheme: string }> = {
@@ -37,11 +37,12 @@ const FeedbackTable = () => {
   const [showResolved, setShowResolved] = useState(false)
   const feedbackQuery = useQuery({
     queryKey: ["feedback"],
-    queryFn: () => MiscService.getFeedback().then((response) => response.data),
+    queryFn: () =>
+      FeedbackService.getFeedback().then((response) => response.data),
   })
   const resolveMutation = useMutation({
     mutationFn: ({ id, resolved }: { id: string; resolved: boolean }) =>
-      MiscService.patchFeedback({
+      FeedbackService.patchFeedback({
         feedback_id: id,
         feedbackPatch: { resolved },
       }).then((response) => response.data),

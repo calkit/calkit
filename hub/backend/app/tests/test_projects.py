@@ -8,6 +8,7 @@ import git
 import pytest
 from sqlmodel import Session
 
+import app.dvc
 import app.projects
 from app.models import Account, Project
 
@@ -737,7 +738,7 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
 
 
 def test_drop_stale_lock_stages() -> None:
-    from app.projects import drop_stale_lock_stages
+    from app.dvc import drop_stale_lock_stages
 
     lock = {
         "schema": "2.0",
@@ -764,32 +765,32 @@ def test_drop_stale_lock_stages() -> None:
     assert drop_stale_lock_stages({}, dvc_yaml) == {}
 
 
-def test_dvc_object_fpath(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_object_fpath_for_out(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str, str]] = []
 
     def fake_lookup(owner_name: str, project_name: str, md5: str, fs) -> str:
         calls.append((owner_name, project_name, md5))
         return f"/{owner_name}/{project_name}/{md5}"
 
-    monkeypatch.setattr(app.projects, "get_data_fpath_for_md5", fake_lookup)
+    monkeypatch.setattr(app.dvc, "get_data_fpath_for_md5", fake_lookup)
     # A plain output is looked up in the project's own storage
     out = {"md5": "abc", "size": 3}
-    assert app.projects.dvc_object_fpath("me", "proj", out, fs=None) == (
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
         "/me/proj/abc"
     )
     # An import from another Calkit project is a pointer whose bytes only
     # live in the source project's storage
     out = {"md5": "def", "remote": "calkit:them/source", "push": False}
-    assert app.projects.dvc_object_fpath("me", "proj", out, fs=None) == (
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
         "/them/source/def"
     )
     # Other remotes (a plain DVC remote name) stay local, and no md5 means
     # nothing to look up
     out = {"md5": "ghi", "remote": "s3"}
-    assert app.projects.dvc_object_fpath("me", "proj", out, fs=None) == (
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
         "/me/proj/ghi"
     )
-    assert app.projects.dvc_object_fpath("me", "proj", {}, fs=None) is None
+    assert app.dvc.object_fpath_for_out("me", "proj", {}, fs=None) is None
     assert [c[:2] for c in calls] == [
         ("me", "proj"),
         ("them", "source"),

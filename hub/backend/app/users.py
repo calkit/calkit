@@ -150,7 +150,7 @@ def create_user(*, session: Session, user_create: UserCreate) -> User:
     if existing is not None:
         # A name nobody chose (the email's local part, or a GitHub name
         # already used here) shouldn't block signup: a second alex@ gets
-        # alex-2, and can rename from settings
+        # alex-2
         base = account_name
         for n in range(2, 1000):
             account_name = f"{base}-{n}"

@@ -4,7 +4,6 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import Any
 
 import jwt
 import requests
@@ -143,20 +142,6 @@ def token_resp_text_to_dict(resp_text: str) -> dict:
     return out
 
 
-def get_emails(access_token: str) -> list[dict[str, Any]]:
-    """Fetch a GitHub user's email addresses, with their verified status."""
-    resp = requests.get(
-        "https://api.github.com/user/emails",
-        headers={"Authorization": f"Bearer {access_token}"},
-    )
-    if resp.status_code != 200:
-        raise HTTPException(400, "Could not fetch your GitHub email addresses")
-    emails = resp.json()
-    if not isinstance(emails, list):
-        raise HTTPException(400, "Could not fetch your GitHub email addresses")
-    return emails
-
-
 def resolve_email(access_token: str) -> tuple[str, bool]:
     """Pick the email to identify a GitHub user by, and say if it's verified.
 
@@ -168,7 +153,13 @@ def resolve_email(access_token: str) -> tuple[str, bool]:
     account that already exists is not, and only the caller knows which of
     those it's doing.
     """
-    emails = get_emails(access_token)
+    resp = requests.get(
+        "https://api.github.com/user/emails",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    emails = resp.json() if resp.status_code == 200 else None
+    if not isinstance(emails, list):
+        raise HTTPException(400, "Could not fetch your GitHub email addresses")
     if not emails:
         raise HTTPException(400, "Your GitHub account has no email address")
     primary = [e for e in emails if e.get("primary")]

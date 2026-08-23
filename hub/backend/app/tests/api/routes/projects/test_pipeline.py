@@ -5,7 +5,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from app.config import settings
-from app.tests.api.routes.projects.test_studio import _make_repo
+from app.tests.api.routes.projects.test_figures import _make_repo
 
 URL = f"{settings.API_V1_STR}/projects/o/p/pipeline/map-paths"
 
@@ -20,12 +20,12 @@ def _call(
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
     with (
         patch(
-            "app.api.routes.projects.map_paths.app.projects.get_project",
+            "app.api.routes.projects.pipeline.app.projects.get_project",
             return_value=fake_project,
         ),
-        patch("app.api.routes.projects.map_paths.get_repo", return_value=repo),
+        patch("app.api.routes.projects.pipeline.get_repo", return_value=repo),
         patch(
-            "app.api.routes.projects.map_paths.app.projects"
+            "app.api.routes.projects.pipeline.app.projects"
             ".dvc_outputs_from_tree",
             return_value={"data/big.h5": {"md5": "abc"}},
         ),

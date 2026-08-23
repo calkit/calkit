@@ -40,7 +40,7 @@ import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactC
 import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
 import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
-import FigureStudio from "../../../../../components/Figures/FigureStudio"
+import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
 import useProject from "../../../../../hooks/useProject"
 import TipBubble from "../../../../../components/Onboarding/TipBubble"
@@ -53,7 +53,7 @@ const figuresSearchSchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   // Whether the figure editor is open, so a refresh or a link can land
   // on it directly.
-  studio: z.boolean().optional(),
+  editor: z.boolean().optional(),
   // The figure editor, open on the figure at `path`
   edit: z.boolean().optional(),
   q: z.string().optional(),
@@ -292,12 +292,12 @@ function ProjectFigures() {
 
   const uploadFigureModal = useDisclosure()
   const labelFigureModal = useDisclosure()
-  const { studio: studioOpen, edit: editOpen } = Route.useSearch()
-  const studioModal = {
-    isOpen: Boolean(studioOpen),
-    onOpen: () => navigate({ search: (prev) => ({ ...prev, studio: true }) }),
+  const { editor: editorOpen, edit: editOpen } = Route.useSearch()
+  const editorModal = {
+    isOpen: Boolean(editorOpen),
+    onOpen: () => navigate({ search: (prev) => ({ ...prev, editor: true }) }),
     onClose: () =>
-      navigate({ search: (prev) => ({ ...prev, studio: undefined }) }),
+      navigate({ search: (prev) => ({ ...prev, editor: undefined }) }),
   }
 
   const selectedFigure = figures?.find((f) => f.path === selectedPath) ?? null
@@ -418,7 +418,7 @@ function ProjectFigures() {
                   <Icon as={FaPlus} fontSize="xs" />
                 </MenuButton>
                 <MenuList>
-                  <MenuItem onClick={studioModal.onOpen}>
+                  <MenuItem onClick={editorModal.onOpen}>
                     New figure from data
                   </MenuItem>
                   <MenuItem onClick={uploadFigureModal.onOpen}>
@@ -437,10 +437,10 @@ function ProjectFigures() {
                 isOpen={labelFigureModal.isOpen}
                 onClose={labelFigureModal.onClose}
               />
-              {studioModal.isOpen ? (
-                <FigureStudio
-                  isOpen={studioModal.isOpen}
-                  onClose={studioModal.onClose}
+              {editorModal.isOpen ? (
+                <FigureEditor
+                  isOpen={editorModal.isOpen}
+                  onClose={editorModal.onClose}
                 />
               ) : null}
             </>

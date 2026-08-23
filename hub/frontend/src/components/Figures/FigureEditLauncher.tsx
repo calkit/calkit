@@ -8,7 +8,7 @@ import useProject from "../../hooks/useProject"
 import { declaredInputs } from "../../lib/provenance"
 import NotebookRunLauncher from "../Notebooks/NotebookRunLauncher"
 import TipBubble from "../Onboarding/TipBubble"
-import FigureStudio, { type StudioEdit } from "./FigureStudio"
+import FigureEditor, { type FigureEditTarget } from "./FigureEditor"
 
 interface StageInfo {
   kind?: string
@@ -41,7 +41,7 @@ const FigureEditLauncher = ({
 }) => {
   const { userHasWriteAccess } = useProject(ownerName, projectName)
   const local = useDisclosure()
-  const studio = {
+  const editor = {
     isOpen: isOpen ?? local.isOpen,
     onOpen: () => (onOpenChange ? onOpenChange(true) : local.onOpen()),
     onClose: () => (onOpenChange ? onOpenChange(false) : local.onClose()),
@@ -71,7 +71,7 @@ const FigureEditLauncher = ({
   })
   if (!figure.stage) return null
   // The slot is held from the start so the panel doesn't jump when the
-  // stage arrives; the studio reads the script's own read_csv calls, so it
+  // stage arrives; the editor reads the script's own read_csv calls, so it
   // doesn't need the pipeline to have loaded before it opens.
   if (!stageQuery.data) {
     if (stageQuery.isError || !userHasWriteAccess) return null
@@ -98,7 +98,7 @@ const FigureEditLauncher = ({
   )
   if (stage.kind === "python-script" && stage.script_path) {
     if (!userHasWriteAccess) return null
-    const edit: StudioEdit = {
+    const edit: FigureEditTarget = {
       stage: figure.stage,
       scriptPath: stage.script_path,
       figurePath: figure.path,
@@ -115,20 +115,20 @@ const FigureEditLauncher = ({
             variant="primary"
             width="100%"
             onClick={() => {
-              mixpanel.track("Opened figure studio", {
+              mixpanel.track("Opened figure editor", {
                 source: "figure-detail",
                 editing: true,
               })
-              studio.onOpen()
+              editor.onOpen()
             }}
           >
             Edit figure
           </Button>
         </TipBubble>
-        {studio.isOpen ? (
-          <FigureStudio
-            isOpen={studio.isOpen}
-            onClose={studio.onClose}
+        {editor.isOpen ? (
+          <FigureEditor
+            isOpen={editor.isOpen}
+            onClose={editor.onClose}
             ownerName={ownerName}
             projectName={projectName}
             edit={edit}

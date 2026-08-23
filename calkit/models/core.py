@@ -353,9 +353,9 @@ class _AuthoredArtifact(_CalkitObject):
     created_by: _Person | list[_Person] | None = Field(
         default=None,
         description=(
-            "Who made this, for something produced here rather than by the "
-            "pipeline or obtained from elsewhere. Each person discloses "
-            "the generative AI tools they used via ``with_ai``."
+            "Who made this primary artifact: one produced here rather than "
+            "by the pipeline or obtained from elsewhere. Each person "
+            "discloses the generative AI tools they used via ``with_ai``."
         ),
     )
     imported_from: ImportedFromType | None = Field(

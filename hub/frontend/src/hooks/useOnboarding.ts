@@ -35,7 +35,7 @@ const useOnboardingFlags = (projectId?: string | null) => {
   const setFlagMutation = useMutation({
     mutationFn: ({ step, done }: { step: string; done: boolean }) =>
       done
-        ? UsersService.postUserOnboardingFlag({
+        ? UsersService.putUserOnboardingFlag({
             onboardingFlagPost: { step, project_id: projectId ?? null },
           }).then((response) => response.data)
         : UsersService.deleteUserOnboardingFlag({
@@ -54,7 +54,7 @@ const useOnboardingFlags = (projectId?: string | null) => {
   // checklists" means from account settings, where no one project is in view.
   const resetAllMutation = useMutation({
     mutationFn: () =>
-      UsersService.deleteAllUserOnboardingFlags().then(
+      UsersService.deleteUserOnboardingFlag({}).then(
         (response) => response.data,
       ),
     onSuccess: () =>

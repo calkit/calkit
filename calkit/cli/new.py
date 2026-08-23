@@ -47,13 +47,16 @@ def _person_from_options(
 
     if email is None and orcid is None and not with_ai:
         return None
-    # One tool stays a scalar rather than a one-item list, which is what
-    # the docs show and what reads best in calkit.yaml
-    tools: str | list[str] | None = with_ai or None
+    # ``with_ai`` is a list, one entry per --with-ai given. A single tool is
+    # written as a scalar, which is what the docs show and what reads best
+    # in calkit.yaml; several stay a list
+    with_ai_value: str | list[str] | None = None
     if len(with_ai) == 1:
-        tools = with_ai[0]
+        with_ai_value = with_ai[0]
+    elif with_ai:
+        with_ai_value = with_ai
     try:
-        person = _Person(email=email, orcid=orcid, with_ai=tools)
+        person = _Person(email=email, orcid=orcid, with_ai=with_ai_value)
     except ValidationError as e:
         raise_error(
             f"Invalid --{option}: "

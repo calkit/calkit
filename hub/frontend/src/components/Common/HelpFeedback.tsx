@@ -23,7 +23,7 @@ import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
-import { MiscService } from "../../client"
+import { FeedbackService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import { submitOnCmdEnter } from "../../lib/keyboard"
@@ -67,7 +67,7 @@ const HelpFeedback = ({ isOpen, onClose }: HelpFeedbackProps) => {
   const kind = watch("kind")
   const mutation = useMutation({
     mutationFn: (data: FeedbackForm) =>
-      MiscService.postFeedback({
+      FeedbackService.postFeedback({
         feedbackPost: {
           kind: data.kind,
           message: data.message,

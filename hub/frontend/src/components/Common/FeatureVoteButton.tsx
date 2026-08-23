@@ -2,7 +2,7 @@ import { Button, HStack, Text, Tooltip } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { FiThumbsUp } from "react-icons/fi"
 
-import { FeatureVotesService } from "../../client"
+import { FeedbackService } from "../../client"
 import { isLoggedIn } from "../../hooks/useAuth"
 
 interface FeatureVoteButtonProps {
@@ -32,7 +32,7 @@ const FeatureVoteButton = ({
   const { data: status } = useQuery({
     queryKey: ["feature-votes", feature],
     queryFn: () =>
-      FeatureVotesService.getFeatureVoteStatus({ feature }).then(
+      FeedbackService.getFeatureVoteStatus({ feature }).then(
         (response) => response.data,
       ),
     enabled: isLoggedIn(),
@@ -40,10 +40,10 @@ const FeatureVoteButton = ({
   const mutation = useMutation({
     mutationFn: (voted: boolean) =>
       voted
-        ? FeatureVotesService.deleteFeatureVote({ feature }).then(
+        ? FeedbackService.deleteFeatureVote({ feature }).then(
             (response) => response.data,
           )
-        : FeatureVotesService.postFeatureVote({ feature }).then(
+        : FeedbackService.postFeatureVote({ feature }).then(
             (response) => response.data,
           ),
     onSuccess: (data) =>

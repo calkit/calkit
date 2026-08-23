@@ -711,14 +711,14 @@ def test_onboarding_flags_round_trip(
     assert response.status_code == 200
     assert response.json()["account"] == []
     # An account-level flag lands under "account", not under a project.
-    response = client.post(
+    response = client.put(
         base, headers=normal_user_token_headers, json={"step": "cli"}
     )
     assert response.status_code == 200
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["account"] == ["cli"]
     # Setting the same flag twice is a no-op rather than a duplicate.
-    response = client.post(
+    response = client.put(
         base, headers=normal_user_token_headers, json={"step": "cli"}
     )
     assert response.status_code == 200
@@ -737,7 +737,7 @@ def test_onboarding_flags_round_trip(
     db.add(project)
     db.commit()
     db.refresh(project)
-    response = client.post(
+    response = client.put(
         base,
         headers=normal_user_token_headers,
         json={"step": "editor", "project_id": str(project.id)},
@@ -772,7 +772,7 @@ def test_onboarding_flags_round_trip(
         return stmt
 
     with patch.object(users_routes, "select", blind_select):
-        response = client.post(
+        response = client.put(
             base,
             headers=normal_user_token_headers,
             json={"step": "editor", "project_id": str(project.id)},
@@ -796,7 +796,7 @@ def test_onboarding_flags_round_trip(
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["projects"].get(str(project.id), []) == []
     # A project that doesn't exist can't be flagged.
-    response = client.post(
+    response = client.put(
         base,
         headers=normal_user_token_headers,
         json={"step": "editor", "project_id": str(uuid.uuid4())},
@@ -814,31 +814,31 @@ def test_onboarding_flags_round_trip(
     db.add(private)
     db.commit()
     db.refresh(private)
-    response = client.post(
+    response = client.put(
         base,
         headers=normal_user_token_headers,
         json={"step": "editor", "project_id": str(private.id)},
     )
     assert response.status_code == 403
     # Resetting clears everything at once, account and project alike.
-    client.post(base, headers=normal_user_token_headers, json={"step": "cli"})
-    client.post(
+    client.put(base, headers=normal_user_token_headers, json={"step": "cli"})
+    client.put(
         base,
         headers=normal_user_token_headers,
         json={"step": "editor", "project_id": str(project.id)},
     )
-    response = client.delete(f"{base}/all", headers=normal_user_token_headers)
+    response = client.delete(base, headers=normal_user_token_headers)
     assert response.status_code == 200
     body = client.get(base, headers=normal_user_token_headers).json()
     assert body["account"] == []
     assert body["projects"] == {}
     # Resetting again is harmless rather than an error.
     assert (
-        client.delete(f"{base}/all", headers=normal_user_token_headers)
+        client.delete(base, headers=normal_user_token_headers)
     ).status_code == 200
     # Flags require a session at all.
     assert client.get(base).status_code == 401
-    assert client.delete(f"{base}/all").status_code == 401
+    assert client.delete(base).status_code == 401
 
 
 def test_read_users_search_and_sort(

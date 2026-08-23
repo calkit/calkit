@@ -1077,8 +1077,8 @@ def get_user_onboarding_flags(
     )
 
 
-@router.post("/user/onboarding-flags")
-def post_user_onboarding_flag(
+@router.put("/user/onboarding-flags")
+def put_user_onboarding_flag(
     req: OnboardingFlagPost, session: SessionDep, current_user: CurrentUser
 ) -> Message:
     """Dismiss a checklist, or mark a step done that we can't detect."""
@@ -1130,35 +1130,29 @@ def post_user_onboarding_flag(
     return Message(message="Success")
 
 
-@router.delete("/user/onboarding-flags/all")
-def delete_all_user_onboarding_flags(
-    session: SessionDep, current_user: CurrentUser
-) -> Message:
-    """Bring every onboarding checklist back, everywhere.
-
-    Its own route rather than a bare DELETE on the collection, so clearing
-    the lot can't be what a request that merely forgot its ``step`` does.
-    """
-    rows = session.exec(
-        select(UserOnboardingFlag).where(
-            UserOnboardingFlag.user_id == current_user.id
-        )
-    ).all()
-    for row in rows:
-        session.delete(row)
-    session.commit()
-    mixpanel.user_reset_onboarding(user=current_user, n_flags=len(rows))
-    return Message(message=f"Reset {len(rows)} onboarding flags")
-
-
 @router.delete("/user/onboarding-flags")
 def delete_user_onboarding_flag(
-    step: str,
     session: SessionDep,
     current_user: CurrentUser,
+    step: str | None = None,
     project_id: uuid.UUID | None = None,
 ) -> Message:
-    """Undo a dismissal, e.g. to bring a checklist back."""
+    """Undo a dismissal, e.g. to bring a checklist back.
+
+    With no ``step``, every flag the user has goes, on every project: what
+    "reset my checklists" means from account settings.
+    """
+    if step is None:
+        rows = session.exec(
+            select(UserOnboardingFlag).where(
+                UserOnboardingFlag.user_id == current_user.id
+            )
+        ).all()
+        for row in rows:
+            session.delete(row)
+        session.commit()
+        mixpanel.user_reset_onboarding(user=current_user, n_flags=len(rows))
+        return Message(message=f"Reset {len(rows)} onboarding flags")
     rows = session.exec(
         select(UserOnboardingFlag).where(
             UserOnboardingFlag.user_id == current_user.id,

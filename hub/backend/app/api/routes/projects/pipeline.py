@@ -21,7 +21,7 @@ from app.api.routes.projects.core import (
     _dump_ck_stage_map,
     _validate_ck_stage,
 )
-from app.api.routes.projects.studio import _clean_rel_path
+from app.api.routes.projects.figures import _clean_rel_path
 from app.core import ryaml
 from app.git import (
     get_ck_info_from_repo,

@@ -107,7 +107,6 @@ from app.git import (
     resolve_commit_sha,
     search_refs,
 )
-from app.messaging import generate_new_project_email, send_email
 from app.models import (
     Account,
     ContentsItem,
@@ -1192,9 +1191,6 @@ def post_project(
         session.add(project)
         session.commit()
         session.refresh(project)
-    _maybe_send_first_project_email(
-        session=session, user=current_user, project=project
-    )
     return project  # type: ignore
 
 
@@ -1257,41 +1253,6 @@ def _copy_template_dvc_objects(
         f"to {project.owner_account_name}/{project.name}"
     )
     return count
-
-
-def _maybe_send_first_project_email(
-    session: Session, user: User, project: Project
-) -> None:
-    """Email the clone-and-run commands after a user's first project.
-
-    Creating a project happens in the browser, but running it happens in a
-    terminal, usually later and on a different machine. Without a scheduler
-    the one moment we can reliably reach someone is right now, so the first
-    project gets a note with exactly what to type next. Best-effort.
-    """
-    if not settings.emails_enabled:
-        return
-    n_projects = session.exec(
-        select(func.count())
-        .select_from(Project)
-        .where(Project.owner_account_id == user.account.id)
-    ).one()
-    if n_projects != 1:
-        return
-    try:
-        email_data = generate_new_project_email(
-            email_to=user.email,
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            project_title=project.title,
-        )
-        send_email(
-            email_to=user.email,
-            subject=email_data.subject,
-            html_content=email_data.html_content,
-        )
-    except Exception as e:
-        logger.warning(f"Could not send first-project email: {e}")
 
 
 class ProjectOptionalExtended(ProjectPublic):

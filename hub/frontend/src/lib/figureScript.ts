@@ -6,7 +6,7 @@
 import type { Environment } from "../client"
 
 // Kinds a Python script can run in, most preferred first. Mirrors the
-// backend's choice, so what the studio shows is what the stage gets.
+// backend's choice, so what the editor shows is what the stage gets.
 const PYTHON_ENV_KINDS = ["uv", "uv-venv", "pixi", "conda", "venv"]
 
 /** The project's Python environment the stage would run in, if any. */
@@ -93,7 +93,7 @@ export const isHdfPath = (path: string) => /\.(h5|hdf5|hdf|he5)$/i.test(path)
 /** A file pandas reads straight into a frame. */
 const isFramePath = (path: string) => isCsvPath(path) || isHdfPath(path)
 
-// The lines the studio owns: a pandas load per CSV, and a marker naming
+// The lines the editor owns: a pandas load per CSV, and a marker naming
 // every other input, since what opens an HDF5 file or a results folder is
 // the script's business, not something to guess at.
 const isLoadLine = (line: string) =>

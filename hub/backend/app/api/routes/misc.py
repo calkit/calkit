@@ -1,30 +1,26 @@
 """Miscellaneous routes."""
 
-import html
 import logging
 import os
 import uuid
-from typing import Annotated, Literal
+from typing import Literal
 
 import requests
-import sqlalchemy
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from pydantic.networks import EmailStr
 from sqlalchemy.exc import DataError
-from sqlalchemy.orm import selectinload
 from sqlmodel import and_, or_, select
 from starlette.requests import Request
 
-from app import arxiv, mixpanel, version
+from app import arxiv, version
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
     SessionDep,
     get_current_active_superuser,
 )
-from app.config import settings
 from app.core import utcnow
 from app.messaging import generate_test_email, send_email
 from app.models import (
@@ -33,9 +29,6 @@ from app.models import (
     Dataset,
     DiscountCode,
     DiscountCodePost,
-    Feedback,
-    FeedbackPatch,
-    FeedbackPublic,
     Message,
     Notification,
     Org,
@@ -90,120 +83,6 @@ class DiscountCodePublic(BaseModel):
     price: float | None = None
     months: int | None = None
     plan_name: str | None = None
-
-
-class FeedbackPost(BaseModel):
-    kind: Literal["feedback", "bug", "help"] = "feedback"
-    message: str = Field(min_length=1, max_length=5000)
-    # Where the user was when they opened the form. A bug report without it
-    # usually costs a round trip to ask "which page?".
-    page: str | None = Field(default=None, max_length=2048)
-
-
-@router.post("/feedback")
-def post_feedback(
-    req: FeedbackPost, session: SessionDep, current_user: CurrentUser
-) -> Message:
-    """Record a user's feedback, bug report, or question.
-
-    The row is written first and the email is best-effort after it: a relay
-    that's down is a notification problem, not a reason to tell someone
-    their feedback didn't go through and lose what they typed.
-    """
-    feedback = Feedback(
-        user_id=current_user.id,
-        kind=req.kind,
-        message=req.message,
-        page=req.page,
-    )
-    session.add(feedback)
-    session.commit()
-    labels = {
-        "feedback": "Feedback",
-        "bug": "Bug report",
-        "help": "Help request",
-    }
-    label = labels[req.kind]
-    # Composed here rather than from a template, since the built templates
-    # come out of the MJML sources and this has no styling worth the round
-    # trip. The message is user-controlled, so every interpolated value is
-    # escaped -- render_email_template's autoescape doesn't apply here.
-    lines = [
-        f"<p><strong>{html.escape(label)}</strong> from "
-        f"{html.escape(current_user.full_name or 'a user')} "
-        f'(<a href="mailto:{html.escape(current_user.email)}">'
-        f"{html.escape(current_user.email)}</a>, account "
-        f"{html.escape(current_user.account.name)})</p>",
-    ]
-    if req.page:
-        lines.append(f"<p>Sent from: {html.escape(req.page)}</p>")
-    lines.append(
-        f'<pre style="white-space: pre-wrap">{html.escape(req.message)}</pre>'
-    )
-    if settings.emails_enabled:
-        try:
-            send_email(
-                email_to=settings.feedback_email,
-                subject=f"{settings.PROJECT_NAME} - {label}",
-                html_content="\n".join(lines),
-            )
-        except Exception as e:
-            # Already saved, and visible on the admin page, so a failed
-            # notification is worth a log and nothing more.
-            logger.warning(f"Failed to email feedback {feedback.id}: {e}")
-    logger.info(f"Recorded {req.kind} from user {current_user.id}")
-    mixpanel.user_sent_feedback(
-        user=current_user, kind=req.kind, page=req.page
-    )
-    return Message(message="Thanks! We'll get back to you.")
-
-
-@router.get("/feedback", dependencies=[Depends(get_current_active_superuser)])
-def get_feedback(
-    session: SessionDep,
-    limit: Annotated[int, Query(ge=1, le=500)] = 100,
-    offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[FeedbackPublic]:
-    """List what users have sent in, newest first."""
-    rows = session.exec(
-        select(Feedback)
-        # The sender's name and email are on the user, which would
-        # otherwise be a query per row.
-        .options(selectinload(Feedback.user))  # type: ignore[arg-type]
-        .order_by(sqlalchemy.desc(Feedback.created))  # type: ignore
-        .limit(limit)
-        .offset(offset)
-    ).all()
-    return [
-        FeedbackPublic(
-            id=row.id,
-            kind=row.kind,
-            message=row.message,
-            page=row.page,
-            created=row.created,
-            resolved=row.resolved,
-            user_email=row.user.email,
-            user_full_name=row.user.full_name,
-        )
-        for row in rows
-    ]
-
-
-@router.patch(
-    "/feedback/{feedback_id}",
-    dependencies=[Depends(get_current_active_superuser)],
-)
-def patch_feedback(
-    feedback_id: uuid.UUID, req: FeedbackPatch, session: SessionDep
-) -> Message:
-    """Mark a piece of feedback dealt with, or put it back."""
-    row = session.get(Feedback, feedback_id)
-    if row is None:
-        raise HTTPException(404, "Feedback not found")
-    row.resolved = req.resolved
-    session.add(row)
-    session.commit()
-    return Message(message="Success")
 
 
 @router.get("/discount-codes/{discount_code}")

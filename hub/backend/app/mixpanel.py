@@ -245,7 +245,7 @@ def user_uploaded_project(
     )
 
 
-def user_saved_studio_figure(
+def user_saved_figure_script(
     user: User,
     project: Project,
     env_created: bool,
@@ -254,14 +254,14 @@ def user_saved_studio_figure(
 ) -> None:
     """A figure drafted in the browser was committed as a pipeline stage.
 
-    The save is the activation moment the studio exists for: a run in the
+    The save is the activation moment the figure editor exists for: a run in the
     browser proves nothing, a stage in the repo does. ``env_created`` says
-    whether the studio also had to stand up the project's first Python
+    whether the figure editor also had to stand up the project's first Python
     environment, which is the setup work it's meant to absorb.
     """
     track(
         user,
-        "Saved studio figure",
+        "Saved figure script",
         add_event_info=dict(
             owner_name=project.owner_account_name,
             project_name=project.name,

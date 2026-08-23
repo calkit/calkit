@@ -6,21 +6,21 @@ from fastapi import APIRouter
 # for automated frontend client generation
 from .core import *  # noqa: F401,F403
 from .core import router as core_router
+from .datasets import *  # noqa: F401,F403
+from .datasets import router as datasets_router
 from .dvc import *  # noqa: F401,F403
 from .dvc import router as dvc_router
+from .figures import *  # noqa: F401,F403
+from .figures import router as figures_router
 from .fs import *  # noqa: F401,F403
 from .fs import router as fs_router
-from .map_paths import *  # noqa: F401,F403
-from .map_paths import router as map_paths_router
-from .studio import *  # noqa: F401,F403
-from .studio import router as studio_router
-from .tables import *  # noqa: F401,F403
-from .tables import router as tables_router
+from .pipeline import *  # noqa: F401,F403
+from .pipeline import router as pipeline_router
 
 router = APIRouter()
 router.include_router(core_router)
 router.include_router(dvc_router)
 router.include_router(fs_router)
-router.include_router(map_paths_router)
-router.include_router(studio_router)
-router.include_router(tables_router)
+router.include_router(pipeline_router)
+router.include_router(figures_router)
+router.include_router(datasets_router)

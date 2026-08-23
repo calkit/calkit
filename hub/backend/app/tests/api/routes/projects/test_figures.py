@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.config import settings
 
-URL = f"{settings.API_V1_STR}/projects/o/p/figures/studio"
+URL = f"{settings.API_V1_STR}/projects/o/p/figures/script"
 
 SCRIPT = (
     "import matplotlib.pyplot as plt\n"
@@ -46,18 +46,18 @@ def _post(
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
     with (
         patch(
-            "app.api.routes.projects.studio.app.projects.get_project",
+            "app.api.routes.projects.figures.app.projects.get_project",
             return_value=fake_project,
         ),
-        patch("app.api.routes.projects.studio.get_repo", return_value=repo),
+        patch("app.api.routes.projects.figures.get_repo", return_value=repo),
         patch(
-            "app.api.routes.projects.studio.mixpanel.user_saved_studio_figure"
+            "app.api.routes.projects.figures.mixpanel.user_saved_figure_script"
         ),
     ):
         return client.post(URL, json=body, headers=headers)
 
 
-def test_post_project_studio_figure(
+def test_post_project_figure_script(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     headers = normal_user_token_headers
@@ -272,7 +272,7 @@ publications:
 """
 
 
-def test_post_project_studio_figure_on_template_project(
+def test_post_project_figure_script_on_template_project(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     """The exact shape a project made from example-basic has."""
@@ -324,7 +324,7 @@ def test_post_project_studio_figure_on_template_project(
     assert origin.head.commit.hexsha == repo.head.commit.hexsha
 
 
-def test_post_project_studio_figure_edits_own_stage(
+def test_post_project_figure_script_edits_own_stage(
     client: TestClient, normal_user_token_headers: dict[str, str], tmp_path
 ) -> None:
     repo, origin = _make_repo(

@@ -59,7 +59,7 @@ import ConnectGitHubPrompt from "../../components/Common/ConnectGitHubPrompt"
 import BrowseDatasets from "../../components/Datasets/BrowseDatasets"
 import NewDataset from "../../components/Datasets/NewDataset"
 import FilterableSelect from "../../components/Common/FilterableSelect"
-import FigureStudio from "../../components/Figures/FigureStudio"
+import FigureEditor from "../../components/Figures/FigureEditor"
 import CommandBlock from "../../components/Onboarding/CommandBlock"
 import ReproAudit from "../../components/Onboarding/ReproAudit"
 import StartPaths, {
@@ -991,7 +991,7 @@ function DataStep({
 
 /**
  * For a fresh project: the figure the template already produced, and the
- * studio to make the next one.
+ * editor to make the next one.
  *
  * The template's data, script, and figure are all in the repo, and the
  * figure is on the project page before anything has been installed. That
@@ -1006,7 +1006,7 @@ function FigureStep({
   projectName: string
   onDone: () => void
 }) {
-  const { studio_open: studioOpen } = Route.useSearch()
+  const { studio_open: editorOpen } = Route.useSearch()
   const navigate = Route.useNavigate()
   const setStudioOpen = (open: boolean) =>
     navigate({
@@ -1092,7 +1092,7 @@ function FigureStep({
         <Button
           variant={shown ? "outline" : "primary"}
           onClick={() => {
-            mixpanel.track("Opened figure studio", { source: "wizard" })
+            mixpanel.track("Opened figure editor", { source: "wizard" })
             setStudioOpen(true)
           }}
         >
@@ -1107,8 +1107,8 @@ function FigureStep({
         plot from it adds a stage to the pipeline and an environment for it to
         run in.
       </Text>
-      {studioOpen ? (
-        <FigureStudio
+      {editorOpen ? (
+        <FigureEditor
           isOpen
           onClose={() => setStudioOpen(false)}
           ownerName={accountName}

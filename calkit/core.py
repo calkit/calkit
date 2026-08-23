@@ -1064,6 +1064,21 @@ def detect_project_name(
     return name
 
 
+def normalize_git_url(url: str) -> str:
+    """An SSH GitHub URL as its HTTPS form; anything else unchanged.
+
+    ``git@github.com:owner/repo.git`` and ``https://github.com/owner/repo``
+    name the same repo, and only the latter is a link, so that's the one
+    worth recording.
+    """
+    url = url.strip()
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url[len("git@github.com:") :]
+    if url.startswith("https://github.com/") and url.endswith(".git"):
+        url = url[: -len(".git")]
+    return url
+
+
 def detect_project_github_url(wdir: str | None = None) -> str | None:
     """Detect the GitHub URL for the current project."""
     try:
@@ -1075,8 +1090,7 @@ def detect_project_github_url(wdir: str | None = None) -> str | None:
         warnings.warn("Git remote is not a GitHub URL")
         return None
     url = url.removesuffix(".git")
-    if url.startswith("git@github.com:"):
-        url = url.replace("git@github.com:", "https://github.com/")
+    url = normalize_git_url(url)
     return url
 
 

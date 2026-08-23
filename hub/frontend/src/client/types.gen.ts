@@ -1330,6 +1330,79 @@ export type Figure = {
 }
 
 /**
+ * FigureScriptPost
+ */
+export type FigureScriptPost = {
+  /**
+   * Figure Path
+   */
+  figure_path: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Script Content
+   */
+  script_content: string
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Packages
+   */
+  packages?: Array<string>
+  /**
+   * Environment
+   */
+  environment?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
+ * FigureScriptResult
+ */
+export type FigureScriptResult = {
+  figure: Figure
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Created
+   */
+  environment_created: boolean
+  /**
+   * Packages Missing
+   */
+  packages_missing: Array<string>
+  /**
+   * Script Content
+   */
+  script_content: string
+}
+
+/**
  * FiguresPage
  *
  * A page of project figures, with the total available for paging.
@@ -4663,6 +4736,22 @@ export type ReproCheck = {
    */
   n_misc_no_import_or_stage?: number
   /**
+   * N Tables
+   */
+  n_tables?: number
+  /**
+   * N Tables No Import Or Stage
+   */
+  n_tables_no_import_or_stage?: number
+  /**
+   * N Presentations
+   */
+  n_presentations?: number
+  /**
+   * N Presentations No Import Or Stage
+   */
+  n_presentations_no_import_or_stage?: number
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -4688,6 +4777,14 @@ export type ReproCheck = {
    * N Misc With Import Or Stage
    */
   readonly n_misc_with_import_or_stage: number
+  /**
+   * N Tables With Import Or Stage
+   */
+  readonly n_tables_with_import_or_stage: number
+  /**
+   * N Presentations With Import Or Stage
+   */
+  readonly n_presentations_with_import_or_stage: number
   /**
    * N Stages Without Env
    */
@@ -4942,79 +5039,6 @@ export type StorageUsage = {
    * Used Gb
    */
   used_gb: number
-}
-
-/**
- * StudioFigure
- */
-export type StudioFigure = {
-  figure: Figure
-  /**
-   * Stage Name
-   */
-  stage_name: string
-  /**
-   * Environment
-   */
-  environment: string
-  /**
-   * Environment Created
-   */
-  environment_created: boolean
-  /**
-   * Packages Missing
-   */
-  packages_missing: Array<string>
-  /**
-   * Script Content
-   */
-  script_content: string
-}
-
-/**
- * StudioFigurePost
- */
-export type StudioFigurePost = {
-  /**
-   * Figure Path
-   */
-  figure_path: string
-  /**
-   * Title
-   */
-  title: string
-  /**
-   * Description
-   */
-  description?: string | null
-  /**
-   * Script Path
-   */
-  script_path: string
-  /**
-   * Script Content
-   */
-  script_content: string
-  /**
-   * Inputs
-   */
-  inputs?: Array<string>
-  /**
-   * Packages
-   */
-  packages?: Array<string>
-  /**
-   * Environment
-   */
-  environment?: string | null
-  /**
-   * Stage
-   */
-  stage?: string | null
-  /**
-   * Message
-   */
-  message?: string | null
 }
 
 /**
@@ -6049,6 +6073,22 @@ export type ReproCheckWritable = {
    * N Misc No Import Or Stage
    */
   n_misc_no_import_or_stage?: number
+  /**
+   * N Tables
+   */
+  n_tables?: number
+  /**
+   * N Tables No Import Or Stage
+   */
+  n_tables_no_import_or_stage?: number
+  /**
+   * N Presentations
+   */
+  n_presentations?: number
+  /**
+   * N Presentations No Import Or Stage
+   */
+  n_presentations_no_import_or_stage?: number
   /**
    * N Dvc Remotes
    */
@@ -7353,11 +7393,11 @@ export type GetUserStorageResponse =
 export type DeleteUserOnboardingFlagData = {
   body?: never
   path?: never
-  query: {
+  query?: {
     /**
      * Step
      */
-    step: string
+    step?: string | null
     /**
      * Project Id
      */
@@ -7403,49 +7443,32 @@ export type GetUserOnboardingFlagsResponses = {
 export type GetUserOnboardingFlagsResponse =
   GetUserOnboardingFlagsResponses[keyof GetUserOnboardingFlagsResponses]
 
-export type PostUserOnboardingFlagData = {
+export type PutUserOnboardingFlagData = {
   body: OnboardingFlagPost
   path?: never
   query?: never
   url: "/user/onboarding-flags"
 }
 
-export type PostUserOnboardingFlagErrors = {
+export type PutUserOnboardingFlagErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostUserOnboardingFlagError =
-  PostUserOnboardingFlagErrors[keyof PostUserOnboardingFlagErrors]
+export type PutUserOnboardingFlagError =
+  PutUserOnboardingFlagErrors[keyof PutUserOnboardingFlagErrors]
 
-export type PostUserOnboardingFlagResponses = {
+export type PutUserOnboardingFlagResponses = {
   /**
    * Successful Response
    */
   200: Message
 }
 
-export type PostUserOnboardingFlagResponse =
-  PostUserOnboardingFlagResponses[keyof PostUserOnboardingFlagResponses]
-
-export type DeleteAllUserOnboardingFlagsData = {
-  body?: never
-  path?: never
-  query?: never
-  url: "/user/onboarding-flags/all"
-}
-
-export type DeleteAllUserOnboardingFlagsResponses = {
-  /**
-   * Successful Response
-   */
-  200: Message
-}
-
-export type DeleteAllUserOnboardingFlagsResponse =
-  DeleteAllUserOnboardingFlagsResponses[keyof DeleteAllUserOnboardingFlagsResponses]
+export type PutUserOnboardingFlagResponse =
+  PutUserOnboardingFlagResponses[keyof PutUserOnboardingFlagResponses]
 
 export type GetHubVersionData = {
   body?: never
@@ -7493,100 +7516,6 @@ export type TestEmailResponses = {
 }
 
 export type TestEmailResponse = TestEmailResponses[keyof TestEmailResponses]
-
-export type GetFeedbackData = {
-  body?: never
-  path?: never
-  query?: {
-    /**
-     * Limit
-     */
-    limit?: number
-    /**
-     * Offset
-     */
-    offset?: number
-  }
-  url: "/feedback"
-}
-
-export type GetFeedbackErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type GetFeedbackError = GetFeedbackErrors[keyof GetFeedbackErrors]
-
-export type GetFeedbackResponses = {
-  /**
-   * Response Misc-Get Feedback
-   *
-   * Successful Response
-   */
-  200: Array<FeedbackPublic>
-}
-
-export type GetFeedbackResponse =
-  GetFeedbackResponses[keyof GetFeedbackResponses]
-
-export type PostFeedbackData = {
-  body: FeedbackPost
-  path?: never
-  query?: never
-  url: "/feedback"
-}
-
-export type PostFeedbackErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type PostFeedbackError = PostFeedbackErrors[keyof PostFeedbackErrors]
-
-export type PostFeedbackResponses = {
-  /**
-   * Successful Response
-   */
-  200: Message
-}
-
-export type PostFeedbackResponse =
-  PostFeedbackResponses[keyof PostFeedbackResponses]
-
-export type PatchFeedbackData = {
-  body: FeedbackPatch
-  path: {
-    /**
-     * Feedback Id
-     */
-    feedback_id: string
-  }
-  query?: never
-  url: "/feedback/{feedback_id}"
-}
-
-export type PatchFeedbackErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type PatchFeedbackError = PatchFeedbackErrors[keyof PatchFeedbackErrors]
-
-export type PatchFeedbackResponses = {
-  /**
-   * Successful Response
-   */
-  200: Message
-}
-
-export type PatchFeedbackResponse =
-  PatchFeedbackResponses[keyof PatchFeedbackResponses]
 
 export type GetDiscountCodeData = {
   body?: never
@@ -12103,8 +12032,8 @@ export type PostProjectMapPathsResponses = {
 export type PostProjectMapPathsResponse =
   PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
 
-export type PostProjectStudioFigureData = {
-  body: StudioFigurePost
+export type PostProjectFigureScriptData = {
+  body: FigureScriptPost
   path: {
     /**
      * Owner Name
@@ -12116,28 +12045,28 @@ export type PostProjectStudioFigureData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/figures/studio"
+  url: "/projects/{owner_name}/{project_name}/figures/script"
 }
 
-export type PostProjectStudioFigureErrors = {
+export type PostProjectFigureScriptErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostProjectStudioFigureError =
-  PostProjectStudioFigureErrors[keyof PostProjectStudioFigureErrors]
+export type PostProjectFigureScriptError =
+  PostProjectFigureScriptErrors[keyof PostProjectFigureScriptErrors]
 
-export type PostProjectStudioFigureResponses = {
+export type PostProjectFigureScriptResponses = {
   /**
    * Successful Response
    */
-  200: StudioFigure
+  200: FigureScriptResult
 }
 
-export type PostProjectStudioFigureResponse =
-  PostProjectStudioFigureResponses[keyof PostProjectStudioFigureResponses]
+export type PostProjectFigureScriptResponse =
+  PostProjectFigureScriptResponses[keyof PostProjectFigureScriptResponses]
 
 export type GetProjectDatasetCsvData = {
   body?: never
@@ -13281,6 +13210,100 @@ export type GetDatasetsResponses = {
 export type GetDatasetsResponse =
   GetDatasetsResponses[keyof GetDatasetsResponses]
 
+export type GetFeedbackData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/feedback"
+}
+
+export type GetFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetFeedbackError = GetFeedbackErrors[keyof GetFeedbackErrors]
+
+export type GetFeedbackResponses = {
+  /**
+   * Response Feedback-Get Feedback
+   *
+   * Successful Response
+   */
+  200: Array<FeedbackPublic>
+}
+
+export type GetFeedbackResponse =
+  GetFeedbackResponses[keyof GetFeedbackResponses]
+
+export type PostFeedbackData = {
+  body: FeedbackPost
+  path?: never
+  query?: never
+  url: "/feedback"
+}
+
+export type PostFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostFeedbackError = PostFeedbackErrors[keyof PostFeedbackErrors]
+
+export type PostFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostFeedbackResponse =
+  PostFeedbackResponses[keyof PostFeedbackResponses]
+
+export type PatchFeedbackData = {
+  body: FeedbackPatch
+  path: {
+    /**
+     * Feedback Id
+     */
+    feedback_id: string
+  }
+  query?: never
+  url: "/feedback/{feedback_id}"
+}
+
+export type PatchFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchFeedbackError = PatchFeedbackErrors[keyof PatchFeedbackErrors]
+
+export type PatchFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PatchFeedbackResponse =
+  PatchFeedbackResponses[keyof PatchFeedbackResponses]
+
 export type DeleteFeatureVoteData = {
   body?: never
   path: {
@@ -13386,7 +13409,7 @@ export type GetFeatureVotesData = {
 
 export type GetFeatureVotesResponses = {
   /**
-   * Response Feature Votes-Get Feature Votes
+   * Response Feedback-Get Feature Votes
    *
    * Successful Response
    */

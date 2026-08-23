@@ -14,7 +14,7 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 
-import { FeatureVotesService } from "../../client"
+import { FeedbackService } from "../../client"
 import { formatTimestamp } from "../../lib/strings"
 
 /**
@@ -27,7 +27,7 @@ const FeatureVotesTable = () => {
   const votesQuery = useQuery({
     queryKey: ["admin", "feature-votes"],
     queryFn: () =>
-      FeatureVotesService.getFeatureVotes().then((response) => response.data),
+      FeedbackService.getFeatureVotes().then((response) => response.data),
   })
   return (
     <Box mt={10}>

@@ -62,7 +62,7 @@ import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react"
 
-import { ProjectsService, type StudioFigure } from "../../client"
+import { ProjectsService, type FigureScriptResult } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { isSubmitChord } from "../../hooks/useSubmitOnCmdEnter"
 import { numericColumns, previewCsv } from "../../lib/csv"
@@ -90,7 +90,7 @@ import PdfCanvas from "../Common/PdfCanvas"
 import { FaPlus } from "react-icons/fa"
 import PathPicker from "../Releases/PathPicker"
 
-const AUTO_RUN_KEY = "figure-studio-auto-run"
+const AUTO_RUN_KEY = "figure-editor-auto-run"
 const AUTO_RUN_DELAY_MS = 1200
 
 const Plot = lazy(() => import("react-plotly.js"))
@@ -139,7 +139,7 @@ function DatasetPeek({
 }) {
   const [open, setOpen] = useState(false)
   const peekQuery = useQuery({
-    queryKey: ["projects", accountName, projectName, "studio-data", [path]],
+    queryKey: ["projects", accountName, projectName, "editor-data", [path]],
     queryFn: async () => ({
       [path]: await fetchFileText(accountName, projectName, path),
     }),
@@ -219,7 +219,7 @@ function DatasetPeek({
 }
 
 /** An existing script stage to edit, rather than a new figure to make. */
-export interface StudioEdit {
+export interface FigureEditTarget {
   stage: string
   scriptPath: string
   figurePath: string
@@ -230,7 +230,7 @@ export interface StudioEdit {
   description?: string | null
 }
 
-interface FigureStudioProps {
+interface FigureEditorProps {
   isOpen: boolean
   onClose: () => void
   /** Supplied when rendered outside the project route. */
@@ -239,8 +239,8 @@ interface FigureStudioProps {
   /** Dataset to open on; the first CSV dataset otherwise. */
   initialDataset?: string
   /** Open on an existing stage's script; saving updates that stage. */
-  edit?: StudioEdit
-  onSaved?: (result: StudioFigure) => void
+  edit?: FigureEditTarget
+  onSaved?: (result: FigureScriptResult) => void
 }
 
 /**
@@ -253,7 +253,7 @@ interface FigureStudioProps {
  * as part of making it a stage. What gets committed is exactly the script
  * that ran here; what runs in the pipeline is the real environment.
  */
-const FigureStudio = ({
+const FigureEditor = ({
   isOpen,
   onClose,
   ownerName,
@@ -261,7 +261,7 @@ const FigureStudio = ({
   initialDataset,
   edit,
   onSaved,
-}: FigureStudioProps) => {
+}: FigureEditorProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
   const routeParams = useParams({ strict: false }) as {
@@ -366,7 +366,7 @@ const FigureStudio = ({
       "projects",
       accountName,
       projectName,
-      "studio-script",
+      "editor-script",
       edit?.scriptPath,
     ],
     queryFn: () => fetchFileText(accountName, projectName, edit!.scriptPath),
@@ -399,7 +399,7 @@ const FigureStudio = ({
       "projects",
       accountName,
       projectName,
-      "studio-data",
+      "editor-data",
       [...datasetPaths].sort(),
     ],
     queryFn: async () => {
@@ -502,7 +502,7 @@ const FigureStudio = ({
   const packages = useMemo(() => packagesFromImports(code), [code])
   const canRun = Boolean(inputsReady && figurePath && code.trim())
   // One run on launch, as soon as the data and script are in, so the
-  // studio opens on a figure rather than on an empty pane.
+  // editor opens on a figure rather than on an empty pane.
   const autoRan = useRef(false)
   // Re-run on edit, a moment after typing stops, for those who'd rather
   // watch the figure follow the script than press a key. Remembered across
@@ -516,7 +516,7 @@ const FigureStudio = ({
   })
   const toggleAutoRun = (on: boolean) => {
     setAutoRun(on)
-    mixpanel.track("Toggled studio auto-run", { on })
+    mixpanel.track("Toggled editor auto-run", { on })
     try {
       localStorage.setItem(AUTO_RUN_KEY, String(on))
     } catch {
@@ -543,7 +543,7 @@ const FigureStudio = ({
     setStatus("")
     setRunning(false)
     setResult(res)
-    mixpanel.track("Ran studio figure", {
+    mixpanel.track("Ran editor figure", {
       ok: res.error === null,
       duration_ms: Math.round(performance.now() - started),
       n_packages: packages.length,
@@ -572,10 +572,10 @@ const FigureStudio = ({
   }, [autoRun, code, canRun, codeSettled, codeTouched, running])
   const saveMutation = useMutation({
     mutationFn: () =>
-      ProjectsService.postProjectStudioFigure({
+      ProjectsService.postProjectFigureScript({
         owner_name: accountName,
         project_name: projectName,
-        studioFigurePost: {
+        figureScriptPost: {
           figure_path: figurePath,
           title,
           description: description || null,
@@ -621,7 +621,7 @@ const FigureStudio = ({
   // that closing would throw away; a generated script nobody touched isn't.
   const hasUnsavedWork = codeTouched || Boolean(result?.image)
   // What "Discard" should do: close, or leave for somewhere else. A link
-  // out of the studio is the same question as closing it, so it goes
+  // out of the editor is the same question as closing it, so it goes
   // through the same confirmation.
   const pendingLeave = useRef<() => void>(onClose)
   const requestLeave = (leave: () => void) => {
@@ -646,7 +646,7 @@ const FigureStudio = ({
     <Modal
       isOpen={isOpen}
       onClose={requestClose}
-      // The figure is the point, so the studio gets most of the viewport,
+      // The figure is the point, so the editor gets most of the viewport,
       // while still reading as a dialog over the page it came from.
       size="6xl"
       scrollBehavior="inside"
@@ -656,7 +656,7 @@ const FigureStudio = ({
       <ModalContent
         maxW={{ base: "100%", lg: "92vw" }}
         maxH="92vh"
-        // Cmd+Enter reruns the script from anywhere in the studio, the
+        // Cmd+Enter reruns the script from anywhere in the editor, the
         // editor included; there's no form here for it to submit instead.
         onKeyDown={(e) => {
           // The editor handles the chord itself (and marks the event
@@ -838,7 +838,7 @@ const FigureStudio = ({
                       . Runs in environment{" "}
                       <Link
                         cursor="pointer"
-                        // Leaving unmounts the studio, so unsaved work gets
+                        // Leaving unmounts the editor, so unsaved work gets
                         // the same confirmation as closing it would.
                         onClick={() => requestLeave(goToEnvironment)}
                       >
@@ -1000,11 +1000,11 @@ const FigureStudio = ({
                 </Alert>
               ) : null}
               <FormControl mb={3} isRequired>
-                <FormLabel htmlFor="studio-title" fontSize="sm">
+                <FormLabel htmlFor="editor-title" fontSize="sm">
                   Title
                 </FormLabel>
                 <Input
-                  id="studio-title"
+                  id="editor-title"
                   size="sm"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -1012,11 +1012,11 @@ const FigureStudio = ({
                 />
               </FormControl>
               <FormControl mb={3}>
-                <FormLabel htmlFor="studio-description" fontSize="sm">
+                <FormLabel htmlFor="editor-description" fontSize="sm">
                   Description
                 </FormLabel>
                 <Input
-                  id="studio-description"
+                  id="editor-description"
                   size="sm"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -1025,11 +1025,11 @@ const FigureStudio = ({
                 />
               </FormControl>
               <FormControl isInvalid={!figurePath}>
-                <FormLabel htmlFor="studio-path" fontSize="sm">
+                <FormLabel htmlFor="editor-path" fontSize="sm">
                   Figure path
                 </FormLabel>
                 <Input
-                  id="studio-path"
+                  id="editor-path"
                   size="sm"
                   value={figurePath}
                   isReadOnly
@@ -1087,7 +1087,7 @@ const FigureStudio = ({
               <Button
                 colorScheme="red"
                 onClick={() => {
-                  mixpanel.track("Discarded studio figure", {
+                  mixpanel.track("Discarded editor figure", {
                     had_figure: Boolean(result?.image),
                   })
                   discardDialog.onClose()
@@ -1104,4 +1104,4 @@ const FigureStudio = ({
   )
 }
 
-export default FigureStudio
+export default FigureEditor

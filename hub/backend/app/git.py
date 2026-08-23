@@ -438,6 +438,9 @@ def record_project_update(
             project.updated = head_dt
             session.add(project)
             session.commit()
+            # The commit expires the row's attributes; callers go on using
+            # the project, so load them back now rather than lazily later
+            session.refresh(project)
     except Exception as e:
         logger.warning(f"Could not record project update time: {e}")
 

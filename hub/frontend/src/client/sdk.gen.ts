@@ -30,7 +30,6 @@ import type {
   CreateUserErrors,
   CreateUserResponses,
   DatasetPost,
-  DeleteAllUserOnboardingFlagsResponses,
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
@@ -76,6 +75,7 @@ import type {
   ExternalReleasePost,
   FeedbackPatch,
   FeedbackPost,
+  FigureScriptPost,
   FileLockPost,
   FsOpBatchRequest,
   FsOpRequest,
@@ -313,6 +313,8 @@ import type {
   PostProjectErrors,
   PostProjectFigureErrors,
   PostProjectFigureResponses,
+  PostProjectFigureScriptErrors,
+  PostProjectFigureScriptResponses,
   PostProjectFileLockErrors,
   PostProjectFileLockResponses,
   PostProjectFsBatchOpErrors,
@@ -346,8 +348,6 @@ import type {
   PostProjectResponses,
   PostProjectStatusErrors,
   PostProjectStatusResponses,
-  PostProjectStudioFigureErrors,
-  PostProjectStudioFigureResponses,
   PostProjectSyncErrors,
   PostProjectSyncResponses,
   PostProjectUploadErrors,
@@ -362,8 +362,6 @@ import type {
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
   PostUserGoogleAuthResponses,
-  PostUserOnboardingFlagErrors,
-  PostUserOnboardingFlagResponses,
   PostUserTokenErrors,
   PostUserTokenResponses,
   PostUserZenodoAuthErrors,
@@ -393,6 +391,8 @@ import type {
   PutProjectReferenceItemResponses,
   PutProjectReferenceNotesErrors,
   PutProjectReferenceNotesResponses,
+  PutUserOnboardingFlagErrors,
+  PutUserOnboardingFlagResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
   PutUserSubscriptionErrors,
@@ -431,7 +431,6 @@ import type {
   SearchProjectRefsResponses,
   ServeProjectAppFileErrors,
   ServeProjectAppFileResponses,
-  StudioFigurePost,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -1904,10 +1903,13 @@ export class UsersService {
    * Delete User Onboarding Flag
    *
    * Undo a dismissal, e.g. to bring a checklist back.
+   *
+   * With no ``step``, every flag the user has goes, on every project: what
+   * "reset my checklists" means from account settings.
    */
   public static deleteUserOnboardingFlag<ThrowOnError extends boolean = true>(
-    parameters: {
-      step: string
+    parameters?: {
+      step?: string | null
       project_id?: string | null
     },
     options?: Options<never, ThrowOnError>,
@@ -1965,27 +1967,27 @@ export class UsersService {
   }
 
   /**
-   * Post User Onboarding Flag
+   * Put User Onboarding Flag
    *
    * Dismiss a checklist, or mark a step done that we can't detect.
    */
-  public static postUserOnboardingFlag<ThrowOnError extends boolean = true>(
+  public static putUserOnboardingFlag<ThrowOnError extends boolean = true>(
     parameters: {
       onboardingFlagPost: OnboardingFlagPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostUserOnboardingFlagResponses,
-    PostUserOnboardingFlagErrors,
+    PutUserOnboardingFlagResponses,
+    PutUserOnboardingFlagErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
       [parameters],
       [{ args: [{ key: "onboardingFlagPost", map: "body" }] }],
     )
-    return (options?.client ?? client).post<
-      PostUserOnboardingFlagResponses,
-      PostUserOnboardingFlagErrors,
+    return (options?.client ?? client).put<
+      PutUserOnboardingFlagResponses,
+      PutUserOnboardingFlagErrors,
       ThrowOnError
     >({
       responseType: "json",
@@ -1998,35 +2000,6 @@ export class UsersService {
         ...options?.headers,
         ...params.headers,
       },
-    })
-  }
-
-  /**
-   * Delete All User Onboarding Flags
-   *
-   * Bring every onboarding checklist back, everywhere.
-   *
-   * Its own route rather than a bare DELETE on the collection, so clearing
-   * the lot can't be what a request that merely forgot its ``step`` does.
-   */
-  public static deleteAllUserOnboardingFlags<
-    ThrowOnError extends boolean = true,
-  >(
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    DeleteAllUserOnboardingFlagsResponses,
-    unknown,
-    ThrowOnError
-  > {
-    return (options?.client ?? client).delete<
-      DeleteAllUserOnboardingFlagsResponses,
-      unknown,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/user/onboarding-flags/all",
-      ...options,
     })
   }
 }
@@ -2080,120 +2053,6 @@ export class MiscService {
       url: "/test-email/",
       ...options,
       ...params,
-    })
-  }
-
-  /**
-   * Get Feedback
-   *
-   * List what users have sent in, newest first.
-   */
-  public static getFeedback<ThrowOnError extends boolean = true>(
-    parameters?: {
-      limit?: number
-      offset?: number
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<GetFeedbackResponses, GetFeedbackErrors, ThrowOnError> {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "query", key: "limit" },
-            { in: "query", key: "offset" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).get<
-      GetFeedbackResponses,
-      GetFeedbackErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/feedback",
-      ...options,
-      ...params,
-    })
-  }
-
-  /**
-   * Post Feedback
-   *
-   * Record a user's feedback, bug report, or question.
-   *
-   * The row is written first and the email is best-effort after it: a relay
-   * that's down is a notification problem, not a reason to tell someone
-   * their feedback didn't go through and lose what they typed.
-   */
-  public static postFeedback<ThrowOnError extends boolean = true>(
-    parameters: {
-      feedbackPost: FeedbackPost
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<PostFeedbackResponses, PostFeedbackErrors, ThrowOnError> {
-    const params = buildClientParams(
-      [parameters],
-      [{ args: [{ key: "feedbackPost", map: "body" }] }],
-    )
-    return (options?.client ?? client).post<
-      PostFeedbackResponses,
-      PostFeedbackErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/feedback",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
-    })
-  }
-
-  /**
-   * Patch Feedback
-   *
-   * Mark a piece of feedback dealt with, or put it back.
-   */
-  public static patchFeedback<ThrowOnError extends boolean = true>(
-    parameters: {
-      feedback_id: string
-      feedbackPatch: FeedbackPatch
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<PatchFeedbackResponses, PatchFeedbackErrors, ThrowOnError> {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "feedback_id" },
-            { key: "feedbackPatch", map: "body" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).patch<
-      PatchFeedbackResponses,
-      PatchFeedbackErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/feedback/{feedback_id}",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 
@@ -7098,24 +6957,24 @@ export class ProjectsService {
   }
 
   /**
-   * Post Project Studio Figure
+   * Post Project Figure Script
    *
-   * Commit a studio script as a stage that produces the figure.
+   * Commit a figure editor script as a stage that produces the figure.
    *
    * One commit carries the script, the stage, the figure entry, and the
    * environment (created or amended), so the repo never holds a figure
    * that points at a stage that doesn't exist yet.
    */
-  public static postProjectStudioFigure<ThrowOnError extends boolean = true>(
+  public static postProjectFigureScript<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      studioFigurePost: StudioFigurePost
+      figureScriptPost: FigureScriptPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostProjectStudioFigureResponses,
-    PostProjectStudioFigureErrors,
+    PostProjectFigureScriptResponses,
+    PostProjectFigureScriptErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -7125,19 +6984,19 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { key: "studioFigurePost", map: "body" },
+            { key: "figureScriptPost", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostProjectStudioFigureResponses,
-      PostProjectStudioFigureErrors,
+      PostProjectFigureScriptResponses,
+      PostProjectFigureScriptErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/figures/studio",
+      url: "/projects/{owner_name}/{project_name}/figures/script",
       ...options,
       ...params,
       headers: {
@@ -8380,7 +8239,121 @@ export class DatasetsService {
   }
 }
 
-export class FeatureVotesService {
+export class FeedbackService {
+  /**
+   * Get Feedback
+   *
+   * List what users have sent in, newest first.
+   */
+  public static getFeedback<ThrowOnError extends boolean = true>(
+    parameters?: {
+      limit?: number
+      offset?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeedbackResponses, GetFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetFeedbackResponses,
+      GetFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Feedback
+   *
+   * Record a user's feedback, bug report, or question.
+   *
+   * The row is written first and the email is best-effort after it: a relay
+   * that's down is a notification problem, not a reason to tell someone
+   * their feedback didn't go through and lose what they typed.
+   */
+  public static postFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedbackPost: FeedbackPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostFeedbackResponses, PostFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "feedbackPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostFeedbackResponses,
+      PostFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Patch Feedback
+   *
+   * Mark a piece of feedback dealt with, or put it back.
+   */
+  public static patchFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedback_id: string
+      feedbackPatch: FeedbackPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PatchFeedbackResponses, PatchFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "feedback_id" },
+            { key: "feedbackPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchFeedbackResponses,
+      PatchFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback/{feedback_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * Delete Feature Vote
    *

@@ -126,7 +126,7 @@ const UploadFigure = ({ isOpen, onClose }: UploadFigureProps) => {
                 <Link
                   as={RouterLink}
                   to={`/${accountName}/${projectName}/figures` as any}
-                  search={{ studio: true } as any}
+                  search={{ editor: true } as any}
                   onClick={onClose}
                 >
                   New figure from data

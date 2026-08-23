@@ -1,4 +1,7 @@
-"""Reading tabular files for the dataset viewer.
+"""Reading datasets for the dataset viewer: tabular files and HDF5.
+
+These are datasets that happen to be tabular, not Calkit "tables" (which
+are pipeline outputs declared as such).
 
 The viewer is the same one the tables page uses, which wants CSV text. The
 hub reads CSV, TSV, parquet, and JSON lines with polars and hands back CSV,
@@ -140,9 +143,15 @@ def scan_table(fpath: str, path: str) -> pl.LazyFrame:
             )
         if suffix in (".jsonl", ".ndjson"):
             return pl.scan_ndjson(fpath)
-        return pl.scan_csv(fpath, infer_schema_length=1000, ignore_errors=True)
+        if suffix == ".csv":
+            return pl.scan_csv(
+                fpath, infer_schema_length=1000, ignore_errors=True
+            )
     except Exception as e:
         raise HTTPException(422, f"Could not read '{path}' as a table: {e}")
+    raise HTTPException(
+        415, f"'{path}' isn't a table format this viewer reads"
+    )
 
 
 def read_table_window(
@@ -154,7 +163,7 @@ def read_table_window(
     col_limit: int,
 ) -> TableText:
     """One window of a tabular file, read without materializing the rest."""
-    suffix = posixpath.splitext(path)[1].lower() or ".csv"
+    suffix = posixpath.splitext(path)[1].lower()
     with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
         tmp.write(data)
         tmp.flush()

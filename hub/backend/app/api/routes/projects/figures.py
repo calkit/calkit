@@ -1,6 +1,6 @@
-"""Figure studio: a script written in the browser becomes a pipeline stage.
+"""Figure scripts: a script written in the browser becomes a pipeline stage.
 
-The studio runs Python in the browser so a figure can be iterated on with
+The figure editor runs Python in the browser so a figure can be iterated on with
 nothing installed, but a browser run is not a reproducible one. Saving is
 what makes it real: the script is committed, a stage is declared that reads
 the data and writes the figure, and an environment exists for the stage to
@@ -49,7 +49,7 @@ FIGURE_SUFFIXES = (
 )
 
 
-class StudioFigurePost(BaseModel):
+class FigureScriptPost(BaseModel):
     figure_path: str
     title: str
     description: str | None = None
@@ -70,7 +70,7 @@ class StudioFigurePost(BaseModel):
     message: str | None = None
 
 
-class StudioFigure(BaseModel):
+class FigureScriptResult(BaseModel):
     figure: Figure
     stage_name: str
     environment: str
@@ -203,15 +203,15 @@ def _create_python_env(
     return spec_path, env
 
 
-@router.post("/projects/{owner_name}/{project_name}/figures/studio")
-def post_project_studio_figure(
+@router.post("/projects/{owner_name}/{project_name}/figures/script")
+def post_project_figure_script(
     owner_name: str,
     project_name: str,
-    req: StudioFigurePost,
+    req: FigureScriptPost,
     current_user: CurrentUser,
     session: SessionDep,
-) -> StudioFigure:
-    """Commit a studio script as a stage that produces the figure.
+) -> FigureScriptResult:
+    """Commit a figure editor script as a stage that produces the figure.
 
     One commit carries the script, the stage, the figure entry, and the
     environment (created or amended), so the repo never holds a figure
@@ -310,7 +310,7 @@ def post_project_studio_figure(
     repo.git.add(script_path)
     if editing is not None and req.stage is not None:
         # Editing: the stage keeps its name and whatever else it declares;
-        # only what the studio owns changes
+        # only what the figure editor owns changes
         stage_name = req.stage
         stage_map: dict[str, Any] = dict(editing)
         stage_map["script_path"] = script_path
@@ -383,14 +383,14 @@ def post_project_studio_figure(
     repo.git.commit(["-m", message])
     repo.git.push(["origin", repo.active_branch.name])
     record_project_update(project, repo, session)
-    mixpanel.user_saved_studio_figure(
+    mixpanel.user_saved_figure_script(
         user=current_user,
         project=project,
         env_created=env_created,
         n_inputs=len(inputs),
         n_packages=len(packages),
     )
-    return StudioFigure(
+    return FigureScriptResult(
         figure=Figure(
             path=figure_path,
             title=entry["title"],

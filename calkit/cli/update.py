@@ -1356,7 +1356,9 @@ def update_dataset(
                     )
                 source = _ImportedFromGit(
                     git=_GitSource(
-                        repo_url=imported_from_git_url or "",
+                        repo_url=calkit.normalize_git_url(
+                            imported_from_git_url or ""
+                        ),
                         rev=imported_from_git_rev,
                         path=imported_from_git_path,
                     ),

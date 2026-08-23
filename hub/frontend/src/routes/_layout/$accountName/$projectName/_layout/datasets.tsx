@@ -32,7 +32,7 @@ import BrowseDatasets from "../../../../../components/Datasets/BrowseDatasets"
 import DatasetViewer from "../../../../../components/Datasets/DatasetViewer"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import NewDataset from "../../../../../components/Datasets/NewDataset"
-import FigureStudio from "../../../../../components/Figures/FigureStudio"
+import FigureEditor from "../../../../../components/Figures/FigureEditor"
 import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
@@ -220,8 +220,8 @@ const datasetsSearchSchema = z.object({
   source: z
     .enum(["primary", "upload", "enter", "url", "doi", "git_repo"])
     .optional(),
-  // Dataset the figure studio is open on, so the studio survives a refresh.
-  studio: z.string().optional(),
+  // Dataset the figure editor is open on, so the editor survives a refresh.
+  editor: z.string().optional(),
   // The "find a dataset on Calkit" browser.
   browse: z.boolean().optional(),
   // The dataset open in the viewer, by path.
@@ -248,7 +248,7 @@ function ProjectDataView() {
   const {
     new_dataset_open: newDatasetOpen,
     source,
-    studio: studioDataset,
+    editor: editorDataset,
     browse: browseOpen,
     view: viewPath,
   } = Route.useSearch()
@@ -257,8 +257,8 @@ function ProjectDataView() {
   const viewedDataset = datasets?.find((d) => d.path === viewPath) ?? null
   const setBrowseOpen = (open: boolean) =>
     navigate({ search: (prev) => ({ ...prev, browse: open || undefined }) })
-  const setStudioDataset = (path: string | undefined) =>
-    navigate({ search: (prev) => ({ ...prev, studio: path }) })
+  const setEditorDataset = (path: string | undefined) =>
+    navigate({ search: (prev) => ({ ...prev, editor: path }) })
   // Which figures each dataset feeds: a figure's stage lists its concrete
   // inputs in dvc.yaml, so a dataset path (or a file under a dataset
   // folder) among those deps ties the two together.
@@ -380,13 +380,13 @@ function ProjectDataView() {
         ) : null}
         {userHasWriteAccess ? (
           <>
-            {studioDataset ? (
-              <FigureStudio
+            {editorDataset ? (
+              <FigureEditor
                 isOpen
-                onClose={() => setStudioDataset(undefined)}
+                onClose={() => setEditorDataset(undefined)}
                 ownerName={accountName}
                 projectName={projectName}
-                initialDataset={studioDataset}
+                initialDataset={editorDataset}
               />
             ) : null}
           </>
@@ -487,10 +487,10 @@ function ProjectDataView() {
                           size="xs"
                           variant="primary"
                           onClick={() => {
-                            mixpanel.track("Opened figure studio", {
+                            mixpanel.track("Opened figure editor", {
                               source: "dataset-card",
                             })
-                            setStudioDataset(dataset.path)
+                            setEditorDataset(dataset.path)
                           }}
                         >
                           New figure

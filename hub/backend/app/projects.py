@@ -36,6 +36,7 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
+import app.dvc
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     normalize_artifact_path,
@@ -655,32 +656,6 @@ def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
     return ck_info
 
 
-def drop_stale_lock_stages(
-    dvc_lock: dict[str, Any], dvc_yaml: dict[str, Any]
-) -> dict[str, Any]:
-    """The lock with entries for stages no longer in dvc.yaml removed.
-
-    A stage that was renamed or deleted leaves its entry behind in
-    dvc.lock, and when it wrote the same output path as a live stage the
-    two disagree about the file's hash. DVC resolves the path through the
-    live stage, and so must the hub, or it looks for an object that was
-    never pushed. A `foreach` stage locks as ``name@key``, which counts as
-    ``name`` being present.
-    """
-    stages = dvc_lock.get("stages") if isinstance(dvc_lock, dict) else None
-    live = dvc_yaml.get("stages") if isinstance(dvc_yaml, dict) else None
-    if not isinstance(stages, dict) or not isinstance(live, dict):
-        return dvc_lock
-    kept = {
-        name: stage
-        for name, stage in stages.items()
-        if name in live or name.split("@", 1)[0] in live
-    }
-    if len(kept) == len(stages):
-        return dvc_lock
-    return {**dvc_lock, "stages": kept}
-
-
 def get_ck_info_and_dvc_outs_from_tree(
     project: Project,
     tree: RepoTree,
@@ -705,7 +680,7 @@ def get_ck_info_and_dvc_outs_from_tree(
     ck_bytes = (
         tree.read_bytes("calkit.yaml") if tree.is_file("calkit.yaml") else b""
     )
-    dvc_bytes = (
+    dvc_lock_bytes = (
         tree.read_bytes("dvc.lock") if tree.is_file("dvc.lock") else b""
     )
     dvc_yaml_bytes = (
@@ -724,7 +699,7 @@ def get_ck_info_and_dvc_outs_from_tree(
     h.update(project_name.encode())
     h.update(b"\0")
     h.update(hashlib.sha1(ck_bytes).digest())
-    h.update(hashlib.sha1(dvc_bytes).digest())
+    h.update(hashlib.sha1(dvc_lock_bytes).digest())
     h.update(hashlib.sha1(zip_bytes).digest())
     cache_key = h.hexdigest()
     now = time.monotonic()
@@ -754,10 +729,10 @@ def get_ck_info_and_dvc_outs_from_tree(
     if not isinstance(ck_info, dict):
         ck_info = {}
     normalize_ck_info_paths(ck_info)
-    dvc_lock = (_yaml_load(dvc_bytes) or {}) if dvc_bytes else {}
+    dvc_lock = (_yaml_load(dvc_lock_bytes) or {}) if dvc_lock_bytes else {}
     if dvc_yaml_bytes:
         try:
-            dvc_lock = drop_stale_lock_stages(
+            dvc_lock = app.dvc.drop_stale_lock_stages(
                 dvc_lock, _yaml_load(dvc_yaml_bytes) or {}
             )
         except Exception as e:
@@ -783,34 +758,6 @@ def get_ck_info_and_dvc_outs_from_tree(
         if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
             _ck_dvc_cache.popitem(last=False)
     return result
-
-
-def dvc_object_fpath(
-    owner_name: str,
-    project_name: str,
-    dvc_out: dict[str, Any],
-    fs: Any,
-) -> str | None:
-    """Where a DVC output's bytes sit in storage, or None if not pushed.
-
-    An output imported from another Calkit project is a pointer whose
-    ``remote`` names that project (``calkit:owner/project``) and is
-    ``push: false``, so its bytes only ever live in the source project's
-    storage. That is where such a lookup goes; anything else is looked up
-    in this project's storage.
-    """
-    md5 = dvc_out.get("md5")
-    if not md5:
-        return None
-    remote = str(dvc_out.get("remote") or "")
-    if remote.startswith("calkit:") and "/" in remote:
-        owner_name, project_name = remote[len("calkit:") :].split("/", 1)
-    return get_data_fpath_for_md5(
-        owner_name=owner_name,
-        project_name=project_name,
-        md5=md5,
-        fs=fs,
-    )
 
 
 def get_contents_from_tree(
@@ -1145,7 +1092,7 @@ def get_contents_from_tree(
         content = None
         url = None
         if md5:
-            fp = dvc_object_fpath(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
                 dvc_out=dvc_out,
@@ -1191,7 +1138,7 @@ def get_contents_from_tree(
             else:
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
-            fp = dvc_object_fpath(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
                 dvc_out=dvc_out,

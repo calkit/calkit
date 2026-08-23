@@ -735,13 +735,16 @@ def test_xr_markdown(tmp_dir):
     with open("README.md", "w") as f:
         f.write(
             "# Demo\n\n"
-            "```python calkit stage name=demo\n"
+            "```python calkit stage name=demo outputs=[results.json]\n"
             "import json\n\n"
             'print(json.dumps({"hello": "markdown"}))\n'
+            'json.dump({"n": 401}, open("results.json", "w"))\n'
             "```\n\n"
             "```text calkit output stage=demo\n"
             "stale\n"
-            "```\n"
+            "```\n\n"
+            "There are <!-- calkit value key=n path=results.json -->?"
+            "<!-- /calkit value --> samples.\n"
         )
     result = subprocess.run(
         ["calkit", "xr", "README.md"], capture_output=True, text=True
@@ -760,6 +763,11 @@ def test_xr_markdown(tmp_dir):
     assert "```python calkit stage name=demo environment=readme\n" in readme
     assert '{"hello": "markdown"}\n```' in readme
     assert "stale" not in readme
+    # Values in the prose come from the results file the stage wrote
+    assert (
+        "There are <!-- calkit value key=n path=results.json -->401"
+        "<!-- /calkit value --> samples." in readme
+    )
     assert ck_info["environments"]["readme"]["kind"] == "uv"
     assert os.path.isfile(".calkit/envs/readme/pyproject.toml")
     # Writing the output back changed a file the stage depends on, which

@@ -983,18 +983,18 @@ def check_all_in_pipeline(
     # blocks declare do, so expand before looking for environments to check.
     import calkit.markdown
 
-    md_targets = calkit.markdown.get_markdown_stage_targets(ck_info)
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
     ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
-        # A target naming a Markdown file (or its stage) covers every stage
-        # it declares, which are named '<stage>/<block>'
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
         prefixes = [
-            md_targets[t][0] + calkit.markdown.STAGE_NAME_SEPARATOR
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
             for t in targets
-            if t in md_targets
+            if t in md_stages
         ]
         stages = {
             k: v

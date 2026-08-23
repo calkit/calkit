@@ -62,7 +62,9 @@ y = 2.0 * x**2 + rng.normal(scale=5.0, size=x.size)
 
 Then fit it and write it out, still in the same stage:
 
-```python calkit stage name=analysis outputs=[{path: data/data.csv, storage: git}]
+```python calkit stage name=analysis outputs=[{path: data/data.csv, storage: git}, {path: results/fit.json, storage: git}]
+import json
+
 coeffs = np.polyfit(x, y, deg=2)
 print(f"fitted quadratic coefficient: {coeffs[0]:.3f}")
 print(f"n points: {x.size}")
@@ -70,6 +72,9 @@ print(f"n points: {x.size}")
 np.savetxt(
     "data/data.csv", np.column_stack([x, y]), delimiter=",", header="x,y"
 )
+os.makedirs("results", exist_ok=True)
+with open("results/fit.json", "w") as f:
+    json.dump({"coeffs": coeffs.tolist(), "n": int(x.size)}, f)
 ```
 
 Standard output from a run is written back into the block below, so what
@@ -78,6 +83,21 @@ the README claims the code prints is what it actually printed:
 ```text calkit output stage=analysis
 fitted quadratic coefficient: 1.974
 n points: 50
+```
+
+Numbers in the prose can be kept current too.
+The stage above writes its results to `results/fit.json`, and this
+sentence refers to them by key, between a pair of markers that are
+invisible when rendered:
+the fit has a leading coefficient of <!-- calkit value key=coeffs.0 path=results/fit.json format="{:.3f}" -->1.974<!-- /calkit value -->
+from <!-- calkit value key=n path=results/fit.json -->50<!-- /calkit value --> points.
+After every run, the text between each pair is rewritten from the
+results file.
+In the source, that sentence reads:
+
+```md
+the fit has a leading coefficient of <!-- calkit value key=coeffs.0 path=results/fit.json format="{:.3f}" -->1.974<!-- /calkit value -->
+from <!-- calkit value key=n path=results/fit.json -->50<!-- /calkit value --> points.
 ```
 
 ## Plotting

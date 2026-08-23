@@ -1267,3 +1267,113 @@ def test_read_markdown_and_get_environments(tmp_path, monkeypatch):
     # A default environment means nothing needs detecting
     envs = get_environments(doc, default_env="declared")
     assert envs.assignments == {} and envs.detected == {}
+
+
+def test_values(tmp_path, monkeypatch):
+    from calkit.markdown import (
+        MarkdownParseError,
+        extract_values,
+        format_value,
+        parse_markdown,
+        set_values,
+    )
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "results.json").write_text(
+        '{"rms": 0.29330001, "n": 401, "fit": {"coeffs": [1.974, 0.1]}, '
+        '"ok": true, "label": "damped"}'
+    )
+    (tmp_path / "other.json").write_text('{"n": 7}')
+    text = (
+        "# Title\n\n"
+        "<!-- calkit values path=results.json -->\n\n"
+        'The RMS is <!-- calkit value key=rms format="{:.4f}" -->?'
+        "<!-- /calkit value --> over <!-- calkit value key=n -->"
+        "<!-- /calkit value --> samples.\n\n"
+        "| quantity | value |\n| --- | --- |\n"
+        "| leading coefficient | <!-- calkit value key=fit.coeffs.0 -->"
+        "stale<!-- /calkit value --> |\n\n"
+        "Elsewhere: <!-- calkit value key=n path=other.json -->"
+        "<!-- /calkit value -->, <!-- calkit value key=ok --><!-- /calkit value -->"
+        ", <!-- calkit value key=label --><!-- /calkit value -->.\n\n"
+        "````md\n"
+        "<!-- calkit value key=rms -->example<!-- /calkit value -->\n"
+        "````\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    values = extract_values(text, "README.md")
+    # Markers inside fenced code are examples, not values
+    assert [(v.key, v.path, v.text, v.format, v.line) for v in values] == [
+        ("rms", "results.json", "?", "{:.4f}", 5),
+        ("n", "results.json", "", None, 5),
+        ("fit.coeffs.0", "results.json", "stale", None, 9),
+        ("n", "other.json", "", None, 11),
+        ("ok", "results.json", "", None, 11),
+        ("label", "results.json", "", None, 11),
+    ]
+    # The markers are invisible to the block parser
+    assert [b.name for b in parse_markdown(text)] == ["a"]
+    new, changed = set_values(text, "README.md")
+    assert changed
+    assert (
+        'The RMS is <!-- calkit value key=rms format="{:.4f}" -->0.2933'
+        "<!-- /calkit value --> over <!-- calkit value key=n -->401"
+        "<!-- /calkit value --> samples."
+    ) in new
+    assert (
+        "| leading coefficient | <!-- calkit value key=fit.coeffs.0 -->1.974"
+        "<!-- /calkit value --> |"
+    ) in new
+    assert (
+        "Elsewhere: <!-- calkit value key=n path=other.json -->7"
+        "<!-- /calkit value -->, <!-- calkit value key=ok -->true"
+        "<!-- /calkit value -->, <!-- calkit value key=label -->damped"
+        "<!-- /calkit value -->."
+    ) in new
+    assert "<!-- calkit value key=rms -->example<!-- /calkit value -->" in new
+    # Idempotent once in line with the results
+    assert set_values(new, "README.md") == (new, False)
+    # Without a format, numbers read exactly as the results file has them
+    assert format_value(0.29330001) == "0.29330001"
+    assert format_value(3) == "3"
+    assert format_value(None) == "null"
+    assert format_value(1234.5, "{value:,.1f}") == "1,234.5"
+    # Errors name the line
+    marker = "<!-- calkit value {} -->x<!-- /calkit value -->"
+    for bad, match in [
+        (marker.format(""), "must name a key"),
+        (marker.format("key=rms"), "names no results file"),
+        (marker.format("key=nope path=results.json"), "has no key 'nope'"),
+        (marker.format("key=rms path=missing.json"), "does not exist"),
+        (marker.format("key=rms path=results.json nope=1"), "unrecognized"),
+        (
+            marker.format('key=label path=results.json format="{:.2f}"'),
+            "Could not format",
+        ),
+        ("<!-- calkit values path=results.json format=x -->", "only a 'path'"),
+    ]:
+        with pytest.raises(MarkdownParseError, match=match):
+            set_values("Intro.\n\n" + bad + "\n", "README.md")
+    # A value annotation on a fence is a mistake, not a block
+    with pytest.raises(MarkdownParseError, match="inline marker"):
+        parse_markdown("```python calkit value key=rms\npass\n```\n")
+
+
+def test_expand_ck_info_one_stage_per_file(tmp_path, monkeypatch):
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"},
+                "again": {"kind": "markdown", "target_path": "README.md"},
+            }
+        }
+    }
+    # Two stages reading one file would fight over its derived files
+    with pytest.raises(ValueError, match="another markdown stage already"):
+        expand_ck_info(ck_info)

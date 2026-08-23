@@ -1976,19 +1976,18 @@ def translate_run_targets(
         sp_map[sp] = sp_cfg
         sp_map[Path(sp).name] = sp_cfg
     # A markdown stage stands in for the stages its blocks declare, so a
-    # target naming the file has to become the stages DVC actually knows
-    # about. Done before subproject handling because a Markdown path
-    # contains no ':' and so can't be a subproject shorthand.
-    md_targets = calkit.markdown.get_markdown_stage_targets(ck_info)
-    if md_targets:
+    # target naming it has to become the stages DVC actually knows about.
+    # Done before subproject handling because a Markdown path contains no
+    # ':' and so can't be a subproject shorthand.
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    if md_stages:
         expanded: list[str] = []
         for target in targets:
-            match = md_targets.get(target)
-            if match is None:
+            md_path = md_stages.get(target)
+            if md_path is None:
                 expanded.append(target)
                 continue
-            md_stage_name, md_path = match
-            expanded += calkit.markdown.get_stage_names(md_path, md_stage_name)
+            expanded += calkit.markdown.get_stage_names(md_path, target)
         targets = expanded
     parent_targets: list[str] = []
     isolated_sp_targets: list[tuple[str, str | None]] = []

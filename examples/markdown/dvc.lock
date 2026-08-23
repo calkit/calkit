@@ -13,8 +13,8 @@ stages:
       size: 90979
     - path: .calkit/markdown/README.md/analysis.py
       hash: md5
-      md5: ef6274d4d1082f7a53ec12e7bfbc306f
-      size: 390
+      md5: d591454d8c95ee256a74b17e22e3d5f5
+      size: 546
     - path: .calkit/markdown/outputs/README.md/analysis.txt
       hash: md5
       md5: 91168b0969537d0b481356f4826a275e
@@ -24,6 +24,10 @@ stages:
       hash: md5
       md5: 08fdae643712833dd7b1312e57037833
       size: 2509
+    - path: results/fit.json
+      hash: md5
+      md5: f3b321b7601658cd1a3edd05945391f5
+      size: 83
   README.md/figure:
     cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/figure.py
     deps:

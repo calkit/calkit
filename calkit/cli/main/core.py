@@ -1505,22 +1505,22 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
     if not stdout_by_stage:
         return []
     ck_info = calkit.load_calkit_info()
-    md_targets = calkit.markdown.get_markdown_stage_targets(ck_info)
-    if not md_targets:
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    if not md_stages:
         return []
     sep = calkit.markdown.STAGE_NAME_SEPARATOR
-    # Group by Markdown file so each is read and written once
-    by_path: dict[str, dict[str, str]] = {}
+    # Group by Markdown stage so each file is read and written once
+    by_stage: dict[str, dict[str, str]] = {}
     for dvc_stage_name, output in stdout_by_stage.items():
         if sep not in dvc_stage_name:
             continue
         md_stage_name, block_name = dvc_stage_name.rsplit(sep, 1)
-        match = md_targets.get(md_stage_name)
-        if match is None:
+        if md_stage_name not in md_stages:
             continue
-        by_path.setdefault(match[1], {})[block_name] = output
+        by_stage.setdefault(md_stage_name, {})[block_name] = output
     changed_stages = []
-    for md_path, outputs in by_path.items():
+    for md_stage_name, outputs in by_stage.items():
+        md_path = md_stages[md_stage_name]
         if not os.path.isfile(md_path):
             continue
         with open(md_path, encoding="utf-8") as f:
@@ -1545,12 +1545,35 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
                 with open(cache_path, encoding="utf-8") as f:
                     before[block_name] = f.read()
         cache_paths = calkit.markdown.write_output_caches(cached, md_path)
-        md_stage_name = md_targets[md_path][0]
         for block_name, cache_path in cache_paths.items():
             with open(cache_path, encoding="utf-8") as f:
                 if f.read() != before.get(block_name):
                     changed_stages.append(md_stage_name + sep + block_name)
     return changed_stages
+
+
+def _inject_markdown_values() -> list[str]:
+    """Bring each Markdown file's value markers into line with its results.
+
+    Done after every run rather than only for stages that ran: the
+    results files are tracked outputs, so whatever they hold is what the
+    prose should say. Returns the paths of the files that changed.
+    """
+    import calkit.markdown
+
+    ck_info = calkit.load_calkit_info()
+    changed_paths = []
+    for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
+        if not os.path.isfile(md_path):
+            continue
+        with open(md_path, encoding="utf-8") as f:
+            text = f.read()
+        new_text, changed = calkit.markdown.set_values(text, md_path)
+        if changed:
+            with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(new_text)
+            changed_paths.append(md_path)
+    return changed_paths
 
 
 def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
@@ -2646,6 +2669,12 @@ def run(
         )
         if res_commit != 0:
             warn("Failed to record markdown output in dvc.lock")
+    # ...and bring any values the Markdown shows into line with the
+    # results files the stages produced
+    try:
+        _inject_markdown_values()
+    except Exception as e:
+        warn(f"Failed to write values into markdown: {e}")
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

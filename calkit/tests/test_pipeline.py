@@ -2660,7 +2660,8 @@ def test_translate_run_targets_markdown(tmp_dir):
 
 
 def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
-    # A markdown stage keyed by a name can be targeted either way.
+    # A markdown stage is addressed by its name like any other kind; the
+    # file's path is not an alias for it
     from calkit.pipeline import translate_run_targets
 
     with open("guide.md", "w") as f:
@@ -2672,9 +2673,10 @@ def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
             "stages": {"docs": {"kind": "markdown", "target_path": "guide.md"}}
         }
     }
-    for target in ["docs", "guide.md"]:
-        targets, _ = translate_run_targets([target], ck_info=ck_info)
-        assert targets == ["docs/one"]
+    targets, _ = translate_run_targets(["docs"], ck_info=ck_info)
+    assert targets == ["docs/one"]
+    targets, _ = translate_run_targets(["guide.md"], ck_info=ck_info)
+    assert targets == ["guide.md"]
 
 
 def test_sync_markdown_writes_environments(tmp_dir):

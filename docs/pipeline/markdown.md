@@ -227,14 +227,50 @@ stage in `calkit.yaml` apply to every stage the file declares
 `outputs`, `iterate_over`, and `wdir` are not supported on the file as a
 whole; declare them on the blocks.
 
+## Values
+
+Numbers in the prose can be kept current too, the way
+[`json-to-latex`](index.md#json-to-latex) does for LaTeX.
+A stage writes its results to a JSON file it declares as an output:
+
+````md
+```python calkit stage name=analysis environment=py outputs=[results.json]
+json.dump({"rms": rms, "n": t.size}, open("results.json", "w"))
+```
+````
+
+and the prose refers to values in it by key, between a pair of markers
+that are invisible when rendered:
+
+```md
+The RMS is <!-- calkit value key=rms path=results.json format="{:.4f}" -->0.2933<!-- /calkit value -->
+over <!-- calkit value key=n path=results.json -->401<!-- /calkit value --> samples.
+```
+
+After every run, the text between each pair is rewritten from the results
+file, so the file says what was actually computed.
+Keys can be dotted to reach into nested objects and lists, e.g.,
+`fit.coeffs.0`.
+`format` is a Python format string applied to the value,
+e.g., `format="{:.2%}"` or `format="{value:,}"`;
+without one, numbers read exactly as the results file has them.
+A `calkit values path=results.json` directive sets the results file for
+every marker after it, so a file drawing on one results file needn't name
+it each time.
+Markers inside fenced code are examples and are left alone.
+
 ## Running
 
-Name the file, its stage, or one of the stages it declares:
+Assuming you named your stage `README.md`, as `calkit xr` does,
+name the stage or one of the stages it declares:
 
 ```sh
 calkit run README.md
 calkit run README.md/analysis
 ```
+
+A stage keyed by some other name is run by that name, like any other
+stage kind.
 
 Stages depend on the scripts extracted from their blocks
 (written under `.calkit/markdown/`, which is Git-ignored),

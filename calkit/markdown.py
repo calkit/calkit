@@ -30,11 +30,19 @@ from typing import Any, Literal
 import ruamel.yaml
 from pydantic import BaseModel
 
-DirectiveKind = Literal["stage", "environment", "output"]
+DirectiveKind = Literal["stage", "environment", "output", "value", "values"]
 # ``output`` blocks are written to, never read: a stage's extracted script
 # must not include what that stage printed, or injecting output would make
 # the stage stale, which would rerun it, which would inject again.
-DIRECTIVE_KINDS: tuple[str, ...] = ("stage", "environment", "output")
+# ``value`` and ``values`` are inline markers rather than block
+# annotations; see ``set_values``.
+DIRECTIVE_KINDS: tuple[str, ...] = (
+    "stage",
+    "environment",
+    "output",
+    "value",
+    "values",
+)
 BlockSource = Literal["fence", "list"]
 
 # A fence is at least three backticks or tildes, optionally indented. Only
@@ -202,8 +210,12 @@ def parse_annotation(text: str) -> tuple[DirectiveKind, dict[str, Any]] | None:
         kind = "stage"
     elif parts[0] == "environment":
         kind = "environment"
-    else:
+    elif parts[0] == "output":
         kind = "output"
+    elif parts[0] == "value":
+        kind = "value"
+    else:
+        kind = "values"
     return kind, parse_attrs(parts[1] if len(parts) > 1 else "")
 
 
@@ -309,6 +321,13 @@ def parse_markdown(text: str, path: str | None = None) -> list[MarkdownBlock]:
                     break
                 body.append(lines[j][indent:] if indent else lines[j])
                 j += 1
+            if annotation is not None and annotation[0] in ("value", "values"):
+                raise MarkdownParseError(
+                    f"'calkit {annotation[0]}' is an inline marker, not a "
+                    "code block annotation",
+                    path=path,
+                    line=i + 1,
+                )
             if annotation is not None or pending is not None:
                 try:
                     kind, attrs = _merge(pending, annotation)
@@ -356,7 +375,9 @@ def parse_markdown(text: str, path: str | None = None) -> list[MarkdownBlock]:
             annotation, end = _read_comment_directive(lines, i)
         except ValueError as e:
             raise MarkdownParseError(str(e), path=path, line=i + 1)
-        if annotation is not None:
+        # Value markers are read by ``set_values``, not here; they live in
+        # prose and attach to nothing
+        if annotation is not None and annotation[0] not in ("value", "values"):
             pending = annotation
             pending_line = i + 1
         # Whatever a comment contains is commented out, fences included,
@@ -729,27 +750,24 @@ def get_stage_names(markdown_path: str, stage_name: str) -> list[str]:
     return [stage_name + STAGE_NAME_SEPARATOR + name for name in specs]
 
 
-def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
-    """Map what a user might type at a markdown stage to that stage.
+def get_markdown_stages(ck_info: dict) -> dict[str, str]:
+    """Map each markdown stage's name to the Markdown file it reads.
 
-    Keys are both the stage's name and the Markdown file's path, so a
-    stage keyed by something other than its path can be named either way.
-    Values are ``(stage_name, markdown_path)``.
+    A stage is addressed by its name, like any other kind; ``calkit xr``
+    keys the stage by the file's path, which is what makes ``calkit run
+    README.md`` work.
     """
-    targets: dict[str, tuple[str, str]] = {}
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if not isinstance(stages, dict):
-        return targets
-    for name, cfg in stages.items():
-        if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
-            continue
-        if not cfg.get("target_path"):
-            # Not a valid stage; expansion reports that properly
-            continue
-        path = Path(str(cfg["target_path"])).as_posix()
-        targets[name] = (name, path)
-        targets[path] = (name, path)
-    return targets
+        return {}
+    return {
+        name: Path(str(cfg["target_path"])).as_posix()
+        for name, cfg in stages.items()
+        if isinstance(cfg, dict)
+        and cfg.get("kind") == "markdown"
+        # Not a valid stage otherwise; expansion reports that properly
+        and cfg.get("target_path")
+    }
 
 
 class MarkdownDocument(BaseModel):
@@ -1249,6 +1267,11 @@ def expand_ck_info(
                 f"Markdown stage '{stage_name}' is not defined properly: {e}"
             )
         md_path = md_stage.markdown_path
+        if md_path in result.markdown_paths:
+            raise ValueError(
+                f"Markdown stage '{stage_name}' reads '{md_path}', which "
+                "another markdown stage already does"
+            )
         result.markdown_paths.append(md_path)
         read_path = os.path.join(wdir, md_path) if wdir else md_path
         if not os.path.isfile(read_path):
@@ -2328,3 +2351,231 @@ def set_output_blocks(text: str, outputs: dict[str, str]) -> tuple[str, bool]:
             out_lines.append(close_line)
         i = j + 1
     return "".join(out_lines), changed
+
+
+# A value marker wraps the text it keeps current, so the file reads as
+# ordinary prose wherever it is rendered and the number is still there to
+# be checked. Both comments sit on one line with the value between them.
+_VALUE_RE = re.compile(
+    r"<!--\s*calkit value\b(?P<attrs>.*?)-->"
+    r"(?P<text>.*?)"
+    r"<!--\s*/calkit value\s*-->"
+)
+_VALUES_RE = re.compile(r"<!--\s*calkit values\b(?P<attrs>.*?)-->")
+
+
+@dataclass
+class MarkdownValue:
+    """One value a Markdown file shows from a JSON results file."""
+
+    key: str
+    path: str
+    # What the file currently shows for it
+    text: str
+    format: str | None = None
+    # 1-indexed line the marker is on
+    line: int = 0
+
+
+def _value_attrs(attrs_text: str, path: str | None, line: int) -> dict:
+    try:
+        return parse_attrs(attrs_text)
+    except ValueError as e:
+        raise MarkdownParseError(str(e), path=path, line=line)
+
+
+def extract_values(text: str, markdown_path: str) -> list[MarkdownValue]:
+    """Find the value markers in Markdown text, in document order.
+
+    A ``calkit values path=...`` directive sets the results file for the
+    markers after it, so a file drawing on one results file needn't name
+    it on every value. Markers inside fenced code are examples, not
+    values, and are left alone.
+    """
+    path = Path(markdown_path).as_posix()
+    values: list[MarkdownValue] = []
+    default_path: str | None = None
+    fence: str | None = None
+    for i, line in enumerate(text.splitlines()):
+        fm = _FENCE_RE.match(line)
+        if fence is not None:
+            if (
+                fm is not None
+                and fm.group("fence")[0] == fence[0]
+                and len(fm.group("fence")) >= len(fence)
+                and not fm.group("info").strip()
+            ):
+                fence = None
+            continue
+        if fm is not None:
+            fence = fm.group("fence")
+            continue
+        for dm in _VALUES_RE.finditer(line):
+            attrs = _value_attrs(dm.group("attrs"), path, i + 1)
+            if set(attrs) != {"path"}:
+                raise MarkdownParseError(
+                    "'calkit values' takes only a 'path', e.g. "
+                    "'calkit values path=results.json'",
+                    path=path,
+                    line=i + 1,
+                )
+            default_path = Path(str(attrs["path"])).as_posix()
+        for m in _VALUE_RE.finditer(line):
+            attrs = _value_attrs(m.group("attrs"), path, i + 1)
+            key = attrs.pop("key", None)
+            if key is None:
+                raise MarkdownParseError(
+                    "A value marker must name a key, e.g. "
+                    "'calkit value key=rms'",
+                    path=path,
+                    line=i + 1,
+                )
+            results_path = attrs.pop("path", default_path)
+            if results_path is None:
+                raise MarkdownParseError(
+                    f"Value '{key}' names no results file; set 'path=' on "
+                    "the marker or declare one with 'calkit values "
+                    "path=...' above it",
+                    path=path,
+                    line=i + 1,
+                )
+            fmt = attrs.pop("format", None)
+            if attrs:
+                raise MarkdownParseError(
+                    f"Value '{key}' has unrecognized attribute(s): "
+                    f"{', '.join(sorted(attrs))}",
+                    path=path,
+                    line=i + 1,
+                )
+            values.append(
+                MarkdownValue(
+                    key=str(key),
+                    path=Path(str(results_path)).as_posix(),
+                    text=m.group("text"),
+                    format=None if fmt is None else str(fmt),
+                    line=i + 1,
+                )
+            )
+    return values
+
+
+def lookup_value(data: Any, key: str) -> Any:
+    """Return the value at a dotted key, e.g. ``fit.coeffs.0``."""
+    value = data
+    for part in key.split("."):
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        elif isinstance(value, list) and part.lstrip("-").isdigit():
+            value = value[int(part)]
+        else:
+            raise KeyError(key)
+    return value
+
+
+def format_value(value: Any, fmt: str | None = None) -> str:
+    """Render a value the way it should read in prose.
+
+    ``fmt`` is a Python format string applied to the value, e.g.
+    ``{:.3f}`` or ``{value:,}``. Without one, a number is written as
+    JSON would write it, so the file shows exactly what the results file
+    holds.
+    """
+    import json
+
+    if fmt is not None:
+        return fmt.format(value, value=value)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value)
+
+
+def set_values(
+    text: str, markdown_path: str, wdir: str | None = None
+) -> tuple[str, bool]:
+    """Rewrite each value marker's text from its results file.
+
+    The results files are outputs of stages, so they are the truth about
+    what was computed; the prose is brought into line with them rather
+    than the other way round. Returns the new text and whether anything
+    changed. A missing file or key raises ``MarkdownParseError`` naming
+    the line.
+    """
+    import json
+
+    values = extract_values(text, markdown_path)
+    if not values:
+        return text, False
+    path = Path(markdown_path).as_posix()
+    data_by_path: dict[str, Any] = {}
+    for value in values:
+        if value.path in data_by_path:
+            continue
+        fpath = os.path.join(wdir, value.path) if wdir else value.path
+        if not os.path.isfile(fpath):
+            raise MarkdownParseError(
+                f"Results file '{value.path}' for value '{value.key}' does "
+                "not exist; is it an output of a stage that has run?",
+                path=path,
+                line=value.line,
+            )
+        with open(fpath, encoding="utf-8") as f:
+            try:
+                data_by_path[value.path] = json.load(f)
+            except json.JSONDecodeError as e:
+                raise MarkdownParseError(
+                    f"Results file '{value.path}' is not valid JSON: {e}",
+                    path=path,
+                    line=value.line,
+                )
+    rendered = []
+    for value in values:
+        try:
+            raw = lookup_value(data_by_path[value.path], value.key)
+        except KeyError:
+            raise MarkdownParseError(
+                f"Results file '{value.path}' has no key '{value.key}'",
+                path=path,
+                line=value.line,
+            )
+        try:
+            rendered.append(format_value(raw, value.format))
+        except Exception as e:
+            raise MarkdownParseError(
+                f"Could not format value '{value.key}' with "
+                f"'{value.format}': {e}",
+                path=path,
+                line=value.line,
+            )
+    # Markers were found outside fences in document order, so walking the
+    # lines again the same way pairs each match with its rendering
+    lines = text.splitlines(keepends=True)
+    changed = False
+    n = 0
+    fence: str | None = None
+    for i, line in enumerate(lines):
+        bare = line.rstrip("\r\n")
+        fm = _FENCE_RE.match(bare)
+        if fence is not None:
+            if (
+                fm is not None
+                and fm.group("fence")[0] == fence[0]
+                and len(fm.group("fence")) >= len(fence)
+                and not fm.group("info").strip()
+            ):
+                fence = None
+            continue
+        if fm is not None:
+            fence = fm.group("fence")
+            continue
+        matches = list(_VALUE_RE.finditer(bare))
+        if not matches:
+            continue
+        # Replace from the right so earlier offsets stay valid
+        for m in reversed(matches):
+            new = rendered[n + matches.index(m)]
+            if new != m.group("text"):
+                bare = bare[: m.start("text")] + new + bare[m.end("text") :]
+                changed = True
+        n += len(matches)
+        lines[i] = bare + line[len(line.rstrip("\r\n")) :]
+    return "".join(lines), changed

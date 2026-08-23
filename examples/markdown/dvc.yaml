@@ -10,6 +10,9 @@ stages:
       - data/data.csv:
           cache: false
           persist: false
+      - results/fit.json:
+          cache: false
+          persist: false
     desc: Automatically generated from the 'README.md/analysis' stage in
       calkit.yaml. Changes made here will be overwritten.
   README.md/figure:

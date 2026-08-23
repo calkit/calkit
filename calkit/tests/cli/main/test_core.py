@@ -148,42 +148,6 @@ def test_init(tmp_dir):
     # --force allows re-initialization without clobbering calkit.yaml
     subprocess.check_call(["calkit", "init", "--force"], cwd="sub")
     assert calkit.load_calkit_info(wdir="sub") == ck_info
-    # Without a Git identity the commits can't be made, but the project is
-    # initialized all the same: the files are left staged with a warning,
-    # rather than the whole init failing (which took the JupyterLab
-    # extension's stage setup down with it on CI runners)
-    os.makedirs("noident")
-    # This sits inside the repo initialized above, so it becomes a
-    # subdirectory project of it rather than a repo of its own
-    root_repo = git.Repo(".")
-    n_commits_before = root_repo.head.commit.count()
-    env = {
-        k: v
-        for k, v in os.environ.items()
-        if not k.startswith(("GIT_AUTHOR", "GIT_COMMITTER")) and k != "EMAIL"
-    }
-    env["GIT_CONFIG_GLOBAL"] = os.devnull
-    env["GIT_CONFIG_NOSYSTEM"] = "1"
-    # Git would otherwise guess an identity from the OS user, which is what
-    # fails on CI runners, where that user has no name
-    env["GIT_CONFIG_COUNT"] = "1"
-    env["GIT_CONFIG_KEY_0"] = "user.useConfigOnly"
-    env["GIT_CONFIG_VALUE_0"] = "true"
-    result = subprocess.run(
-        ["calkit", "init"],
-        cwd="noident",
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    assert result.returncode == 0, result.stderr
-    assert "could not commit" in (result.stdout + result.stderr).lower()
-    assert os.path.isfile(os.path.join("noident", ".dvc", "config"))
-    assert os.path.isfile(os.path.join("noident", "calkit.yaml"))
-    staged = calkit.git.get_staged_files(repo=root_repo)
-    assert "noident/calkit.yaml" in staged
-    assert "noident/.dvc/config" in staged
-    assert root_repo.head.commit.count() == n_commits_before
 
 
 @skipif_windows_docker

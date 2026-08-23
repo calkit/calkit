@@ -6,12 +6,12 @@ import re
 import warnings
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import typer
 from pydantic import BaseModel, Field, computed_field, field_validator
 
 import calkit
-import calkit.markdown
 from calkit.models.iteration import expand_project_parameters
 from calkit.models.pipeline import (
     InputsFromStageOutputs,
@@ -657,6 +657,7 @@ def get_status(
     check pipeline environments, then query DVC for out-of-date stages.
     """
     import calkit.environments
+    import calkit.markdown
 
     prev_cwd = os.getcwd()
     if wdir is not None:
@@ -667,7 +668,7 @@ def get_status(
         has_pipeline = bool(ck_info.get("pipeline", {}).get("stages", {}))
         has_pipeline = has_pipeline or os.path.isfile("dvc.yaml")
         has_subprojects = bool(ck_info.get("subprojects"))
-        result = {
+        result: dict[str, Any] = {
             "has_pipeline": has_pipeline or has_subprojects,
             "environment_checks": {},
             "cleaned_notebooks": [],
@@ -1196,6 +1197,8 @@ def sync_markdown(
     environment declared in Markdown has to be in ``calkit.yaml`` before
     anything tries to create or enter it.
     """
+    import calkit.markdown
+
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     markdown = calkit.markdown.expand_ck_info(ck_info, wdir=wdir)
@@ -1219,6 +1222,8 @@ def _write_markdown_environments(
 
     Returns True if ``calkit.yaml`` was modified.
     """
+    import calkit.markdown
+
     ck_yaml_path = os.path.join(wdir, "calkit.yaml") if wdir else "calkit.yaml"
     if not os.path.isfile(ck_yaml_path):
         return False
@@ -1236,6 +1241,17 @@ def _write_markdown_environments(
             continue
         envs[env_name] = env
         changed = True
+    # An environment a file declared on an earlier compile and no longer
+    # does---renamed, or removed---would otherwise stay behind for good.
+    # The generated description is what marks an entry as one of these,
+    # so a user's own environments are never touched.
+    for env_name in list(envs):
+        if env_name in markdown.environments:
+            continue
+        source = calkit.markdown.env_source_path(envs[env_name])
+        if source is not None and source in markdown.markdown_paths:
+            del envs[env_name]
+            changed = True
     if changed:
         # Separate a newly created 'environments' section from what comes
         # before it, the way the rest of the file is written
@@ -1344,6 +1360,7 @@ def to_dvc(
     a subproject that is a library with no defined pipeline stages).
     """
     import calkit.dvc.zip
+    import calkit.markdown
     from calkit.environments import get_env_lock_fpath
 
     if ck_info is None:
@@ -1503,7 +1520,7 @@ def to_dvc(
     for stage in pipeline.stages.values():
         used_envs.add(stage.inner_environment)
         used_envs.add(stage.outer_environment)
-    env_fpaths: dict[str, list[str]] = {}
+    env_lock_fpaths: dict[str, list[str]] = {}
     environments = ck_info.get("environments", {})
     for env_name, env in environments.items():
         if env_name not in used_envs:
@@ -1522,7 +1539,7 @@ def to_dvc(
                 lock_fpath = Path(lock_fpath).relative_to(wdir).as_posix()
             except ValueError:
                 pass
-        env_fpaths.setdefault(env_name, []).append(lock_fpath)
+        env_lock_fpaths.setdefault(env_name, []).append(lock_fpath)
         # A uv environment's interpreter comes from a .python-version next
         # to its spec, not from the lock, which records only a
         # requires-python floor. Without it as a dependency, changing the
@@ -1534,7 +1551,7 @@ def to_dvc(
             ).as_posix()
             pv_full = os.path.join(wdir, pv_path) if wdir else pv_path
             if os.path.isfile(pv_full):
-                env_fpaths[env_name].append(pv_path)
+                env_lock_fpaths[env_name].append(pv_path)
         # An environment built by installing the project itself points at
         # the project's own spec file. That install is a pointer to the
         # working tree, so the lock says nothing about the code it
@@ -1542,13 +1559,16 @@ def to_dvc(
         # or editing the package would leave its stages looking current.
         language = calkit.markdown.ENV_KIND_LANGUAGES.get(env.get("kind", ""))
         spec_entry = calkit.markdown.LOCAL_PACKAGE_SPECS.get(language or "")
-        if spec_entry is not None and env.get("path") == spec_entry[0]:
+        if (
+            language is not None
+            and spec_entry is not None
+            and env.get("path") == spec_entry[0]
+        ):
             for source_path in calkit.markdown.local_package_source_paths(
-                language,
-                wdir=wdir,  # type: ignore[arg-type]
+                language, wdir=wdir
             ):
-                if source_path not in env_fpaths[env_name]:
-                    env_fpaths[env_name].append(source_path)
+                if source_path not in env_lock_fpaths[env_name]:
+                    env_lock_fpaths[env_name].append(source_path)
     project_params = expand_project_parameters(ck_info.get("parameters", {}))
     # Convert legacy sbatch stages to shell-script + scheduler and rename
     # old `slurm:` stage fields to `scheduler:`, updating calkit.yaml
@@ -1586,7 +1606,7 @@ def to_dvc(
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
     # Ensure environment lock files are set as stage inputs if necessary
-    pipeline.ensure_env_paths_are_inputs(env_fpaths=env_fpaths)
+    pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages
     for stage_name, stage in pipeline.stages.items():
         # If this stage is a Jupyter notebook stage, we need to update its
@@ -1943,6 +1963,8 @@ def translate_run_targets(
         ``isolated_sp_targets`` is a list of ``(sp_path, stage_or_None)``
         pairs that must be reproduced by chdiring into the subproject.
     """
+    import calkit.markdown
+
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     subprojects = ck_info.get("subprojects", [])

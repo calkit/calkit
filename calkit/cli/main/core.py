@@ -282,7 +282,7 @@ def init(
     # DVC refuses to initialize inside an existing Git repo unless told the
     # project is a subdirectory of one, so work out which case this is.
     result = calkit.dvc.run_dvc_command(
-        calkit.dvc.dvc_init_args() + (["--force"] if force else [])
+        calkit.dvc.make_dvc_init_args() + (["--force"] if force else [])
     )
     if result != 0:
         raise_error("Failed to initialize DVC")
@@ -527,7 +527,7 @@ def get_status(
             typer.echo("Initializing DVC repository")
             try:
                 result = calkit.dvc.run_dvc_command(
-                    calkit.dvc.dvc_init_args() + ["-q"]
+                    calkit.dvc.make_dvc_init_args() + ["-q"]
                 )
                 if result != 0:
                     raise subprocess.CalledProcessError(result, "dvc init")
@@ -1495,7 +1495,9 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
     producing the same path. Output blocks are never read back when
     extracting scripts, so writing one can't make its stage stale.
 
-    Returns the paths of the Markdown files that changed.
+    Returns the names of the DVC stages whose cached output changed. Each
+    of those depends on its cache, which was hashed before the stage ran,
+    so the caller has to record the new hash or the stage reads as stale.
     """
     import calkit.markdown
 
@@ -1517,7 +1519,7 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
         if match is None:
             continue
         by_path.setdefault(match[1], {})[block_name] = output
-    changed_paths = []
+    changed_stages = []
     for md_path, outputs in by_path.items():
         if not os.path.isfile(md_path):
             continue
@@ -1527,18 +1529,28 @@ def _inject_markdown_stage_output(log_content: str) -> list[str]:
         if changed:
             with open(md_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new_text)
-            changed_paths.append(md_path)
         # Keep each block's cache in step with the block itself. Read back
         # from the written text rather than from what was injected, so the
         # cache can only ever hold exactly what the file says.
-        calkit.markdown.write_output_caches(
-            calkit.markdown.extract_outputs(
-                calkit.markdown.parse_markdown(new_text, path=md_path),
-                md_path,
-            ),
+        cached = calkit.markdown.extract_outputs(
+            calkit.markdown.parse_markdown(new_text, path=md_path),
             md_path,
         )
-    return changed_paths
+        before = {}
+        for block_name in cached:
+            cache_path = calkit.markdown.get_output_cache_path(
+                md_path, block_name
+            )
+            if os.path.isfile(cache_path):
+                with open(cache_path, encoding="utf-8") as f:
+                    before[block_name] = f.read()
+        cache_paths = calkit.markdown.write_output_caches(cached, md_path)
+        md_stage_name = md_targets[md_path][0]
+        for block_name, cache_path in cache_paths.items():
+            with open(cache_path, encoding="utf-8") as f:
+                if f.read() != before.get(block_name):
+                    changed_stages.append(md_stage_name + sep + block_name)
+    return changed_stages
 
 
 def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
@@ -2337,7 +2349,7 @@ def run(
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        result = calkit.dvc.run_dvc_command(calkit.dvc.dvc_init_args())
+        result = calkit.dvc.run_dvc_command(calkit.dvc.make_dvc_init_args())
         if result != 0:
             raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names
@@ -2620,9 +2632,20 @@ def run(
     # Write what each stage printed back into any 'calkit output' blocks
     # in the Markdown that declared it
     try:
-        _inject_markdown_stage_output(log_content)
+        md_changed_stages = _inject_markdown_stage_output(log_content)
     except Exception as e:
         warn(f"Failed to write stage output into markdown: {e}")
+        md_changed_stages = []
+    if md_changed_stages:
+        # A stage depends on its output cache, which DVC hashed before the
+        # stage ran. Now that the cache holds what the stage just printed,
+        # record it in the lock, or the stage would read as stale and run
+        # again just to arrive at the same place.
+        res_commit = calkit.dvc.run_dvc_command(
+            ["commit", "--force", "--quiet"] + md_changed_stages
+        )
+        if res_commit != 0:
+            warn("Failed to record markdown output in dvc.lock")
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

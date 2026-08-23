@@ -23,15 +23,13 @@ export interface MarkdownStageBlock {
  * try to be the full attribute parser that lives on the Python side.
  */
 function stageNameFromAnnotation(text: string): string | undefined {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith("calkit")) {
+  // Whole tokens, so "calkit stages" or "calkit stagecoach" is not a stage
+  // any more than the Python parser thinks it is
+  const match0 = /^\s*calkit\s+stage(?:\s+|$)/.exec(text);
+  if (!match0) {
     return undefined;
   }
-  const rest = trimmed.slice("calkit".length).trim();
-  if (!rest.startsWith("stage")) {
-    return undefined;
-  }
-  const attrs = rest.slice("stage".length);
+  const attrs = text.slice(match0[0].length);
   // A name is a bare token, so it ends at the next whitespace
   const match = /(?:^|\s)name=("[^"]*"|'[^']*'|\S+)/.exec(attrs);
   if (!match) {
@@ -99,6 +97,12 @@ export function findMarkdownStageBlocks(text: string): MarkdownStageBlock[] {
       i = j + 1;
       continue;
     }
+    // A directive comment attaches to the block directly below it. Prose
+    // in between makes the file invalid to compile, so there is no stage
+    // to run and a lens on a later block would be wrong.
+    if (pendingName !== undefined && lines[i].trim()) {
+      pendingName = undefined;
+    }
     const comment = COMMENT_OPEN_RE.exec(lines[i]);
     if (comment) {
       // A directive comment may span several lines, so a long declaration
@@ -140,8 +144,8 @@ export function findMarkdownStageBlocks(text: string): MarkdownStageBlock[] {
 /**
  * Return the pipeline stage a Markdown file is declared as, if any.
  *
- * A Markdown stage stands in for the stages its blocks declare, and is
- * normally keyed by its own path.
+ * A Markdown stage stands in for the stages its blocks declare; its
+ * target_path says which file that is.
  */
 export function markdownStageNameForFile(
   config: CalkitInfo | undefined,
@@ -153,8 +157,10 @@ export function markdownStageNameForFile(
     if (stage?.kind !== "markdown") {
       continue;
     }
-    const stagePath = (stage.target_path ?? stageName).replace(/\\/g, "/");
-    if (stagePath === relPath) {
+    if (typeof stage.target_path !== "string") {
+      continue;
+    }
+    if (stage.target_path.replace(/\\/g, "/") === relPath) {
       return stageName;
     }
   }
@@ -230,8 +236,8 @@ export function markdownStagePath(
   stageName: string,
 ): string | undefined {
   const stage = config?.pipeline?.stages?.[stageName];
-  if (stage?.kind !== "markdown") {
+  if (stage?.kind !== "markdown" || typeof stage.target_path !== "string") {
     return undefined;
   }
-  return (stage.target_path ?? stageName).replace(/\\/g, "/");
+  return stage.target_path.replace(/\\/g, "/");
 }

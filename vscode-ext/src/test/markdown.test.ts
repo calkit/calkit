@@ -77,6 +77,42 @@ test("findMarkdownStageBlocks ignores unannotated and non-stage blocks", () => {
   assert.deepEqual(findMarkdownStageBlocks(text), []);
 });
 
+test("findMarkdownStageBlocks matches the Python parser's strictness", () => {
+  // "calkit" and "stage" are whole tokens; the backend rejects these, so
+  // offering to run them would be offering something that can't compile
+  const text = [
+    "```python calkit stages name=a",
+    "print(1)",
+    "```",
+    "```python calkit stagecoach name=b",
+    "print(2)",
+    "```",
+    "```python calkitx stage name=c",
+    "print(3)",
+    "```",
+  ].join("\n");
+  assert.deepEqual(findMarkdownStageBlocks(text), []);
+  // A directive comment attaches only to the block directly below it:
+  // prose in between makes the file invalid, so there is no stage to run
+  const separated = [
+    "<!-- calkit stage name=orphan -->",
+    "",
+    "Some prose.",
+    "",
+    "```python",
+    "print(1)",
+    "```",
+    "<!-- calkit stage name=attached -->",
+    "",
+    "```python",
+    "print(2)",
+    "```",
+  ].join("\n");
+  assert.deepEqual(findMarkdownStageBlocks(separated), [
+    { name: "attached", line: 7 },
+  ]);
+});
+
 test("findMarkdownStageBlocks handles quoted names and tilde fences", () => {
   const text = [
     '~~~python calkit stage name="my stage" environment=main',
@@ -92,7 +128,7 @@ test("markdownStageNameForFile only matches declared markdown stages", () => {
   const config = {
     pipeline: {
       stages: {
-        "README.md": { kind: "markdown" },
+        "README.md": { kind: "markdown", target_path: "README.md" },
         docs: { kind: "markdown", target_path: "docs/guide.md" },
         other: { kind: "python-script", script_path: "x.py" },
       },
@@ -183,7 +219,7 @@ test("splitMarkdownStageName maps a derived stage back to its file", () => {
   const config = {
     pipeline: {
       stages: {
-        "README.md": { kind: "markdown" },
+        "README.md": { kind: "markdown", target_path: "README.md" },
         docs: { kind: "markdown", target_path: "docs/guide.md" },
         plain: { kind: "python-script", script_path: "a.py" },
       },
@@ -206,7 +242,7 @@ test("markdownStagePath honors target_path", () => {
   const config = {
     pipeline: {
       stages: {
-        "README.md": { kind: "markdown" },
+        "README.md": { kind: "markdown", target_path: "README.md" },
         docs: { kind: "markdown", target_path: "docs/guide.md" },
         plain: { kind: "python-script", script_path: "a.py" },
       },
@@ -215,4 +251,10 @@ test("markdownStagePath honors target_path", () => {
   assert.equal(markdownStagePath(config, "README.md"), "README.md");
   assert.equal(markdownStagePath(config, "docs"), "docs/guide.md");
   assert.equal(markdownStagePath(config, "plain"), undefined);
+  // A markdown stage with no target_path is invalid, not one keyed by path
+  const missing = {
+    pipeline: { stages: { "NOTES.md": { kind: "markdown" } } },
+  } as never;
+  assert.equal(markdownStagePath(missing, "NOTES.md"), undefined);
+  assert.equal(markdownStageNameForFile(missing, "NOTES.md"), undefined);
 });

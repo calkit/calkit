@@ -2344,7 +2344,7 @@ def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
 
 
 def test_stage_stdout_from_log_content():
-    """Stage output is read back out of the run log, not captured twice."""
+    # Stage output is read back out of the run log, not captured twice.
     from calkit.cli.main.core import (
         STAGE_OUTPUT_END,
         STAGE_OUTPUT_START,
@@ -2376,15 +2376,12 @@ def test_stage_stdout_from_log_content():
 
 
 def test_run_refuses_outside_a_project(tmp_dir):
-    """``calkit run`` must not initialize anything outside a project.
-
-    It initializes Git and DVC as needed, so a wrong working directory
-    would otherwise scatter a .dvc directory into an unrelated folder ---
-    and inside an existing Git repo that now succeeds, since DVC is told
-    the project is a subdirectory.
-    """
-    import subprocess
-
+    # `calkit run` must not initialize anything outside a project.
+    #
+    # It initializes Git and DVC as needed, so a wrong working directory
+    # would otherwise scatter a .dvc directory into an unrelated folder ---
+    # and inside an existing Git repo that now succeeds, since DVC is told
+    # the project is a subdirectory.
     result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
     assert result.returncode != 0
     assert "no calkit.yaml or dvc.yaml" in result.stderr.lower()
@@ -2408,9 +2405,7 @@ def test_run_refuses_outside_a_project(tmp_dir):
 
 
 def test_project_dir_option(tmp_dir):
-    """``-C`` changes directory before anything reads the filesystem."""
-    import subprocess
-
+    # `-C` changes directory before anything reads the filesystem.
     os.makedirs("proj")
     with open(os.path.join("proj", "calkit.yaml"), "w") as f:
         f.write("name: from-subdir\n")

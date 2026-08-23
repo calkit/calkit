@@ -166,6 +166,13 @@ For more details, see `calkit.models.pipeline`.
 
 - `command`
 
+### `markdown`
+
+- `target_path`
+
+A stage sourced from a Markdown file's annotated code blocks;
+see [Runnable Markdown](markdown.md).
+
 ## Iteration
 
 ### Over a list of values
@@ -477,13 +484,22 @@ A stage sourced from a Markdown file's annotated code blocks.
 
 This stands in for however many stages the file declares. It is
 replaced by them at compile time (see
-`Pipeline.expand_markdown_stages`), so nothing downstream needs to
+`calkit.markdown.expand_ck_info`), so nothing downstream needs to
 know Markdown was involved.
 
-| Kind-specific parameter | Type        | Required | Default    | Description                                                                                                      |
-| ----------------------- | ----------- | -------- | ---------- | ---------------------------------------------------------------------------------------------------------------- |
-| `environment`           | str         | no       | '\_system' | Environment used by blocks that don't name one.                                                                  |
-| `target_path`           | str \| None | no       | null       | Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path. |
+`inputs`, `always_run`, `frozen`, and `scheduler` apply to
+every stage the file declares. A file can't iterate or declare
+outputs as a whole, since those belong to the individual stages in
+it, and its stages always run in the project root, where the scripts
+extracted from it are written.
+
+| Kind-specific parameter | Type | Required | Default    | Description                                                      |
+| ----------------------- | ---- | -------- | ---------- | ---------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Environment used by blocks that don't name one.                  |
+| `wdir`                  | None | no       | null       | Not supported; a Markdown file's stages run in the project root. |
+| `outputs`               | None | no       | null       | Not supported; declare outputs on the file's blocks.             |
+| `iterate_over`          | None | no       | null       | Not supported; markdown stages can't iterate.                    |
+| `target_path`           | str  | yes      |            | Path to the Markdown file.                                       |
 
 ### `matlab-command`
 

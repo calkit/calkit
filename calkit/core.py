@@ -418,6 +418,31 @@ def make_readme_content(
     return txt
 
 
+def update_readme_content(
+    text: str, project_title: str, project_description: str | None
+) -> str:
+    """Retitle an existing README and add a description, keeping the rest.
+
+    A template's README is often the project: its instructions, and in a
+    runnable README the pipeline itself. So the first heading is replaced
+    with the new title and the description goes just below it, and
+    everything else is left as it was. A README with no heading gets one
+    put in front of it.
+    """
+    lines = text.splitlines(keepends=True)
+    heading = f"# {project_title}\n"
+    intro = f"\n{project_description}\n" if project_description else ""
+    for i, line in enumerate(lines):
+        if re.match(r"^#(?!#)\s*\S", line):
+            lines[i] = heading
+            rest = "".join(lines[i + 1 :])
+            if intro and not rest.startswith("\n"):
+                intro += "\n"
+            return "".join(lines[: i + 1]) + intro + rest
+    body = text.lstrip("\n")
+    return heading + intro + ("\n" + body if body else "")
+
+
 def check_dep_exists(
     name: str,
     kind: Literal["app", "env-var", "calkit-config"] = "app",

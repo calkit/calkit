@@ -370,7 +370,7 @@ pass
 
 
 def test_resolve_environments_infers_kind_from_language():
-    """An R or Julia README needn't spell out its environment's kind."""
+    # An R or Julia README needn't spell out its environment's kind.
     from calkit.markdown import (
         extract_environments,
         extract_stages,
@@ -465,12 +465,22 @@ def test_expand_ck_info(tmp_path, monkeypatch):
         "```python calkit stage name=demo outputs=[out.txt]\n"
         "pass\n```\n"
     )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     result = expand_ck_info(ck_info)
     # The input is untouched, so a caller that writes calkit.yaml back can't
     # persist derived entries by accident
     assert ck_info == {
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}}
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
     }
     stages = result.ck_info["pipeline"]["stages"]
     assert list(stages) == ["README.md/demo"]
@@ -497,7 +507,11 @@ def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
     )
     ck_info = {
         "environments": {"main": {"kind": "conda", "path": "environment.yml"}},
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        },
     }
     with pytest.raises(ValueError, match="only be defined in one place"):
         expand_ck_info(ck_info)
@@ -514,11 +528,10 @@ def test_expand_ck_info_env_conflict(tmp_path, monkeypatch):
 
 
 def test_detect_environments_merges_by_language():
-    """One environment per language, not one per code block.
-
-    A README's examples are variations on the same setup, so a virtualenv
-    per block would be churn for nothing.
-    """
+    # One environment per language, not one per code block.
+    #
+    # A README's examples are variations on the same setup, so a virtualenv
+    # per block would be churn for nothing.
     from calkit.markdown import detect_environments, extract_stages
 
     text = (
@@ -573,11 +586,10 @@ def test_detect_environments_skips_declared_and_avoids_collisions():
 
 
 def test_output_blocks_are_never_extracted():
-    """An output block must not become part of its stage's script.
-
-    If it did, injecting output would change the script, which would make
-    the stage stale, which would rerun it, which would inject again.
-    """
+    # An output block must not become part of its stage's script.
+    #
+    # If it did, injecting output would change the script, which would make
+    # the stage stale, which would rerun it, which would inject again.
     from calkit.markdown import extract_stages
 
     text = (
@@ -646,11 +658,10 @@ def test_extract_outputs():
 
 
 def test_expand_ck_info_output_cache_is_an_input(tmp_path, monkeypatch):
-    """A stage depends on its output block, so editing it makes it stale.
-
-    The cache can't be an output: injection happens after the pipeline
-    runs, so nothing the stage command itself does would satisfy one.
-    """
+    # A stage depends on its output block, so editing it makes it stale.
+    #
+    # The cache can't be an output: injection happens after the pipeline
+    # runs, so nothing the stage command itself does would satisfy one.
     from calkit.markdown import expand_ck_info
 
     monkeypatch.chdir(tmp_path)
@@ -659,7 +670,13 @@ def test_expand_ck_info_output_cache_is_an_input(tmp_path, monkeypatch):
         "```text calkit output stage=a\nx\n```\n\n"
         "```python calkit stage name=b environment=main\npass\n```\n"
     )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     result = expand_ck_info(ck_info)
     cache = ".calkit/markdown/outputs/README.md/a.txt"
     stages = result.ck_info["pipeline"]["stages"]
@@ -681,13 +698,19 @@ def test_expand_ck_info_rejects_output_for_unknown_stage(
         "```python calkit stage name=a environment=main\npass\n```\n\n"
         "```text calkit output stage=typo\nx\n```\n"
     )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     with pytest.raises(ValueError, match="does not declare"):
         expand_ck_info(ck_info)
 
 
 def test_expand_ck_info_prunes_orphaned_derived_files(tmp_path, monkeypatch):
-    """Renaming a stage must not leave its old script and cache behind."""
+    # Renaming a stage must not leave its old script and cache behind.
     from calkit.markdown import expand_ck_info
 
     monkeypatch.chdir(tmp_path)
@@ -696,7 +719,13 @@ def test_expand_ck_info_prunes_orphaned_derived_files(tmp_path, monkeypatch):
         "```python calkit stage name=old environment=main\nprint('x')\n```\n\n"
         "```text calkit output stage=old\nx\n```\n"
     )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     expand_ck_info(ck_info)
     assert (tmp_path / ".calkit/markdown/README.md/old.py").is_file()
     assert (tmp_path / ".calkit/markdown/outputs/README.md/old.txt").is_file()
@@ -719,11 +748,10 @@ def test_expand_ck_info_prunes_orphaned_derived_files(tmp_path, monkeypatch):
 def test_expand_ck_info_env_description_says_it_is_generated(
     tmp_path, monkeypatch
 ):
-    """The notice lives in the environment, not a YAML comment.
-
-    A comment is easy to delete without it ever coming back; a
-    description is data, and is rewritten on every compile.
-    """
+    # The notice lives in the environment, not a YAML comment.
+    #
+    # A comment is easy to delete without it ever coming back; a
+    # description is data, and is rewritten on every compile.
     from calkit.markdown import expand_ck_info
 
     monkeypatch.chdir(tmp_path)
@@ -731,7 +759,13 @@ def test_expand_ck_info_env_description_says_it_is_generated(
         "<!-- calkit environment name=main -->\n- numpy\n\n"
         "```python calkit stage name=a\npass\n```\n"
     )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     env = expand_ck_info(ck_info).environments["main"]
     assert env["description"] == (
         "Generated from README.md. Changes made here will be overwritten."
@@ -750,7 +784,7 @@ def test_expand_ck_info_env_description_says_it_is_generated(
 def test_expand_ck_info_description_alone_is_not_a_conflict(
     tmp_path, monkeypatch
 ):
-    """A differing description must not read as a competing definition."""
+    # A differing description must not read as a competing definition.
     from calkit.markdown import expand_ck_info
 
     monkeypatch.chdir(tmp_path)
@@ -766,18 +800,21 @@ def test_expand_ck_info_description_alone_is_not_a_conflict(
                 "description": "something a user typed",
             }
         },
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        },
     }
     assert expand_ck_info(ck_info).environments["main"]["kind"] == "uv"
 
 
 def test_parse_markdown_file_cache_sees_edits(tmp_path):
-    """The parse cache must never hide a change to the file.
-
-    Project info is expanded several times over one status, so the cache
-    matters---but a stale one would silently run the previous version of
-    the code.
-    """
+    # The parse cache must never hide a change to the file.
+    #
+    # Project info is expanded several times over one status, so the cache
+    # matters---but a stale one would silently run the previous version of
+    # the code.
     import time
 
     from calkit.markdown import parse_markdown_file
@@ -1009,3 +1046,224 @@ def test_installing_the_projects_own_package_is_a_dev_install(
     )
     assert envs["py"]["path"] == "pyproject.toml"
     assert envs["py"]["_spec_content"] is None
+
+
+def test_parse_markdown_skips_commented_out_content():
+    from calkit.markdown import MarkdownParseError, parse_markdown
+
+    # Whatever an ordinary comment contains is commented out, fences
+    # included, so a block inside one is not a stage
+    text = (
+        "<!--\n"
+        "```python calkit stage name=hidden\nprint(1)\n```\n"
+        "-->\n"
+        "<!-- one line ```python calkit stage name=hidden2 -->\n"
+        "```python calkit stage name=real\nprint(2)\n```\n"
+    )
+    assert [b.name for b in parse_markdown(text)] == ["real"]
+    # A directive comment still attaches to the block below it
+    text = (
+        "<!-- not ours -->\n\n"
+        "<!-- calkit stage name=a -->\n\n```python\npass\n```\n"
+    )
+    assert [b.name for b in parse_markdown(text)] == ["a"]
+    # An unterminated comment is just Markdown with a typo
+    text = "<!-- oops\n\n```python calkit stage name=a\npass\n```\n"
+    assert [b.name for b in parse_markdown(text)] == ["a"]
+    # Names become path components, so they have to be a single safe
+    # segment rather than something that escapes the project
+    for bad in ["../../tmp/payload", "a/b", ".hidden", "a b", "-x"]:
+        with pytest.raises(MarkdownParseError, match="is not valid"):
+            parse_and_extract = parse_markdown(
+                f'```python calkit stage name="{bad}"\npass\n```\n'
+            )
+            from calkit.markdown import extract_stages
+
+            extract_stages(parse_and_extract, "README.md")
+        with pytest.raises(MarkdownParseError, match="is not valid"):
+            from calkit.markdown import extract_environments
+
+            extract_environments(
+                parse_markdown(
+                    f'<!-- calkit environment name="{bad}" -->\n- numpy\n'
+                ),
+                "README.md",
+            )
+
+
+def test_set_stage_attrs_directive_comment():
+    from calkit.markdown import extract_stages, parse_markdown, set_stage_attrs
+
+    # A stage declared in a comment gets the attribute written into the
+    # comment, since there is no annotation on the fence to carry it
+    text = "<!-- calkit stage name=a -->\n\n```python\npass\n```\n"
+    new, changed = set_stage_attrs(text, "a", {"environment": "py"})
+    assert changed
+    assert new == (
+        "<!-- calkit stage name=a environment=py -->\n\n```python\npass\n```\n"
+    )
+    specs = extract_stages(parse_markdown(new), "README.md")
+    assert specs["a"].attrs == {"environment": "py"}
+    # A multi-line comment is closed on its last line
+    text = (
+        "<!-- calkit stage name=a\n     inputs=[x.csv] -->\n\n"
+        "```python\npass\n```\n"
+    )
+    new, changed = set_stage_attrs(text, "a", {"environment": "py"})
+    assert changed
+    assert new.splitlines()[1] == "     inputs=[x.csv] environment=py -->"
+    # The author's word beats the detected one
+    assert set_stage_attrs(new, "a", {"environment": "other"}) == (new, False)
+    # A stage the file doesn't declare can't be written to
+    assert set_stage_attrs(text, "nope", {"environment": "py"}) == (
+        text,
+        False,
+    )
+
+
+def test_set_output_blocks_lengthens_fence_for_output_containing_one():
+    from calkit.markdown import (
+        extract_outputs,
+        parse_markdown,
+        set_output_blocks,
+    )
+
+    # Output can contain a line that would close the block, which would
+    # otherwise leave the rest of it rendering as Markdown
+    text = "```text calkit output stage=a\nold\n```\n\nAfter.\n"
+    new, changed = set_output_blocks(text, {"a": "line\n```\nmore"})
+    assert changed
+    assert new == (
+        "````text calkit output stage=a\nline\n```\nmore\n````\n\nAfter.\n"
+    )
+    assert extract_outputs(parse_markdown(new), "README.md") == {
+        "a": "line\n```\nmore"
+    }
+    # ...however long the run gets, and a fence that is already long
+    # enough is left alone
+    new2, _ = set_output_blocks(new, {"a": "````"})
+    assert new2.startswith("`````text calkit output stage=a\n````\n`````\n")
+    new3, _ = set_output_blocks(new2, {"a": "x"})
+    assert new3.startswith("`````text calkit output stage=a\nx\n`````\n")
+    # A run of the other fence character is just content
+    new4, _ = set_output_blocks(text, {"a": "~~~"})
+    assert new4.startswith("```text calkit output stage=a\n~~~\n```\n")
+
+
+def test_expand_ck_info_file_level_fields(tmp_path, monkeypatch):
+    from copy import deepcopy
+
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "guide.md").write_text(
+        "```python calkit stage name=a inputs=[b.csv]\npass\n```\n\n"
+        "```text calkit output stage=a\nhi\n```\n"
+    )
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "guide": {
+                    "kind": "markdown",
+                    "target_path": "docs/guide.md",
+                    "environment": "main",
+                    "inputs": ["data.csv"],
+                    "always_run": True,
+                    "frozen": True,
+                }
+            }
+        }
+    }
+    result = expand_ck_info(ck_info)
+    assert result.markdown_paths == ["docs/guide.md"]
+    stage = result.ck_info["pipeline"]["stages"]["guide/a"]
+    # What the file declares for itself applies to every stage in it,
+    # alongside what each block declares for itself
+    assert stage["inputs"] == [
+        "data.csv",
+        "b.csv",
+        ".calkit/markdown/outputs/docs/guide.md/a.txt",
+    ]
+    assert stage["always_run"] is True
+    assert stage["frozen"] is True
+    assert stage["environment"] == "main"
+    # Outputs, iteration and a working directory belong to the blocks,
+    # not the file, so setting them on the file is an error rather than
+    # something quietly dropped
+    for key, value in [
+        ("outputs", ["x.txt"]),
+        ("iterate_over", [{"arg_name": "n", "values": [1]}]),
+        ("wdir", "docs"),
+    ]:
+        bad = deepcopy(ck_info)
+        bad["pipeline"]["stages"]["guide"][key] = value
+        with pytest.raises(ValueError, match="not defined properly"):
+            expand_ck_info(bad)
+    # The path is required, and must be a Markdown file
+    for cfg in [
+        {"kind": "markdown"},
+        {"kind": "markdown", "target_path": "script.py"},
+    ]:
+        with pytest.raises(ValueError, match="not defined properly"):
+            expand_ck_info({"pipeline": {"stages": {"x": cfg}}})
+
+
+def test_expand_ck_info_env_declared_in_two_files(tmp_path, monkeypatch):
+    from calkit.markdown import expand_ck_info
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "README.md").write_text(
+        "<!-- calkit environment name=main -->\n- numpy\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    (tmp_path / "OTHER.md").write_text(
+        "<!-- calkit environment name=main -->\n- pandas\n\n"
+        "```python calkit stage name=b\npass\n```\n"
+    )
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"},
+                "OTHER.md": {"kind": "markdown", "target_path": "OTHER.md"},
+            }
+        }
+    }
+    # The entries look identical---the package lists live in the spec
+    # files---so this has to be caught by ownership, not by comparison
+    with pytest.raises(ValueError, match="declared in both"):
+        expand_ck_info(ck_info)
+
+
+def test_read_markdown_and_get_environments(tmp_path, monkeypatch):
+    from calkit.markdown import get_environments, read_markdown
+
+    monkeypatch.chdir(tmp_path)
+    text = (
+        "```sh calkit environment name=declared python=3.13\n"
+        "pip install numpy\n```\n\n"
+        "```python calkit stage name=a environment=declared\n"
+        "import numpy\n```\n\n"
+        "```python calkit stage name=b\nimport pandas\n```\n\n"
+        "```text calkit output stage=b\nold\n```\n"
+    )
+    doc = read_markdown(text, "README.md")
+    assert doc.path == "README.md"
+    assert list(doc.stages) == ["a", "b"]
+    assert doc.outputs == {"b": "old"}
+    envs = get_environments(doc, existing_env_names=["readme"])
+    assert list(envs.declared) == ["declared"]
+    # Only the stage naming no environment gets one detected, named to
+    # avoid both the project's environments and the file's own
+    assert envs.assignments == {"b": "readme-2"}
+    assert envs.detected["readme-2"]["kind"] == "uv"
+    assert "pandas" in envs.detected["readme-2"]["_spec_content"]
+    assert envs.detected_public == {
+        "readme-2": {
+            "kind": "uv",
+            "path": ".calkit/envs/readme-2/pyproject.toml",
+        }
+    }
+    # A default environment means nothing needs detecting
+    envs = get_environments(doc, default_env="declared")
+    assert envs.assignments == {} and envs.detected == {}

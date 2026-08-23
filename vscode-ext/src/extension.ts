@@ -3494,12 +3494,13 @@ function runStageInTerminal(
   terminal.show();
   // A project can live in a subdirectory of the workspace without being
   // declared as a subproject, so point the CLI at it rather than assuming
-  // the terminal is already in the right place.
-  const rel =
+  // the terminal is already in the right place. The path is absolute
+  // because the terminal is reused, and the user may have cd'd it
+  // somewhere else since it was created.
+  const prefix =
     projectDir && path.relative(workspaceRoot, projectDir)
-      ? path.relative(workspaceRoot, projectDir).replace(/\\/g, "/")
-      : undefined;
-  const prefix = rel ? `calkit -C ${shQuote(rel)}` : "calkit";
+      ? `calkit -C ${shQuote(projectDir)}`
+      : "calkit";
   terminal.sendText(`${prefix} run ${shQuote(stageName)}`);
 }
 
@@ -3704,11 +3705,12 @@ async function findStageForFile(
     ) {
       return stageName;
     }
-    // A markdown stage stands in for the stages its blocks declare, and is
-    // normally keyed by the path of the file itself
+    // A markdown stage stands in for the stages its blocks declare, and
+    // its target_path is the file itself
     if (
       stage.kind === "markdown" &&
-      (stage.target_path ?? stageName).replace(/\\/g, "/") === relPath
+      typeof stage.target_path === "string" &&
+      stage.target_path.replace(/\\/g, "/") === relPath
     ) {
       return stageName;
     }

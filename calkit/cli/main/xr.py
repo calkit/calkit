@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from copy import deepcopy
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -28,28 +29,40 @@ def _xr_markdown(
     Unlike a script, a Markdown file declares however many stages its
     annotated blocks do, so this records one ``markdown`` stage standing
     in for them all. Environments the blocks don't name are detected from
-    the code and written back into the fences, which is the only place a
-    per-stage environment can live.
+    the code and written back into the annotations, which is the only
+    place a per-stage environment can live.
 
     Nothing needs to exist beforehand: an ordinary README in an ordinary
     directory gets the project initialized around it, its code fences
     annotated, and an environment built from what those fences import.
     """
     import io
+    import shutil
 
     import calkit.markdown
 
+    def _snapshot(paths: list[str]) -> dict[str, bytes | None]:
+        """Read files as they are now, so a failed run can put them back."""
+        snap: dict[str, bytes | None] = {}
+        for path in paths:
+            if os.path.isfile(path):
+                with open(path, "rb") as f:
+                    snap[path] = f.read()
+            else:
+                snap[path] = None
+        return snap
+
     if not os.path.isfile(markdown_path):
         raise_error(f"{markdown_path} does not exist")
+    markdown_path = Path(markdown_path).as_posix()
     with open(markdown_path, encoding="utf-8") as f:
         original_text = f.read()
     text = original_text
     try:
-        blocks = calkit.markdown.parse_markdown(text, path=markdown_path)
-        specs = calkit.markdown.extract_stages(blocks, markdown_path)
+        doc = calkit.markdown.read_markdown(text, markdown_path)
     except Exception as e:
         raise_error(str(e))
-    if not specs:
+    if not doc.stages:
         # A file nobody has marked up yet gets its runnable fences
         # annotated, which is how a plain README becomes a pipeline
         text, annotated = calkit.markdown.annotate_code_blocks(
@@ -66,13 +79,10 @@ def _xr_markdown(
                     + ", ".join(sorted(annotated.environments))
                 )
             try:
-                blocks = calkit.markdown.parse_markdown(
-                    text, path=markdown_path
-                )
-                specs = calkit.markdown.extract_stages(blocks, markdown_path)
+                doc = calkit.markdown.read_markdown(text, markdown_path)
             except Exception as e:
                 raise_error(str(e))
-    if not specs:
+    if not doc.stages:
         raise_error(
             f"{markdown_path} declares no stages; annotate a code block "
             "with 'calkit stage name=<name>' to define one"
@@ -84,55 +94,52 @@ def _xr_markdown(
         typer.echo(f"Initializing project in {os.getcwd()}")
         init()
         ck_info = calkit.load_calkit_info()
-    declared_envs = calkit.markdown.extract_environments(blocks, markdown_path)
-    existing_env_names = list(ck_info.get("environments", {}) or {})
-    existing_env_names += list(declared_envs)
-    detected_envs, assignments = calkit.markdown.detect_environments(
-        specs,
-        markdown_path,
-        existing_env_names=existing_env_names,
+    envs = calkit.markdown.get_environments(
+        doc,
+        existing_env_names=list(ck_info.get("environments", {}) or {}),
         default_env=environment,
     )
     # Record each detected environment on the block that needs it, since
-    # the fence is the only place a per-stage environment can live.
-    for stage_name, env_name in assignments.items():
-        text, _ = calkit.markdown.set_stage_attrs(
+    # the annotation is the only place a per-stage environment can live;
+    # a stage it can't be recorded on would silently run in _system.
+    for stage_name, env_name in envs.assignments.items():
+        text, changed = calkit.markdown.set_stage_attrs(
             text, stage_name, {"environment": env_name}
         )
+        if not changed:
+            raise_error(
+                f"Could not record environment '{env_name}' on stage "
+                f"'{stage_name}' in {markdown_path}"
+            )
     stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
-    stage: dict[str, Any] = {"kind": "markdown"}
+    stage: dict[str, Any] = {"kind": "markdown", "target_path": markdown_path}
     if environment is not None:
         stage["environment"] = environment
+    detected_envs = envs.detected_public
     if dry_run:
         out = io.StringIO()
         calkit.ryaml.dump({markdown_path: stage}, out)
         typer.echo(out.getvalue().rstrip())
         for env_name, env in detected_envs.items():
             env_out = io.StringIO()
-            calkit.ryaml.dump(
-                {
-                    env_name: {
-                        k: v for k, v in env.items() if not k.startswith("_")
-                    }
-                },
-                env_out,
-            )
+            calkit.ryaml.dump({env_name: env}, env_out)
             typer.echo(env_out.getvalue().rstrip())
         return
-    # Keep the file itself rather than a reparsed copy of it, so a failed
-    # bootstrap restores what was there byte for byte---including the case
-    # where there was no file at all until a moment ago
-    ck_yaml_orig = None
-    if os.path.isfile("calkit.yaml"):
-        with open("calkit.yaml", encoding="utf-8") as f:
-            ck_yaml_orig = f.read()
-    if detected_envs:
-        calkit.markdown.write_env_specs(detected_envs)
-        envs = ck_info.setdefault("environments", {})
-        for env_name, env in detected_envs.items():
-            envs[env_name] = {
-                k: v for k, v in env.items() if not k.startswith("_")
-            }
+    # Keep the files themselves rather than reparsed copies, so a failed
+    # bootstrap restores what was there byte for byte---including the
+    # case where there was no file at all until a moment ago. Running
+    # compiles the pipeline and builds environments too, so everything
+    # that writes is covered, not just the two files written here.
+    env_dirs = sorted(
+        {os.path.dirname(env["path"]) for env in detected_envs.values()}
+    )
+    snapshot = _snapshot(
+        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", markdown_path]
+    )
+    new_env_dirs = [d for d in env_dirs if d and not os.path.isdir(d)]
+    if envs.detected:
+        calkit.markdown.write_env_specs(envs.detected)
+        ck_info.setdefault("environments", {}).update(detected_envs)
     if text != original_text:
         with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
@@ -144,15 +151,15 @@ def _xr_markdown(
     except Exception as e:
         # Put back everything this touched, so a failed bootstrap leaves
         # no half-recorded pipeline behind
-        if ck_yaml_orig is None:
-            if os.path.isfile("calkit.yaml"):
-                os.remove("calkit.yaml")
-        else:
-            with open("calkit.yaml", "w", encoding="utf-8", newline="") as f:
-                f.write(ck_yaml_orig)
-        if text != original_text:
-            with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
-                f.write(original_text)
+        for path, content in snapshot.items():
+            if content is None:
+                if os.path.isfile(path):
+                    os.remove(path)
+            else:
+                with open(path, "wb") as fb:
+                    fb.write(content)
+        for env_dir in new_env_dirs:
+            shutil.rmtree(env_dir, ignore_errors=True)
         raise_error(f"Failed to execute stages in {markdown_path}: {e}")
 
 

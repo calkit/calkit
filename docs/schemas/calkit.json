@@ -2766,7 +2766,7 @@
     },
     "MarkdownStage": {
       "additionalProperties": false,
-      "description": "A stage sourced from a Markdown file's annotated code blocks.\n\nThis stands in for however many stages the file declares. It is\nreplaced by them at compile time (see\n``Pipeline.expand_markdown_stages``), so nothing downstream needs to\nknow Markdown was involved.",
+      "description": "A stage sourced from a Markdown file's annotated code blocks.\n\nThis stands in for however many stages the file declares. It is\nreplaced by them at compile time (see\n``calkit.markdown.expand_ck_info``), so nothing downstream needs to\nknow Markdown was involved.\n\n``inputs``, ``always_run``, ``frozen``, and ``scheduler`` apply to\nevery stage the file declares. A file can't iterate or declare\noutputs as a whole, since those belong to the individual stages in\nit, and its stages always run in the project root, where the scripts\nextracted from it are written.",
       "properties": {
         "always_run": {
           "default": false,
@@ -2822,24 +2822,14 @@
             }
           ],
           "default": [],
-          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "description": "Paths every stage declared in the file depends on, in addition to any a block declares for itself.",
           "title": "Inputs"
         },
         "iterate_over": {
-          "anyOf": [
-            {
-              "items": {
-                "$ref": "#/$defs/StageIteration"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": null,
-          "description": "Arguments over which to run this stage multiple times.",
-          "title": "Iterate Over"
+          "description": "Not supported; markdown stages can't iterate.",
+          "title": "Iterate Over",
+          "type": "null"
         },
         "kind": {
           "const": "markdown",
@@ -2861,27 +2851,10 @@
           "title": "Name"
         },
         "outputs": {
-          "anyOf": [
-            {
-              "items": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "$ref": "#/$defs/PathOutput"
-                  }
-                ]
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": [],
-          "description": "Paths this stage produces.",
-          "title": "Outputs"
+          "default": null,
+          "description": "Not supported; declare outputs on the file's blocks.",
+          "title": "Outputs",
+          "type": "null"
         },
         "scheduler": {
           "anyOf": [
@@ -2909,32 +2882,20 @@
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
         "target_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Path to the Markdown file. Defaults to the stage name, since a Markdown stage is normally keyed by its own path.",
-          "title": "Target Path"
+          "description": "Path to the Markdown file.",
+          "title": "Target Path",
+          "type": "string"
         },
         "wdir": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
           "default": null,
-          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
-          "title": "Wdir"
+          "description": "Not supported; a Markdown file's stages run in the project root.",
+          "title": "Wdir",
+          "type": "null"
         }
       },
+      "required": [
+        "target_path"
+      ],
       "title": "MarkdownStage",
       "type": "object"
     },

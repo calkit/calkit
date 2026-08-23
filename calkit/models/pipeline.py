@@ -1758,16 +1758,20 @@ class MarkdownStage(Stage):
 
     This stands in for however many stages the file declares. It is
     replaced by them at compile time (see
-    ``Pipeline.expand_markdown_stages``), so nothing downstream needs to
+    ``calkit.markdown.expand_ck_info``), so nothing downstream needs to
     know Markdown was involved.
+
+    ``inputs``, ``always_run``, ``frozen``, and ``scheduler`` apply to
+    every stage the file declares. A file can't iterate or declare
+    outputs as a whole, since those belong to the individual stages in
+    it, and its stages always run in the project root, where the scripts
+    extracted from it are written.
     """
 
     kind: Literal["markdown"] = "markdown"
     # Named to match the other stages that compile a document, e.g. latex
-    target_path: RelativeChildPathString | None = Field(
-        default=None,
-        description="Path to the Markdown file. Defaults to the stage name, "
-        "since a Markdown stage is normally keyed by its own path.",
+    target_path: RelativeChildPathString = Field(
+        description="Path to the Markdown file.",
     )
     # A Markdown stage never runs as itself, so it needs no environment of
     # its own; this is the fallback for blocks that don't name one.
@@ -1775,13 +1779,42 @@ class MarkdownStage(Stage):
         default="_system",
         description="Environment used by blocks that don't name one.",
     )
+    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
+        default=[],
+        description="Paths every stage declared in the file depends on, in "
+        "addition to any a block declares for itself.",
+        json_schema_extra=_allow_null,
+    )
+    # Two stages can't produce the same path, so outputs are declared on
+    # the blocks rather than the file; likewise iteration, which would
+    # otherwise have to be defined for a file that runs as several stages.
+    outputs: None = Field(  # type: ignore[assignment]
+        default=None,
+        description="Not supported; declare outputs on the file's blocks.",
+    )
+    iterate_over: None = Field(
+        default=None,
+        description="Not supported; markdown stages can't iterate.",
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; a Markdown file's stages run in the "
+        "project root.",
+    )
+
+    @field_validator("target_path")
+    @classmethod
+    def check_target_path_is_markdown(cls, v: str) -> str:
+        if not str(v).lower().endswith((".md", ".markdown")):
+            raise ValueError(
+                "Markdown stage 'target_path' must be a Markdown file "
+                f"(.md or .markdown), got: {v}"
+            )
+        return v
 
     @property
     def markdown_path(self) -> str:
-        path = self.target_path if self.target_path is not None else self.name
-        if path is None:
-            raise ValueError("Markdown stage has no path")
-        return Path(path).as_posix()
+        return Path(self.target_path).as_posix()
 
 
 class Pipeline(BaseModel):
@@ -1827,29 +1860,6 @@ class Pipeline(BaseModel):
                     f"'{stage_name}'"
                 )
             stage.name = stage_name
-        return self
-
-    @model_validator(mode="after")
-    def check_markdown_stage_paths(self) -> Pipeline:
-        """Check that markdown stages point at a Markdown file.
-
-        This runs at the pipeline level because a stage's name is only
-        filled in from its key above, and the name is where the path
-        normally comes from.
-        """
-        for stage_name, stage in self.stages.items():
-            if stage.kind != "markdown":
-                continue
-            path = (
-                stage.target_path
-                if stage.target_path is not None
-                else stage_name
-            )
-            if not str(path).endswith(".md"):
-                raise ValueError(
-                    f"Markdown stage '{stage_name}' needs a 'target_path' "
-                    "ending in .md, or a name that is one"
-                )
         return self
 
     def set_stage_scheduler_options(
@@ -2033,16 +2043,16 @@ class Pipeline(BaseModel):
             converted[name] = calkit_yaml_stage
         return converted
 
-    def ensure_env_paths_are_inputs(
-        self, env_fpaths: dict[str, list[str]]
+    def ensure_env_lock_paths_are_inputs(
+        self, env_lock_fpaths: dict[str, list[str]]
     ) -> None:
-        """Ensure each environment's defining files are inputs to its stages.
+        """Ensure each environment's lock file paths are inputs to its stages.
 
-        That is normally just the lock file, but a ``uv`` environment also
-        has a ``.python-version``, which is what actually selects the
-        interpreter: ``uv.lock`` records only a ``requires-python`` floor,
-        so a changed pin would otherwise leave every stage in that
-        environment looking up to date.
+        An environment can have more than one: a ``uv`` environment's
+        ``.python-version`` counts as part of its lock, since it is what
+        pins the interpreter (``uv.lock`` records only a
+        ``requires-python`` floor), and an environment that installs the
+        project itself is locked to the project's own source.
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
@@ -2053,6 +2063,6 @@ class Pipeline(BaseModel):
                 stage.inner_environment,
                 stage.outer_environment,
             ):
-                for fpath in env_fpaths.get(env_name, []):
+                for fpath in env_lock_fpaths.get(env_name, []):
                     if fpath not in stage.inputs:
                         stage.inputs.append(fpath)

@@ -50,19 +50,6 @@ def _split_template_subdir(
     return git_url.rsplit("/" + subdir, 1)[0], subdir
 
 
-def _readme_sources_pipeline(ck_info: dict) -> bool:
-    """Return whether README.md declares any of the project's stages."""
-    stages = ck_info.get("pipeline", {}).get("stages", {})
-    if not isinstance(stages, dict):
-        return False
-    for stage_name, cfg in stages.items():
-        if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
-            continue
-        if str(cfg.get("target_path") or stage_name) == "README.md":
-            return True
-    return False
-
-
 @new_app.command(name="project", cls=_NewProjectCommand)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
@@ -467,20 +454,27 @@ def new_project(
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
             ryaml.dump(ck_info, f)
         calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
-        # Update README, unless the pipeline is declared inside it, in
-        # which case overwriting it would delete the project
+        # Update the README rather than replacing it: a template's README
+        # is its instructions, and in a runnable README it is the pipeline
+        # itself, so only the title and description are this project's
         readme_fpath = os.path.join(abs_path, "README.md")
-        if _readme_sources_pipeline(ck_info):
-            typer.echo("Keeping README.md, which declares pipeline stages")
+        if os.path.isfile(readme_fpath):
+            typer.echo("Updating README.md title and description")
+            with open(readme_fpath, encoding="utf-8") as f:
+                readme_txt = calkit.update_readme_content(
+                    f.read(),
+                    project_title=title,
+                    project_description=description,
+                )
         else:
             typer.echo("Generating README.md")
             readme_txt = calkit.make_readme_content(
                 project_name=name,
-                project_title=title,  # type: ignore
+                project_title=title,
                 project_description=description,
             )
-            with open(readme_fpath, "w") as f:
-                f.write(readme_txt)
+        with open(readme_fpath, "w", encoding="utf-8", newline="\n") as f:
+            f.write(readme_txt)
         # Update DVC remote
         # TODO: This will fail because we don't know this user's account name
         typer.echo("Updating Calkit DVC remote")

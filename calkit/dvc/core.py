@@ -488,9 +488,13 @@ def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
 def dvc_init_needs_subdir(wdir: str | None = None) -> bool:
     """Return whether ``dvc init`` here needs ``--subdir``.
 
-    DVC refuses to initialize inside an existing Git repository unless it
-    is told the project is a subdirectory of one, which is the case for a
-    self-contained example living inside a larger repo.
+    DVC refuses to initialize anywhere but the root of a Git repository
+    unless told the project is a subdirectory of one. It doesn't assume
+    so itself because a DVC repo in a subdirectory is its own project,
+    with its own cache, remotes and pipeline, rather than part of the
+    enclosing repo's; initializing one by accident in the wrong directory
+    would be hard to notice, so DVC asks for the flag. A self-contained
+    example living inside a larger repo is exactly that case.
     """
     import git
     from git import InvalidGitRepositoryError, NoSuchPathError
@@ -537,7 +541,7 @@ def enclosing_repo_ignores(path: str | None = None) -> bool:
         return False
 
 
-def dvc_init_args(wdir: str | None = None) -> list[str]:
+def make_dvc_init_args(wdir: str | None = None) -> list[str]:
     """Return the arguments for initializing a DVC repo in ``wdir``."""
     args = ["init"]
     if dvc_init_needs_subdir(wdir=wdir):

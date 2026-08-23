@@ -270,11 +270,10 @@ def test_get_md5(tmp_dir):
 
 
 def test_ryaml_dump_leaves_no_trailing_whitespace():
-    """Wrapping must not leave a space before the fold.
-
-    Whitespace-trimming tools strip those, and Calkit writes them back on
-    the next compile, so the two take turns rewriting the same file.
-    """
+    # Wrapping must not leave a space before the fold.
+    #
+    # Whitespace-trimming tools strip those, and Calkit writes them back on
+    # the next compile, so the two take turns rewriting the same file.
     import io
 
     import calkit
@@ -292,7 +291,7 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
 
 
 def test_ryaml_dump_keeps_significant_trailing_whitespace():
-    """In a block scalar a trailing space is content, not formatting."""
+    # In a block scalar a trailing space is content, not formatting.
     import io
 
     from ruamel.yaml.scalarstring import (
@@ -309,3 +308,30 @@ def test_ryaml_dump_keeps_significant_trailing_whitespace():
         buf = io.StringIO()
         calkit.ryaml.dump({"k": value}, buf)
         assert calkit.ryaml.load(buf.getvalue()) == {"k": value}
+
+
+def test_update_readme_content():
+    import calkit
+
+    # A template's README keeps everything but its title, and the
+    # description goes right under the new one
+    text = "# Template title\n\nSome intro.\n\n```python calkit stage name=a\npass\n```\n"
+    out = calkit.update_readme_content(text, "My project", "What it is.")
+    assert out == (
+        "# My project\n\nWhat it is.\n\nSome intro.\n\n"
+        "```python calkit stage name=a\npass\n```\n"
+    )
+    # No description: only the title changes
+    assert calkit.update_readme_content(text, "My project", None) == (
+        text.replace("# Template title", "# My project")
+    )
+    # Only the first top-level heading is the title; '##' is not one
+    text = "Intro first.\n\n## Section\n\n# Real title\n\nBody.\n"
+    out = calkit.update_readme_content(text, "T", "D.")
+    assert out == "Intro first.\n\n## Section\n\n# T\n\nD.\n\nBody.\n"
+    # A README with no heading gets one put in front of it
+    assert calkit.update_readme_content("Just prose.\n", "T", "D.") == (
+        "# T\n\nD.\n\nJust prose.\n"
+    )
+    assert calkit.update_readme_content("", "T", "D.") == "# T\n\nD.\n"
+    assert calkit.update_readme_content("", "T", None) == "# T\n"

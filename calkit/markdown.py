@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import ruamel.yaml
+from pydantic import BaseModel
 
 DirectiveKind = Literal["stage", "environment", "output"]
 # ``output`` blocks are written to, never read: a stage's extracted script
@@ -58,6 +59,24 @@ class MarkdownParseError(ValueError):
         self.line = line
         where = f"{path}:{line}" if path else f"line {line}"
         super().__init__(f"{where}: {message}")
+
+
+# Names are used as path components---a stage's extracted script and an
+# environment's spec directory are named for them---so they must be a
+# single safe segment rather than something that escapes the project.
+_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def check_name(name: str, what: str, path: str | None, line: int) -> None:
+    """Check that a declared name can be used as a single path segment."""
+    if not _NAME_RE.match(name) or name in (".", ".."):
+        raise MarkdownParseError(
+            f"{what} name '{name}' is not valid; names may only contain "
+            "letters, digits, '.', '_' and '-', and must start with a "
+            "letter or digit",
+            path=path,
+            line=line,
+        )
 
 
 @dataclass
@@ -340,9 +359,9 @@ def parse_markdown(text: str, path: str | None = None) -> list[MarkdownBlock]:
         if annotation is not None:
             pending = annotation
             pending_line = i + 1
-            i = end
-            continue
-        i += 1
+        # Whatever a comment contains is commented out, fences included,
+        # so skip past the whole of one whether it was a directive or not
+        i = max(end, i + 1)
     if pending is not None:
         raise MarkdownParseError(
             "A Calkit directive comment must be followed by a fenced code "
@@ -621,6 +640,7 @@ def extract_stages(
             raise MarkdownParseError(
                 "A stage block must declare a name", path=path, line=block.line
             )
+        check_name(name, "Stage", path, block.line)
         if block.language is None:
             raise MarkdownParseError(
                 f"Stage '{name}' has a code block with no language, so "
@@ -723,10 +743,84 @@ def get_markdown_stage_targets(ck_info: dict) -> dict[str, tuple[str, str]]:
     for name, cfg in stages.items():
         if not isinstance(cfg, dict) or cfg.get("kind") != "markdown":
             continue
-        path = Path(str(cfg.get("target_path") or name)).as_posix()
+        if not cfg.get("target_path"):
+            # Not a valid stage; expansion reports that properly
+            continue
+        path = Path(str(cfg["target_path"])).as_posix()
         targets[name] = (name, path)
         targets[path] = (name, path)
     return targets
+
+
+class MarkdownDocument(BaseModel):
+    """What a Markdown file declares, read in one pass."""
+
+    path: str
+    text: str
+    blocks: list[MarkdownBlock]
+    # Stage name -> the stage its blocks declare
+    stages: dict[str, MarkdownStageSpec]
+    # Stage name -> what its output block claims it printed
+    outputs: dict[str, str]
+
+
+def read_markdown(text: str, path: str) -> MarkdownDocument:
+    """Read Markdown text into the stages and outputs it declares.
+
+    Raises ``MarkdownParseError`` for an annotation that can't be read.
+    """
+    path = Path(path).as_posix()
+    blocks = parse_markdown(text, path=path)
+    return MarkdownDocument(
+        path=path,
+        text=text,
+        blocks=blocks,
+        stages=extract_stages(blocks, path),
+        outputs=extract_outputs(blocks, path),
+    )
+
+
+class MarkdownEnvironments(BaseModel):
+    """The environments a Markdown file's stages run in.
+
+    Declared environments are those the file annotates; detected ones are
+    built from the imports of stages that name none, and ``assignments``
+    says which detected environment each such stage was given.
+    """
+
+    declared: dict[str, dict]
+    detected: dict[str, dict]
+    assignments: dict[str, str]
+
+    @property
+    def detected_public(self) -> dict[str, dict]:
+        """Detected environments as they would be written to calkit.yaml."""
+        return {
+            name: {k: v for k, v in env.items() if not k.startswith("_")}
+            for name, env in self.detected.items()
+        }
+
+
+def get_environments(
+    doc: MarkdownDocument,
+    existing_env_names: list[str] | None = None,
+    default_env: str | None = None,
+) -> MarkdownEnvironments:
+    """Collect a file's declared environments and detect any it still needs.
+
+    A detected environment is named to avoid both the project's existing
+    environments and the ones the file declares.
+    """
+    declared = extract_environments(doc.blocks, doc.path)
+    detected, assignments = detect_environments(
+        doc.stages,
+        doc.path,
+        existing_env_names=list(existing_env_names or []) + list(declared),
+        default_env=default_env,
+    )
+    return MarkdownEnvironments(
+        declared=declared, detected=detected, assignments=assignments
+    )
 
 
 # Environment kinds that can be declared in Markdown, and the spec file
@@ -751,6 +845,23 @@ LANGUAGE_ENV_KINDS: dict[str, str] = {
     "julia": "julia",
     "jl": "julia",
 }
+
+
+_ENV_SOURCE_RE = re.compile(r"^(?:Generated from|Declared in) (?P<path>\S+)\.")
+
+
+def env_source_path(env: dict) -> str | None:
+    """Return the Markdown file an environment entry was generated from.
+
+    The description written with a generated entry is the record of
+    where it came from, which is what lets a later compile tell one of
+    these from an environment the user wrote.
+    """
+    description = env.get("description") if isinstance(env, dict) else None
+    if not isinstance(description, str):
+        return None
+    m = _ENV_SOURCE_RE.match(description)
+    return None if m is None else m.group("path")
 
 
 def _env_definition(env: dict) -> dict:
@@ -836,6 +947,7 @@ def extract_environments(
                 path=path,
                 line=block.line,
             )
+        check_name(name, "Environment", path, block.line)
         install = (
             parse_install_block(block.content, block.language)
             if block.source == "fence"
@@ -1073,6 +1185,9 @@ class MarkdownExpansion:
     """What a project's Markdown files contributed to its pipeline."""
 
     ck_info: dict
+    # The Markdown files that were expanded, so their previously generated
+    # entries can be told apart from a user's own
+    markdown_paths: list[str] = field(default_factory=list)
     script_paths: list[str] = field(default_factory=list)
     # Environment name -> definition, and the file that declared it
     environments: dict[str, dict] = field(default_factory=dict)
@@ -1126,12 +1241,15 @@ def expand_ck_info(
         from calkit.models.pipeline import MarkdownStage
 
         try:
-            MarkdownStage.model_validate(dict(md_cfg) | {"name": stage_name})
+            md_stage = MarkdownStage.model_validate(
+                dict(md_cfg) | {"name": stage_name}
+            )
         except Exception as e:
             raise ValueError(
                 f"Markdown stage '{stage_name}' is not defined properly: {e}"
             )
-        md_path = Path(str(md_cfg.get("target_path") or stage_name)).as_posix()
+        md_path = md_stage.markdown_path
+        result.markdown_paths.append(md_path)
         read_path = os.path.join(wdir, md_path) if wdir else md_path
         if not os.path.isfile(read_path):
             raise ValueError(
@@ -1159,6 +1277,16 @@ def expand_ck_info(
         )
         for env_name, env in envs.items():
             public = {k: v for k, v in env.items() if not k.startswith("_")}
+            # Two files can't both own one environment, however alike
+            # their entries look: the spec file is written from whichever
+            # was read last, and the other file's stages would run in it.
+            other = result.environment_sources.get(env_name)
+            if other is not None:
+                raise ValueError(
+                    f"Environment '{env_name}' is declared in both "
+                    f"'{other}' and '{md_path}'; it can only be defined in "
+                    "one place"
+                )
             existing = out_envs.get(env_name)
             # An identical entry is this same definition written back on
             # an earlier compile, not a competing one.
@@ -1210,12 +1338,22 @@ def expand_ck_info(
                 "kind": spec.stage_kind,
                 "script_path": spec.script_path,
             }
-            if md_cfg.get("wdir") is not None:
-                sub["wdir"] = md_cfg["wdir"]
+            # What the file declares for itself applies to every stage in
+            # it; a block's own attributes then take precedence
+            for key in ("always_run", "frozen", "scheduler"):
+                if key in md_cfg and md_cfg[key] is not None:
+                    sub[key] = md_cfg[key]
             sub.update(spec.attrs)
+            inputs = list(md_cfg.get("inputs") or []) + [
+                i
+                for i in spec.attrs.get("inputs") or []
+                if i not in (md_cfg.get("inputs") or [])
+            ]
             cache_path = output_cache_paths.get(spec.name)
             if cache_path is not None:
-                sub["inputs"] = list(sub.get("inputs", [])) + [cache_path]
+                inputs.append(cache_path)
+            if inputs:
+                sub["inputs"] = inputs
             if "environment" not in sub:
                 sub["environment"] = default_env or "_system"
             if spec.stage_kind == "shell-script" and "shell" not in sub:
@@ -1977,21 +2115,24 @@ def annotate_code_blocks(
     }
     result = Annotation()
     for f in install_fences:
-        suffix = LANGUAGE_SUFFIXES[f.install.language]  # type: ignore
+        install = f.install
+        if install is None:
+            continue
+        suffix = LANGUAGE_SUFFIXES[install.language]
         if suffix not in env_names:
             continue
         name = env_names[suffix]
         annotation = f"calkit environment name={name}"
         # Pin the interpreter here rather than letting it float, so what
         # the environment resolves to doesn't depend on when it is built
-        if f.install.kind == "julia":
+        if install.kind == "julia":
             annotation += f" julia={detected_julia_version()}"
-        elif f.install.kind in ("uv", "uv-venv") and not f.install.dev:
+        elif install.kind in ("uv", "uv-venv") and not install.dev:
             annotation += (
                 f" python={calkit.environments.DEFAULT_PYTHON_VERSION}"
             )
         _annotate_fence(lines, f, annotation)
-        result.environments[name] = f.install.language  # type: ignore
+        result.environments[name] = install.language
     for f in stage_fences:
         suffix = LANGUAGE_SUFFIXES[f.language.lower()]  # type: ignore
         annotation = f"calkit stage name={suffix}"
@@ -2032,34 +2173,69 @@ def set_stage_attrs(
     if not attrs:
         return text, False
     lines = text.splitlines(keepends=True)
-    for i, line in enumerate(lines):
-        m = _FENCE_RE.match(line.rstrip("\r\n"))
-        if m is None:
+    bare = [line.rstrip("\r\n") for line in lines]
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = _FENCE_RE.match(bare[i])
+        if m is not None:
+            try:
+                language, annotation = _parse_fence_info(m.group("info"))
+            except ValueError:
+                annotation = None
+            if (
+                annotation is not None
+                and annotation[0] == "stage"
+                and str(annotation[1].get("name")) == stage_name
+            ):
+                new_attrs = {
+                    k: v for k, v in attrs.items() if k not in annotation[1]
+                }
+                if not new_attrs:
+                    return text, False
+                ending = line[len(bare[i]) :]
+                info = " ".join(
+                    part
+                    for part in [
+                        language or "",
+                        "calkit stage",
+                        format_attrs(annotation[1]),
+                        format_attrs(new_attrs),
+                    ]
+                    if part
+                )
+                lines[i] = m.group("indent") + m.group("fence") + info + ending
+                return "".join(lines), True
+            i += 1
             continue
+        # A stage declared in a directive comment gets the attributes
+        # written into the comment, just before it closes
         try:
-            language, annotation = _parse_fence_info(m.group("info"))
+            annotation, end = _read_comment_directive(bare, i)
         except ValueError:
-            continue
-        if annotation is None or annotation[0] != "stage":
-            continue
-        if str(annotation[1].get("name")) != stage_name:
-            continue
-        new_attrs = {k: v for k, v in attrs.items() if k not in annotation[1]}
-        if not new_attrs:
-            return text, False
-        ending = line[len(line.rstrip("\r\n")) :]
-        info = " ".join(
-            part
-            for part in [
-                language or "",
-                "calkit stage",
-                format_attrs(annotation[1]),
-                format_attrs(new_attrs),
-            ]
-            if part
-        )
-        lines[i] = m.group("indent") + m.group("fence") + info + ending
-        return "".join(lines), True
+            annotation, end = None, i + 1
+        if (
+            annotation is not None
+            and annotation[0] == "stage"
+            and str(annotation[1].get("name")) == stage_name
+        ):
+            new_attrs = {
+                k: v for k, v in attrs.items() if k not in annotation[1]
+            }
+            if not new_attrs:
+                return text, False
+            last = end - 1
+            close_at = bare[last].rfind("-->")
+            before = bare[last][:close_at].rstrip()
+            ending = lines[last][len(bare[last]) :]
+            lines[last] = (
+                " ".join(
+                    p for p in [before, format_attrs(new_attrs), "-->"] if p
+                )
+                + ending
+            )
+            return "".join(lines), True
+        i = max(end, i + 1)
     return text, False
 
 
@@ -2115,11 +2291,40 @@ def set_output_blocks(text: str, outputs: dict[str, str]) -> tuple[str, bool]:
             continue
         body = outputs[stage_name]
         new_body = [line + "\n" for line in body.splitlines()] if body else []
-        if lines[i + 1 : j] != new_body:
+        # Output can itself contain a line that would close the block, so
+        # the fence is lengthened past the longest such run in it; a fence
+        # that is already long enough is left as it is
+        longest = max(
+            (
+                len(fm.group("fence"))
+                for fm in (_FENCE_RE.match(b.rstrip("\r\n")) for b in new_body)
+                if fm is not None and fm.group("fence")[0] == fence[0]
+            ),
+            default=0,
+        )
+        open_line = line
+        close_line = lines[j] if j < len(lines) else None
+        if longest >= len(fence):
+            new_fence = fence[0] * (longest + 1)
+            open_line = (
+                m.group("indent")
+                + new_fence
+                + m.group("info")
+                + line[len(line.rstrip("\r\n")) :]
+            )
+            if close_line is not None:
+                cm = _FENCE_RE.match(close_line.rstrip("\r\n"))
+                assert cm is not None
+                close_line = (
+                    cm.group("indent")
+                    + new_fence
+                    + close_line[len(close_line.rstrip("\r\n")) :]
+                )
+        if lines[i + 1 : j] != new_body or open_line != line:
             changed = True
-        out_lines.append(line)
+        out_lines.append(open_line)
         out_lines += new_body
-        if j < len(lines):
-            out_lines.append(lines[j])
+        if close_line is not None:
+            out_lines.append(close_line)
         i = j + 1
     return "".join(out_lines), changed

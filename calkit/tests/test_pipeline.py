@@ -2523,7 +2523,7 @@ def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
 
 
 def test_to_dvc_markdown_stage(tmp_dir):
-    """A markdown stage expands into one DVC stage per named block."""
+    # A markdown stage expands into one DVC stage per named block.
     import calkit
     from calkit.pipeline import to_dvc
 
@@ -2546,7 +2546,11 @@ def test_to_dvc_markdown_stage(tmp_dir):
         "environments": {
             "main": {"kind": "uv-venv", "path": "requirements.txt"}
         },
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        },
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -2573,7 +2577,11 @@ def test_to_dvc_markdown_stage_errors(tmp_dir):
 
     ck_info = {
         "environments": {},
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        },
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -2586,11 +2594,10 @@ def test_to_dvc_markdown_stage_errors(tmp_dir):
 
 
 def test_to_dvc_markdown_scripts_are_gitignored(tmp_dir):
-    """Extracted scripts are derived, so they're kept out of Git.
-
-    Like cleaned notebooks, they're rewritten on every compile rather than
-    committed, so a stale copy can never be what runs.
-    """
+    # Extracted scripts are derived, so they're kept out of Git.
+    #
+    # Like cleaned notebooks, they're rewritten on every compile rather than
+    # committed, so a stale copy can never be what runs.
     import git
 
     import calkit
@@ -2607,7 +2614,11 @@ def test_to_dvc_markdown_scripts_are_gitignored(tmp_dir):
         "environments": {
             "main": {"kind": "uv-venv", "path": "requirements.txt"}
         },
-        "pipeline": {"stages": {"README.md": {"kind": "markdown"}}},
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        },
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -2620,7 +2631,7 @@ def test_to_dvc_markdown_scripts_are_gitignored(tmp_dir):
 
 
 def test_translate_run_targets_markdown(tmp_dir):
-    """Naming a Markdown file runs every stage it declares."""
+    # Naming a Markdown file runs every stage it declares.
     from calkit.pipeline import translate_run_targets
 
     with open("README.md", "w") as f:
@@ -2630,7 +2641,13 @@ def test_translate_run_targets_markdown(tmp_dir):
             "```python calkit stage name=two environment=main\n"
             "pass\n```\n"
         )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     targets, isolated = translate_run_targets(["README.md"], ck_info=ck_info)
     assert targets == ["README.md/one", "README.md/two"]
     assert isolated == []
@@ -2643,7 +2660,7 @@ def test_translate_run_targets_markdown(tmp_dir):
 
 
 def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
-    """A markdown stage keyed by a name can be targeted either way."""
+    # A markdown stage keyed by a name can be targeted either way.
     from calkit.pipeline import translate_run_targets
 
     with open("guide.md", "w") as f:
@@ -2661,11 +2678,10 @@ def test_translate_run_targets_markdown_keyed_by_name(tmp_dir):
 
 
 def test_sync_markdown_writes_environments(tmp_dir):
-    """Markdown environments must reach calkit.yaml to be usable.
-
-    A stage's command runs ``calkit xenv`` as a subprocess, which reads
-    environments back off disk.
-    """
+    # Markdown environments must reach calkit.yaml to be usable.
+    #
+    # A stage's command runs `calkit xenv` as a subprocess, which reads
+    # environments back off disk.
     import calkit
     from calkit.pipeline import sync_markdown
 
@@ -2677,7 +2693,17 @@ def test_sync_markdown_writes_environments(tmp_dir):
         )
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(
-            {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}, f
+            {
+                "pipeline": {
+                    "stages": {
+                        "README.md": {
+                            "kind": "markdown",
+                            "target_path": "README.md",
+                        }
+                    }
+                }
+            },
+            f,
         )
     sync_markdown()
     written = calkit.load_calkit_info()
@@ -2705,13 +2731,12 @@ def test_sync_markdown_writes_environments(tmp_dir):
 
 
 def test_to_dvc_markdown_ignores_only_the_installed_env(tmp_dir):
-    """Specs and locks are committed; the installed environment is not.
-
-    Recording environments in Git is how a Calkit project is reproducible,
-    so the spec, the lock and the interpreter pin all stay tracked. What
-    can't be committed is the virtualenv itself: it is large and holds
-    absolute paths from the machine that built it.
-    """
+    # Specs and locks are committed; the installed environment is not.
+    #
+    # Recording environments in Git is how a Calkit project is reproducible,
+    # so the spec, the lock and the interpreter pin all stay tracked. What
+    # can't be committed is the virtualenv itself: it is large and holds
+    # absolute paths from the machine that built it.
     import git
 
     import calkit
@@ -2723,7 +2748,13 @@ def test_to_dvc_markdown_ignores_only_the_installed_env(tmp_dir):
             "<!-- calkit environment name=main python=3.13 -->\n- numpy\n\n"
             "```python calkit stage name=demo\npass\n```\n"
         )
-    ck_info = {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "README.md": {"kind": "markdown", "target_path": "README.md"}
+            }
+        }
+    }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     to_dvc(ck_info=ck_info, write=True)
@@ -2740,12 +2771,11 @@ def test_to_dvc_markdown_ignores_only_the_installed_env(tmp_dir):
 
 
 def test_to_dvc_uv_python_version_is_a_stage_input(tmp_dir):
-    """A uv environment's interpreter pin has to invalidate its stages.
-
-    ``uv.lock`` records only a ``requires-python`` floor, so without this
-    a changed pin would leave every stage in that environment looking up
-    to date.
-    """
+    # A uv environment's interpreter pin has to invalidate its stages.
+    #
+    # `uv.lock` records only a `requires-python` floor, so without this
+    # a changed pin would leave every stage in that environment looking up
+    # to date.
     import calkit
     from calkit.pipeline import to_dvc
 
@@ -2780,3 +2810,90 @@ def test_to_dvc_uv_python_version_is_a_stage_input(tmp_dir):
     os.remove(".calkit/envs/main/.python-version")
     deps = to_dvc(ck_info=ck_info)["s"]["deps"]
     assert ".calkit/envs/main/.python-version" not in deps
+
+
+def test_sync_markdown_prunes_renamed_environments(tmp_dir):
+    import calkit
+    from calkit.pipeline import sync_markdown
+
+    def _write_readme(env_name):
+        with open("README.md", "w") as f:
+            f.write(
+                f"<!-- calkit environment name={env_name} -->\n- numpy\n\n"
+                f"```python calkit stage name=demo environment={env_name}\n"
+                "pass\n```\n"
+            )
+
+    _write_readme("main")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "environments": {
+                    "mine": {"kind": "uv-venv", "path": "requirements.txt"}
+                },
+                "pipeline": {
+                    "stages": {
+                        "README.md": {
+                            "kind": "markdown",
+                            "target_path": "README.md",
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    sync_markdown()
+    assert set(calkit.load_calkit_info()["environments"]) == {"mine", "main"}
+    # Renaming the environment in the Markdown must not leave the old
+    # entry behind, while an environment the user wrote is never touched
+    _write_readme("main2")
+    sync_markdown()
+    assert set(calkit.load_calkit_info()["environments"]) == {"mine", "main2"}
+
+
+def test_check_all_in_pipeline_markdown_targets(tmp_dir, monkeypatch):
+    import calkit
+    import calkit.environments
+
+    os.makedirs("docs")
+    with open("docs/guide.md", "w") as f:
+        f.write(
+            "```python calkit stage name=example environment=nested\n"
+            "pass\n```\n"
+        )
+    with open("README.md", "w") as f:
+        f.write("```python calkit stage name=a environment=top\npass\n```\n")
+    ck_info = {
+        "environments": {
+            "nested": {"kind": "uv-venv", "path": "nested.txt"},
+            "top": {"kind": "uv-venv", "path": "top.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "docs/guide.md": {
+                    "kind": "markdown",
+                    "target_path": "docs/guide.md",
+                },
+                "README.md": {"kind": "markdown", "target_path": "README.md"},
+            }
+        },
+    }
+    import calkit.cli.check
+
+    checked = []
+    monkeypatch.setattr(
+        calkit.cli.check,
+        "check_environment",
+        lambda name, verbose=False: checked.append(name),
+    )
+    # A Markdown stage whose own name contains the separator still
+    # matches its stages as a whole
+    calkit.environments.check_all_in_pipeline(
+        ck_info=ck_info, targets=["docs/guide.md"], force=True
+    )
+    assert checked == ["nested"]
+    checked.clear()
+    calkit.environments.check_all_in_pipeline(
+        ck_info=ck_info, targets=["README.md/a"], force=True
+    )
+    assert checked == ["top"]

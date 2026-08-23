@@ -1831,11 +1831,10 @@ def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
 
 
 def test_split_template_subdir():
-    """A template may name a directory inside a repo.
-
-    One repo can hold several self-contained examples, e.g.
-    'calkit/calkit/examples/markdown'.
-    """
+    # A template may name a directory inside a repo.
+    #
+    # One repo can hold several self-contained examples, e.g.
+    # 'calkit/calkit/examples/markdown'.
     from calkit.cli.new import _split_template_subdir
 
     assert _split_template_subdir(
@@ -1851,33 +1850,3 @@ def test_split_template_subdir():
         "file:///tmp/x/examples/demo",
     ]:
         assert _split_template_subdir(url, url) == (url, None)
-
-
-def test_readme_sources_pipeline():
-    """A README declaring stages must not be overwritten by the template
-    flow, which would delete the project it describes."""
-    from calkit.cli.new import _readme_sources_pipeline
-
-    assert _readme_sources_pipeline(
-        {"pipeline": {"stages": {"README.md": {"kind": "markdown"}}}}
-    )
-    assert _readme_sources_pipeline(
-        {
-            "pipeline": {
-                "stages": {
-                    "docs": {"kind": "markdown", "target_path": "README.md"}
-                }
-            }
-        }
-    )
-    assert not _readme_sources_pipeline(
-        {
-            "pipeline": {
-                "stages": {
-                    "guide": {"kind": "markdown", "target_path": "guide.md"}
-                }
-            }
-        }
-    )
-    assert not _readme_sources_pipeline({"pipeline": {"stages": {}}})
-    assert not _readme_sources_pipeline({})

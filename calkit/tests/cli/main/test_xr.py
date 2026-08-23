@@ -729,3 +729,60 @@ def test_xr_jupyter_notebook_conda_env(tmp_dir):
     assert result.returncode == 0
     assert "kind: conda" in result.stdout
     assert f"path: {env_path}" in result.stdout
+
+
+def test_xr_markdown(tmp_dir):
+    with open("README.md", "w") as f:
+        f.write(
+            "# Demo\n\n"
+            "```python calkit stage name=demo\n"
+            "import json\n\n"
+            'print(json.dumps({"hello": "markdown"}))\n'
+            "```\n\n"
+            "```text calkit output stage=demo\n"
+            "stale\n"
+            "```\n"
+        )
+    result = subprocess.run(
+        ["calkit", "xr", "README.md"], capture_output=True, text=True
+    )
+    print(result.stdout, result.stderr)
+    assert result.returncode == 0
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["pipeline"]["stages"]["README.md"] == {
+        "kind": "markdown",
+        "target_path": "README.md",
+    }
+    # The environment detected for the block is recorded on the block,
+    # and the output block now says what the stage actually printed
+    with open("README.md") as f:
+        readme = f.read()
+    assert "```python calkit stage name=demo environment=readme\n" in readme
+    assert '{"hello": "markdown"}\n```' in readme
+    assert "stale" not in readme
+    assert ck_info["environments"]["readme"]["kind"] == "uv"
+    assert os.path.isfile(".calkit/envs/readme/pyproject.toml")
+    # Writing the output back changed a file the stage depends on, which
+    # must not make it stale: running again does nothing
+    result = subprocess.run(
+        ["calkit", "run", "README.md"], capture_output=True, text=True
+    )
+    print(result.stdout, result.stderr)
+    assert result.returncode == 0
+    assert "didn't change" in result.stdout
+    # A stage that fails leaves nothing half-recorded behind
+    with open("calkit.yaml") as f:
+        ck_yaml_before = f.read()
+    with open("BROKEN.md", "w") as f:
+        f.write("```python calkit stage name=boom\nraise SystemExit(1)\n```\n")
+    with open("BROKEN.md") as f:
+        broken_before = f.read()
+    result = subprocess.run(
+        ["calkit", "xr", "BROKEN.md"], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    with open("calkit.yaml") as f:
+        assert f.read() == ck_yaml_before
+    with open("BROKEN.md") as f:
+        assert f.read() == broken_before
+    assert not os.path.isdir(".calkit/envs/broken")

@@ -134,6 +134,13 @@ jobs:
         working-directory: jupyterlab-ext
     steps:
       - uses: actions/checkout@v7
+      # The UI tests initialize a project from inside JupyterLab, which
+      # commits, and Git refuses to commit without an identity
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
       - name: Setup uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:

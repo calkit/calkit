@@ -290,15 +290,37 @@ def init(
     # because Git resolves them against the repo root, which is not this
     # directory when the project is a subdirectory of a larger repo.
     repo = calkit.git.get_repo()
+
+    def _commit_staged(message: str) -> None:
+        """Commit what's staged, if anything, and if Git will let us.
+
+        The project is initialized either way; the commit is a courtesy,
+        so a Git that refuses---typically for want of a user.name and
+        user.email---is a warning rather than a failed init.
+        """
+        from git.exc import GitCommandError
+
+        if not calkit.git.get_staged_files(repo=repo):
+            return
+        try:
+            repo.git.commit("-m", message)
+        except GitCommandError as e:
+            # Git's reason is the last line of a long message (the rest
+            # is advice on configuring an identity)
+            lines = [ln for ln in (e.stderr or str(e)).splitlines() if ln]
+            reason = lines[-1].strip().rstrip("'") if lines else str(e)
+            warn(
+                f"Could not commit '{message}' ({reason}); the changes are "
+                "staged, so commit them once Git is configured"
+            )
+
     repo.git.add(os.path.abspath(".dvc"))
-    if calkit.git.get_staged_files(repo=repo):
-        repo.git.commit("-m", "Initialize DVC")
+    _commit_staged("Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         calkit.schema.ensure_modeline("calkit.yaml")
         repo.git.add(os.path.abspath("calkit.yaml"))
-        if calkit.git.get_staged_files(repo=repo):
-            repo.git.commit("-m", "Initialize Calkit")
+        _commit_staged("Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
     # TODO: Add a sane LICENSE file?

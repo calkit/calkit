@@ -197,7 +197,19 @@ def _check_julia_env(
     cmd += [
         f"--project={env_dir}",
         "-e",
-        "using Pkg; Pkg.resolve(); Pkg.instantiate();",
+        # Resolve only when the manifest no longer matches the project
+        # (e.g. a dependency was added, or the manifest was written by a
+        # different Julia version): plain instantiate would install it
+        # as-is and fail later at precompile. A current manifest is
+        # installed exactly as locked, with no registry involved---
+        # resolving one unconditionally can fail spuriously (and would
+        # rewrite the lock). Older Julias without the check keep the
+        # plain instantiate they always had.
+        "using Pkg; "
+        "if hasmethod(Pkg.is_manifest_current, Tuple{String}) && "
+        "Pkg.is_manifest_current(dirname(Base.active_project())) == false; "
+        "Pkg.resolve(); end; "
+        "Pkg.instantiate();",
     ]
     if julia_version:
         try:

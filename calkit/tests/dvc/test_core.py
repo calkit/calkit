@@ -1,0 +1,489 @@
+"""Tests for the ``dvc`` module."""
+
+import logging
+import os
+import subprocess
+
+import dvc.repo
+import git
+import pytest
+import zc.lockfile
+from configobj import ConfigObj
+from dvc.config_schema import SCHEMA, Invalid
+from dvc_objects.fs import known_implementations
+
+import calkit
+from calkit.dvc import register_ck_scheme
+from calkit.dvc.core import _tolerate_lock_release_failures
+
+
+def test_get_remotes(tmp_dir):
+    subprocess.call(["git", "init"])
+    assert not calkit.dvc.get_remotes()
+    subprocess.call(["dvc", "init"])
+    assert not calkit.dvc.get_remotes()
+    subprocess.call(
+        [
+            "dvc",
+            "remote",
+            "add",
+            "something",
+            "https://sup.com",
+        ]
+    )
+    subprocess.call(
+        [
+            "dvc",
+            "remote",
+            "add",
+            "something-very-long-remote-that-will-be-more-than-one-line",
+            "https://sup.com/this/is/a/long/remote/url/so/test/this",
+        ]
+    )
+    resp = calkit.dvc.get_remotes()
+    assert resp == {
+        "something": "https://sup.com",
+        "something-very-long-remote-that-will-be-more-than-one-line": (
+            "https://sup.com/this/is/a/long/remote/url/so/test/this"
+        ),
+    }
+
+
+def test_ensure_dvc_lock_not_ignored(tmp_dir):
+    subprocess.check_call(["git", "init"])
+    repo = git.Repo()
+    # No-op (and no .gitignore created) when dvc.lock isn't ignored
+    assert not calkit.dvc.ensure_dvc_lock_not_ignored()
+    # Once dvc.lock is ignored, the helper un-ignores it
+    with open(".gitignore", "w") as f:
+        f.write("dvc.lock\n")
+    assert repo.ignored("dvc.lock")
+    assert calkit.dvc.ensure_dvc_lock_not_ignored()
+    assert not repo.ignored("dvc.lock")
+
+
+def test_hash_directory():
+    this_dir = os.path.dirname(__file__)
+    fpath = os.path.join(this_dir, "..", "..", "..", "test", "dvc-md5-dir")
+    res = calkit.dvc.hash_directory(fpath)
+    assert res["nfiles"] == 1
+    assert res["size"] == 1226
+    assert res["hash"] == "md5"
+    assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
+
+
+def test_frozen_stage_reproduce_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.repo.reproduce logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.repo.reproduce")
+    with caplog.at_level(logging.WARNING, logger="dvc.repo.reproduce"):
+        logger.warning(
+            "%s is frozen. Its dependencies are not going to be reproduced.",
+            "stage: 'foo@1'",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("is frozen" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
+
+
+def test_stale_rwlock_warning_is_suppressed(caplog):
+    # Import side effect: loading calkit.dvc installs the filter on the
+    # dvc.rwlock logger.
+    import logging
+
+    import calkit.dvc  # noqa: F401
+
+    logger = logging.getLogger("dvc.rwlock")
+    with caplog.at_level(logging.WARNING, logger="dvc.rwlock"):
+        logger.warning(
+            "Process '%s' with (Pid %s), in RWLock-file '%s' had been "
+            "killed. Auto removed it from the lock file.",
+            "calkit status --json -c pipeline",
+            22108,
+            "runs/amip",
+        )
+        logger.warning("some other warning that must pass through")
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("Auto removed it from the lock file" in m for m in messages)
+    assert any("must pass through" in m for m in messages)
+
+
+def test_tolerate_lock_release_failures(tmp_dir, caplog):
+    # Stand in for Windows' msvcrt unlock, which can fail while another
+    # process contends for the same lock. It's applied at import time there,
+    # so install it over a failing unlock here to test on any platform.
+    def failing_unlock(file):
+        raise zc.lockfile.LockError(f"Couldn't unlock {file.name!r}")
+
+    original = zc.lockfile._unlock_file
+    zc.lockfile._unlock_file = failing_unlock
+    try:
+        # Without the fix, closing raises and leaks the still-locked handle
+        lock = zc.lockfile.LockFile("untolerated.lock")
+        fp = lock._fp
+        with pytest.raises(zc.lockfile.LockError):
+            lock.close()
+        assert not fp.closed
+        fp.close()
+        # With it, closing succeeds and the handle is closed, which is what
+        # actually releases the lock
+        _tolerate_lock_release_failures()
+        lock = zc.lockfile.LockFile("tolerated.lock")
+        fp = lock._fp
+        with caplog.at_level(logging.WARNING, logger="calkit.dvc"):
+            lock.close()
+        assert fp.closed
+        assert lock._fp is None
+        assert any(
+            "Ignoring failure to release DVC lock" in r.getMessage()
+            for r in caplog.records
+        )
+    finally:
+        zc.lockfile._unlock_file = original
+
+
+def test_register_ck_scheme_updates_schema_and_registry():
+    register_ck_scheme()
+
+    remote_validator = SCHEMA["remote"][str]
+    validated = remote_validator({"url": "ck://owner/project"})
+
+    assert validated["url"] == "ck://owner/project"
+    assert "ck" in known_implementations
+
+
+def test_ck_url_rejected_before_registration_when_schema_reset(monkeypatch):
+    from dvc.config_schema import REMOTE_SCHEMAS, ByUrl
+
+    original_remote = SCHEMA["remote"]
+    try:
+        sc = dict(REMOTE_SCHEMAS)
+        sc.pop("ck", None)
+        SCHEMA["remote"] = {str: ByUrl(sc)}
+        validator = SCHEMA["remote"][str]
+        try:
+            validator({"url": "ck://owner/project"})
+            assert False, "Expected Invalid for unsupported scheme"
+        except Invalid:
+            pass
+    finally:
+        SCHEMA["remote"] = original_remote
+
+
+def test_list_files_paths(tmp_dir):
+    subprocess.call(["calkit", "init"])
+    calkit.dvc.list_files()
+    with open("file1.txt", "w") as f:
+        f.write("hello")
+    repo = dvc.repo.Repo()
+    repo.add("file1.txt")  # type: ignore
+    assert "file1.txt" in calkit.dvc.list_paths()
+
+
+def test_detect_calkit_remote_type():
+    http_name = calkit.dvc.make_remote_name(use_ck=False)
+    ck_name = calkit.dvc.make_remote_name(use_ck=True)
+    # Default-named HTTP remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "https://example.com")
+        == "http"
+    )
+    # Default-named ck remote
+    assert (
+        calkit.dvc.detect_calkit_remote_type(ck_name, "ck://owner/proj")
+        == "ck"
+    )
+    # External-project remote with ":" suffix
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{http_name}:owner/proj", "https://example.com/o/p/dvc"
+        )
+        == "http"
+    )
+    assert (
+        calkit.dvc.detect_calkit_remote_type(
+            f"{ck_name}:owner/proj", "ck://owner/proj"
+        )
+        == "ck"
+    )
+    # Unrelated remote name
+    assert (
+        calkit.dvc.detect_calkit_remote_type("something", "https://sup.com")
+        is None
+    )
+    # Matching name but unknown URL scheme
+    assert (
+        calkit.dvc.detect_calkit_remote_type(http_name, "ssh://git@host/repo")
+        is None
+    )
+
+
+def test_configure_remote_ck_uses_ck_scheme_and_skips_http_auth(monkeypatch):
+    monkeypatch.setattr(calkit, "detect_project_name", lambda wdir=None: "o/p")
+
+    class DummyRepo:
+        def remote(self):
+            return "origin"
+
+    monkeypatch.setattr(git, "Repo", lambda wdir=None, **kwargs: DummyRepo())
+    calls = []
+    events = []
+
+    def fake_run(argv, cwd=None):
+        events.append("run")
+        calls.append((argv, cwd))
+        return 0
+
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_command", fake_run)
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "clear_remote_local_http_auth",
+        lambda remote_name=None, wdir=None: events.append("clear"),
+    )
+    out = calkit.dvc.configure_remote(use_ck=True)
+    assert out == calkit.dvc.make_remote_name(use_ck=True)
+    assert events and events[0] == "clear"
+    assert calls == [
+        (
+            [
+                "remote",
+                "add",
+                "-d",
+                "-f",
+                calkit.dvc.make_remote_name(use_ck=True),
+                "ck://o/p",
+            ],
+            None,
+        )
+    ]
+
+
+def test_add_external_remote(monkeypatch):
+    calls = []
+    auth_calls = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None: calls.append((argv, cwd)) or 0,
+    )
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "set_remote_auth",
+        lambda name: auth_calls.append(name),
+    )
+    # HTTP case: builds URL from hub base, sets custom auth
+    monkeypatch.setattr(
+        calkit.hub, "get_base_url", lambda: "https://example.com"
+    )
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=False)
+    http_name = f"{calkit.dvc.make_remote_name(use_ck=False)}:o/p"
+    assert out == {
+        "name": http_name,
+        "url": "https://example.com/projects/o/p/dvc",
+    }
+    assert calls == [
+        (
+            [
+                "remote",
+                "add",
+                "-f",
+                http_name,
+                "https://example.com/projects/o/p/dvc",
+            ],
+            None,
+        ),
+        (["remote", "modify", http_name, "auth", "custom"], None),
+    ]
+    assert auth_calls == [http_name]
+    # ck case: builds ck:// URL, skips HTTP auth modify and set_remote_auth
+    calls.clear()
+    auth_calls.clear()
+    out = calkit.dvc.add_external_remote("o", "p", use_ck=True)
+    ck_name = f"{calkit.dvc.make_remote_name(use_ck=True)}:o/p"
+    assert out == {"name": ck_name, "url": "ck://o/p"}
+    assert calls == [
+        (["remote", "add", "-f", ck_name, "ck://o/p"], None),
+    ]
+    assert auth_calls == []
+
+
+def test_set_remote_auth_ck_remote_clears_local_http_auth(
+    monkeypatch, tmp_path
+):
+    remote_name = calkit.dvc.make_remote_name()
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "get_remotes",
+        lambda wdir=None: {remote_name: "ck://owner/proj"},
+    )
+    dvc_dir = tmp_path / ".dvc"
+    dvc_dir.mkdir()
+    fpath = dvc_dir / "config.local"
+    with open(fpath, "w") as f:
+        f.write(
+            f'[remote "{remote_name}"]\n'
+            "    custom_auth_header = Authorization\n"
+            "    password = Bearer token\n"
+            "    url = https://example.com\n"
+        )
+    calkit.dvc.set_remote_auth(wdir=str(tmp_path))
+    cfg = ConfigObj(str(fpath), encoding="utf-8")
+    section = cfg[f'remote "{remote_name}"']
+    assert "custom_auth_header" not in section
+    assert "password" not in section
+    assert section["url"] == "https://example.com"  # type: ignore
+
+
+def test_data_status_as_posix():
+    # Use os.path.join so on Windows the inputs contain real backslash
+    # separators (exercising the \ -> / conversion), and on POSIX they're
+    # already forward-slashes (testing structure preservation + regressions).
+    data_status = {
+        "git": {
+            "is_dirty": True,
+            "untracked": [os.path.join("sub", "file.txt")],
+        },
+        "uncommitted": {
+            "added": [os.path.join("data", "a.csv")],
+            "modified": [os.path.join("data", "b.csv")],
+            "renamed": [
+                {
+                    "old": os.path.join("data", "old.csv"),
+                    "new": os.path.join("data", "new.csv"),
+                }
+            ],
+        },
+        "not_in_remote": [
+            os.path.join("figs", "a.png"),
+            os.path.join("figs", "b.png"),
+        ],
+        "scalar": "ignored",
+    }
+    out = calkit.dvc.data_status_as_posix(data_status)
+    # Git entry passes through untouched (no normalization applied), including
+    # whatever separator the OS uses.
+    assert out["git"] == {
+        "is_dirty": True,
+        "untracked": [os.path.join("sub", "file.txt")],
+    }
+    # All other paths come out in posix form regardless of platform.
+    assert out["not_in_remote"] == ["figs/a.png", "figs/b.png"]
+    assert out["uncommitted"]["added"] == ["data/a.csv"]
+    assert out["uncommitted"]["modified"] == ["data/b.csv"]
+    # Renamed entries are dicts — must not crash and must convert old/new.
+    assert out["uncommitted"]["renamed"] == [
+        {"old": "data/old.csv", "new": "data/new.csv"}
+    ]
+    # Unknown scalar values pass through.
+    assert out["scalar"] == "ignored"
+
+
+def test_status_as_posix():
+    # Stages with: bare-string entries, normal path/status dicts (using
+    # os.path.join so Windows runs see real backslashes), and scalar category
+    # values like "changed command" (which must not crash).
+    status = {
+        "stage1": ["always changed"],
+        "stage2": [
+            {
+                "changed outs": {os.path.join("data", "out.csv"): "modified"},
+                "changed deps": {os.path.join("src", "foo.py"): "modified"},
+            }
+        ],
+        "stage3": [{"changed command": "python src/new-script.py"}],
+    }
+    out = calkit.dvc.status_as_posix(status)
+    assert out["stage1"] == ["always changed"]
+    assert out["stage2"] == [
+        {
+            "changed outs": {"data/out.csv": "modified"},
+            "changed deps": {"src/foo.py": "modified"},
+        }
+    ]
+    assert out["stage3"] == [{"changed command": "python src/new-script.py"}]
+
+
+def test_run_dvc_command_lock_timeout(monkeypatch):
+    """``run_dvc_command`` extends DVC's lock timeout when asked.
+
+    ``pull``/``push`` pass a ``lock_timeout`` so a briefly-held repo lock (e.g.
+    by the VS Code extension's status poller) doesn't fail the command. Verify
+    the elevated timeout is in effect during the call and restored afterward.
+    """
+    import dvc.lock
+
+    base = dvc.lock.DEFAULT_TIMEOUT
+    seen = {}
+
+    def fake_cli(argv):
+        seen["timeout"] = dvc.lock.DEFAULT_TIMEOUT
+        return 0
+
+    monkeypatch.setattr(calkit.dvc.core, "run_dvc_cli", fake_cli)
+    rc = calkit.dvc.run_dvc_command(["pull"], lock_timeout=base + 100)
+    assert rc == 0
+    assert seen["timeout"] == base + 100
+    # Restored after the call.
+    assert dvc.lock.DEFAULT_TIMEOUT == base
+    # Without a timeout, DVC's default is left untouched.
+    rc = calkit.dvc.run_dvc_command(["pull"])
+    assert rc == 0
+    assert seen["timeout"] == base
+
+
+def test_init_detects_subdir(tmp_path, monkeypatch):
+    # DVC won't initialize inside a Git repo unless told it's a subdir. A
+    # self-contained project living within a larger repo is exactly that
+    # case, and getting it wrong leaves the user with a Git error.
+    import calkit.dvc
+    import calkit.dvc.core
+
+    ran = []
+    monkeypatch.setattr(
+        calkit.dvc.core,
+        "run_dvc_command",
+        lambda argv, cwd=None, **kw: ran.append((argv, cwd)) or 0,
+    )
+
+    def _init_args(**kwargs):
+        assert calkit.dvc.init(**kwargs) == 0
+        return ran.pop()
+
+    monkeypatch.chdir(tmp_path)
+    # No Git repo at all: the caller creates one here, so this is the root
+    assert _init_args() == (["init"], None)
+    subprocess.check_call(["git", "init", "-q", "."])
+    assert _init_args() == (["init"], None)
+    assert _init_args(force=True, quiet=True) == (
+        ["init", "--force", "--quiet"],
+        None,
+    )
+    sub = tmp_path / "examples" / "demo"
+    sub.mkdir(parents=True)
+    monkeypatch.chdir(sub)
+    assert _init_args() == (["init", "--subdir"], None)
+    # An explicit wdir is honored rather than the process's cwd
+    monkeypatch.chdir(tmp_path)
+    assert _init_args(wdir=str(sub)) == (["init", "--subdir"], str(sub))
+    # A directory the enclosing repo ignores needs its own repo. Scratch
+    # and test project directories are routinely ignored by the repo
+    # holding them, and DVC refuses to initialize into an ignored path, so
+    # treating one as a subdirectory project fails outright.
+    (tmp_path / ".gitignore").write_text("/scratch\n")
+    tracked = tmp_path / "tracked"
+    tracked.mkdir()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    # A tracked subdirectory is part of the repo, so DVC is told so
+    assert not calkit.dvc.enclosing_repo_ignores(str(tracked))
+    assert _init_args(wdir=str(tracked))[0] == ["init", "--subdir"]
+    # An ignored one is not, so it becomes its own root instead
+    assert calkit.dvc.enclosing_repo_ignores(str(scratch))
+    assert _init_args(wdir=str(scratch))[0] == ["init"]
+    # The repo root itself is never "ignored by" its own repo
+    assert not calkit.dvc.enclosing_repo_ignores(str(tmp_path))

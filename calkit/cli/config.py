@@ -4,29 +4,74 @@ from __future__ import annotations
 
 import glob
 import os
+import platform
+import re
 import subprocess
 
-import git
 import typer
-from git.exc import InvalidGitRepositoryError
 from typing_extensions import Annotated
 
 import calkit
-from calkit import config
 from calkit.cli.core import raise_error
-from calkit.dvc import configure_remote, get_remotes, set_remote_auth
 
 config_app = typer.Typer(no_args_is_help=True)
 
 
-@config_app.command(name="set")
-def set_config_value(key: str, value: str):
-    """Set a value in the config."""
-    keys = config.Settings.model_fields.keys()
-    if key not in keys:
+# Registered under the hub CLI group as 'calkit hub config', and below
+# as 'calkit config hub' so both spellings work
+hub_config_app = typer.Typer(no_args_is_help=True)
+config_app.add_typer(
+    hub_config_app,
+    name="hub",
+    help="Work with per-hub credentials (alias for 'calkit hub config').",
+)
+
+_HUB_OPTION = typer.Option(
+    "--hub",
+    help=(
+        "URL of the hub, e.g., https://staging.calkit.io. Defaults to "
+        "the active hub."
+    ),
+)
+
+
+def _select_hub(hub: str | None) -> None:
+    if hub is None:
+        return
+    if hub in ["test", "local", "staging", "production"]:
+        raise_error("--hub takes a hub URL, e.g., https://staging.calkit.io")
+    os.environ["CALKIT_HUB"] = hub
+
+
+def _check_shared_key(key: str) -> None:
+    from calkit import config
+
+    keys = [
+        k
+        for k in config.Settings.model_fields
+        if k not in config.HUB_SCOPED_FIELDS
+    ]
+    if key in config.HUB_SCOPED_FIELDS:
         raise_error(
-            f"Invalid config key: '{key}'; Valid keys are: {list(keys)}"
+            f"'{key}' is stored per hub; use 'calkit hub config' commands"
         )
+    if key not in keys:
+        raise_error(f"Invalid config key: '{key}'; Valid keys are: {keys}")
+
+
+def _check_hub_key(key: str) -> None:
+    from calkit import config
+
+    if key not in config.HUB_SCOPED_FIELDS:
+        raise_error(
+            f"'{key}' is not a per-hub credential; valid keys are: "
+            f"{config.HUB_SCOPED_FIELDS}"
+        )
+
+
+def _set_config_value(key: str, value: str) -> None:
+    from calkit import config
+
     try:
         cfg = config.read()
         cfg = config.Settings.model_validate(cfg.model_dump() | {key: value})
@@ -35,41 +80,106 @@ def set_config_value(key: str, value: str):
     cfg.write()
 
 
-@config_app.command(name="get")
-def get_config_value(key: str) -> None:
-    """Get and print a value from the config."""
-    cfg = config.read().model_dump()
-    if key not in cfg:
-        raise_error(
-            f"Invalid config key: '{key}'; Valid keys are: {list(cfg.keys())}"
-        )
-    val = cfg[key]
+def _get_config_value(key: str) -> None:
+    from calkit import config
+
+    # Attribute access rather than a full dump, so reading one credential
+    # doesn't ask the keyring for every other one too
+    val = getattr(config.read(), key)
     if val is not None:
         print(val)
     else:
         print()
 
 
-@config_app.command(name="unset")
-def unset_config_value(key: str):
-    """Unset a value in the config, returning it to default."""
-    model_fields = config.Settings.model_fields
-    if key not in model_fields:
-        raise_error(
-            f"Invalid config key: '{key}'; "
-            f"Valid keys: {list(model_fields.keys())}"
-        )
+def _unset_config_value(key: str) -> None:
+    from calkit import config
+
     try:
         cfg = config.read()
-        setattr(cfg, key, model_fields[key].default)
+        setattr(cfg, key, config.Settings.model_fields[key].default)
     except Exception as e:
         raise_error(f"Failed to unset {key} in config: {e}")
     cfg.write()
 
 
+@config_app.command(name="set")
+def set_config_value(key: str, value: str) -> None:
+    """Set a value in the config."""
+    _check_shared_key(key)
+    _set_config_value(key, value)
+
+
+@config_app.command(name="get")
+def get_config_value(key: str) -> None:
+    """Get and print a value from the config."""
+    _check_shared_key(key)
+    _get_config_value(key)
+
+
+@config_app.command(name="unset")
+def unset_config_value(key: str) -> None:
+    """Unset a value in the config, returning it to default."""
+    _check_shared_key(key)
+    _unset_config_value(key)
+
+
+@hub_config_app.command(name="list")
+def list_hub_config_keys() -> None:
+    """List per-hub credential keys."""
+    from calkit import config
+
+    for key in config.HUB_SCOPED_FIELDS:
+        typer.echo(key)
+
+
+@hub_config_app.command(name="set")
+def set_hub_config_value(
+    key: str,
+    value: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Set a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _set_config_value(key, value)
+
+
+@hub_config_app.command(name="get")
+def get_hub_config_value(
+    key: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Get and print a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _get_config_value(key)
+
+
+@hub_config_app.command(name="unset")
+def unset_hub_config_value(
+    key: str,
+    hub: Annotated[str | None, _HUB_OPTION] = None,
+) -> None:
+    """Unset a credential for the active or given hub."""
+    _select_hub(hub)
+    _check_hub_key(key)
+    _unset_config_value(key)
+
+
 @config_app.command(name="setup-remote", help="Alias for 'remote'.")
 @config_app.command(name="remote")
 def setup_remote(
+    http: Annotated[
+        bool,
+        typer.Option(
+            "--http",
+            help=(
+                "Use the legacy HTTP URL for the Calkit DVC remote instead "
+                "of ck://."
+            ),
+        ),
+    ] = False,
     no_commit: Annotated[
         bool,
         typer.Option(
@@ -77,12 +187,16 @@ def setup_remote(
         ),
     ] = False,
 ):
-    """Setup the Calkit cloud as the default DVC remote and store a token in
-    the local config.
+    """Set up the Calkit hub as the default DVC remote and store a token
+    in the local config.
     """
+    from git.exc import InvalidGitRepositoryError
+
+    from calkit.dvc import configure_remote, set_remote_auth
+
     try:
-        configure_remote()
-        set_remote_auth()
+        remote_name = configure_remote(use_ck=not http)
+        set_remote_auth(remote_name=remote_name)
     except subprocess.CalledProcessError:
         if not os.path.isfile(".dvc/config"):
             raise_error(
@@ -96,7 +210,7 @@ def setup_remote(
     except (ValueError, RuntimeError) as e:
         raise_error(f"Failed to set up DVC remote: {e}")
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(".dvc/config")
         if ".dvc/config" in calkit.git.get_staged_files():
             typer.echo("Committing changes to DVC config")
@@ -106,16 +220,17 @@ def setup_remote(
 @config_app.command(name="setup-remote-auth", help="Alias for 'remote-auth'.")
 @config_app.command(name="remote-auth")
 def setup_remote_auth():
-    """Store a Calkit cloud token in the local DVC config for all Calkit
+    """Store a Calkit hub token in the local DVC config for all Calkit
     remotes.
     """
+    from calkit.dvc import get_remotes, set_remote_auth
+
     try:
         remotes = get_remotes()
     except Exception:
         raise_error("Cannot list DVC remotes; check DVC config for errors")
-    ck_remote_name = calkit.config.get_app_name()
     for name, url in remotes.items():
-        if name == ck_remote_name or name.startswith(f"{ck_remote_name}:"):
+        if calkit.dvc.detect_calkit_remote_type(name, url) is not None:
             typer.echo(f"Setting up authentication for DVC remote: {name}")
             set_remote_auth(remote_name=name)
 
@@ -123,19 +238,29 @@ def setup_remote_auth():
 @config_app.command(name="list")
 def list_config_keys():
     """List keys in the config."""
+    from calkit import config
+
     cfg = config.read()
     for key in cfg.model_dump():
-        typer.echo(key)
+        if key in config.HUB_SCOPED_FIELDS:
+            typer.echo(f"{key} (per hub; see 'calkit hub config')")
+        else:
+            typer.echo(key)
 
 
 @config_app.command(name="github-ssh")
 def config_github_ssh():
     """Walk through the process of adding an SSH key to GitHub."""
+    import git
+
     typer.echo("Checking if you can already connect to GitHub via SSH")
     # First check if we can already connect to GitHub
     ssh_test_cmd = ["ssh", "-T", "git@github.com"]
     p = subprocess.run(ssh_test_cmd, capture_output=True, text=True)
-    if "successfully authenticated" in p.stderr:
+    if (
+        "successfully authenticated" in p.stdout
+        or "successfully authenticated" in p.stderr
+    ):
         typer.echo("You can already connect to GitHub via SSH")
         go_on = typer.confirm("Do you want to add a new SSH key anyway?")
         if not go_on:
@@ -209,12 +334,57 @@ def config_github_ssh():
     subprocess.run(keygen_cmd)
     # Start the SSH agent in the background
     typer.echo("Checking that the SSH agent is running")
-    ssh_agent_cmd = subprocess.run(
-        ["ssh-agent", "-s"], capture_output=True, text=True
-    ).stdout
-    p = subprocess.run(ssh_agent_cmd, shell=True)
-    if p.returncode != 0:
-        raise_error("Failed to start ssh-agent")
+    # Note that under git bash / MSYS (MSYSTEM is set) we get a POSIX
+    # ssh-agent on PATH, so we use the POSIX path even on Windows there.
+    native_windows = platform.system() == "Windows" and not os.environ.get(
+        "MSYSTEM"
+    )
+    if native_windows:
+        # On native Windows, OpenSSH's ssh-agent runs as a Windows service
+        # rather than exporting environment variables to the current shell.
+        # The service ships disabled by default, so ensure it's enabled
+        # before starting it (enabling requires administrator privileges).
+        p = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                (
+                    "if ((Get-Service ssh-agent).StartType -eq 'Disabled') "
+                    "{ Set-Service ssh-agent -StartupType Manual }; "
+                    "Start-Service ssh-agent"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if p.returncode != 0:
+            err = (p.stderr.strip() or p.stdout.strip()).lower()
+            if "access" in err and "denied" in err:
+                raise_error(
+                    "Failed to start ssh-agent service: access denied.\n"
+                    "The ssh-agent service is disabled and enabling it "
+                    "requires administrator privileges. Please run the "
+                    "following in an elevated (Run as administrator) "
+                    "PowerShell, then try again:\n\n"
+                    "    Set-Service ssh-agent -StartupType Manual; "
+                    "Start-Service ssh-agent"
+                )
+            raise_error(
+                "Failed to start ssh-agent service: "
+                f"{p.stderr.strip() or p.stdout.strip()}"
+            )
+    else:
+        # On POSIX systems, ssh-agent -s prints shell commands that export
+        # SSH_AUTH_SOCK and SSH_AGENT_PID; parse them into our environment so
+        # the subsequent ssh-add call can find the agent
+        p = subprocess.run(["ssh-agent", "-s"], capture_output=True, text=True)
+        if p.returncode != 0:
+            raise_error("Failed to start ssh-agent")
+        for match in re.finditer(
+            r"(SSH_AUTH_SOCK|SSH_AGENT_PID)=([^;\n]+);", p.stdout
+        ):
+            os.environ[match.group(1)] = match.group(2)
     # Add the SSH key to the ssh-agent
     typer.echo(f"Adding SSH key to ssh-agent: {key_path}")
     cmd = ["ssh-add", key_path]
@@ -259,7 +429,7 @@ def config_github_codespace():
         typer.echo("No GitHub token found; exiting")
         raise typer.Exit()
     try:
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             "/login/github-token",
             headers={"Authorization": f"Bearer {github_token}"},
             auth=False,

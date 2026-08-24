@@ -1,0 +1,55 @@
+schema: '2.0'
+stages:
+  README.md/usage:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/usage.py
+    deps:
+    - path: .calkit/markdown/README.md/usage.py
+      hash: md5
+      md5: f27810aaf1406ca84a4696184f94b10f
+      size: 224
+    - path: .calkit/markdown/outputs/README.md/usage.txt
+      hash: md5
+      md5: 8bdf52528a30774a50419d1f99a35146
+      size: 40
+    - path: .python-version
+      hash: md5
+      md5: 789ee353b44223a8ed8031aa190631dd
+      size: 5
+    - path: src/wavetools
+      hash: md5
+      md5: 2a9968d37de9927d1cebf59ce2544efe.dir
+      size: 1694
+      nfiles: 2
+    - path: uv.lock
+      hash: md5
+      md5: e956bfe5b8c433b91d12f19a4907996e
+      size: 90987
+  README.md/figure:
+    cmd: calkit xenv -n py --no-check -- python .calkit/markdown/README.md/figure.py
+    deps:
+    - path: .calkit/markdown/README.md/figure.py
+      hash: md5
+      md5: 22ab2e88f459fa62fc60bd211525a39d
+      size: 502
+    - path: .calkit/markdown/outputs/README.md/figure.txt
+      hash: md5
+      md5: bf32c42b12e302ff76e5dea82776b0eb
+      size: 24
+    - path: .python-version
+      hash: md5
+      md5: 789ee353b44223a8ed8031aa190631dd
+      size: 5
+    - path: src/wavetools
+      hash: md5
+      md5: 2a9968d37de9927d1cebf59ce2544efe.dir
+      size: 1694
+      nfiles: 2
+    - path: uv.lock
+      hash: md5
+      md5: e956bfe5b8c433b91d12f19a4907996e
+      size: 90987
+    outs:
+    - path: figures/waves.png
+      hash: md5
+      md5: d5cf5806a70452d4e5801f1bd7434b48
+      size: 61443

@@ -1,102 +1,154 @@
 name: Run tests
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on: pull_request
 
 env:
   CALKIT_TEST_ZENODO_TOKEN: ${{ secrets.CALKIT_ZENODO_TOKEN }}
 
 jobs:
-  linux:
+  # Always runs so the gated job below can be a branch protection required
+  # check; hub-only PRs are covered by test-hub.yml instead
+  changes:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      cli: ${{ steps.filter.outputs.cli }}
+      jlab: ${{ steps.filter.outputs.jlab }}
+      vscode: ${{ steps.filter.outputs.vscode }}
+      browser: ${{ steps.filter.outputs.browser }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # Negated patterns are ignored under the default 'some'
+          # quantifier, which would make this match every change
+          predicate-quantifier: "every"
+          filters: |
+            cli:
+              - "**"
+              - "!hub/**"
+              - "!vscode-ext/**"
+              - "!browser-ext/**"
+            # The JupyterLab extension depends on the core Python package,
+            # so run its tests for any change outside the other subprojects
+            jlab:
+              - "**"
+              - "!hub/**"
+              - "!vscode-ext/**"
+              - "!browser-ext/**"
+            vscode:
+              - "vscode-ext/**"
+            browser:
+              - "browser-ext/**"
+
+  main:
+    needs: changes
+    if: needs.changes.outputs.cli == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Needed so the example project in examples/basic is checked
+          # against the calkit.yaml JSON schema
+          submodules: true
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
-      - name: Configure Git push behavior
-        run: git config --global push.autoSetupRemote true
+          git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@v3
+        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
           miniforge-version: latest
           auto-activate-base: true
           conda-remove-defaults: true
-      - name: Install Pixi
-        run: |
-          curl -fsSL https://pixi.sh/install.sh | bash
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@f00437f565399d418b0acc85936d12c1fb668347 # v0.10.1
+        with:
+          run-install: false
       - name: Install Juliaup
-        uses: julia-actions/install-juliaup@v2
+        uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
+      # Juliaup installs Julia but leaves the depot empty, and the first Pkg
+      # operation then precompiles Pkg and downloads the General registry.
+      # Tests that isolate themselves in a throwaway depot append this one,
+      # so whatever is here is read rather than rebuilt -- measured at 65s
+      # cold vs 1s warm for a single `Pkg.instantiate` on an empty project.
+      - name: Cache the Julia depot
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/packages
+            ~/.julia/registries
+          # A new entry each run, restoring the newest previous one, so the
+          # depot keeps up with whatever the tests install
+          key: julia-depot-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: julia-depot-${{ runner.os }}-
+      # Cheap on a cache hit, and on a miss it pays the precompile once here
+      # rather than inside whichever test happens to reach Julia first
+      - name: Warm the Julia depot
+        run: julia -e 'using Pkg; Pkg.Registry.add("General")'
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Setup R
-        uses: r-lib/actions/setup-r@v2
+        uses: r-lib/actions/setup-r@d3c5be51b12e724e68f33216ca3c148b66d5f0b6 # v2
         with:
           r-version: latest
       - name: Run tests
         run: |
-          source ~/.bashrc
           pixi --version
           conda --version
-          docker --version
+          docker --version || true
           juliaup --version
           Rscript --version
           uv --version
           uv run pytest -n 4 --durations=10
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 20
-    # TODO: Get this working!
-    if: false
+  jupyterlab-ext:
+    needs: changes
+    if: needs.changes.outputs.jlab == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: jupyterlab-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # The UI tests initialize a project from inside JupyterLab, which
+      # commits, and Git refuses to commit without an identity
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
           git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
           git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
-      - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@v3
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          miniforge-version: latest
-          auto-activate-base: true
-          conda-remove-defaults: true
-      - name: Install Pixi
-        shell: bash
-        run: |
-          curl -fsSL https://pixi.sh/install.sh | bash
-      - name: Install compatible libsqlite
-        shell: bash -el {0}
-        run: |
-          source ~/.bashrc
-          conda activate base
-          conda install -c conda-forge libsqlite=3.48.0
-      - name: Run tests
-        shell: bash -el {0}
-        run: |
-          source ~/.bashrc
-          pixi --version
-          conda --version
-          docker --version
-          conda activate base
-          make test
-  ui:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Install JupyterLab extension dependencies
@@ -116,8 +168,48 @@ jobs:
           uv run jlpm playwright test -u --reporter=list
       - name: Upload Playwright test results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
-          path: ui-tests/test-results/
+          path: jupyterlab-ext/ui-tests/test-results/
           retention-days: 7
+  vscode-ext:
+    needs: changes
+    if: needs.changes.outputs.vscode == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-ext
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run VS Code extension tests
+        run: npm test
+  browser-ext:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: browser-ext
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: browser-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Run browser extension unit tests
+        run: npm test
+      - name: Build browser extension
+        run: npm run build

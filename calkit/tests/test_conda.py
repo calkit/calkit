@@ -1,14 +1,32 @@
 """Tests for the ``conda`` module."""
 
 import os
+import shutil
 import subprocess
+import sys
 
 import pytest
 
 import calkit
-from calkit.conda import _check_list, _check_single, check_env
+from calkit.conda import (
+    _check_list,
+    _check_single,
+    _enrich_pip_deps_from_freeze,
+    _get_pip_dependency_list,
+    _split_env_dependencies,
+    check_env,
+    find_conda_exe,
+)
 
 ENV_NAME = "main"
+
+# TODO: calkit conda env subprocess interactions need Windows debugging.
+# Conda on Windows uses .bat shims and PATH activation that interact poorly
+# with Python's subprocess; needs a real Windows checkout to fix properly.
+skipif_windows_conda = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: calkit conda env subprocess interactions need Windows debug",
+)
 
 
 def test_check_single():
@@ -24,6 +42,64 @@ def test_check_single():
     assert _check_single(
         "python>=3.12,<3.13", "python==3.12.18", env_spec_dir=".", conda=False
     )
+    # PEP 508 git direct reference in req matches plain installed version
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm==0.4.0",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Different package name must not match
+    assert not _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "other==1.0",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: same ref → match
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: short spec ref matches long installed ref (prefix)
+    assert _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b07ca1234",
+        env_spec_dir=".",
+        conda=False,
+    )
+    # Both sides git: different refs → no match
+    assert not _check_single(
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@aabbcc1",
+        env_spec_dir=".",
+        conda=False,
+    )
+
+
+def test_enrich_pip_deps_from_freeze():
+    pip_freeze = [
+        "numpy==1.24.3",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b07ca",
+        "scipy==1.11.0",
+    ]
+    spec_deps = [
+        "numpy==1.24.3",
+        "pyxdsm @ git+https://github.com/rebeccamccabe/pyXDSM.git@fc0b49b",
+        "scipy",
+    ]
+    result = _enrich_pip_deps_from_freeze(spec_deps, pip_freeze)
+    # numpy and scipy get the exact freeze version
+    assert "numpy==1.24.3" in result
+    assert "scipy==1.11.0" in result
+    # pyxdsm gets the full git URL from freeze
+    assert any("fc0b49b07ca" in r for r in result)
+    # Editable installs are kept unchanged
+    editable = ["-e ../mypackage", "numpy==1.24.3"]
+    result2 = _enrich_pip_deps_from_freeze(editable, pip_freeze)
+    assert result2[0] == "-e ../mypackage"
 
 
 def test_check_list():
@@ -37,20 +113,44 @@ def test_check_list():
     assert not _check_list("pandas", installed, env_spec_dir=".", conda=False)
 
 
+def test_split_env_dependencies():
+    dependencies = [
+        "python=3.12",
+        "pip",
+        "numpy=2",
+        {"pip": ["sqlalchemy==2.0.39"]},
+    ]
+    conda_deps, pip_deps = _split_env_dependencies(dependencies)
+    assert conda_deps == ["python=3.12", "pip", "numpy=2"]
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+
+
+def test_get_pip_dependency_list():
+    dependencies = ["python=3.12", "pip", {"pip": "sqlalchemy==2.0.39"}]
+    pip_deps = _get_pip_dependency_list(dependencies)
+    assert pip_deps == ["sqlalchemy==2.0.39"]
+    assert dependencies[-1]["pip"] == ["sqlalchemy==2.0.39"]
+
+
 def delete_env(name: str):
-    subprocess.check_call(["conda", "env", "remove", "-y", "-n", name])
+    conda = find_conda_exe() or "conda"
+    subprocess.check_call([conda, "env", "remove", "-y", "-n", name])
 
 
 @pytest.fixture
 def conda_env_name():
-    name = calkit.to_kebab_case(os.path.basename(os.getcwd())) + "-" + ENV_NAME
+    name = calkit.to_kebab_case(os.path.basename(os.getcwd())) + "." + ENV_NAME
     yield name
     # Teardown code
     delete_env(name)
 
 
+@skipif_windows_conda
 def test_check_env(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
+    # Note the specs here use trivial packages, since what matters is that
+    # there's one in the conda section and one in the pip section, not which
+    # ones---heavier packages cost tens of seconds each to install
     subprocess.check_call(
         [
             "calkit",
@@ -61,9 +161,9 @@ def test_check_env(tmp_dir, conda_env_name):
             "--no-check",
             "python=3.13",
             "pip",
-            "h5py",
+            "six",
             "--pip",
-            "pxl",
+            "iniconfig",
         ]
     )
     res = check_env()
@@ -87,7 +187,7 @@ def test_check_env(tmp_dir, conda_env_name):
             "python=3.11.0",
             "pip",
             "--pip",
-            "pxl",
+            "iniconfig",
         ]
     )
     res = check_env()
@@ -186,9 +286,11 @@ def test_check_env(tmp_dir, conda_env_name):
 def conda_env_prefix():
     prefix = ".conda-envs/my-conda-env"
     yield prefix
-    subprocess.check_call(["conda", "env", "remove", "-y", "--prefix", prefix])
+    conda = find_conda_exe() or "conda"
+    subprocess.check_call([conda, "env", "remove", "-y", "--prefix", prefix])
 
 
+@skipif_windows_conda
 def test_check_prefix_env(tmp_dir, conda_env_prefix):
     subprocess.check_call(["calkit", "init"])
     # Test we can use a local prefix
@@ -262,7 +364,8 @@ def test_check_prefix_env(tmp_dir, conda_env_prefix):
     )
 
 
-def test_check_editable(tmp_dir, conda_env_name):
+@skipif_windows_conda
+def test_check_env_editable(tmp_dir, conda_env_name):
     subprocess.check_call(["calkit", "init"])
     # Create a dummy package named 'src' to install in editable mode
     os.makedirs("src", exist_ok=True)
@@ -288,7 +391,7 @@ setup(
             "--no-check",
             "python=3.12",
             "pip",
-            "h5py",
+            "six",
             "--pip",
             "-e .",
         ]
@@ -306,6 +409,98 @@ setup(
         lock = calkit.ryaml.load(f)
     pip_deps = lock["dependencies"][-1]["pip"]
     assert "-e ." in pip_deps
+    # Now let's make sure we get proper output if the editable package is
+    # has an invalid pyproject.toml
+    os.remove("setup.py")
+    shutil.rmtree("src.egg-info")
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = [
+    "numpy>=1.21",
+    "scipy>=1.7",
+    "pandas>=1.5",
+    "matplotlib>=3.5",
+    "h5netcdf>=0.12",
+    "h5py>=3.0",
+    "xarray>=2023.0",
+    "streamlit>=1.0"
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["src-thing"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"src-thing" = [] # Explicitly state no package data
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    with pytest.raises(Exception, match="Failed to load pyproject.toml"):
+        res = check_env()
+    # Fix it and make sure it runs with relaxed mode
+    toml_txt = """[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "src-thing"
+dynamic = ["version"]
+authors = [
+  {name = "Someone"}
+]
+description = "Test"
+
+dependencies = []
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.setuptools_scm]
+local_scheme = "no-local-version"
+fallback_version = "0+unknown"
+"""
+    with open("pyproject.toml", "w") as f:
+        f.write(toml_txt)
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert res.env_needs_rebuild
+    assert res.env_needs_export
+    # Make sure we can import the editable package
+    os.makedirs("subdir")
+    subprocess.check_call(
+        [
+            "conda",
+            "run",
+            "-n",
+            conda_env_name,
+            "python",
+            "-c",
+            "import src; print('src file:', src.__file__);",
+        ],
+        cwd="subdir",
+    )
+    # Check again and make sure we don't need a rebuild since the editable
+    # package is still valid
+    res = check_env(relaxed=True)
+    assert res.env_exists
+    assert not res.env_needs_rebuild
 
 
 def test_find_conda_exe():

@@ -9,16 +9,10 @@ import os
 from copy import deepcopy
 from typing import Annotated
 
-import git
-import requests
 import typer
-from tqdm import tqdm
 
 import calkit
-import calkit.invenio
 from calkit.cli import raise_error
-from calkit.dvc import run_dvc_command
-from calkit.models.core import _ImportedFromProject
 
 import_app = typer.Typer(no_args_is_help=True)
 
@@ -63,11 +57,27 @@ def import_dataset(
             help="Force adding the dataset even if it already exists.",
         ),
     ] = False,
+    http: Annotated[
+        bool,
+        typer.Option(
+            "--http",
+            help=(
+                "Use the legacy HTTP URL for the imported project's DVC "
+                "remote instead of ck://."
+            ),
+        ),
+    ] = False,
 ):
     """Import a dataset.
 
     Currently only supports datasets kept in DVC, not Git.
     """
+    import requests
+    from tqdm import tqdm
+
+    from calkit.dvc import run_dvc_command
+    from calkit.models.core import _ImportedFromProject
+
     # Ensure we don't already have a dataset at this path
     path_split = src_path.split("/")
     owner_name = path_split[0]
@@ -84,7 +94,7 @@ def import_dataset(
         raise_error("A dataset already exists in this project at this path")
     elif overwrite and ds_dest_path in ds_paths:
         datasets = [ds for ds in datasets if ds["path"] != ds_dest_path]
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     # Obtain, save, and commit the .dvc file for the dataset, or if this is
     # kept in Git, just download the files and commit them here
     typer.echo("Fetching import info")
@@ -92,12 +102,12 @@ def import_dataset(
     if filter_paths is not None:
         params = {"filter_paths": filter_paths}
     try:
-        resp = calkit.cloud.get(
+        resp = calkit.hub.get(
             f"/projects/{owner_name}/{project_name}/datasets/{path}",
             params=params,
         )
     except Exception as e:
-        raise_error(f"Failed to fetch dataset info from cloud: {e}")
+        raise_error(f"Failed to fetch dataset info from the hub: {e}")
     dvc_import, git_import = resp["dvc_import"], resp["git_import"]
     if dest_path is not None:
         typer.echo(f"Importing to destination path: {dest_path}")
@@ -111,7 +121,9 @@ def import_dataset(
         # have a token set for that remote
         typer.echo("Adding new DVC remote")
         remote = calkit.dvc.add_external_remote(
-            owner_name=owner_name, project_name=project_name
+            owner_name=owner_name,
+            project_name=project_name,
+            use_ck=not http,
         )
         repo.git.add(".dvc/config")
         # Import this data with DVC
@@ -154,7 +166,7 @@ def import_dataset(
             os.makedirs(dest_path, exist_ok=True)
         for f in tqdm(files):
             # Fetch content from API
-            resp_i = calkit.cloud.get(
+            resp_i = calkit.hub.get(
                 f"/projects/{owner_name}/{project_name}/contents/{f}"
             )
             content = resp_i.get("content")
@@ -181,7 +193,7 @@ def import_dataset(
                         f.write(chunk)
             repo.git.add(out_path)
     else:
-        raise_error("Could not fetch import info from Calkit Cloud")
+        raise_error("Could not fetch import info from the hub")
     # Add to datasets in calkit.yaml
     typer.echo("Adding dataset to calkit.yaml")
     new_ds = calkit.models.ImportedDataset(
@@ -221,7 +233,7 @@ def import_environment(
             help=(
                 "Environment location and name, e.g., "
                 "someone/some-project:env-name. If not present, the Calkit "
-                "Cloud will be queried."
+                "API will be queried."
             )
         ),
     ],
@@ -259,9 +271,7 @@ def import_environment(
         raise_error("Invalid source environment specification")
     if os.path.isdir(project):
         typer.echo(f"Importing from local project directory: {project}")
-        src_ck_info = dict(
-            calkit.load_calkit_info(wdir=project, process_includes=True)
-        )
+        src_ck_info = dict(calkit.load_calkit_info(wdir=project))
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")
@@ -273,13 +283,13 @@ def import_environment(
         except Exception as e:
             raise_error(f"Could not detect source project name: {e}")
     else:
-        typer.echo("Importing from Cloud project")
+        typer.echo("Importing from hub project")
         try:
-            resp = calkit.cloud.get(  # noqa: F841 TODO: Use this variable
+            resp = calkit.hub.get(  # noqa: F841 TODO: Use this variable
                 f"/projects/{project}/environments/{env_name}"
             )
         except Exception as e:
-            raise_error(f"Failed to fetch environment info from cloud: {e}")
+            raise_error(f"Failed to fetch environment info from the hub: {e}")
         src_project_name = project
         # TODO: Parse information we need from the response
     # Write environment into current Calkit info
@@ -302,7 +312,7 @@ def import_environment(
     ck_info["environments"] = environments
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     repo.git.add("calkit.yaml")
     if not no_commit and calkit.git.get_staged_files():
         repo.git.commit(["-m", f"Import environment {src}"])
@@ -356,6 +366,10 @@ def import_from_zenodo(
     ] = False,
 ):
     """Import files from a Zenodo record."""
+    import requests
+
+    from calkit.dvc import run_dvc_command
+
     # Ensure destination directory either doesn't exist or is empty
     if os.path.isdir(dest_dir):
         if os.listdir(dest_dir):
@@ -420,7 +434,7 @@ def import_from_zenodo(
             for chunk in resp.iter_content(chunk_size=8192):
                 f.write(chunk)
     # Decide if this should be stored in Git or DVC
-    repo = git.Repo()
+    repo = calkit.git.get_repo()
     commit_paths = []
     if storage is None:
         if calkit.get_size(dest_dir) > calkit.DVC_SIZE_THRESH_BYTES:
@@ -488,7 +502,7 @@ def import_from_zenodo(
         json.dump(imports, f, indent=2)
     # Commit if desired
     if not no_commit:
-        repo = git.Repo()
+        repo = calkit.git.get_repo()
         repo.git.add(commit_paths)
         if repo.git.diff(commit_paths + ["--staged"]):
             repo.git.commit(

@@ -1,5 +1,5 @@
 """A filesystem-like object that follows ``fsspec`` and interacts with Calkit
-cloud storage to unify operations between private and public storage.
+object storage to unify operations between private and public storage.
 
 The basic operation is as follows:
 1. Make a request to the Calkit API over HTTP to get file operation info.
@@ -13,17 +13,17 @@ Path format:
     - project: Project name
     - path/to/file: File path within the project (optional)
 
-Supported storage backends (via Calkit Cloud API):
+Supported storage backends (via the Calkit hub API):
     - Google Cloud Storage (GCS) - presigned URLs
     - Amazon S3 - presigned URLs
     - Google Drive - OAuth + API
     - Box - OAuth + API
-    - Other storage providers as configured in Calkit Cloud
+    - Other storage providers as configured in the hub
 
-Multi-cloud support:
-    By default, the filesystem routes to the Calkit Cloud API endpoint
-    configured by CALKIT_ENV (production, staging, etc.). To use a different
-    Calkit Cloud instance:
+Multi-backend support:
+    By default, the filesystem routes to the Calkit hub API endpoint
+    of the active hub (CALKIT_HUB, the project's declared hub, or
+    default_hub). To use a different Calkit hub:
 
     - DVC config: dvc remote modify myremote endpointurl https://api.other.com
     - URI query: ck://owner/project/file?endpoint_url=https://api.other.com
@@ -71,15 +71,19 @@ from __future__ import annotations
 
 import base64
 import io
+import os
+import time
 import xml.etree.ElementTree as ET
 from typing import Any
 from urllib.parse import urlparse
 
 import requests
 from fsspec import AbstractFileSystem
+from fsspec.callbacks import DEFAULT_CALLBACK
 from fsspec.spec import AbstractBufferedFile
 from fsspec.utils import stringify_path
-from requests.exceptions import HTTPError
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from requests.exceptions import HTTPError, Timeout
 
 import calkit
 
@@ -126,13 +130,13 @@ def _parse_path(path: str) -> tuple[str, str, str]:
 
 
 class CalkitFileSystem(AbstractFileSystem):
-    """An fsspec-compatible filesystem for Calkit cloud storage.
+    """An fsspec-compatible filesystem for Calkit hub storage.
 
     This filesystem makes requests to the Calkit API to get file operation
     information, then uses the appropriate method to interact with the
     underlying storage backend.
 
-    The Calkit Cloud API acts as a compatibility layer that:
+    The Calkit hub API acts as a compatibility layer that:
 
     - Determines which storage backend is configured for each project
     - Returns appropriate access credentials (presigned URLs, OAuth tokens,
@@ -147,19 +151,19 @@ class CalkitFileSystem(AbstractFileSystem):
     - Users can create subdirectories for organization (data/, models/, etc.)
     - Files can be stored at the project root
 
-    Cloud endpoints are configured via:
+    Endpoints are configured via:
 
     - endpointurl parameter (for DVC remotes): Route to different Calkit
       instances
     - endpoint_url query parameter (for URIs): Ad-hoc endpoint specification
-    - CALKIT_ENV environment variable: Select production, staging, local, or
-      test
-    - Defaults to production when unspecified
+    - the active hub: CALKIT_HUB, the working directory project's declared
+      ``hub``, or the ``default_hub`` config value
+    - Defaults to calkit.io when unspecified
 
     This design allows for:
 
     - Multiple storage backend support without client-side changes
-    - Multi-cloud support with configurable endpoints
+    - Multiple storage backends with configurable endpoints
     - Future protocol upgrades (e.g., SFTP) without breaking API compatibility
     - Unified interface regardless of underlying storage provider
 
@@ -168,8 +172,8 @@ class CalkitFileSystem(AbstractFileSystem):
     protocol : str
         The protocol scheme for this filesystem ("ck")
     base_url : str
-        The Calkit Cloud API endpoint URL, configured via endpointurl in DVC
-        config, endpoint_url in URI query, or CALKIT_ENV environment variable.
+        The Calkit hub API endpoint URL, configured via endpointurl in DVC
+        config, endpoint_url in URI query, or the active hub.
         Defaults to production (https://api.calkit.io) when unspecified.
     """
 
@@ -183,8 +187,8 @@ class CalkitFileSystem(AbstractFileSystem):
 
     @property
     def base_url(self) -> str:
-        """Get the base URL for the Calkit Cloud API."""
-        return self._base_url or calkit.cloud.get_base_url()
+        """Get the base URL for the Calkit hub API."""
+        return self._base_url or calkit.hub.get_base_url()
 
     @staticmethod
     def _normalize_info(
@@ -218,7 +222,7 @@ class CalkitFileSystem(AbstractFileSystem):
             request_body["content_length"] = content_length
         if content_type is not None:
             request_body["content_type"] = content_type
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         # Validate response has required fields
@@ -246,7 +250,7 @@ class CalkitFileSystem(AbstractFileSystem):
         }
         if include:
             request_body["include"] = include
-        resp = calkit.cloud.post(
+        resp = calkit.hub.post(
             endpoint, json=request_body, base_url=self.base_url
         )
         if "backend" not in resp:
@@ -296,9 +300,71 @@ class CalkitFileSystem(AbstractFileSystem):
         operation_info: dict[str, Any],
         operation: str,
         data: bytes | None = None,
+        file_obj: Any = None,
+        file_size: int | None = None,
         headers: dict | None = None,
+        callback=DEFAULT_CALLBACK,
     ) -> requests.Response:
-        """Execute a file operation using the provided operation info."""
+        """Execute a file operation using the provided operation info.
+
+        Exactly one of ``data`` or ``file_obj`` should be provided for put
+        operations. When ``file_obj`` is given it must be a seekable binary
+        file-like object and ``file_size`` must be set; part/chunk bodies are
+        streamed from it instead of being held in memory, which keeps memory
+        bounded for large uploads.
+        """
+        if data is not None and file_obj is not None:
+            raise ValueError("Provide data or file_obj, not both")
+        if file_obj is not None:
+            if not callable(getattr(file_obj, "seek", None)):
+                raise TypeError(
+                    "file_obj must be a seekable binary file-like object"
+                )
+            if file_size is None:
+                raise ValueError(
+                    "file_size must be provided when file_obj is given"
+                )
+        # Total payload size for progress reporting.
+        payload_size = len(data) if data is not None else (file_size or 0)
+        # Retries are intentionally narrow: transient transport errors and
+        # transient 5xx responses from the storage backend (e.g. GCS/S3
+        # returning 503 under load). Non-5xx statuses (308 resume acks, 404,
+        # etc.) are returned to the caller untouched.
+        max_retries = 2
+        retry_backoff = 1.0
+        transient_statuses = (500, 502, 503, 504)
+
+        def _request_with_retry(func):
+            delay = retry_backoff
+            for attempt in range(max_retries + 1):
+                try:
+                    resp = func()
+                except (Timeout, RequestsConnectionError):
+                    if attempt >= max_retries:
+                        raise
+                else:
+                    status = getattr(resp, "status_code", None)
+                    if (
+                        status not in transient_statuses
+                        or attempt >= max_retries
+                    ):
+                        return resp
+                if delay > 0:
+                    time.sleep(delay)
+                    delay *= 2
+
+        def _prepare_stream(request_headers: dict) -> Any:
+            """Return the request body, setting Content-Length if streaming."""
+            if data is not None:
+                return data
+            if file_obj is None:
+                return None
+            file_obj.seek(0)
+            # Explicit Content-Length avoids chunked transfer-encoding, which
+            # presigned URL signatures typically reject.
+            request_headers.setdefault("Content-Length", str(file_size))
+            return file_obj
+
         # Extract access info from the operation info
         access = operation_info.get("access")
         if not access:
@@ -319,14 +385,19 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            return self._session.request(
-                method=http_method.upper(),
-                url=url,
-                headers=request_headers,
-                params=params,
-                data=data,
-                timeout=120,
+            resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=http_method.upper(),
+                    url=url,
+                    headers=request_headers,
+                    params=params,
+                    data=_prepare_stream(request_headers),
+                    timeout=120,
+                )
             )
+            if operation == "put" and payload_size:
+                callback.relative_update(payload_size)
+            return resp
         elif kind == "http-request":
             # Generic HTTP request with custom headers
             url = access.get("url")
@@ -339,17 +410,22 @@ class CalkitFileSystem(AbstractFileSystem):
             if headers:
                 request_headers.update(headers)
             params = access.get("params")
-            return self._session.request(
-                method=http_method.upper(),
-                url=url,
-                headers=request_headers,
-                params=params,
-                data=data,
-                timeout=120,
+            resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=http_method.upper(),
+                    url=url,
+                    headers=request_headers,
+                    params=params,
+                    data=_prepare_stream(request_headers),
+                    timeout=120,
+                )
             )
+            if operation == "put" and payload_size:
+                callback.relative_update(payload_size)
+            return resp
         elif kind == "presigned-multipart":
             # S3 multipart upload using server-provided part URLs
-            if data is None:
+            if data is None and file_obj is None:
                 raise ValueError("Data required for multipart upload")
             upload_id = access.get("upload_id")
             part_urls = access.get("part_urls")
@@ -373,7 +449,8 @@ class CalkitFileSystem(AbstractFileSystem):
                     "presigned-multipart"
                 )
             content_type = access.get("content_type")
-            total_parts_needed = (len(data) + part_size - 1) // part_size
+            total_bytes = len(data) if data is not None else int(file_size)
+            total_parts_needed = (total_bytes + part_size - 1) // part_size
             if total_parts_needed > len(part_urls):
                 raise ValueError(
                     "Insufficient part URLs for multipart upload "
@@ -382,17 +459,23 @@ class CalkitFileSystem(AbstractFileSystem):
             uploaded_parts: list[tuple[int, str]] = []
             for part_num in range(1, total_parts_needed + 1):
                 start = (part_num - 1) * part_size
-                end = min(start + part_size, len(data))
-                part_data = data[start:end]
+                end = min(start + part_size, total_bytes)
+                if data is not None:
+                    part_data = data[start:end]
+                else:
+                    file_obj.seek(start)
+                    part_data = file_obj.read(end - start)
                 part_url = part_urls[part_num - 1]
                 part_headers = {}
                 if content_type:
                     part_headers["Content-Type"] = str(content_type)
-                part_resp = self._session.put(
-                    part_url,
-                    headers=part_headers,
-                    data=part_data,
-                    timeout=120,
+                part_resp = _request_with_retry(
+                    lambda: self._session.put(
+                        part_url,
+                        headers=part_headers,
+                        data=part_data,
+                        timeout=120,
+                    )
                 )
                 part_resp.raise_for_status()
                 etag = part_resp.headers.get("ETag")
@@ -401,6 +484,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         f"Missing ETag for uploaded multipart part {part_num}"
                     )
                 uploaded_parts.append((part_num, etag.strip()))
+                callback.relative_update(len(part_data))
             complete_root = ET.Element("CompleteMultipartUpload")
             for part_num, etag in uploaded_parts:
                 part_el = ET.SubElement(complete_root, "Part")
@@ -409,17 +493,19 @@ class CalkitFileSystem(AbstractFileSystem):
             complete_body = ET.tostring(
                 complete_root, encoding="utf-8", xml_declaration=True
             )
-            complete_resp = self._session.post(
-                complete_url,
-                headers={"Content-Type": "application/xml"},
-                data=complete_body,
-                timeout=120,
+            complete_resp = _request_with_retry(
+                lambda: self._session.post(
+                    complete_url,
+                    headers={"Content-Type": "application/xml"},
+                    data=complete_body,
+                    timeout=120,
+                )
             )
             complete_resp.raise_for_status()
             return complete_resp
         elif kind == "presigned-chunked":
             # GCS resumable upload - requires multiple requests
-            if data is None:
+            if data is None and file_obj is None:
                 raise ValueError("Data required for chunked upload")
             init_url = access.get("init_url")
             if not init_url:
@@ -441,12 +527,14 @@ class CalkitFileSystem(AbstractFileSystem):
             if content_type:
                 init_headers["Content-Type"] = str(content_type)
             init_headers["Content-Length"] = "0"  # Init request has no body
-            init_resp = self._session.request(
-                method=init_method.upper(),
-                url=init_url,
-                headers=init_headers,
-                params=init_params,
-                timeout=30,
+            init_resp = _request_with_retry(
+                lambda: self._session.request(
+                    method=init_method.upper(),
+                    url=init_url,
+                    headers=init_headers,
+                    params=init_params,
+                    timeout=30,
+                )
             )
             init_resp.raise_for_status()
             # Get the session URI from the Location header
@@ -467,7 +555,7 @@ class CalkitFileSystem(AbstractFileSystem):
                         pass
 
             # Step 2: Upload data in chunks
-            total_size = len(data)
+            total_size = len(data) if data is not None else int(file_size)
             offset = 0
             chunk_headers_base = dict(
                 access.get("chunk_headers") or access.get("headers") or {}
@@ -500,7 +588,11 @@ class CalkitFileSystem(AbstractFileSystem):
             try:
                 while offset < total_size:
                     chunk_end = min(offset + chunk_size, total_size)
-                    chunk_data = data[offset:chunk_end]
+                    if data is not None:
+                        chunk_data = data[offset:chunk_end]
+                    else:
+                        file_obj.seek(offset)
+                        chunk_data = file_obj.read(chunk_end - offset)
                     # Set Content-Range header for the chunk
                     chunk_headers = {
                         **chunk_headers_base,
@@ -509,13 +601,15 @@ class CalkitFileSystem(AbstractFileSystem):
                             f"bytes {offset}-{chunk_end - 1}/{total_size}"
                         ),
                     }
-                    chunk_resp = self._session.request(
-                        method=chunk_upload_method.upper(),
-                        url=session_uri,
-                        headers=chunk_headers,
-                        params=access.get("chunk_params"),
-                        data=chunk_data,
-                        timeout=120,
+                    chunk_resp = _request_with_retry(
+                        lambda: self._session.request(
+                            method=chunk_upload_method.upper(),
+                            url=session_uri,
+                            headers=chunk_headers,
+                            params=access.get("chunk_params"),
+                            data=chunk_data,
+                            timeout=120,
+                        )
                     )
                     # Check response
                     if chunk_resp.status_code == 308:
@@ -544,6 +638,7 @@ class CalkitFileSystem(AbstractFileSystem):
                                 "Chunked upload acknowledged full payload with "
                                 "status 308 instead of final success"
                             )
+                        callback.relative_update(next_offset - offset)
                         offset = next_offset
                     elif chunk_resp.status_code in (200, 201):
                         # Final success is only valid when sending the final
@@ -553,6 +648,7 @@ class CalkitFileSystem(AbstractFileSystem):
                                 "Chunked upload returned success before all "
                                 "bytes were sent"
                             )
+                        callback.relative_update(chunk_end - offset)
                         return chunk_resp
                     else:
                         # Unexpected status
@@ -885,9 +981,50 @@ class CalkitFileSystem(AbstractFileSystem):
         """
         pass
 
+    def put_file(
+        self,
+        lpath,
+        rpath,
+        callback=DEFAULT_CALLBACK,
+        mode="overwrite",
+        **kwargs,
+    ):
+        """Upload a local file to Calkit hub storage.
+
+        Overrides the default fsspec implementation to report progress based
+        on actual bytes uploaded rather than bytes written to the local buffer.
+        """
+        if mode == "create" and self.exists(rpath):
+            raise FileExistsError
+        if os.path.isdir(lpath):
+            self.makedirs(rpath, exist_ok=True)
+            return None
+        owner, project, file_path = _parse_path(rpath)
+        size = os.path.getsize(lpath)
+        callback.set_size(size)
+        operation_info = self._get_fs_op_info(
+            owner,
+            project,
+            file_path,
+            "put",
+            content_length=size,
+        )
+        # Stream the file from disk rather than loading it into memory. This
+        # keeps RAM bounded when DVC pushes many (or very large) files in
+        # parallel via its worker pool.
+        with open(lpath, "rb") as f:
+            resp = self._execute_operation(
+                operation_info,
+                "put",
+                file_obj=f,
+                file_size=size,
+                callback=callback,
+            )
+        resp.raise_for_status()
+
 
 class CalkitFile(AbstractBufferedFile):
-    """A file-like object for reading/writing from Calkit cloud storage.
+    """A file-like object for reading/writing from Calkit hub storage.
 
     This class handles buffering and delegates actual I/O to the underlying
     storage backend (GCS, S3, Google Drive, Box, etc.) via the Calkit API.
@@ -955,7 +1092,7 @@ class CalkitFile(AbstractBufferedFile):
                 self.owner, self.project, self.file_path, "get"
             )
         # Add Range header for partial content
-        # For backends where range is unsupported, the Calkit Cloud API can
+        # For backends where range is unsupported, the Calkit hub API can
         # choose to ignore this header or return a backend-specific request
         # configuration
         headers = {"Range": f"bytes={start}-{end - 1}"}
@@ -967,7 +1104,7 @@ class CalkitFile(AbstractBufferedFile):
         return resp.content
 
     def _upload_chunk(self, final: bool = False) -> int | bool:
-        """Upload buffered data to cloud storage."""
+        """Upload buffered data to object storage."""
         if not final:
             # For non-final chunks, we don't upload yet (buffer accumulates)
             return False

@@ -22,7 +22,7 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
         if token is None:
             token = os.getenv("ZENODO_TOKEN")
         if token is None:
-            token = calkit.cloud.get("/user/zenodo-token")["access_token"]
+            token = calkit.hub.get("/user/zenodo-token")["access_token"]
         return token
     elif service == "caltechdata":
         token = config.caltechdata_token
@@ -34,6 +34,9 @@ def get_token(service: ServiceName = DEFAULT_SERVICE) -> str:
 
 
 def get_base_url(service: ServiceName = DEFAULT_SERVICE) -> str:
+    override = os.getenv(f"CALKIT_INVENIO_BASE_URL_{service.upper()}")
+    if override:
+        return override
     current_env = calkit.config.get_env()
     if service == "zenodo":
         if (
@@ -102,6 +105,26 @@ post = partial(_request, "post")
 patch = partial(_request, "patch")
 put = partial(_request, "put")
 delete = partial(_request, "delete")
+
+
+def extract_doi(record: dict) -> str | None:
+    """Extract the DOI identifier from an InvenioRDM record or response.
+
+    Depending on the endpoint and whether the DOI has been minted yet, the
+    identifier can live in different places, so check all known locations and
+    return ``None`` if it isn't present yet.
+    """
+    pids = record.get("pids")
+    if isinstance(pids, dict):
+        doi = pids.get("doi")
+        if isinstance(doi, dict) and doi.get("identifier"):
+            return doi["identifier"]
+    if record.get("doi"):
+        return record["doi"]
+    metadata = record.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("doi"):
+        return metadata["doi"]
+    return None
 
 
 def get_download_urls(

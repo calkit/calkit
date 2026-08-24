@@ -1,15 +1,19 @@
 """Functionality for working with notebooks."""
 
+from __future__ import annotations
+
 import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-import git
-
-import calkit
-from calkit.models.io import InputsFromStageOutputs, PathOutput
+if TYPE_CHECKING:
+    from calkit.models.io import (
+        InputsFromStageOutputs,
+        PathInput,
+        PathOutput,
+    )
 
 
 def get_executed_notebook_path(
@@ -54,6 +58,24 @@ def get_executed_notebook_path(
     return p
 
 
+# How much of a file to read when deciding whether it's a marimo notebook.
+# marimo writes its header at the top, but a project's own license banner or
+# module docstring comes first, so leave room for one.
+MARIMO_DETECT_N_BYTES = 8192
+
+
+def is_marimo_notebook(content: str) -> bool:
+    """Determine whether some Python source is a marimo notebook.
+
+    A marimo notebook is a Python module that constructs a ``marimo.App``,
+    which is both what makes it one and what marimo itself writes at the top
+    of every notebook it generates. Keyed on the constructor call rather
+    than on the word 'marimo' appearing somewhere, so a script that merely
+    imports or mentions marimo isn't mistaken for a notebook.
+    """
+    return "marimo.App(" in content
+
+
 def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
     """Return the path of a cleaned notebook."""
     p = os.path.join(".calkit", "notebooks", "cleaned", path)
@@ -95,6 +117,8 @@ def clean_notebook_outputs(path: str):
 def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:
     """Clean all notebooks in the pipeline."""
     if ck_info is None:
+        import calkit
+
         ck_info = calkit.load_calkit_info()
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
@@ -131,14 +155,16 @@ def determine_storage(
     except (json.JSONDecodeError, UnicodeDecodeError, OSError):
         source_bytes = file_size
     estimated_bytes = max(file_size, source_bytes) * size_multiplier
-    return "git" if estimated_bytes <= calkit.DVC_SIZE_THRESH_BYTES else "dvc"
+    from calkit.core import DVC_SIZE_THRESH_BYTES
+
+    return "git" if estimated_bytes <= DVC_SIZE_THRESH_BYTES else "dvc"
 
 
 def declare_notebook(
     path: str,
     stage_name: str,
     environment_name: str,
-    inputs: list[str | InputsFromStageOutputs] = [],
+    inputs: list[str | PathInput | InputsFromStageOutputs] = [],
     outputs: list[str | PathOutput] = [],
     always_run: bool = False,
     title: str | None = None,
@@ -153,10 +179,11 @@ def declare_notebook(
     if anything has changed about the pipeline declaration, then prompt the
     user to rerun.
     """
+    import calkit
     from calkit.models.pipeline import JupyterNotebookStage, Pipeline
 
     # Detect the project root directory so we ensure calkit.yaml lives there
-    repo = git.Repo(search_parent_directories=True)
+    repo = calkit.git.get_repo()
     wdir = repo.working_dir
     if not os.path.isfile(os.path.join(wdir, path)):
         raise FileNotFoundError(
@@ -237,11 +264,9 @@ def declare_notebook(
             }
         )
     # Write calkit.yaml
-    fpath = os.path.join(wdir, "calkit.yaml")
     ck_info["pipeline"] = pipeline_dict
     ck_info["notebooks"] = notebooks
-    with open(fpath, "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.save_calkit_info(ck_info, wdir=wdir)
     if must_be_rerun:
         raise RuntimeError(
             f"Notebook stage '{stage_name}' was modified while the pipeline "

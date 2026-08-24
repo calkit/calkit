@@ -1,12 +1,15 @@
 """Tests for ``cli.new``."""
 
 import os
+import re
 import subprocess
+import sys
 
 import git
 import pytest
 
 import calkit
+import calkit.schema
 from calkit.environments import get_env_lock_fpath
 
 
@@ -132,6 +135,90 @@ def test_new_figure(tmp_dir):
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
 
 
+def test_new_result(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--title",
+            "Key metrics",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    # Calkit init writes the schema modeline into an otherwise empty file,
+    # and declaring something must not wipe it out
+    with open("calkit.yaml") as f:
+        assert f.read().startswith(calkit.schema.MODELINE)
+    assert ck_info["results"][0]["path"] == "results/metrics.json"
+    assert ck_info["results"][0]["title"] == "Key metrics"
+    # Won't overwrite without -f
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "result",
+                "results/metrics.json",
+                "--title",
+                "Key metrics",
+            ]
+        )
+    # Several results can share a file, each naming a value inside it, since
+    # a result is identified by its path and key together
+    for key in ["mean", "std"]:
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", key]
+        )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["mean"]["path"] == "results/metrics.json"
+    assert by_key["std"]["path"] == "results/metrics.json"
+    # Re-declaring the same path and key is what counts as a duplicate
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", "std"]
+        )
+    # A name can be attached for referring to the result later
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--key",
+            "metrics.rmse",
+            "--name",
+            "error",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["metrics.rmse"]["name"] == "error"
+
+
+def test_new_presentation(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "presentation",
+            "slides/talk.pdf",
+            "--title",
+            "Kickoff",
+            "--stage",
+            "build-slides",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pres = ck_info["presentations"]
+    assert pres[0]["path"] == "slides/talk.pdf"
+    assert pres[0]["stage"] == "build-slides"
+
+
 def test_new_publication(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
@@ -167,6 +254,84 @@ def test_new_publication(tmp_dir):
     assert stage["environment"] == "my-latex-env"
     assert stage["target_path"] == "my-paper/paper.tex"
     assert stage["outputs"] == ["my-paper/paper.pdf"]
+    # A duplicate path fails cleanly rather than partially applying
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "Again",
+            "--stage",
+            "build-latex-article",
+            "--environment",
+            "my-latex-env",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    # The description is optional and stays out of calkit.yaml when absent
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper-2",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "No description",
+            "--stage",
+            "build-latex-article-2",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pub2 = ck_info["publications"][1]
+    assert pub2["path"] == "my-paper-2/paper.pdf"
+    assert "description" not in pub2
+    # A template that brings its own class and style files declares them as
+    # stage inputs, else editing them wouldn't rebuild the paper and the
+    # in-browser preview couldn't compile it at all
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "jfm-paper",
+            "--template",
+            "latex/jfm",
+            "--kind",
+            "journal-article",
+            "--title",
+            "A JFM paper",
+            "--stage",
+            "build-jfm-paper",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-jfm-paper"]
+    assert stage["inputs"] == [
+        "jfm-paper/jfm.bst",
+        "jfm-paper/jfm.cls",
+        "jfm-paper/lineno-FLM.sty",
+        "jfm-paper/upmath.sty",
+    ]
+    # The article template needs nothing beyond its own .tex
+    article_stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert article_stage.get("inputs", []) == []
 
 
 def test_new_uv_env(tmp_dir):
@@ -224,7 +389,8 @@ def test_new_uv_venv(tmp_dir):
     env = envs["my-uv-venv"]
     assert isinstance(env, calkit.models.UvVenvEnvironment)
     assert env.path == "requirements.txt"
-    assert env.prefix == ".venv"
+    # No prefix is pinned by default; it is resolved on the fly to .venv
+    assert env.prefix is None
     assert env.kind == "uv-venv"
     subprocess.check_call(
         [
@@ -277,7 +443,7 @@ def test_new_conda_env(tmp_dir):
     )
     with open("environment.yml") as f:
         env = calkit.ryaml.load(f)
-    assert env["name"] == "test-e1"
+    assert env["name"] == "test.e1"
     assert env["dependencies"] == ["python", "requests"]
 
 
@@ -328,6 +494,129 @@ def test_new_project_existing_files(tmp_dir):
     assert repo.git.ls_files(".devcontainer")
     ck_info = calkit.load_calkit_info()
     assert ck_info["title"] == "My new project"
+
+
+def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
+    # Respond to unexpected requests with a 404 instead of the default 500,
+    # since the hub client retries 5xx responses with exponential backoff,
+    # which would make a missing expectation take minutes to fail
+    httpserver.no_handler_status_code = 404
+    monkeypatch.setenv(
+        "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
+    )
+    monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
+    project_resp = {
+        "id": "00000000-0000-0000-0000-000000000001",
+        "owner_account_id": "00000000-0000-0000-0000-000000000002",
+        "owner_account_name": "test-user",
+        "owner_account_display_name": "Test User",
+        "owner_account_type": "user",
+        "name": "my-project",
+        "title": "My Project",
+        "description": None,
+        "is_public": False,
+        "git_repo_url": "https://github.com/test-user/my-project",
+        "created": "2024-01-01T00:00:00",
+        "updated": "2024-01-01T00:00:00",
+        "latest_git_rev": None,
+        "status": None,
+        "status_updated": None,
+        "status_message": None,
+        "current_user_access": "owner",
+    }
+    # Test `new project .` in an existing git repo with a remote
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["git", "config", "user.name", "Test User"])
+    subprocess.check_call(["git", "config", "user.email", "test@example.com"])
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/test-user/my-project.git",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["title"] == "My Project"
+    assert ck_info["owner"] == "test-user"
+    assert ck_info["name"] == "my-project"
+    assert ck_info["git_repo_url"] == "https://github.com/test-user/my-project"
+    repo = git.Repo()
+    assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
+    assert not repo.is_dirty(untracked_files=True)
+    # Test 403: remote owner is an org not in Calkit hub; error should
+    # surface the detected org name and a helpful hint
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(
+        {
+            "detail": (
+                "Can only create projects for yourself or organizations "
+                "you belong to"
+            )
+        },
+        status=403,
+    )
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+            "--overwrite",
+            "--git-url",
+            "https://github.com/some-org/some-project",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "some-org" in result.stderr
+    assert "organization exists on the hub" in result.stderr
+    # Test that a non-'origin' remote name is handled correctly
+    httpserver.expect_ordered_request(
+        "/projects", method="POST"
+    ).respond_with_json(project_resp)
+    # Configuring the DVC remote looks up the project on the hub, since
+    # there's no remote named 'origin' from which to detect the Git repo URL
+    httpserver.expect_ordered_request(
+        "/projects/test-user/my-project", method="GET"
+    ).respond_with_json(project_resp)
+    subprocess.check_call(["git", "remote", "rename", "origin", "upstream"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "My Project",
+            "--cloud",
+            "--overwrite",
+        ]
+    )
+    repo = git.Repo()
+    assert (
+        repo.remotes.upstream.url == "https://github.com/test-user/my-project"
+    )
 
 
 def test_new_python_script_stage(tmp_dir):
@@ -452,6 +741,108 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # A document's class, bibliography, and figures become deps automatically,
+    # since LaTeX resolves those itself and the pipeline can't see them
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.png", "wb") as f:
+        f.write(b"not really a PNG")
+    # A DVC-tracked figure is only a pointer file until it's pulled, but it's
+    # still an input
+    with open("figures/dvc-fig.png.dvc", "w") as f:
+        f.write("outs:\n  - path: dvc-fig.png\n")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("myclass.cls", "w") as f:
+        f.write("\\usepackage{mystyle}\n")
+    with open("mystyle.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("paper2.tex", "w") as f:
+        f.write(
+            "\\documentclass{myclass}\n"
+            "\\usepackage{graphicx}\n"
+            "% \\includegraphics{figures/commented}\n"
+            "\\bibliography{refs}\n"
+            "\\includegraphics[width=0.5\\textwidth]{figures/fig}\n"
+            "\\includegraphics{figures/dvc-fig.png}\n"
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-2",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper2.pdf",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    # graphicx lives in TeX Live, not the project, so it isn't an input
+    assert ck_info["pipeline"]["stages"]["build-paper-2"]["inputs"] == [
+        "figures/dvc-fig.png",
+        "figures/fig.png",
+        "myclass.cls",
+        "mystyle.sty",
+        "refs.bib",
+    ]
+    # Detection can be turned off, and explicit inputs are always kept
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-3",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper3.pdf",
+            "--input",
+            "refs.bib",
+            "--no-detect-inputs",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["pipeline"]["stages"]["build-paper-3"]["inputs"] == [
+        "refs.bib"
+    ]
+    # output_dir / aux_dir / extra latexmk args flow through to the command
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-out",
+            "--target",
+            "paper.tex",
+            "--environment",
+            "tex",
+            "--output-dir",
+            "build",
+            "--aux-dir",
+            "aux",
+            "--latexmk-arg",
+            "-shell-escape",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-paper-out"]
+    assert stage["output_dir"] == "build"
+    assert stage["aux_dir"] == "aux"
+    assert stage["latexmk_args"] == ["-shell-escape"]
+    subprocess.check_call(["calkit", "check", "pipeline", "--compile"])
+    pipeline = calkit.dvc.read_pipeline()
+    cmd = pipeline["stages"]["build-paper-out"]["cmd"]
+    assert "--output-dir build" in cmd
+    assert "--aux-dir aux" in cmd
+    assert "--latexmk-arg -shell-escape" in cmd
 
 
 def test_new_matlab_script_stage(tmp_dir):
@@ -507,10 +898,17 @@ def test_new_matlab_script_stage(tmp_dir):
     ]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_new_julia_env(tmp_dir):
     subprocess.check_call(["calkit", "init"])
+    # Note we use Example, the registry's trivial test package, since nothing
+    # here depends on which package is installed, and heavier ones cost tens
+    # of seconds each to download and precompile
     subprocess.check_call(
-        ["calkit", "new", "julia-env", "--name", "j1", "WaterLily"]
+        ["calkit", "new", "julia-env", "--name", "j1", "Example"]
     )
     assert os.path.isfile("Project.toml")
     assert os.path.isfile("Manifest.toml")
@@ -523,16 +921,107 @@ def test_new_julia_env(tmp_dir):
             "j2",
             "--julia",
             "1.10",
-            "Revise",
+            "Example",
             "--path",
             "envs/my-env/Project.toml",
         ]
     )
     assert os.path.isfile("envs/my-env/Project.toml")
     assert os.path.isfile("envs/my-env/Manifest.toml")
+    # Test we can create an empty env with just a Project.toml
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "j3",
+            "--julia",
+            "1.10",
+            "--path",
+            "envs/empty/Project.toml",
+        ]
+    )
+    assert os.path.isfile("envs/empty/Project.toml")
+    assert not os.path.isfile("envs/empty/Manifest.toml")
 
 
-def test_new_release(tmp_dir):
+def test_new_nix_env_stages_flake(tmp_dir):
+    # ``nix flake lock`` refuses to see untracked files inside a Git
+    # repo. ``calkit new nix-env`` must stage the freshly written
+    # flake.nix before invoking the lock step, even when ``--no-check``
+    # skips the lock itself -- we verify staging happens by checking
+    # that the auto-commit captured flake.nix.
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        ["calkit", "new", "nix-env", "--name", "main", "python3", "--no-check"]
+    )
+    assert os.path.isfile("flake.nix")
+    repo = git.Repo(".")
+    head_files = [item.path for item in repo.head.commit.tree.traverse()]  # type: ignore
+    assert "flake.nix" in head_files
+    assert "calkit.yaml" in head_files
+
+
+def test_new_release(tmp_dir, monkeypatch, httpserver):
+    # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
+    record_id = "test-record-abc123"
+    doi = "10.5072/zenodo.test123"
+    # Point the Zenodo base URL at the local mock server and provide a dummy
+    # token so no real credentials are needed.  Both env vars are inherited
+    # by every subprocess started by this test.
+    monkeypatch.setenv(
+        "CALKIT_INVENIO_BASE_URL_ZENODO",
+        httpserver.url_for("").rstrip("/"),
+    )
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    # POST /records – create a new draft record
+    httpserver.expect_request(
+        re.compile(r"^/records$"), method="POST"
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # POST /records/{id}/draft/files – initiate a file upload slot
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+    ).respond_with_json({"entries": []})
+    # PUT /records/{id}/draft/files/{filename}/content – stream file bytes
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        method="PUT",
+    ).respond_with_data("", status=200)
+    # POST /records/{id}/draft/files/{filename}/commit – finalise upload
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        method="POST",
+    ).respond_with_json({"key": "file", "status": "completed"})
+    # POST /records/{id}/draft/pids/doi – reserve a DOI for a draft
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+    ).respond_with_json({"pids": {"doi": {"identifier": doi}}})
+    # GET /records/{id}/draft/files – list files already in the draft
+    # (used by --reupload to decide which files to delete first)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="GET"
+    ).respond_with_json({"entries": []})
+    # POST /records/{id}/draft/actions/publish – publish the draft
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/actions/publish$"),
+        method="POST",
+    ).respond_with_json(
+        {"id": record_id, "pids": {"doi": {"identifier": doi}}}
+    )
+    # GET /records/{id} – fetch the published record for post-test assertions
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}$"), method="GET"
+    ).respond_with_json(
+        {
+            "metadata": {
+                "license": {"id": "cc-by-4.0"},
+                "related_identifiers": [
+                    {"identifier": ("https://github.com/calkit/test-project")}
+                ],
+            }
+        }
+    )
     subprocess.check_call(
         [
             "calkit",
@@ -555,7 +1044,7 @@ def test_new_release(tmp_dir):
         ]
     )
     # TODO: Add project description?
-    # Add authors
+    # Add authors to CITATION.cff (the single source of truth for authors)
     authors = [
         {
             "first_name": "Alice",
@@ -570,10 +1059,7 @@ def test_new_release(tmp_dir):
             "orcid": None,
         },
     ]
-    ck_info = calkit.load_calkit_info()
-    ck_info["authors"] = authors
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
+    calkit.releases.set_cff_authors(authors)
     # Add a default license
     subprocess.check_call(
         [
@@ -602,6 +1088,23 @@ def test_new_release(tmp_dir):
     assert "v0.1.0" in ck_info["releases"]
     release = ck_info["releases"]["v0.1.0"]
     assert release["doi"] is not None
+    # Issue #874: the creating Calkit version is recorded on the release
+    assert release["calkit_version"] == calkit.__version__
+    # Regression test for issue #931: the README must not be emptied, the
+    # committed README must match the working tree (otherwise it shows up as a
+    # spurious unstaged change), and the DOI badge must link to doi.org rather
+    # than the DataCite staging host (which 502s)
+    repo = git.Repo()
+    readme_working = (tmp_dir / "README.md").read_text()
+    assert readme_working.strip()
+    readme_committed = repo.git.show("HEAD:README.md")
+    assert readme_committed.strip() == readme_working.strip()
+    badge_link = f"](https://doi.org/{release['doi']})"
+    assert badge_link in readme_working
+    assert "datacite.org" not in readme_working
+    # The release BibTeX entry should be added to references.bib
+    references = (tmp_dir / "references.bib").read_text()
+    assert release["doi"] in references
     # TODO: Test that the GitHub link is in the related works
     # Test that we can update this release
     # Side note: This is revealing some design weirdness where we're grouping
@@ -643,3 +1146,707 @@ def test_new_release(tmp_dir):
     # subprocess.check_call(
     #     ["calkit", "update", "release", "--name", "v0.1.0", "--delete"]
     # )
+
+
+def test_new_internal_release(tmp_dir):
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    # Create a presentation (single file), a dataset (folder), and register
+    # them in calkit.yaml so their release kinds can be detected
+    os.makedirs("slides", exist_ok=True)
+    with open("slides/slides.pdf", "wb") as f:
+        f.write(b"%PDF-1.4 fake slides\n")
+    os.makedirs("data/raw", exist_ok=True)
+    with open("data/raw/values.csv", "w") as f:
+        f.write("a,b\n1,2\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["presentations"] = [
+        {"path": "slides/slides.pdf", "title": "Slides"}
+    ]
+    ck_info["datasets"] = [{"path": "data/raw", "title": "Raw data"}]
+    calkit.save_calkit_info(ck_info)
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Add artifacts"])
+    # Internal release of a single file: stored as-is with a self-describing
+    # name, with the kind inferred from calkit.yaml
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "slides/slides.pdf",
+            "--internal",
+            "--to",
+            "none",
+            "--name",
+            "slides-v0",
+            "--desc",
+            "First version sent for review.",
+            "--no-push",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "slides-v0" in ck_info["releases"]
+    release = ck_info["releases"]["slides-v0"]
+    assert release["internal"] is True
+    assert release["kind"] == "presentation"
+    assert release["doi"] is None
+    assert release["calkit_version"] == calkit.__version__
+    assert release["description"] == "First version sent for review."
+    assert (
+        release["stored_path"]
+        == ".calkit/releases/slides-v0/test-project-slides-v0.pdf"
+    )
+    assert os.path.isfile(release["stored_path"])
+    assert "slides-v0" in [t.name for t in git.Repo().tags]
+    # Internal release of a folder: zipped with a self-describing name
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "data/raw",
+            "--internal",
+            "--name",
+            "raw-data-v1",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["raw-data-v1"]
+    assert release["kind"] == "dataset"
+    assert (
+        release["stored_path"]
+        == ".calkit/releases/raw-data-v1/test-project-raw-data-v1.zip"
+    )
+    assert os.path.isfile(release["stored_path"])
+    # Internal release of the whole project: zipped archive
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            ".",
+            "--internal",
+            "--name",
+            "v2",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v2"]
+    assert release["kind"] == "project"
+    assert release["stored_path"] == ".calkit/releases/v2/test-project-v2.zip"
+    assert os.path.isfile(release["stored_path"])
+    # An undeclared file whose path matches a known pattern has its kind
+    # auto-detected (a PNG under figures/ is a figure)
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/plot.png", "wb") as f:
+        f.write(b"\x89PNG\r\n fake\n")
+    subprocess.check_call(["git", "add", "figures/plot.png"])
+    subprocess.check_call(["git", "commit", "-m", "Add figure"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "figures/plot.png",
+            "--internal",
+            "--name",
+            "v3",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v3"]
+    assert release["kind"] == "figure"
+    assert release["stored_path"] == ".calkit/releases/v3/test-project-v3.png"
+    # A path that isn't a defined artifact should fail kind detection
+    with open("notes.txt", "w") as f:
+        f.write("hello\n")
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "release",
+            "notes.txt",
+            "--internal",
+            "--name",
+            "v4",
+            "--no-push",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "Could not determine release kind" in result.stderr
+    # ...but passing --kind explicitly bypasses detection for such paths
+    subprocess.check_call(["git", "add", "notes.txt"])
+    subprocess.check_call(["git", "commit", "-m", "Add notes"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "notes.txt",
+            "--internal",
+            "--kind",
+            "dataset",
+            "--name",
+            "v5",
+            "--no-push",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v5"]
+    assert release["kind"] == "dataset"
+    assert release["stored_path"] == ".calkit/releases/v5/test-project-v5.txt"
+    # Listing releases must not warn about publication status for internal
+    # releases, which have no publisher or record ID
+    result = subprocess.run(
+        ["calkit", "list", "releases"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "v0" in result.stdout
+    assert "Cannot tell if release" not in result.stderr
+
+
+def test_new_release_publish_empty_pids(tmp_dir, monkeypatch, httpserver):
+    """Regression test for issue #927.
+
+    Zenodo's publish action returns 202 and its body may come back with an
+    empty ``pids`` payload, so the DOI cannot be read from the publish
+    response. We must not assume ``pids.doi.identifier`` is present: instead we
+    reserve the DOI on the draft beforehand and recover the minted DOI by
+    polling ``GET /records/{id}``. This mocks exactly that shape so a
+    regression back to ``resp["pids"]["doi"]["identifier"]`` would fail here.
+    """
+    record_id = "test-record-empty-pids"
+    reserved_doi = "10.5072/zenodo.reserved999"
+    monkeypatch.setenv(
+        "CALKIT_INVENIO_BASE_URL_ZENODO",
+        httpserver.url_for("").rstrip("/"),
+    )
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    # Create draft
+    httpserver.expect_request(
+        re.compile(r"^/records$"), method="POST"
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # File upload slot + content + commit
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+    ).respond_with_json({"entries": []})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        method="PUT",
+    ).respond_with_data("", status=200)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        method="POST",
+    ).respond_with_json({"key": "file", "status": "completed"})
+    # Reserve a DOI on the draft – this is where the identifier actually comes
+    # from in the #927 scenario
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+    ).respond_with_json({"pids": {"doi": {"identifier": reserved_doi}}})
+    # Publish returns an EMPTY pids payload (the bug scenario)
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft/actions/publish$"),
+        method="POST",
+    ).respond_with_json({"id": record_id, "pids": {}})
+    # The published record echoes the minted DOI, recovered by the poll
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}$"), method="GET"
+    ).respond_with_json(
+        {"id": record_id, "pids": {"doi": {"identifier": reserved_doi}}}
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test-project.git",
+        ]
+    )
+    calkit.releases.set_cff_authors(
+        [{"first_name": "Alice", "last_name": "Smith", "affiliation": "SomeU"}]
+    )
+    subprocess.check_call(
+        ["calkit", "update", "license", "--copyright-holder", "Some Person"]
+    )
+    # One-shot publish (no --draft) so the new.py publish/poll path runs
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--no-github",
+            "--no-push",
+            "--verbose",
+        ]
+    )
+    release = calkit.load_calkit_info()["releases"]["v0.1.0"]
+    # Despite the empty pids in the publish response, the DOI is recovered
+    assert release["doi"] == reserved_doi
+    assert release["url"] == f"https://doi.org/{reserved_doi}"
+
+
+def _setup_zenodo_sandbox_project(monkeypatch):
+    """Shared setup for the live Zenodo sandbox tests.
+
+    Skips unless the test is explicitly opted into via
+    ``CALKIT_TEST_ZENODO_SANDBOX=1`` (so it never runs in CI -- GitHub Actions
+    doesn't set that variable) and a sandbox token is available. Resolves the
+    token (allowing it to live in a local ``.env``), points the client at the
+    sandbox, and creates a project with authors and a license ready to be
+    released. Must be called from within a ``tmp_dir`` test.
+    """
+    if os.getenv("CALKIT_TEST_ZENODO_SANDBOX") != "1":
+        pytest.skip(
+            "Live Zenodo sandbox test; set CALKIT_TEST_ZENODO_SANDBOX=1 "
+            "(and provide a sandbox ZENODO_TOKEN) to run it"
+        )
+    # Allow the token to live in a local .env file (the usual way calkit
+    # resolves credentials). The calkit subprocesses run in tmp_dir, outside
+    # the repo, so their own load_dotenv() won't find it -- we load it here and
+    # export it below so they inherit it.
+    import dotenv
+
+    dotenv.load_dotenv()
+    token = (
+        os.getenv("ZENODO_TOKEN")
+        or os.getenv("CALKIT_TEST_ZENODO_TOKEN")
+        or os.getenv("CALKIT_ZENODO_TOKEN")
+    )
+    if not token:
+        pytest.skip(
+            "No sandbox Zenodo token found; set ZENODO_TOKEN (or "
+            "CALKIT_TEST_ZENODO_TOKEN) to a sandbox.zenodo.org token"
+        )
+    # Export the token as ZENODO_TOKEN so every calkit subprocess picks it up,
+    # and make sure nothing forces us onto the production base URL.
+    monkeypatch.setenv("ZENODO_TOKEN", token)
+    monkeypatch.delenv("CALKIT_USE_PROD_FOR_TESTS", raising=False)
+    monkeypatch.delenv("CALKIT_INVENIO_BASE_URL_ZENODO", raising=False)
+    # Sanity check: in the test env we should be pointed at the sandbox
+    assert (
+        calkit.invenio.get_base_url("zenodo")
+        == "https://sandbox.zenodo.org/api"
+    )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "project",
+            ".",
+            "--title",
+            "Test project",
+            "--name",
+            "test-project",
+        ]
+    )
+    subprocess.check_call(
+        [
+            "git",
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/calkit/test-project.git",
+        ]
+    )
+    calkit.releases.set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            },
+            {
+                "first_name": "Bob",
+                "last_name": "Jones",
+                "affiliation": None,
+                "orcid": None,
+            },
+        ]
+    )
+    subprocess.check_call(
+        ["calkit", "update", "license", "--copyright-holder", "Some Person"]
+    )
+
+
+def test_new_release_zenodo_sandbox(tmp_dir, monkeypatch):
+    """Live integration test against the real Zenodo sandbox API.
+
+    Unlike ``test_new_release`` (which mocks the Invenio API), this exercises
+    the full release flow against ``sandbox.zenodo.org`` so we can catch
+    regressions the mock can't -- e.g. metadata our client builds that the
+    real API rejects. It is deliberately gated behind
+    ``CALKIT_TEST_ZENODO_SANDBOX=1`` so it never runs in CI (GitHub Actions
+    does not set that variable); it's only for occasional manual local
+    verification.
+
+    Requirements to run locally::
+
+        CALKIT_TEST_ZENODO_SANDBOX=1
+        ZENODO_TOKEN=<a sandbox.zenodo.org personal access token with the
+                      deposit:write and deposit:actions scopes>
+
+    The test only ever creates (and then deletes) a *draft* record -- it never
+    publishes, because a published sandbox record cannot be removed via the
+    API and would litter the account.
+    """
+    _setup_zenodo_sandbox_project(monkeypatch)
+    record_id = None
+    try:
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "release",
+                "--name",
+                "v0.1.0",
+                "--description",
+                "First release.",
+                "--draft",
+                "--no-github",
+                "--verbose",
+            ]
+        )
+        ck_info = calkit.load_calkit_info()
+        assert "v0.1.0" in ck_info["releases"]
+        release = ck_info["releases"]["v0.1.0"]
+        record_id = release["record_id"]
+        assert record_id is not None
+        # A DOI should have been reserved for the draft
+        assert release["doi"] is not None
+        # The draft really exists on the sandbox with the metadata we sent;
+        # fetching it confirms our client and the real API agree on shape
+        draft = calkit.invenio.get(f"/records/{record_id}/draft")
+        metadata = draft["metadata"]
+        assert metadata["title"] == "Test project"
+        # NOTE: our client POSTs the InvenioRDM metadata schema (creators with
+        # person_or_org/given_name/family_name), but the Zenodo draft GET
+        # endpoint echoes back the *legacy* Zenodo serialization, where each
+        # creator is a "Last, First" name string. Asserting on the real shape
+        # here is the whole point of this test -- the mock can't reveal it.
+        creators = metadata["creators"]
+        assert creators[0]["name"] == "Smith, Alice"
+        assert creators[0]["affiliation"] == "SomeU"
+        assert creators[1]["name"] == "Jones, Bob"
+        # License and the GitHub related-identifier round-trip correctly
+        assert metadata["license"]["id"] == "cc-by-4.0"
+        related = metadata["related_identifiers"]
+        assert (
+            related[0]["identifier"]
+            == "https://github.com/calkit/test-project"
+        )
+        # Reuploading the draft should also succeed against the real API
+        subprocess.check_call(
+            ["calkit", "update", "release", "--name", "v0.1.0", "--reupload"]
+        )
+    finally:
+        # Always clean up the draft so we don't accumulate records on the
+        # sandbox, even if an assertion above failed.
+        if record_id is not None:
+            try:
+                calkit.invenio.delete(
+                    f"/records/{record_id}/draft", as_json=False
+                )
+            except Exception as e:
+                print(f"Warning: failed to clean up sandbox draft: {e}")
+
+
+def test_new_release_zenodo_sandbox_publish(tmp_dir, monkeypatch):
+    """Live test of the full *publish* path against the Zenodo sandbox.
+
+    This is the companion to ``test_new_release_zenodo_sandbox``: instead of a
+    draft, it runs a one-shot ``new release`` (no ``--draft``), which is the
+    only path that exercises the DOI-minting logic this branch hardens --
+    reserving a DOI on the draft, publishing, and then (because the publish
+    action returns 202 and may not echo the DOI immediately) retrying a fetch
+    of the published record and pulling the DOI out with
+    ``invenio.extract_doi``.
+
+    Same opt-in gate as the draft test (``CALKIT_TEST_ZENODO_SANDBOX=1``), so
+    it never runs in CI. WARNING: unlike the draft test, this PUBLISHES a real
+    sandbox record, which cannot be deleted via the API, so each run leaves one
+    behind on the sandbox account. It is intentionally separate so the draft
+    test can stay self-cleaning.
+    """
+    _setup_zenodo_sandbox_project(monkeypatch)
+    # No --draft: reserve + publish + mint DOI in one shot. --no-push skips the
+    # git push and GitHub release entirely.
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--description",
+            "First release.",
+            "--no-github",
+            "--no-push",
+            "--verbose",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "v0.1.0" in ck_info["releases"]
+    release = ck_info["releases"]["v0.1.0"]
+    record_id = release["record_id"]
+    assert record_id is not None
+    # The minted DOI should have been resolved and saved (this is exactly what
+    # the publish-path fix is about)
+    doi = release["doi"]
+    assert doi is not None
+    assert doi.startswith("10.")
+    print(f"Published sandbox record {record_id} with DOI {doi}")
+    # The published record really exists and exposes the same DOI via the API,
+    # confirming extract_doi agrees with the real published record
+    record = calkit.invenio.get(f"/records/{record_id}")
+    assert calkit.invenio.extract_doi(record) == doi
+    # A Git tag for the release should have been created locally
+    assert "v0.1.0" in [tag.name for tag in git.Repo().tags]
+
+
+def test_new_release_is_runnable(tmp_dir, monkeypatch):
+    # Provide a dummy Zenodo token so `new_release` can pass its early
+    # token-validation step even in dry-run mode.
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "title": "Test project",
+                "name": "test-project",
+                "owner": "test-user",
+                "git_repo_url": "https://github.com/test-user/test-project",
+                "environments": {
+                    "main": {
+                        "kind": "uv-venv",
+                        "path": "requirements.txt",
+                        "prefix": ".venv",
+                        "python": "3.13",
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "get-data": {
+                            "kind": "python-script",
+                            "script_path": "get_data.py",
+                            "environment": "main",
+                            "outputs": ["results"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    # Authors live in CITATION.cff, the single source of truth
+    calkit.releases.set_cff_authors(
+        [
+            {
+                "first_name": "Alice",
+                "last_name": "Smith",
+                "affiliation": "SomeU",
+                "orcid": "0000-0001-2345-6789",
+            }
+        ]
+    )
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    with open("get_data.py", "w") as f:
+        f.write("print('running running running')\n")
+        f.write("import os\n")
+        f.write("os.makedirs('results', exist_ok=True)\n")
+        f.write("with open('results/data.txt', 'w') as f:\n")
+        f.write("    f.write('hello world')\n")
+    # Add a license
+    subprocess.check_call(
+        [
+            "calkit",
+            "update",
+            "license",
+            "-c",
+            "Some Person",
+        ]
+    )
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" in out
+    repo = git.Repo()
+    repo.git.add(
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            "requirements.txt",
+            "get_data.py",
+        ]
+    )
+    repo.git.commit("-m", "Add pipeline for release test")
+    # Run the pipeline again and make sure it's up to date
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert "running running running" not in out
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--dry-run",
+            "--description",
+            "First release.",
+            "--draft",
+            "--no-github",
+        ],
+        text=True,
+    )
+    print(out)
+    assert "running running running" not in out
+
+
+def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
+    # Covers two edge cases via a dry-run release: detecting a standard
+    # (non-Calkit) MIT license (regression for issue 919) and reading authors
+    # from a CITATION.cff file when none are defined in calkit.yaml.
+    monkeypatch.setenv("ZENODO_TOKEN", "test-token")
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "title": "Test project",
+                "name": "test-project",
+                "owner": "test-user",
+                "git_repo_url": "https://github.com/test-user/test-project",
+                "environments": {
+                    "main": {
+                        "kind": "uv-venv",
+                        "path": "requirements.txt",
+                        "prefix": ".venv",
+                        "python": "3.13",
+                    }
+                },
+                "pipeline": {
+                    "stages": {
+                        "get-data": {
+                            "kind": "python-script",
+                            "script_path": "get_data.py",
+                            "environment": "main",
+                            "outputs": ["results"],
+                        }
+                    }
+                },
+            },
+            f,
+        )
+    with open("requirements.txt", "w") as f:
+        f.write("requests\n")
+    with open("get_data.py", "w") as f:
+        f.write("import os\n")
+        f.write("os.makedirs('results', exist_ok=True)\n")
+        f.write("open('results/data.txt', 'w').write('hello world')\n")
+    # Write a standard MIT license, which says "MIT License" (not "The MIT
+    # License") and previously failed to be detected
+    with open("LICENSE", "w") as f:
+        f.write(
+            "MIT License\n\nCopyright (c) 2026 Alice Smith\n\n"
+            "Permission is hereby granted, free of charge, to any person "
+            "obtaining a copy of this software and associated documentation "
+            'files (the "Software"), to deal in the Software without '
+            "restriction.\n"
+        )
+    # Declare authors only in CITATION.cff, not calkit.yaml
+    with open("CITATION.cff", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "cff-version": "1.2.0",
+                "title": "Test project",
+                "authors": [
+                    {
+                        "family-names": "Smith",
+                        "given-names": "Alice",
+                        "orcid": "https://orcid.org/0000-0001-2345-6789",
+                    }
+                ],
+            },
+            f,
+        )
+    subprocess.check_call(["calkit", "run"])
+    repo = git.Repo()
+    repo.git.add(
+        [
+            "calkit.yaml",
+            "dvc.yaml",
+            "dvc.lock",
+            "requirements.txt",
+            "get_data.py",
+            "LICENSE",
+            "CITATION.cff",
+        ]
+    )
+    repo.git.commit("-m", "Add pipeline for release test")
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.1.0",
+            "--dry-run",
+            "--draft",
+            "--no-github",
+        ],
+        text=True,
+    )
+    print(out)
+    assert "Detected license(s): mit" in out
+    assert "Read 1 author(s) from CITATION.cff" in out
+
+
+def test_split_template_subdir():
+    # A template may name a directory inside a repo.
+    #
+    # One repo can hold several self-contained examples, e.g.
+    # 'calkit/calkit/examples/markdown'.
+    from calkit.cli.new import _split_template_subdir
+
+    assert _split_template_subdir(
+        "calkit/example-basic", "https://github.com/calkit/example-basic"
+    ) == ("https://github.com/calkit/example-basic", None)
+    assert _split_template_subdir(
+        "calkit/calkit/examples/markdown",
+        "https://github.com/calkit/calkit/examples/markdown",
+    ) == ("https://github.com/calkit/calkit", "examples/markdown")
+    # A full URL's path belongs to the repo, so it is left alone
+    for url in [
+        "https://github.com/calkit/example-basic",
+        "file:///tmp/x/examples/demo",
+    ]:
+        assert _split_template_subdir(url, url) == (url, None)

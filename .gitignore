@@ -1,7 +1,7 @@
 dev.ipynb
 *.pyc
 .DS_Store
-.vscode
+.vscode/settings.json
 site
 .env
 .venv
@@ -9,9 +9,11 @@ site
 coverage.xml
 import.log
 tsconfig.tsbuildinfo
-lib
+jupyterlab-ext/lib
 node_modules
 .yarn
+*.eslintcache
+*.stylelintcache
 calkit/labextension
 coverage
 junit.xml
@@ -19,3 +21,7 @@ calk9
 dist
 *.vsix
 vscode-ext/out
+.claude
+TODO.md
+**/__pycache__/
+CLAUDE.md

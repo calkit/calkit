@@ -1,0 +1,1422 @@
+import * as vscode from "vscode";
+import * as path from "node:path";
+import * as fs from "node:fs";
+import type {
+  ArtifactEntry,
+  CalkitInfo,
+  DvcYaml,
+  EnvDescription,
+  NotebookEntry,
+  PipelineStage,
+  QuestionEntry,
+  StaleStageDetail,
+} from "./types";
+import { getExecutedNotebookHtmlPath } from "./notebooks";
+import {
+  classifyStaleStage,
+  dvcStageOutputPaths,
+  type StaleClassification,
+  outputEntryPath,
+} from "./pipeline/core";
+
+// Singular node kinds and the matching calkit.yaml collection keys for the
+// artifact-style sections (figures, datasets, results, publications,
+// presentations), which share the same item machinery.
+type ArtifactKind =
+  | "figure"
+  | "dataset"
+  | "result"
+  | "publication"
+  | "presentation";
+type ArtifactCollection =
+  | "figures"
+  | "datasets"
+  | "results"
+  | "publications"
+  | "presentations";
+
+// The displayed text of a question, which may be a plain string or a structured
+// entry carrying a hypothesis/answer/evidence alongside the question itself.
+function questionText(question: string | QuestionEntry): string {
+  return typeof question === "string" ? question : question.question;
+}
+
+// Base codicon for each artifact kind (used when the artifact has provenance and
+// isn't stale; imported artifacts use a cloud icon instead).
+const ARTIFACT_ICONS: Record<ArtifactKind, string> = {
+  figure: "file-media",
+  dataset: "database",
+  result: "graph",
+  publication: "book",
+  presentation: "device-desktop",
+};
+
+export class SidebarItem extends vscode.TreeItem {
+  constructor(
+    label: string,
+    collapsibleState: vscode.TreeItemCollapsibleState,
+    public readonly nodeKind: string,
+    public readonly nodeId?: string,
+  ) {
+    super(label, collapsibleState);
+  }
+}
+
+export class CalkitSidebarProvider
+  implements vscode.TreeDataProvider<SidebarItem>
+{
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<
+    SidebarItem | undefined | null | void
+  >();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  private workspaceRoot: string | undefined;
+  private calkitConfig: CalkitInfo | undefined;
+  private dvcYaml: DvcYaml | undefined;
+  private staleStageNames = new Set<string>();
+  // What is stale about each stale stage (modified inputs/outputs, script,
+  // environment, command), keyed by base stage name. Drives the per-property
+  // stale markers shown when a stage node is expanded.
+  private staleStageDetails: Record<string, StaleStageDetail> = {};
+  private runningStageNames = new Set<string>();
+  private envDescriptions: Record<string, EnvDescription> | undefined;
+  private detectedNotebooks: string[] = [];
+  private detectedFigures: string[] = [];
+  private detectedDatasets: string[] = [];
+  private detectedResults: string[] = [];
+  private detectedPresentations: string[] = [];
+  private hiddenSections = new Set<string>();
+  // Lowercased filter text; when non-empty, only items matching it (and the
+  // sections containing them) are shown. Set via setFilter, not refresh.
+  private filterText = "";
+  private lastFingerprint: string | undefined;
+
+  // Cached section items so reveal() can use getParent()
+  private readonly questionsSectionItem = this.makeSection(
+    "Questions",
+    "questions",
+  );
+  private readonly envsSectionItem = this.makeSection("Environments", "envs");
+  private readonly pipelineSectionItem = this.makeSection(
+    "Pipeline",
+    "pipeline",
+  );
+  private readonly notebooksSectionItem = this.makeSection(
+    "Notebooks",
+    "notebooks",
+  );
+  private readonly figuresSectionItem = this.makeSection("Figures", "figures");
+  private readonly datasetsSectionItem = this.makeSection(
+    "Datasets",
+    "datasets",
+  );
+  private readonly publicationsSectionItem = this.makeSection(
+    "Publications",
+    "publications",
+  );
+  private readonly presentationsSectionItem = this.makeSection(
+    "Presentations",
+    "presentations",
+  );
+  private readonly resultsSectionItem = this.makeSection("Results", "results");
+  private stageItemCache = new Map<string, SidebarItem>();
+  private envItemCache = new Map<string, SidebarItem>();
+
+  refresh(
+    workspaceRoot: string | undefined,
+    calkitConfig: CalkitInfo | undefined,
+    dvcYaml: DvcYaml | undefined,
+    staleStageNames: Set<string>,
+    envDescriptions?: Record<string, EnvDescription>,
+    detectedNotebooks?: string[],
+    detectedFigures?: string[],
+    detectedDatasets?: string[],
+    runningStageNames?: Set<string>,
+    detectedResults?: string[],
+    detectedPresentations?: string[],
+    hiddenSections?: Set<string>,
+    staleStageDetails?: Record<string, StaleStageDetail>,
+  ): void {
+    const nextFingerprint = JSON.stringify([
+      calkitConfig,
+      dvcYaml,
+      [...staleStageNames].sort(),
+      envDescriptions,
+      detectedNotebooks,
+      detectedFigures,
+      detectedDatasets,
+      [...(runningStageNames ?? [])].sort(),
+      detectedResults,
+      detectedPresentations,
+      [...(hiddenSections ?? [])].sort(),
+      staleStageDetails,
+    ]);
+    if (nextFingerprint === this.lastFingerprint) {
+      return;
+    }
+    this.lastFingerprint = nextFingerprint;
+    this.workspaceRoot = workspaceRoot;
+    this.calkitConfig = calkitConfig;
+    this.dvcYaml = dvcYaml;
+    this.staleStageNames = staleStageNames;
+    this.staleStageDetails = staleStageDetails ?? {};
+    this.runningStageNames = runningStageNames ?? new Set();
+    this.envDescriptions = envDescriptions;
+    this.detectedNotebooks = detectedNotebooks ?? [];
+    this.detectedFigures = detectedFigures ?? [];
+    this.detectedDatasets = detectedDatasets ?? [];
+    this.detectedResults = detectedResults ?? [];
+    this.detectedPresentations = detectedPresentations ?? [];
+    this.hiddenSections = hiddenSections ?? new Set();
+    this.stageItemCache.clear();
+    this.envItemCache.clear();
+    this._onDidChangeTreeData.fire();
+  }
+
+  // Apply (or clear, with "") a case-insensitive text filter across all
+  // sections' items, then re-render. Kept separate from refresh() so it isn't
+  // gated by the data fingerprint.
+  setFilter(text: string): void {
+    const next = text.trim().toLowerCase();
+    if (next === this.filterText) {
+      return;
+    }
+    this.filterText = next;
+    this._onDidChangeTreeData.fire();
+  }
+
+  getFilter(): string {
+    return this.filterText;
+  }
+
+  // True when no filter is active, or any of the given texts contains it.
+  private matchesFilter(...texts: (string | undefined)[]): boolean {
+    if (!this.filterText) {
+      return true;
+    }
+    return texts.some((t) => t?.toLowerCase().includes(this.filterText));
+  }
+
+  // An empty section yields no rows while filtering (so it is hidden) and the
+  // given "none" placeholder otherwise.
+  private emptyOrNone(message: string): SidebarItem[] {
+    if (this.filterText) {
+      return [];
+    }
+    return [
+      new SidebarItem(message, vscode.TreeItemCollapsibleState.None, "empty"),
+    ];
+  }
+
+  getAttentionCount(): number {
+    let total = 0;
+    for (const n of this.computeSectionAttention().values()) {
+      total += n;
+    }
+    return total;
+  }
+
+  // Number of items "needing attention" per section id (stale pipeline stages,
+  // notebooks without an environment, figures/datasets without provenance).
+  // Used both for the view badge and to flag the offending section headers so
+  // they're identifiable while collapsed.
+  private computeSectionAttention(): Map<string, number> {
+    const counts = new Map<string, number>();
+    // Not a Calkit project (no calkit.yaml): the tree shows the welcome view,
+    // so auto-detected files shouldn't drive a "needs attention" badge.
+    if (this.calkitConfig === undefined) {
+      return counts;
+    }
+    // Stale pipeline stages
+    if (this.staleStageNames.size > 0) {
+      counts.set("pipeline", this.staleStageNames.size);
+    }
+    // Notebooks with no environment
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    const listed = this.calkitConfig?.notebooks ?? [];
+    const knownNbPaths = new Set(listed.map((n) => n.path));
+    for (const stage of Object.values(stages)) {
+      if (typeof stage.notebook_path === "string") {
+        knownNbPaths.add(stage.notebook_path);
+      }
+    }
+    const allNbPaths = [...knownNbPaths];
+    for (const p of this.detectedNotebooks) {
+      if (!knownNbPaths.has(p)) {
+        allNbPaths.push(p);
+      }
+    }
+    let notebooksNeedingEnv = 0;
+    for (const nbPath of allNbPaths) {
+      const { entry, stage: nbStage } = this.resolveNotebookEntry(nbPath);
+      const envName = entry.environment ?? nbStage?.environment;
+      if (!envName) {
+        notebooksNeedingEnv++;
+      }
+    }
+    if (notebooksNeedingEnv > 0) {
+      counts.set("notebooks", notebooksNeedingEnv);
+    }
+    // Figures/datasets with no provenance
+    const outputToStage = this.buildOutputToStageMap();
+    for (const kind of ["figures", "datasets"] as const) {
+      const nodeKind = kind.slice(0, -1) as ArtifactKind;
+      let n = 0;
+      for (const artifactPath of this.mergedArtifactPaths(kind)) {
+        const entry = this.resolveArtifactEntry(
+          artifactPath,
+          nodeKind,
+          outputToStage,
+        );
+        if (!entry.stage && !entry.imported_from) {
+          n++;
+        }
+      }
+      if (n > 0) {
+        counts.set(kind, n);
+      }
+    }
+    return counts;
+  }
+
+  findStageItem(stageName: string): SidebarItem | undefined {
+    if (this.stageItemCache.size === 0) {
+      this.getStageItems();
+    }
+    return this.stageItemCache.get(stageName);
+  }
+
+  findEnvItem(envName: string): SidebarItem | undefined {
+    if (this.envItemCache.size === 0) {
+      this.getEnvItems();
+    }
+    return this.envItemCache.get(envName);
+  }
+
+  getParent(element: SidebarItem): SidebarItem | undefined {
+    if (element.nodeKind === "stage") {
+      // A stage declared in a Markdown file sits under that file's stage
+      // rather than directly under the pipeline section
+      const name = element.nodeId ?? "";
+      for (const [parent, children] of this.markdownStageChildren()) {
+        if (children.includes(name)) {
+          return this.stageItemCache.get(parent);
+        }
+      }
+      return this.pipelineSectionItem;
+    }
+    if (element.nodeKind === "env") {
+      return this.envsSectionItem;
+    }
+    if (element.nodeKind === "notebook") {
+      return this.notebooksSectionItem;
+    }
+    if (element.nodeKind === "figure") {
+      return this.figuresSectionItem;
+    }
+    if (element.nodeKind === "dataset") {
+      return this.datasetsSectionItem;
+    }
+    return undefined;
+  }
+
+  getTreeItem(element: SidebarItem): vscode.TreeItem {
+    return element;
+  }
+
+  getChildren(element?: SidebarItem): SidebarItem[] {
+    if (!element) {
+      // No calkit.yaml: leave the tree empty so the "Initialize Calkit
+      // Project" welcome view (contributed in package.json) is shown instead.
+      if (this.calkitConfig === undefined) {
+        return [];
+      }
+      // Full ordered list; users hide sections they don't want via the
+      // calkit.sidebar.hiddenSections setting (the section id is the suffix
+      // after "section-").
+      const attention = this.computeSectionAttention();
+      return (
+        [
+          this.questionsSectionItem,
+          this.envsSectionItem,
+          this.pipelineSectionItem,
+          this.notebooksSectionItem,
+          this.figuresSectionItem,
+          this.datasetsSectionItem,
+          this.publicationsSectionItem,
+          this.presentationsSectionItem,
+          this.resultsSectionItem,
+        ]
+          .filter(
+            (s) =>
+              !this.hiddenSections.has(s.nodeKind.replace(/^section-/, "")),
+          )
+          // While filtering, drop sections whose items don't match (their child
+          // producers return no rows for a non-matching section).
+          .filter(
+            (s) =>
+              !this.filterText ||
+              this.getChildren(s).some((c) => c.nodeKind !== "empty"),
+          )
+          .map((s) => this.decorateSectionAttention(s, attention))
+      );
+    }
+    switch (element.nodeKind) {
+      case "section-questions":
+        return this.getQuestionItems();
+      case "section-envs":
+        return this.getEnvItems();
+      case "section-pipeline":
+        return this.getStageItems();
+      case "section-notebooks":
+        return this.getNotebookItems();
+      case "section-figures":
+        return this.getArtifactItems("figures");
+      case "section-datasets":
+        return this.getArtifactItems("datasets");
+      case "section-publications":
+        return this.getArtifactItems("publications");
+      case "section-presentations":
+        return this.getArtifactItems("presentations");
+      case "section-results":
+        return this.getArtifactItems("results");
+      case "question":
+        return this.getQuestionProps(element.nodeId ?? "");
+      case "env":
+        return this.getEnvProps(element.nodeId ?? "");
+      case "stage": {
+        const stageName = element.nodeId ?? "";
+        const children = this.markdownStageChildren().get(stageName);
+        if (children && children.length > 0) {
+          // Show what the file declares, labelled by block name; the full
+          // stage name stays the node id so running it still works
+          return children.map((child) =>
+            this.makeStageItem(child, child.slice(stageName.length + 1)),
+          );
+        }
+        return this.getStageProps(stageName);
+      }
+      case "notebook":
+        return this.getNotebookProps(element.nodeId ?? "");
+      case "figure":
+      case "dataset":
+      case "result":
+      case "publication":
+      case "presentation":
+        return this.getArtifactProps(
+          element.nodeId ?? "",
+          element.nodeKind as ArtifactKind,
+        );
+      default:
+        return [];
+    }
+  }
+
+  private getQuestionItems(): SidebarItem[] {
+    const questions = this.calkitConfig?.questions ?? [];
+    // Keep the original 1-based index (used by `calkit rm question <index>`)
+    // before filtering removes entries.
+    const filtered = questions
+      .map((question, i) => ({ question, index: i + 1 }))
+      .filter(({ question }) =>
+        this.matchesFilter(
+          questionText(question),
+          typeof question === "string" ? undefined : question.hypothesis,
+          typeof question === "string" ? undefined : question.answer,
+        ),
+      );
+    if (filtered.length === 0) {
+      return this.emptyOrNone("No questions defined");
+    }
+    return filtered.map(({ question, index }) => {
+      const text = questionText(question);
+      // Plain-string questions stay leaf nodes; a structured entry expands to
+      // show whichever of hypothesis/answer/evidence it carries.
+      const hasDetails =
+        typeof question !== "string" &&
+        (!!question.hypothesis ||
+          !!question.answer ||
+          (question.evidence?.length ?? 0) > 0);
+      const item = new SidebarItem(
+        text,
+        hasDetails
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None,
+        "question",
+        String(index),
+      );
+      item.iconPath = new vscode.ThemeIcon("question");
+      item.tooltip = text;
+      item.contextValue = "question";
+      return item;
+    });
+  }
+
+  private getQuestionProps(indexId: string): SidebarItem[] {
+    const question = this.calkitConfig?.questions?.[Number(indexId) - 1];
+    if (question === undefined || typeof question === "string") {
+      return [];
+    }
+    const items: SidebarItem[] = [];
+    // Hypothesis and answer are single-line text props, mirroring the
+    // label/description prop rows used by stages and artifacts.
+    const detail = (label: string, value: string, icon: string) => {
+      const item = new SidebarItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        "question-prop",
+      );
+      item.description = value;
+      item.tooltip = value;
+      item.iconPath = new vscode.ThemeIcon(icon);
+      items.push(item);
+    };
+    if (question.hypothesis) {
+      detail("Hypothesis", question.hypothesis, "lightbulb");
+    }
+    if (question.answer) {
+      detail("Answer", question.answer, "check");
+    }
+    for (const ev of question.evidence ?? []) {
+      // Evidence references a figure or result file with an optional
+      // explanation; clicking opens the file when it has a path.
+      const label = ev.explanation || ev.path || ev.kind || "Evidence";
+      const evItem = new SidebarItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        "question-evidence",
+        ev.path,
+      );
+      evItem.description = ev.path;
+      evItem.tooltip = ev.explanation ?? ev.path;
+      evItem.iconPath = new vscode.ThemeIcon(
+        ev.kind === "result" ? "graph" : "file-media",
+      );
+      if (this.workspaceRoot && ev.path) {
+        evItem.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [vscode.Uri.file(path.join(this.workspaceRoot, ev.path))],
+        };
+      }
+      items.push(evItem);
+    }
+    return items;
+  }
+
+  private makeSection(label: string, id: string): SidebarItem {
+    const item = new SidebarItem(
+      label,
+      vscode.TreeItemCollapsibleState.Expanded,
+      `section-${id}`,
+    );
+    item.contextValue = `section-${id}`;
+    return item;
+  }
+
+  // Flag a section header that contains items needing attention with a warning
+  // icon and count, so the offending section is identifiable while collapsed
+  // (mirroring the view's overall "needs attention" badge).
+  private decorateSectionAttention(
+    section: SidebarItem,
+    attention: Map<string, number>,
+  ): SidebarItem {
+    const id = section.nodeKind.replace(/^section-/, "");
+    const count = attention.get(id) ?? 0;
+    if (count > 0) {
+      section.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      section.description = String(count);
+      section.tooltip = `${count} item${count === 1 ? "" : "s"} need attention`;
+    } else {
+      section.iconPath = undefined;
+      section.description = undefined;
+      section.tooltip = undefined;
+    }
+    return section;
+  }
+
+  private getEnvItems(): SidebarItem[] {
+    const envs = this.calkitConfig?.environments ?? {};
+    const entries = Object.entries(envs).filter(([name, env]) =>
+      this.matchesFilter(name, typeof env.kind === "string" ? env.kind : ""),
+    );
+    if (entries.length === 0) {
+      return this.emptyOrNone("No environments defined");
+    }
+    return entries.map(([name, env]) => {
+      const cached = this.envItemCache.get(name);
+      if (cached) {
+        return cached;
+      }
+      const item = new SidebarItem(
+        name,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        "env",
+        name,
+      );
+      item.description = typeof env.kind === "string" ? env.kind : undefined;
+      item.iconPath = new vscode.ThemeIcon("package");
+      item.contextValue = "env";
+      this.envItemCache.set(name, item);
+      return item;
+    });
+  }
+
+  // An "Environment" property node (shown under stages, notebooks, and
+  // artifacts). Clicking it jumps to the environment in the Environments
+  // section, expanded.
+  private makeEnvPropItem(envName: string, stale = false): SidebarItem {
+    const item = new SidebarItem(
+      stale ? "Environment (modified)" : "Environment",
+      vscode.TreeItemCollapsibleState.None,
+      "stage-env-prop",
+      envName,
+    );
+    item.description = envName;
+    item.iconPath = stale
+      ? new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        )
+      : new vscode.ThemeIcon("package");
+    item.tooltip = stale
+      ? `${envName} — environment changed; stage needs to be re-run`
+      : undefined;
+    item.contextValue = "stage-env-prop";
+    item.command = {
+      command: "calkit-vscode.viewEnvironment",
+      title: "View Environment",
+      arguments: [item],
+    };
+    return item;
+  }
+
+  private getEnvProps(envName: string): SidebarItem[] {
+    const env = this.calkitConfig?.environments?.[envName];
+    if (!env) {
+      return [];
+    }
+    const items: SidebarItem[] = [];
+    const prop = (
+      label: string,
+      val: string,
+      openPath?: string,
+      icon?: string,
+    ): void => {
+      const item = new SidebarItem(
+        label,
+        vscode.TreeItemCollapsibleState.None,
+        "env-prop",
+      );
+      item.description = val;
+      if (icon) {
+        item.iconPath = new vscode.ThemeIcon(icon);
+      }
+      if (openPath && this.workspaceRoot) {
+        const absPath = path.join(this.workspaceRoot, openPath);
+        item.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [vscode.Uri.file(absPath)],
+        };
+        item.tooltip = `Open ${openPath}`;
+      }
+      items.push(item);
+    };
+    const desc = this.envDescriptions?.[envName];
+    const specPath =
+      desc?.spec_path ?? (typeof env.path === "string" ? env.path : undefined);
+    const lockPath = desc?.lock_path;
+    const prefix =
+      desc?.prefix ?? (typeof env.prefix === "string" ? env.prefix : undefined);
+    const python =
+      desc?.python ?? (typeof env.python === "string" ? env.python : undefined);
+    if (typeof env.image === "string") {
+      prop("Image", env.image, undefined, "vm");
+    }
+    if (specPath) {
+      prop("Spec", specPath, specPath, "file-code");
+    }
+    if (lockPath) {
+      prop("Lock", lockPath, lockPath, "lock");
+    }
+    if (prefix) {
+      prop("Prefix", prefix, undefined, "folder");
+    }
+    if (python) {
+      prop("Python", python, undefined, "symbol-namespace");
+    }
+    return items;
+  }
+
+  private resolveNotebookEntry(nbPath: string): {
+    entry: NotebookEntry;
+    stage: PipelineStage | undefined;
+    stageName: string | undefined;
+  } {
+    const listed = this.calkitConfig?.notebooks ?? [];
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    const explicit = listed.find((n) => n.path === nbPath);
+    // Find stage where notebook_path matches
+    const stageEntry = Object.entries(stages).find(
+      ([, s]) => s.notebook_path === nbPath,
+    );
+    const stageName = explicit?.stage ?? stageEntry?.[0];
+    const stage = stageName ? stages[stageName] : undefined;
+    const envName = explicit?.environment ?? stage?.environment;
+    return {
+      entry: explicit ?? {
+        path: nbPath,
+        environment: envName,
+        stage: stageName,
+      },
+      stage,
+      stageName,
+    };
+  }
+
+  private getNotebookItems(): SidebarItem[] {
+    const listed = this.calkitConfig?.notebooks ?? [];
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    const knownPaths = new Set(listed.map((n) => n.path));
+    // Add notebooks from pipeline stages
+    for (const [, stage] of Object.entries(stages)) {
+      if (typeof stage.notebook_path === "string") {
+        if (!knownPaths.has(stage.notebook_path)) {
+          knownPaths.add(stage.notebook_path);
+        }
+      }
+    }
+    // Add auto-detected notebooks not already known
+    const allPaths = [...knownPaths];
+    for (const p of this.detectedNotebooks) {
+      if (!knownPaths.has(p)) {
+        allPaths.push(p);
+      }
+    }
+    const filtered = allPaths.filter((nbPath) =>
+      this.matchesFilter(nbPath, path.basename(nbPath)),
+    );
+    if (filtered.length === 0) {
+      return this.emptyOrNone("No notebooks found");
+    }
+    return filtered.map((nbPath) => {
+      const { entry, stage, stageName } = this.resolveNotebookEntry(nbPath);
+      const envName = entry.environment ?? stage?.environment;
+      const hasStage = !!stageName;
+      const label = path.basename(nbPath);
+      const collapsible =
+        hasStage || !!envName
+          ? vscode.TreeItemCollapsibleState.Collapsed
+          : vscode.TreeItemCollapsibleState.None;
+      const item = new SidebarItem(label, collapsible, "notebook", nbPath);
+      item.description = nbPath;
+      if (!envName) {
+        item.iconPath = new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        );
+        item.tooltip = `${nbPath} — no environment defined`;
+        item.contextValue = "notebook-no-env";
+      } else {
+        item.iconPath = new vscode.ThemeIcon("notebook");
+        item.tooltip = stageName
+          ? `${nbPath} — stage: ${stageName}, env: ${envName}`
+          : `${nbPath} — env: ${envName}`;
+        item.contextValue = "notebook";
+      }
+      // Clicking a notebook opens it (and expands its section if collapsible),
+      // matching how figures and datasets behave.
+      if (this.workspaceRoot) {
+        const absPath = path.join(this.workspaceRoot, nbPath);
+        item.command = {
+          command: "vscode.openWith",
+          title: "Open",
+          arguments: [vscode.Uri.file(absPath), "jupyter-notebook"],
+        };
+      }
+      return item;
+    });
+  }
+
+  private getNotebookProps(nbPath: string): SidebarItem[] {
+    const { entry, stage, stageName } = this.resolveNotebookEntry(nbPath);
+    const items: SidebarItem[] = [];
+    const envName = entry.environment ?? stage?.environment;
+    if (envName) {
+      items.push(this.makeEnvPropItem(envName));
+    }
+    if (stageName && stage) {
+      const stageItem = new SidebarItem(
+        "Stage",
+        vscode.TreeItemCollapsibleState.None,
+        "notebook-stage-prop",
+        stageName,
+      );
+      stageItem.description = stageName;
+      stageItem.iconPath = new vscode.ThemeIcon("layers");
+      stageItem.contextValue = "notebook-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
+      items.push(stageItem);
+      // An app records the stage that builds it, so a notebook whose stage
+      // builds one can say so. A marimo notebook's real output is its app,
+      // and the stage declares that as output_path rather than in `outputs`,
+      // so nothing else here would surface it.
+      const appEntry = Object.entries(this.calkitConfig?.apps ?? {}).find(
+        ([, a]) => a.stage === stageName,
+      );
+      if (appEntry) {
+        const [appName, appInfo] = appEntry;
+        const appItem = new SidebarItem(
+          "App",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-prop",
+        );
+        appItem.description = appInfo.title || appName;
+        appItem.iconPath = new vscode.ThemeIcon("browser");
+        if (this.workspaceRoot && appInfo.path) {
+          appItem.command = {
+            command: "vscode.open",
+            title: "Open",
+            arguments: [
+              vscode.Uri.file(path.join(this.workspaceRoot, appInfo.path)),
+            ],
+          };
+        }
+        items.push(appItem);
+      }
+      for (const rawInput of Array.isArray(stage.inputs) ? stage.inputs : []) {
+        const input = outputEntryPath(rawInput as string | { path: string });
+        const inputItem = new SidebarItem(
+          "Input",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-prop",
+        );
+        inputItem.description = input;
+        inputItem.iconPath = new vscode.ThemeIcon("arrow-left");
+        if (this.workspaceRoot) {
+          inputItem.command = {
+            command: "vscode.open",
+            title: "Open",
+            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, input))],
+          };
+        }
+        items.push(inputItem);
+      }
+      for (const rawOutput of Array.isArray(stage.outputs)
+        ? stage.outputs
+        : []) {
+        const output = outputEntryPath(rawOutput as string | { path: string });
+        const outItem = new SidebarItem(
+          "Output",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-prop",
+        );
+        outItem.description = output;
+        outItem.iconPath = new vscode.ThemeIcon("arrow-right");
+        if (this.workspaceRoot) {
+          outItem.command = {
+            command: "vscode.open",
+            title: "Open",
+            arguments: [vscode.Uri.file(path.join(this.workspaceRoot, output))],
+          };
+        }
+        items.push(outItem);
+      }
+    }
+    if (this.workspaceRoot) {
+      // The notebook itself opens when clicked in the tree, so no separate
+      // "Open" child is needed. Offer the executed HTML when it has been
+      // generated.
+      const htmlRel = getExecutedNotebookHtmlPath(nbPath);
+      if (fs.existsSync(path.join(this.workspaceRoot, htmlRel))) {
+        const htmlItem = new SidebarItem(
+          "Open executed HTML",
+          vscode.TreeItemCollapsibleState.None,
+          "notebook-html",
+          nbPath,
+        );
+        htmlItem.iconPath = new vscode.ThemeIcon("file-pdf");
+        htmlItem.command = {
+          command: "calkit-vscode.openNotebookHtml",
+          title: "Open executed HTML",
+          arguments: [nbPath],
+        };
+        items.push(htmlItem);
+      }
+    }
+    return items;
+  }
+
+  private buildOutputToStageMap(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const [stageName, stage] of Object.entries(
+      this.calkitConfig?.pipeline?.stages ?? {},
+    )) {
+      for (const out of stage.outputs ?? []) {
+        map.set(outputEntryPath(out), stageName);
+      }
+    }
+    for (const [stageName, stage] of Object.entries(
+      this.dvcYaml?.stages ?? {},
+    )) {
+      // dvcStageOutputPaths expands iterate_over (matrix) templates, so the
+      // concrete per-iteration files resolve back to their producing stage.
+      for (const p of dvcStageOutputPaths(stage)) {
+        map.set(p, stageName);
+      }
+    }
+    return map;
+  }
+
+  private detectedForCollection(kind: ArtifactCollection): string[] {
+    switch (kind) {
+      case "figures":
+        return this.detectedFigures;
+      case "datasets":
+        return this.detectedDatasets;
+      case "results":
+        return this.detectedResults;
+      case "presentations":
+        return this.detectedPresentations;
+      case "publications":
+        return []; // publications are declared-only
+    }
+  }
+
+  private resolveArtifactEntry(
+    artifactPath: string,
+    kind: ArtifactKind,
+    outputToStage: Map<string, string>,
+  ): ArtifactEntry {
+    const list = (this.calkitConfig?.[`${kind}s`] ?? []) as ArtifactEntry[];
+    const fromList = list.find((e) => e.path === artifactPath);
+    if (fromList?.stage || fromList?.imported_from) {
+      return fromList;
+    }
+    const stageName = outputToStage.get(artifactPath);
+    if (stageName) {
+      return { ...(fromList ?? { path: artifactPath }), stage: stageName };
+    }
+    return fromList ?? { path: artifactPath };
+  }
+
+  // Registered artifact paths for a kind plus any newly detected ones. Detected
+  // paths are already filtered at the detection source (submodules, files
+  // inside registered artifact/output folders, and folder collapsing), so here
+  // we only need to drop exact duplicates of the registered entries.
+  mergedArtifactPaths(kind: ArtifactCollection): string[] {
+    const list = (this.calkitConfig?.[kind] ?? []) as ArtifactEntry[];
+    const knownPaths = new Set(list.map((e) => e.path));
+    const allPaths = [...knownPaths];
+    for (const p of this.detectedForCollection(kind)) {
+      if (!knownPaths.has(p)) {
+        allPaths.push(p);
+      }
+    }
+    return allPaths;
+  }
+
+  private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
+    const nodeKind = kind.slice(0, -1) as ArtifactKind;
+    const allPaths = this.mergedArtifactPaths(kind).filter((p) =>
+      this.matchesFilter(p, path.basename(p)),
+    );
+    if (allPaths.length === 0) {
+      return this.emptyOrNone(`No ${kind} found`);
+    }
+    const outputToStage = this.buildOutputToStageMap();
+    return allPaths.map((artifactPath) =>
+      this.makeArtifactItem(
+        this.resolveArtifactEntry(artifactPath, nodeKind, outputToStage),
+        nodeKind,
+      ),
+    );
+  }
+
+  private makeArtifactItem(
+    entry: ArtifactEntry,
+    nodeKind: ArtifactKind,
+  ): SidebarItem {
+    const label = path.basename(entry.path);
+    const hasProvenance = !!entry.stage || !!entry.imported_from;
+    const isStale =
+      typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
+    const collapsible = hasProvenance
+      ? vscode.TreeItemCollapsibleState.Collapsed
+      : vscode.TreeItemCollapsibleState.None;
+    const item = new SidebarItem(label, collapsible, nodeKind, entry.path);
+    item.description = entry.path;
+    if (!hasProvenance) {
+      item.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      item.tooltip = `${entry.path} — no source defined`;
+      item.contextValue = `${nodeKind}-no-provenance`;
+    } else if (isStale) {
+      item.iconPath = new vscode.ThemeIcon(
+        "warning",
+        new vscode.ThemeColor("list.warningForeground"),
+      );
+      item.tooltip = `${entry.path} — stage '${entry.stage}' is stale`;
+      item.contextValue = `${nodeKind}-stale`;
+    } else {
+      const isImported = !!entry.imported_from;
+      item.iconPath = new vscode.ThemeIcon(
+        isImported ? "cloud-download" : ARTIFACT_ICONS[nodeKind],
+        new vscode.ThemeColor("testing.iconPassed"),
+      );
+      item.tooltip = entry.stage
+        ? `${entry.path} — stage: ${entry.stage}`
+        : `${entry.path} — imported`;
+      item.contextValue = nodeKind;
+    }
+    // Clicking opens the file in the regular viewer (the inline carousel icon
+    // opens the special figures viewer). Plotly figures (.json) open in the
+    // Plotly preview editor rather than as raw JSON.
+    if (this.workspaceRoot) {
+      const absUri = vscode.Uri.file(path.join(this.workspaceRoot, entry.path));
+      if (
+        nodeKind === "figure" &&
+        path.extname(entry.path).toLowerCase() === ".json"
+      ) {
+        item.command = {
+          command: "vscode.openWith",
+          title: "Open",
+          arguments: [absUri, "calkit.plotlyPreview"],
+        };
+      } else {
+        item.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [absUri],
+        };
+      }
+    }
+    return item;
+  }
+
+  private getArtifactProps(
+    artifactPath: string,
+    nodeKind: ArtifactKind,
+  ): SidebarItem[] {
+    const entry = this.resolveArtifactEntry(
+      artifactPath,
+      nodeKind,
+      this.buildOutputToStageMap(),
+    );
+    const items: SidebarItem[] = [];
+    if (typeof entry.stage === "string") {
+      const stageName = entry.stage;
+      const stageItem = new SidebarItem(
+        "Stage",
+        vscode.TreeItemCollapsibleState.None,
+        "artifact-stage-prop",
+        stageName,
+      );
+      stageItem.description = stageName;
+      stageItem.iconPath = new vscode.ThemeIcon("layers");
+      stageItem.contextValue = "artifact-stage-prop";
+      stageItem.command = {
+        command: "calkit-vscode.viewStage",
+        title: "View Stage",
+        arguments: [stageItem],
+      };
+      items.push(stageItem);
+    } else if (entry.imported_from) {
+      const src =
+        typeof entry.imported_from === "object" &&
+        entry.imported_from !== null &&
+        "url" in (entry.imported_from as object)
+          ? (entry.imported_from as { url: string }).url
+          : JSON.stringify(entry.imported_from);
+      const importItem = new SidebarItem(
+        "Imported from",
+        vscode.TreeItemCollapsibleState.None,
+        "artifact-import-prop",
+      );
+      importItem.description = src;
+      importItem.iconPath = new vscode.ThemeIcon("cloud-download");
+      items.push(importItem);
+    }
+    if (this.workspaceRoot) {
+      const openItem = new SidebarItem(
+        "Open",
+        vscode.TreeItemCollapsibleState.None,
+        "artifact-open",
+        artifactPath,
+      );
+      openItem.iconPath = new vscode.ThemeIcon("go-to-file");
+      openItem.command = {
+        command: "vscode.open",
+        title: "Open",
+        arguments: [
+          vscode.Uri.file(path.join(this.workspaceRoot, artifactPath)),
+        ],
+      };
+      items.push(openItem);
+    }
+    return items;
+  }
+
+  /**
+   * Map each Markdown stage to the stages its blocks declare.
+   *
+   * Those only exist in dvc.yaml---the blocks are in the Markdown file, not
+   * calkit.yaml---so listing them flat would bury the one stage the user
+   * actually wrote among the ones Calkit derived from it.
+   */
+  private markdownStageChildren(): Map<string, string[]> {
+    const calkitStages = this.calkitConfig?.pipeline?.stages ?? {};
+    const dvcStages = this.dvcYaml?.stages ?? {};
+    const children = new Map<string, string[]>();
+    for (const [name, stage] of Object.entries(calkitStages)) {
+      if (stage?.kind !== "markdown") {
+        continue;
+      }
+      const prefix = `${name}/`;
+      children.set(
+        name,
+        Object.keys(dvcStages)
+          .filter((n) => n.startsWith(prefix))
+          .sort(),
+      );
+    }
+    return children;
+  }
+
+  private makeStageItem(stageName: string, label?: string): SidebarItem {
+    const cached = this.stageItemCache.get(stageName);
+    if (cached) {
+      return cached;
+    }
+    // A Markdown stage stands in for the stages its blocks declare, so it
+    // reports their combined state rather than one of its own
+    const descendants = this.markdownStageChildren().get(stageName) ?? [];
+    const names = descendants.length ? descendants : [stageName];
+    const isRunning = names.some((n) => this.runningStageNames.has(n));
+    const isStale = names.some((n) => this.staleStageNames.has(n));
+    const item = new SidebarItem(
+      label ?? stageName,
+      vscode.TreeItemCollapsibleState.Collapsed,
+      "stage",
+      stageName,
+    );
+    item.description = isRunning ? "running" : isStale ? "stale" : undefined;
+    item.iconPath = isRunning
+      ? new vscode.ThemeIcon("loading~spin")
+      : isStale
+      ? new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        )
+      : new vscode.ThemeIcon(
+          "check",
+          new vscode.ThemeColor("testing.iconPassed"),
+        );
+    item.contextValue = "stage";
+    item.tooltip = isRunning
+      ? `${stageName} — running`
+      : isStale
+      ? `${stageName} — stage is stale`
+      : `${stageName} — up to date`;
+    this.stageItemCache.set(stageName, item);
+    return item;
+  }
+
+  private getStageItems(): SidebarItem[] {
+    const calkitStages = this.calkitConfig?.pipeline?.stages ?? {};
+    const dvcStages = this.dvcYaml?.stages ?? {};
+    const mdChildren = this.markdownStageChildren();
+    const childToParent = new Map<string, string>();
+    for (const [parent, children] of mdChildren) {
+      for (const child of children) {
+        childToParent.set(child, parent);
+      }
+    }
+    const allNames = [
+      ...new Set([...Object.keys(calkitStages), ...Object.keys(dvcStages)]),
+    ].filter((name) => {
+      // Derived stages are shown nested under the Markdown stage they came
+      // from, so they must not also appear at the top level
+      if (childToParent.has(name)) {
+        return false;
+      }
+      if (this.matchesFilter(name)) {
+        return true;
+      }
+      // A search for a block's name should still surface its file
+      return (mdChildren.get(name) ?? []).some((child) =>
+        this.matchesFilter(child),
+      );
+    });
+    if (allNames.length === 0) {
+      return this.emptyOrNone("No pipeline stages defined");
+    }
+    return allNames.map((stageName) => this.makeStageItem(stageName));
+  }
+
+  // The environment's spec/lock files (e.g. pyproject.toml + uv.lock), used to
+  // detect when a stage is stale because its environment changed. An env ref
+  // may combine an outer and inner environment as "outer:inner", so collect the
+  // files for each part.
+  private envFilePaths(envName: string): string[] {
+    const paths: string[] = [];
+    for (const part of envName.split(":")) {
+      const desc = this.envDescriptions?.[part];
+      if (desc?.spec_path) {
+        paths.push(desc.spec_path);
+      }
+      if (desc?.lock_path) {
+        paths.push(desc.lock_path);
+      }
+      const env = this.calkitConfig?.environments?.[part];
+      if (env && typeof env.path === "string") {
+        paths.push(env.path);
+      }
+    }
+    return paths;
+  }
+
+  private getStageProps(stageName: string): SidebarItem[] {
+    const calkitStage = this.calkitConfig?.pipeline?.stages?.[stageName];
+    const items: SidebarItem[] = [];
+    // When the stage is stale, attribute its changes to the specific
+    // script/notebook/source/environment/inputs/outputs so each affected row is
+    // flagged, rather than only marking the stage itself.
+    const detail = this.staleStageDetails[stageName];
+    const cls: StaleClassification | undefined =
+      detail && calkitStage
+        ? classifyStaleStage(detail, {
+            scriptPath:
+              typeof calkitStage.script_path === "string"
+                ? calkitStage.script_path
+                : undefined,
+            notebookPath:
+              typeof calkitStage.notebook_path === "string"
+                ? calkitStage.notebook_path
+                : undefined,
+            targetPath:
+              typeof calkitStage.target_path === "string"
+                ? calkitStage.target_path
+                : undefined,
+            configuredInputs: Array.isArray(calkitStage.inputs)
+              ? (calkitStage.inputs as (string | { path: string })[]).map(
+                  outputEntryPath,
+                )
+              : [],
+            envFilePaths:
+              typeof calkitStage.environment === "string"
+                ? this.envFilePaths(calkitStage.environment)
+                : [],
+          })
+        : undefined;
+    // An output is "modified" when its file changed on disk, or "stale" when an
+    // upstream change means it needs regenerating.
+    const outputStaleKind = (p: string): "modified" | "stale" | undefined =>
+      cls?.modifiedOutputs.has(p)
+        ? "modified"
+        : cls?.staleOutputs.has(p)
+        ? "stale"
+        : undefined;
+
+    const prop = (
+      label: string,
+      val: string,
+      icon: string,
+      openPath?: string,
+      staleKind?: "modified" | "stale",
+    ): void => {
+      const item = new SidebarItem(
+        staleKind ? `${label} (${staleKind})` : label,
+        vscode.TreeItemCollapsibleState.None,
+        "stage-prop",
+      );
+      item.description = val;
+      item.iconPath = staleKind
+        ? new vscode.ThemeIcon(
+            "warning",
+            new vscode.ThemeColor("list.warningForeground"),
+          )
+        : new vscode.ThemeIcon(icon);
+      if (openPath && this.workspaceRoot) {
+        const absPath = path.join(this.workspaceRoot, openPath);
+        item.command = {
+          command: "vscode.open",
+          title: "Open",
+          arguments: [vscode.Uri.file(absPath)],
+        };
+        item.tooltip = `Open ${openPath}`;
+      }
+      // The stale tooltip takes precedence over the plain "Open ..." one.
+      if (staleKind) {
+        item.tooltip =
+          staleKind === "modified"
+            ? `${val} — modified; stage needs to be re-run`
+            : `${val} — out of date; stage needs to be re-run`;
+      }
+      items.push(item);
+    };
+
+    if (calkitStage) {
+      if (typeof calkitStage.kind === "string") {
+        prop("Kind", calkitStage.kind, "symbol-enum");
+      }
+      // The stage command itself changed (e.g. its args), independent of any
+      // individual input/output file.
+      if (cls?.commandModified) {
+        const cmdItem = new SidebarItem(
+          "Command (modified)",
+          vscode.TreeItemCollapsibleState.None,
+          "stage-prop",
+        );
+        cmdItem.description = "stage command changed";
+        cmdItem.iconPath = new vscode.ThemeIcon(
+          "warning",
+          new vscode.ThemeColor("list.warningForeground"),
+        );
+        cmdItem.tooltip = "The stage command changed; stage needs to be re-run";
+        items.push(cmdItem);
+      }
+      if (typeof calkitStage.notebook_path === "string") {
+        prop(
+          "Notebook",
+          calkitStage.notebook_path,
+          "notebook",
+          calkitStage.notebook_path,
+          cls?.notebookStale ? "modified" : undefined,
+        );
+      }
+      if (typeof calkitStage.script_path === "string") {
+        prop(
+          "Script",
+          calkitStage.script_path,
+          "file-code",
+          calkitStage.script_path,
+          cls?.scriptStale ? "modified" : undefined,
+        );
+      }
+      if (typeof calkitStage.target_path === "string") {
+        prop(
+          "Source",
+          calkitStage.target_path,
+          "file-code",
+          calkitStage.target_path,
+          cls?.sourceStale ? "modified" : undefined,
+        );
+      }
+      if (typeof calkitStage.environment === "string") {
+        items.push(
+          this.makeEnvPropItem(calkitStage.environment, cls?.envStale),
+        );
+      }
+      for (const rawInput of Array.isArray(calkitStage.inputs)
+        ? (calkitStage.inputs as (string | { path: string })[])
+        : []) {
+        const input = outputEntryPath(rawInput);
+        prop(
+          "Input",
+          input,
+          "arrow-left",
+          input,
+          cls?.modifiedInputs.has(input) ? "modified" : undefined,
+        );
+      }
+      // Modified deps that aren't one of the declared inputs/script/notebook/
+      // environment above (e.g. an auto-added module dependency). Surfacing
+      // them explains an otherwise-mysterious stale stage.
+      for (const extra of cls?.extraModifiedInputs ?? []) {
+        prop("Input", extra, "arrow-left", extra, "modified");
+      }
+      // An iterate_over stage declares templated outputs (e.g.
+      // runs/{problem}.json) that never exist as written; show the concrete
+      // per-iteration files from the generated dvc.yaml matrix instead, so each
+      // "Output" row opens a real file. Scheduler logs get their own row below.
+      const explicitOutputs = calkitStage.iterate_over
+        ? dvcStageOutputPaths(this.dvcYaml?.stages?.[stageName] ?? {}).filter(
+            (p) => !p.startsWith(".calkit/scheduler/logs/"),
+          )
+        : Array.isArray(calkitStage.outputs)
+        ? (calkitStage.outputs as (string | { path: string })[]).map(
+            outputEntryPath,
+          )
+        : [];
+      for (const output of explicitOutputs) {
+        prop("Output", output, "arrow-right", output, outputStaleKind(output));
+      }
+      // Implicit PDF output for latex stages
+      if (
+        calkitStage.kind === "latex" &&
+        typeof calkitStage.target_path === "string"
+      ) {
+        const pdfPath = calkitStage.target_path.replace(/\.tex$/, ".pdf");
+        if (!explicitOutputs.includes(pdfPath)) {
+          prop(
+            "Output",
+            pdfPath,
+            "arrow-right",
+            pdfPath,
+            outputStaleKind(pdfPath),
+          );
+        }
+      }
+    }
+
+    // Stages that run in a scheduler (SLURM/PBS) environment write a log file;
+    // surface it (once it exists) so it can be opened from the tree.
+    const logPath = this.schedulerLogPathForStage(stageName);
+    if (
+      logPath &&
+      this.workspaceRoot &&
+      fs.existsSync(path.join(this.workspaceRoot, logPath))
+    ) {
+      prop("Log", logPath, "output", logPath);
+    }
+
+    return items;
+  }
+
+  // Repo-relative path of the scheduler log for a stage, or undefined if the
+  // stage doesn't run in a scheduler environment. Prefers the log declared as a
+  // DVC output (covers iteration-expanded stages and log_path overrides under
+  // the default dir); otherwise falls back to the default path the CLI uses.
+  private schedulerLogPathForStage(stageName: string): string | undefined {
+    const outs = this.dvcYaml?.stages?.[stageName]?.outs ?? [];
+    for (const out of outs) {
+      const p =
+        typeof out === "string" ? out : String(Object.keys(out)[0] ?? "");
+      if (p.startsWith(".calkit/scheduler/logs/")) {
+        return p;
+      }
+    }
+    const stage = this.calkitConfig?.pipeline?.stages?.[stageName];
+    if (stage && this.usesSchedulerEnv(stage)) {
+      const override = stage.scheduler?.log_path;
+      return typeof override === "string" && override
+        ? override
+        : `.calkit/scheduler/logs/${stageName}.out`;
+    }
+    return undefined;
+  }
+
+  // Whether a stage runs under a SLURM/PBS scheduler. Environments combine as
+  // "outer:inner", with the scheduler being the outer (or only) environment, so
+  // the kind of the part before any colon is what matters.
+  private usesSchedulerEnv(stage: PipelineStage): boolean {
+    const envRef = stage.environment;
+    if (typeof envRef !== "string") {
+      return false;
+    }
+    const outerName = envRef.split(":")[0];
+    const kind = this.calkitConfig?.environments?.[outerName]?.kind;
+    return kind === "slurm" || kind === "pbs";
+  }
+}

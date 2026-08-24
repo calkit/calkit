@@ -1,0 +1,1373 @@
+"""CLI for working with job schedulers (SLURM, PBS).
+
+This module exposes a single typer app that dispatches to the right
+underlying scheduler binary (``sbatch``/``squeue``/``scancel`` for SLURM,
+``qsub``/``qstat``/``qdel`` for PBS) based on the environment kind.
+Registered as ``scheduler|sch``.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import random
+import re
+import shlex
+import shutil
+import signal
+import sqlite3
+import subprocess
+import sys
+import time
+import uuid
+from typing import Any
+
+import typer
+from sqlitedict import SqliteDict
+from typing_extensions import Annotated
+
+import calkit
+from calkit.cli import AliasGroup, raise_error, warn
+
+scheduler_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+SCHEDULER_KINDS = ("slurm", "pbs")
+_BINARIES = {
+    "slurm": {"submit": "sbatch", "query": "squeue", "cancel": "scancel"},
+    "pbs": {"submit": "qsub", "query": "qstat", "cancel": "qdel"},
+}
+
+SCHEDULER_DIR = os.path.join(".calkit", "scheduler")
+LOGS_DIR = os.path.join(SCHEDULER_DIR, "logs")
+# Local scheduler state lives under .calkit/local, which is always gitignored.
+LOCAL_DIR = os.path.join(".calkit", "local")
+# Job records are kept in SQLite so the parallel batch processes that fan out
+# an iterated stage can each write their own record atomically, and readers
+# (e.g. `scheduler queue`) never see a half-written file.
+JOBS_DB_PATH = os.path.join(LOCAL_DIR, "scheduler-jobs.db")
+MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
+# Serializes the check-for-a-free-slot-then-submit sequence across the
+# parallel batch processes that fan out an iterated stage. Without it they
+# would all see the same free slot and submit together, which is exactly what
+# an environment's max_concurrent_jobs exists to prevent.
+QUEUE_LOCK_PATH = os.path.join(LOCAL_DIR, "scheduler-queue-lock.db")
+# Seconds SQLite waits for the lock before raising; retried past this, so it
+# only bounds how long a single attempt blocks.
+QUEUE_LOCK_TIMEOUT = 60
+# How often a job waiting for a queue slot rechecks. Long enough not to hammer
+# the scheduler with status queries, short enough that a freed slot is taken
+# promptly relative to the runtime of a job worth queueing.
+QUEUE_SLOT_POLL_INTERVAL = 10.0
+MOCK_QUEUE_SLOT_POLL_INTERVAL = 0.25
+# Fraction by which each waiter randomizes its poll interval. A capped sweep
+# leaves one waiting process per unsubmitted case, and without jitter they all
+# wake, take the lock, and query the scheduler in lockstep.
+QUEUE_SLOT_POLL_JITTER = 0.25
+# When set, scheduler commands run jobs on the local host instead of
+# dispatching to a real SLURM/PBS install (see _mock_enabled).
+MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
+
+
+# A generous busy timeout lets the many batch processes that fan out an
+# iterated stage wait for the SQLite write lock instead of failing with
+# "database is locked". We keep the default rollback journal (not WAL), which
+# is the safer choice on the network filesystems clusters typically use.
+JOBS_DB_TIMEOUT = 60
+
+
+def _load_jobs() -> dict:
+    if not os.path.isfile(JOBS_DB_PATH):
+        return {}
+    with SqliteDict(JOBS_DB_PATH, timeout=JOBS_DB_TIMEOUT) as jobs:
+        return dict(jobs)
+
+
+def _record_job(name: str, info: dict) -> None:
+    """Persist a single job record.
+
+    SQLite gives atomic, concurrent-safe writes, so the parallel batch
+    processes that fan out an iterated stage each record their own
+    uniquely named job without a separate lock or clobbering one another.
+    """
+    calkit.ensure_local_dir()
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        jobs[name] = info
+
+
+def _delete_job(name: str) -> None:
+    """Remove a job record from the database.
+
+    Used when a job is canceled (e.g. the user hits Ctrl+C while waiting for
+    it). Without this the record would linger, and the next ``calkit run``
+    would find the job gone from the queue with no exit status and wrongly
+    treat it as successful instead of resubmitting it.
+    """
+    if not os.path.isfile(JOBS_DB_PATH):
+        return
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        if name in jobs:
+            del jobs[name]
+
+
+def _record_job_result(name: str, exit_code: int) -> None:
+    """Persist a finished job's observed exit code and completion time.
+
+    Recording the exit code the moment we observe a job finish means a later
+    ``calkit run`` (e.g. after the master process was disconnected) reads the
+    verdict we already saw instead of re-polling a scheduler record that may
+    have since been purged from history. Without it, a job whose status the
+    scheduler has forgotten looks like an unknown outcome, which we
+    deliberately treat as a failure to rerun rather than assume success. Only
+    an existing record is updated, so a job that was canceled and deleted is
+    not resurrected here.
+    """
+    if not os.path.isfile(JOBS_DB_PATH):
+        return
+    with SqliteDict(
+        JOBS_DB_PATH, autocommit=True, timeout=JOBS_DB_TIMEOUT
+    ) as jobs:
+        info = jobs.get(name)
+        if info is None:
+            return
+        info["exit_code"] = exit_code
+        info["finished_at"] = calkit.utcnow().isoformat()
+        jobs[name] = info
+
+
+def _mock_enabled() -> bool:
+    """Whether scheduler commands should run jobs locally.
+
+    Enabled via the ``CALKIT_MOCK_SCHEDULER`` env var. Lets scheduler
+    workflows (and their tests) run on a plain host with no SLURM/PBS install:
+    jobs execute in the background, their output goes to the usual log files,
+    and queue/cancel act on locally tracked processes.
+    """
+    return os.environ.get(MOCK_ENV_VAR, "").strip().lower() not in (
+        "",
+        "0",
+        "false",
+        "no",
+    )
+
+
+def _require_posix_mock() -> None:
+    # The mock backend uses bash; if that is missing, the mock cannot run.
+    if shutil.which("bash") is None:
+        raise_error("CALKIT_MOCK_SCHEDULER requires bash on PATH")
+
+
+def _ensure_mock_dir() -> None:
+    calkit.ensure_local_dir()
+    os.makedirs(MOCK_DIR, exist_ok=True)
+
+
+def _mock_status_path(job_id: str) -> str:
+    # Absolute so the sentinel resolves even if the job cd's elsewhere.
+    return os.path.abspath(os.path.join(MOCK_DIR, f"{job_id}.status"))
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _mock_pid(job_id: str) -> int | None:
+    for record in _load_jobs().values():
+        if record.get("job_id") == job_id:
+            pid = record.get("pid")
+            return pid if isinstance(pid, int) else None
+    return None
+
+
+def _mock_active(job_id: str) -> bool:
+    # A finished job writes its exit code to the sentinel before exiting, so
+    # the sentinel is authoritative; fall back to process liveness only when
+    # it is absent (e.g. the job was killed without recording a status).
+    if os.path.exists(_mock_status_path(job_id)):
+        return False
+    pid = _mock_pid(job_id)
+    if pid is None:
+        return False
+    return _pid_alive(pid)
+
+
+def _build_job_command(
+    target: str,
+    args: list[str],
+    setup_cmds: list[str],
+    is_command: bool,
+) -> str:
+    """Build the shell command a mock job runs on the host.
+
+    Mirrors what the real submit builders hand the scheduler: setup commands
+    chained before the target, with a non-executable script invoked through
+    its shebang interpreter (or bash).
+    """
+    parts = [target] + list(args)
+    if (
+        not is_command
+        and os.path.isfile(target)
+        and not os.access(target, os.X_OK)
+    ):
+        parts = _detect_interpreter(target) + parts
+    invocation = shlex.join(parts)
+    if setup_cmds:
+        return " && ".join([*setup_cmds, invocation])
+    return invocation
+
+
+def _mock_submit(job_id: str, job_command: str, log_path: str) -> int:
+    """Run a job locally in the background, returning its PID.
+
+    Completion is signaled by writing the exit code to a sentinel file, which
+    keeps liveness checks independent of PID reuse.
+    """
+    _require_posix_mock()
+    _ensure_mock_dir()
+    status_path = _mock_status_path(job_id)
+    if os.path.exists(status_path):
+        os.remove(status_path)
+    wrapped = f"{job_command}; echo $? > {shlex.quote(status_path)}"
+    env = dict(os.environ)
+    env.setdefault("PBS_O_WORKDIR", os.getcwd())
+    with open(log_path, "w") as log_file:
+        # Annotated so the mixed value types don't defeat Popen's overloads.
+        popen_kwargs: dict[str, Any] = dict(
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        # Detach the job into its own session/process group so it outlives
+        # this command and can be signaled as a group when canceled. Guard on
+        # `sys.platform` (not `os.name`) so the unused branch reads as
+        # platform-specific dead code rather than an unreachable bug.
+        if sys.platform == "win32":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        proc = subprocess.Popen(
+            ["bash", "-c", wrapped],
+            **popen_kwargs,
+        )
+    return proc.pid
+
+
+def _mock_cancel(job_id: str) -> tuple[bool, str]:
+    _require_posix_mock()
+    pid = _mock_pid(job_id)
+    if pid is not None:
+        try:
+            if os.name == "posix":
+                os.killpg(os.getpgid(pid), signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    # Drop a sentinel so later liveness checks report the job as finished.
+    status_path = _mock_status_path(job_id)
+    _ensure_mock_dir()
+    if not os.path.exists(status_path):
+        with open(status_path, "w") as f:
+            f.write("canceled\n")
+    return True, ""
+
+
+def _mock_exit_code(job_id: str) -> int | None:
+    # The job writes its exit code to the status sentinel before exiting; a
+    # canceled job writes "canceled" instead, which isn't an integer.
+    try:
+        with open(_mock_status_path(job_id)) as f:
+            content = f.read().strip()
+    except OSError:
+        return None
+    try:
+        return int(content)
+    except ValueError:
+        return None
+
+
+def _parse_slurm_exit_code(value: str) -> int | None:
+    # SLURM reports exit status as "<code>:<signal>"; a job killed by a signal
+    # (e.g. out-of-memory, walltime) has a non-zero signal even if code is 0.
+    code_part, _, signal_part = value.strip().partition(":")
+    try:
+        code = int(code_part)
+        # An empty signal part means "no signal"; a non-empty one that won't
+        # parse is malformed, so report the whole value as unknown rather than
+        # silently treating it as a clean exit.
+        sig = int(signal_part) if signal_part else 0
+    except ValueError:
+        return None
+    return code if sig == 0 else 128 + sig
+
+
+def _slurm_exit_code(job_id: str) -> int | None:
+    # Prefer scontrol, which reports a finished job while it lingers in the
+    # controller's memory and is available even without accounting; fall back
+    # to sacct for jobs that have already aged out of scontrol.
+    p = subprocess.run(
+        ["scontrol", "show", "job", job_id],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if p.returncode == 0 and p.stdout.strip():
+        state = None
+        exit_code = None
+        for token in p.stdout.split():
+            if token.startswith("JobState="):
+                state = token.split("=", 1)[1]
+            elif token.startswith("ExitCode="):
+                exit_code = _parse_slurm_exit_code(token.split("=", 1)[1])
+        if state is not None:
+            if state == "COMPLETED":
+                return exit_code or 0
+            return exit_code or 1
+    p = subprocess.run(
+        ["sacct", "-j", job_id, "-n", "-P", "-o", "State,ExitCode"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if p.returncode == 0 and p.stdout.strip():
+        # The first line is the job itself (later lines are its steps).
+        state, _, code = p.stdout.strip().splitlines()[0].partition("|")
+        exit_code = _parse_slurm_exit_code(code)
+        if state.strip() == "COMPLETED":
+            return exit_code or 0
+        return exit_code or 1
+    return None
+
+
+def _parse_pbs_state(stdout: str) -> tuple[str | None, int | None]:
+    # `qstat -f` output is a flat list of `key = value` lines; pull out the
+    # job's state and, for a finished job, its exit status. The status field is
+    # spelled `Exit_status` on PBS Pro and `exit_status` on some Torque builds,
+    # so match it case-insensitively.
+    state = None
+    exit_code = None
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("job_state"):
+            state = stripped.split("=", 1)[-1].strip()
+        elif stripped.lower().startswith("exit_status"):
+            try:
+                exit_code = int(stripped.split("=", 1)[-1].strip())
+            except ValueError:
+                exit_code = None
+    return state, exit_code
+
+
+def _poll_job(kind: str, job_id: str) -> tuple[bool, int | None]:
+    """Return ``(active, exit_code)`` for a scheduler job.
+
+    ``active`` is whether the job is still queued or running. ``exit_code`` is
+    the job's exit status once it has finished---0 for success, non-zero for
+    failure---or ``None`` while the job is still active or when the scheduler
+    no longer has a record from which to read it. A ``None`` exit code on a
+    finished job is an unknown outcome the caller must decide how to treat.
+    """
+    if _mock_enabled():
+        if _mock_active(job_id):
+            return True, None
+        return False, _mock_exit_code(job_id)
+    if kind == "slurm":
+        p = subprocess.run(
+            ["squeue", "--job", job_id],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if p.returncode == 0:
+            # squeue prints a header row plus one row per matching job, so more
+            # than the header means the job is still queued or running.
+            if len(p.stdout.strip().split("\n")) > 1:
+                return True, None
+            return False, _slurm_exit_code(job_id)
+        # A non-zero exit is ambiguous like PBS: an invalid/unknown job id
+        # means the job is gone, but a transient controller failure should not
+        # end the wait early (nor let `_slurm_exit_code` call a still-running
+        # job failed), so only conclude the job is done when squeue positively
+        # reports the id is invalid; otherwise keep waiting.
+        stderr = (p.stderr or "").lower()
+        if "invalid job id" in stderr:
+            return False, _slurm_exit_code(job_id)
+        return True, None
+    # PBS reports a finished job differently across variants, so poll in two
+    # steps that mirror the SLURM path above. First consult the active-queue
+    # view with `qstat -f`: every live state (R, Q, H, E) shows here, and on
+    # Torque a completed job lingers here in state `C` carrying its
+    # `Exit_status`. `qstat -f` is used rather than plain `qstat <id>` because
+    # the latter exits 0 even for completed jobs, so the return code alone
+    # could not tell running from done.
+    p = subprocess.run(
+        ["qstat", "-f", job_id], capture_output=True, text=True, check=False
+    )
+    if p.returncode == 0:
+        state, exit_code = _parse_pbs_state(p.stdout)
+        if state in ("C", "F"):
+            return False, exit_code
+        if state is not None:
+            return True, None
+    # The job is no longer in the active queue---on PBS Pro a finished job is
+    # hidden from plain `qstat` and shows (as state `F` with its `Exit_status`)
+    # only under `qstat -x`---or qstat failed. Ask the history view for the
+    # finished record. Without this, a PBS Pro job that has finished is never
+    # seen as done and the wait hangs forever. `-x` means "include finished
+    # jobs" on PBS Pro; on Torque it switches qstat to XML output, which simply
+    # won't parse here, leaving the stderr check below to settle it (Torque
+    # already reported completion above via state `C`).
+    hist = subprocess.run(
+        ["qstat", "-x", "-f", job_id],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if hist.returncode == 0:
+        state, exit_code = _parse_pbs_state(hist.stdout)
+        if state in ("C", "F"):
+            return False, exit_code
+        if state is not None:
+            return True, None
+    # Neither view resolved a state. A non-zero exit is ambiguous: either the
+    # job is gone (finished and purged from history) or qstat failed
+    # transiently---a busy PBS server periodically refuses connections or times
+    # out. Treating a transient failure as completion would stop the wait while
+    # the job is still running and writing its log, so only conclude the job is
+    # done when qstat positively reports it is unknown; otherwise keep waiting.
+    # A purged job is done but with an unknowable exit status.
+    stderr = (p.stderr or "").lower()
+    return ("unknown job" not in stderr), None
+
+
+def _is_active(kind: str, job_id: str) -> bool:
+    return _poll_job(kind, job_id)[0]
+
+
+def _active_job_ids(kind: str, job_ids: list[str]) -> set[str]:
+    """Return which of ``job_ids`` are still queued or running.
+
+    Answers for the whole set in one scheduler query where possible. Counting
+    queue occupancy means asking about every job this project has submitted,
+    and doing that one ``squeue`` call per job---from every process waiting
+    for a slot, on every poll---would put more load on the scheduler than the
+    submissions we are trying to pace.
+    """
+    if not job_ids:
+        return set()
+    if not _mock_enabled() and kind == "slurm":
+        # Query our own jobs rather than passing `--jobs <ids>`: squeue errors
+        # out when any listed id is unknown, and ids do go unknown once the
+        # scheduler purges a finished job, which is the common case here.
+        p = subprocess.run(
+            ["squeue", "--me", "-h", "-o", "%i"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if p.returncode == 0:
+            wanted = set(job_ids)
+            # Array and step ids appear as `123_4` and `123.batch`; both
+            # belong to the job we recorded as `123`.
+            active = {
+                line.strip().split("_")[0].split(".")[0]
+                for line in p.stdout.splitlines()
+                if line.strip()
+            }
+            return wanted & active
+        # squeue failed---fall through and ask about each job individually
+        # rather than reporting an empty queue we have not confirmed.
+    return {job_id for job_id in job_ids if _is_active(kind, job_id)}
+
+
+def _count_queued_jobs(environment: str, exclude: str) -> int:
+    """Count this project's jobs sitting in the queue for an environment.
+
+    Only jobs Calkit submitted for this project are counted; the limit is
+    about not monopolizing a shared queue with one project's iterated stage,
+    not about the user's jobs at large.
+    """
+    by_kind: dict[str, list[str]] = {}
+    for job_name, info in _load_jobs().items():
+        if job_name == exclude:
+            continue
+        # Records written before environments were tracked have no
+        # environment key. Count them: over-counting delays a submission,
+        # while under-counting is what floods the queue.
+        job_env = info.get("environment")
+        if job_env is not None and job_env != environment:
+            continue
+        if info.get("exit_code") is not None:
+            # Already observed to have finished, so it cannot be in the queue.
+            continue
+        by_kind.setdefault(info.get("kind", "slurm"), []).append(
+            info["job_id"]
+        )
+    return sum(
+        len(_active_job_ids(kind, job_ids))
+        for kind, job_ids in by_kind.items()
+    )
+
+
+@contextlib.contextmanager
+def _queue_lock():
+    """Cross-process mutex around checking for a slot and then submitting.
+
+    Built on SQLite's own locking---an IMMEDIATE transaction takes a write
+    lock that other connections block on---rather than a lock library, since
+    scheduler state already depends on SQLite locking correctly here, and it
+    keeps this to the standard library.
+    """
+    calkit.ensure_local_dir()
+    conn = sqlite3.connect(
+        QUEUE_LOCK_PATH, timeout=QUEUE_LOCK_TIMEOUT, isolation_level=None
+    )
+    try:
+        while True:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as e:
+                # Another process is mid-submit. It holds the lock only for as
+                # long as one submit command takes, so retrying is better than
+                # failing the stage. Only contention is worth retrying though:
+                # a read-only file or a bad disk would never clear, and
+                # retrying those forever would hang the stage with no
+                # explanation instead of surfacing the real problem.
+                msg = str(e).lower()
+                if "locked" not in msg and "busy" not in msg:
+                    raise
+                time.sleep(1)
+        try:
+            yield
+        finally:
+            conn.rollback()
+    finally:
+        conn.close()
+
+
+def _parse_max_concurrent_jobs(environment: str, value: object) -> int | None:
+    """Interpret an environment's ``max_concurrent_jobs``, or ``None``.
+
+    The value is read straight out of ``calkit.yaml`` rather than through
+    ``SlurmEnvironment``, so its ``ge=1`` constraint never runs and a
+    hand-edited file can put anything here. Reject what we cannot honor
+    instead of guessing: silently reading a bad value as "no limit" would
+    flood the queue this setting exists to protect, and a negative one would
+    leave the wait below with a condition that can never come true.
+    """
+    if value is None:
+        return None
+    # bool is an int subclass, and `max_concurrent_jobs: true` is a mistake,
+    # not a limit of one.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise_error(
+            f"Environment '{environment}' has an invalid "
+            f"max_concurrent_jobs ({value!r}); expected a positive integer"
+        )
+    # 0 means no limit, matching `calkit update slurm-env
+    # --max-concurrent-jobs 0`.
+    if value == 0:
+        return None
+    if value < 0:
+        raise_error(
+            f"Environment '{environment}' has a negative "
+            f"max_concurrent_jobs ({value}); it must be at least 1"
+        )
+    return value
+
+
+@contextlib.contextmanager
+def _queue_slot(environment: str, name: str, max_jobs: int | None):
+    """Hold a slot in the environment's queue for the duration of the block.
+
+    Blocks until this project has fewer than ``max_jobs`` jobs queued or
+    running, then keeps the lock while the caller submits and records the new
+    job, so concurrent waiters see it and do not overshoot the limit.
+    """
+    max_jobs = _parse_max_concurrent_jobs(environment, max_jobs)
+    if max_jobs is None:
+        yield
+        return
+    announced = False
+    while True:
+        # Check without the lock first. A capped sweep leaves one waiting
+        # process per unsubmitted case, and each poll would otherwise hold the
+        # exclusive lock across a scheduler query---with enough waiters the
+        # lock stays busy and slots go unclaimed long after they free up.
+        # A full queue is the common answer while waiting and needs no lock to
+        # act on; the authoritative check is still made under it below.
+        n_queued = _count_queued_jobs(environment, exclude=name)
+        if n_queued < max_jobs:
+            with _queue_lock():
+                n_queued = _count_queued_jobs(environment, exclude=name)
+                if n_queued < max_jobs:
+                    yield
+                    return
+        if not announced:
+            typer.echo(
+                f"Waiting for a free slot in environment '{environment}' "
+                f"({n_queued} of {max_jobs} jobs queued)"
+            )
+            announced = True
+        # Mocked jobs run locally and finish in seconds, so a full interval
+        # would dominate the runtime of anything using the mock scheduler.
+        interval = (
+            MOCK_QUEUE_SLOT_POLL_INTERVAL
+            if _mock_enabled()
+            else QUEUE_SLOT_POLL_INTERVAL
+        )
+        time.sleep(
+            interval
+            * (
+                1
+                + random.uniform(
+                    -QUEUE_SLOT_POLL_JITTER, QUEUE_SLOT_POLL_JITTER
+                )
+            )
+        )
+
+
+def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
+    if _mock_enabled():
+        return _mock_cancel(job_id)
+    cancel_bin = _BINARIES[kind]["cancel"]
+    p = subprocess.run(
+        [cancel_bin, job_id], capture_output=True, text=True, check=False
+    )
+    return p.returncode == 0, p.stderr
+
+
+def _wait_until_done(kind: str, job_id: str, name: str) -> int | None:
+    """Poll until the job finishes, returning its exit code.
+
+    The exit code is the scheduler-reported status of the finished job (0 for
+    success, non-zero for failure), or ``None`` when it can't be determined.
+    The job is submitted and tracked, so interrupting the local wait cancels
+    the scheduler job before exiting rather than leaving it orphaned.
+    """
+    try:
+        while True:
+            active, exit_code = _poll_job(kind, job_id)
+            if not active:
+                return exit_code
+            time.sleep(1)
+    except KeyboardInterrupt:
+        typer.echo(f"Interrupted; canceling job '{name}' ({job_id})")
+        ok, stderr = _cancel(kind, job_id)
+        if not ok:
+            typer.echo(f"Failed to cancel job '{name}' ({job_id}): {stderr}")
+        # Drop the record so the next run resubmits this job instead of
+        # mistaking the canceled job (which has no exit status) for a success.
+        _delete_job(name)
+        raise typer.Exit(130)
+
+
+def _wait_for_output_file(log_path: str, timeout: float = 120.0) -> None:
+    """Wait for a finished job's output log to be fully written.
+
+    A scheduler reports a job as done as soon as it leaves the queue, but the
+    job's ``-o`` log---which is the batch stage's declared DVC output---may not
+    be in place yet: PBS stages it back from the exec host's spool after the
+    job exits, and a job can still be flushing its final lines. Returning
+    before the file lands (or while it is still growing) makes the subsequent
+    ``dvc repro`` see a missing or mid-write output and wrongly report the job
+    as failed. Poll until the file exists and its size holds steady, or until
+    ``timeout`` elapses (then return and let DVC surface the real state).
+    """
+    deadline = time.monotonic() + timeout
+    last_size = -1
+    # Require the size to repeat across polls so we don't snapshot mid-write;
+    # a missing file reports -1, which never counts as stable.
+    stable_polls = 0
+    while time.monotonic() < deadline:
+        try:
+            size = os.path.getsize(log_path)
+        except OSError:
+            size = -1
+        if size >= 0 and size == last_size:
+            stable_polls += 1
+            if stable_polls >= 2:
+                return
+        else:
+            stable_polls = 0
+        last_size = size
+        time.sleep(1)
+
+
+def _finalize_job(
+    name: str, job_id: str, exit_code: int | None, log_path: str
+) -> None:
+    """Fail the command if the finished job did not succeed.
+
+    Waiting for the job to leave the queue only tells us it stopped, not
+    whether it worked, so a non-zero scheduler exit code is surfaced as an
+    error---raising a non-zero exit that propagates up through ``dvc repro``
+    so the stage is marked failed rather than silently recorded as done. An
+    unknown exit code here (we waited and the job left the queue, but the
+    scheduler never gave us a status) can't be judged, so we warn and let the
+    stage's declared outputs be the arbiter; a definite code is persisted so a
+    later run reuses it instead of re-polling a possibly-purged record.
+    """
+    # Persist the verdict the instant we have it, before the (potentially long)
+    # wait below: the exit code doesn't depend on the log file, and recording
+    # it first means a disconnect mid-wait can't lose the outcome we already
+    # observed.
+    if exit_code is not None:
+        _record_job_result(name, exit_code)
+    # Wait for the job's `-o` log---this stage's declared DVC output---to be
+    # staged back before we read from or point at it.
+    if not _mock_enabled():
+        _wait_for_output_file(log_path)
+    if exit_code is None:
+        warn(
+            f"Could not determine exit status for job '{name}' (ID {job_id}); "
+            f"assuming success. Check the log at {log_path}"
+        )
+        return
+    if exit_code != 0:
+        raise_error(
+            f"Job '{name}' (ID {job_id}) failed with exit code {exit_code}. "
+            f"See the log at {log_path}"
+        )
+
+
+@scheduler_app.command(name="batch")
+def run_batch(
+    name: Annotated[
+        str,
+        typer.Option("--name", "-n", help="Job name."),
+    ],
+    target: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "The target to run. "
+                "This can be a shell script or an executable."
+            )
+        ),
+    ],
+    environment: Annotated[
+        str,
+        typer.Option(
+            "--environment",
+            "-e",
+            help="Calkit (scheduler) environment to use for the job.",
+        ),
+    ],
+    args: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Arguments for the target command, passed to the job script "
+                "after the target."
+            )
+        ),
+    ] = None,
+    deps: Annotated[
+        list[str],
+        typer.Option(
+            "--dep",
+            "-d",
+            help=(
+                "Additional dependencies to track, which if changed signify"
+                " a job is invalid."
+            ),
+        ),
+    ] = [],
+    outs: Annotated[
+        list[str],
+        typer.Option(
+            "--out",
+            "-o",
+            help=(
+                "Non-persistent output files or directories produced by the "
+                "job, which will be deleted before submitting a new job."
+            ),
+        ),
+    ] = [],
+    options: Annotated[
+        list[str],
+        typer.Option(
+            "--option",
+            "-s",
+            help=(
+                "Additional options to pass to the scheduler submit command "
+                "(no spaces allowed)."
+            ),
+        ),
+    ] = [],
+    setup_cmds: Annotated[
+        list[str],
+        typer.Option(
+            "--setup",
+            help=(
+                "Shell setup command to run before launching the target "
+                "(repeat for multiple commands)."
+            ),
+        ),
+    ] = [],
+    log_path: Annotated[
+        str | None, typer.Option("--log-path", help="Output log path.")
+    ] = None,
+    is_command: Annotated[
+        bool | None,
+        typer.Option(
+            "--command",
+            help="Whether the target is a command instead of a script.",
+        ),
+    ] = None,
+    env_default_options: Annotated[
+        str,
+        typer.Option(
+            "--env-default-options",
+            help=(
+                "How to apply the environment's default scheduler options: "
+                "'replace' (default) uses env defaults only when no "
+                "options were provided here; 'merge' prepends env defaults "
+                "(the scheduler's last-occurrence wins, so explicit options "
+                "still override); 'ignore' never applies env defaults."
+            ),
+        ),
+    ] = "replace",
+    env_default_setup: Annotated[
+        str,
+        typer.Option(
+            "--env-default-setup",
+            help=(
+                "How to apply the environment's default setup commands: "
+                "'replace' (default) uses env defaults only when no setup "
+                "commands were provided here; 'merge' prepends env "
+                "defaults; 'ignore' never applies env defaults."
+            ),
+        ),
+    ] = "replace",
+) -> None:
+    """Submit a batch job through the scheduler associated with the env.
+
+    Duplicates are not allowed, so if one is already running or queued with
+    the same name, we'll wait for it to finish. The only exception is if the
+    dependencies have changed, in which case any queued or running jobs will
+    be canceled and a new one submitted.
+
+    If the environment sets ``max_concurrent_jobs``, submission waits until
+    this project has fewer than that many jobs queued or running, so an
+    iterated stage does not put all of its jobs into a shared cluster's queue
+    at once.
+    """
+    if args is None:
+        args = []
+    valid_modes = ("ignore", "replace", "merge")
+    if env_default_options not in valid_modes:
+        raise_error(
+            f"Invalid --env-default-options value '{env_default_options}'; "
+            f"expected one of {', '.join(valid_modes)}"
+        )
+    if env_default_setup not in valid_modes:
+        raise_error(
+            f"Invalid --env-default-setup value '{env_default_setup}'; "
+            f"expected one of {', '.join(valid_modes)}"
+        )
+    if environment == "_system":
+        raise_error(
+            "Scheduler batch submission requires a scheduler environment; "
+            "got '_system'"
+        )
+    ck_info = calkit.load_calkit_info()
+    env = ck_info.get("environments", {}).get(environment, {})
+    kind = env.get("kind")
+    if kind not in SCHEDULER_KINDS:
+        raise_error(
+            f"Environment '{environment}' is not a scheduler environment "
+            f"(expected one of {', '.join(SCHEDULER_KINDS)}, got "
+            f"'{kind}')"
+        )
+    if log_path is None:
+        log_path = os.path.join(LOGS_DIR, f"{name}.out")
+    if is_command is None:
+        is_command = not os.path.isfile(target)
+    # A scheduler env names the cluster its jobs belong to. Submitting from
+    # anywhere else would queue them on the wrong one, so if this isn't that
+    # machine, go there and submit from a workspace instead. Nothing about
+    # the submission changes: the same command runs on the cluster, where
+    # sbatch/qsub exist and where the job's files have to be anyway.
+    env_host = env.get("host", "localhost")
+    if not calkit.environments.host_is_local(env_host):
+        import calkit.workspace as workspace
+
+        ck_info_full = calkit.load_calkit_info()
+        try:
+            ws = workspace.Workspace.from_env(
+                env=env, env_name=environment, ck_info=ck_info_full
+            )
+            ws = workspace.resolve_wdir(ws)
+            # Re-run this same invocation over there. It terminates rather
+            # than bouncing onward, since on the cluster the env's host is
+            # local and this branch isn't taken.
+            remote_command = "calkit " + shlex.join(sys.argv[1:])
+            workspace.run_in_workspace(
+                workspace=ws,
+                command=remote_command,
+                job_key=f"{environment}::{name}",
+                label=f"{environment} job '{name}'",
+                deps=list(deps or []),
+                outs=list(outs or []),
+                echo=typer.echo,
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
+        return
+    # Apply env defaults per mode
+    env_setup_cmds = env.get("default_setup", []) or []
+    if env_default_setup == "merge" and env_setup_cmds:
+        setup_cmds = [s for s in [*env_setup_cmds, *setup_cmds] if s.strip()]
+    elif env_default_setup == "replace" and not setup_cmds:
+        setup_cmds = [s for s in env_setup_cmds if s.strip()]
+    env_default_opts = env.get("default_options", []) or []
+    if env_default_options == "merge" and env_default_opts:
+        options = [opt for opt in [*env_default_opts, *options] if opt.strip()]
+    elif env_default_options == "replace" and not options:
+        options = [opt for opt in env_default_opts if opt.strip()]
+    # Build the submit command (kind-specific), or the local job command when
+    # the scheduler is mocked.
+    if _mock_enabled():
+        job_command = _build_job_command(
+            target=target,
+            args=args,
+            setup_cmds=setup_cmds,
+            is_command=is_command,
+        )
+    elif kind == "slurm":
+        submit_cmd, submit_input = _build_slurm_submit(
+            name=name,
+            target=target,
+            args=args,
+            options=options,
+            setup_cmds=setup_cmds,
+            log_path=log_path,
+            is_command=is_command,
+        )
+    else:
+        submit_cmd, submit_input = _build_pbs_submit(
+            name=name,
+            target=target,
+            args=args,
+            options=options,
+            setup_cmds=setup_cmds,
+            log_path=log_path,
+            is_command=is_command,
+        )
+    if not is_command and target not in deps:
+        deps = [target] + deps
+    # Set up storage
+    os.makedirs(SCHEDULER_DIR, exist_ok=True)
+    logs_dir = os.path.dirname(log_path)
+    if logs_dir:
+        os.makedirs(logs_dir, exist_ok=True)
+    jobs = _load_jobs()
+    typer.echo("Computing MD5s for dependencies")
+    current_dep_md5s = {}
+    for dep in deps:
+        if not os.path.exists(dep):
+            raise_error(f"Dependency path '{dep}' does not exist.")
+        current_dep_md5s[dep] = calkit.get_md5(dep)
+    # See if there is a job with this name already running/queued
+    if name in jobs:
+        job_info = jobs[name]
+        job_id = job_info["job_id"]
+        job_deps = job_info["deps"]
+        job_target = job_info.get("target")
+        job_args = job_info.get("args", [])
+        job_setup = job_info.get("setup", [])
+        # The recorded job may have been submitted under a different
+        # scheduler kind; use its own kind for activity/cancel checks.
+        prev_kind = job_info.get("kind", kind)
+        # Capture the exit code alongside liveness: if the job already left the
+        # queue (e.g. while we were disconnected) the scheduler may still have
+        # its status in history, and reading it now avoids losing it to a later
+        # purge. An exit code we recorded when the job first finished is
+        # authoritative---we observed it directly---so prefer it over a re-poll,
+        # which can come back unknown once the scheduler forgets the job.
+        stored_exit_code = job_info.get("exit_code")
+        running_or_queued, polled_exit_code = _poll_job(prev_kind, job_id)
+        prev_exit_code = (
+            stored_exit_code
+            if stored_exit_code is not None
+            else polled_exit_code
+        )
+        should_wait = True
+
+        def _cancel_with_reason(reason: str) -> None:
+            typer.echo(f"{reason}; canceling existing job ID {job_id}")
+            ok, stderr = _cancel(prev_kind, job_id)
+            if not ok:
+                raise_error(
+                    f"Failed to cancel existing job ID {job_id}: {stderr}"
+                )
+
+        if running_or_queued:
+            typer.echo(
+                f"Job '{name}' is already running or queued with ID {job_id}"
+            )
+            if job_target != target:
+                should_wait = False
+                _cancel_with_reason(
+                    f"Target for job '{name}' has changed",
+                )
+            if job_args != args:
+                should_wait = False
+                _cancel_with_reason(
+                    f"Arguments for job '{name}' have changed",
+                )
+            if job_setup != setup_cmds:
+                should_wait = False
+                _cancel_with_reason(
+                    f"Setup commands for job '{name}' have changed",
+                )
+            if set(job_deps) != set(deps):
+                should_wait = False
+                _cancel_with_reason(
+                    f"Dependencies for job '{name}' have changed",
+                )
+            job_dep_md5s = job_info.get("dep_md5s", {})
+            for dep_path, md5 in current_dep_md5s.items():
+                job_md5 = job_dep_md5s.get(dep_path)
+                if md5 != job_md5:
+                    should_wait = False
+                    _cancel_with_reason(
+                        f"Dependency '{dep_path}' for job '{name}' has "
+                        "changed",
+                    )
+                    break
+            if should_wait:
+                typer.echo("Waiting for job to finish")
+                exit_code = _wait_until_done(prev_kind, job_id, name)
+                _finalize_job(name, job_id, exit_code, log_path)
+                raise typer.Exit(0)
+        elif not os.environ.get("CALKIT_FORCE"):
+            # The job has left the queue (e.g. it finished while the master
+            # process was disconnected). Harvest it---rather than resubmitting
+            # and discarding the work---only when nothing it depends on changed
+            # and we have a confirmed successful exit code (recorded when we
+            # first observed the job finish, or read back now from the
+            # scheduler's history). Any other outcome falls through to resubmit
+            # so `calkit run` retries it: a known failure (e.g. so the user can
+            # rerun after fixing the cause) and---just as importantly---an
+            # unknown exit code. An unknown code means the scheduler purged the
+            # finished job before we could read its status; assuming success
+            # there would let a job that actually failed be cached as done,
+            # since its declared outputs exist on disk but may be partial or
+            # wrong. Rerunning is the safe choice. Under --force (CALKIT_FORCE)
+            # we skip this and always resubmit.
+            job_dep_md5s = job_info.get("dep_md5s", {})
+            deps_unchanged = set(job_deps) == set(deps) and all(
+                current_dep_md5s.get(dep) == job_dep_md5s.get(dep)
+                for dep in deps
+            )
+            command_unchanged = (
+                job_target == target
+                and job_args == args
+                and job_setup == setup_cmds
+            )
+            if deps_unchanged and command_unchanged and prev_exit_code == 0:
+                typer.echo(
+                    f"Job '{name}' already left the queue; using its result"
+                )
+                _finalize_job(name, job_id, prev_exit_code, log_path)
+                raise typer.Exit(0)
+    # Job is not running or queued, so we can submit. First, delete any
+    # non-persistent outputs.
+    for out in outs:
+        if os.path.exists(out):
+            typer.echo(f"Deleting output path '{out}'")
+            try:
+                if os.path.isfile(out):
+                    os.remove(out)
+                else:
+                    shutil.rmtree(out)
+            except Exception as e:
+                raise_error(f"Error deleting '{out}': {e}")
+    # Wait for room in the queue before submitting, if the environment caps
+    # how many of this project's jobs may be queued at once. This is done
+    # after deleting outputs (which can be slow) so the slot is held only for
+    # as long as submitting takes.
+    max_jobs = env.get("max_concurrent_jobs")
+    pid = None
+    interrupted: list[bool] = []
+    # The wait for a slot sits outside the SIGINT deferral below so Ctrl+C
+    # still works while waiting---that wait can be long, and deferring the
+    # signal through it would make it uninterruptible.
+    with _queue_slot(environment, name, max_jobs):
+        # Submit and record atomically with respect to Ctrl+C: a SIGINT here
+        # would otherwise kill the submit command mid-flight or leave a job
+        # submitted but never written to the database (so a re-run would
+        # resubmit it). Defer the signal until the job is safely recorded,
+        # then act on it. The queue slot is held across both, so a concurrent
+        # waiter counts this job before deciding it has room to submit.
+        prev_sigint = signal.signal(
+            signal.SIGINT, lambda *_: interrupted.append(True)
+        )
+        try:
+            if _mock_enabled():
+                job_id = uuid.uuid4().hex[:12]
+                pid = _mock_submit(
+                    job_id=job_id, job_command=job_command, log_path=log_path
+                )
+            else:
+                # start_new_session shields the submit command from the
+                # terminal's Ctrl+C so the submission always completes.
+                p = subprocess.run(
+                    submit_cmd,
+                    input=submit_input,
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    start_new_session=True,
+                )
+                if p.returncode != 0:
+                    raise_error(f"Failed to submit new job: {p.stderr}")
+                job_id = p.stdout.strip()
+            typer.echo(f"Submitted job with ID: {job_id}")
+            new_job = {
+                "kind": kind,
+                "environment": environment,
+                "job_id": job_id,
+                "deps": deps,
+                "target": target,
+                "args": args,
+                "setup": setup_cmds,
+                "dep_md5s": current_dep_md5s,
+                "submitted_at": calkit.utcnow().isoformat(),
+            }
+            if pid is not None:
+                new_job["pid"] = pid
+            _record_job(name, new_job)
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
+    if interrupted:
+        typer.echo(
+            f"Interrupted after submitting job '{name}' ({job_id}); it will "
+            "keep running. Resume with `calkit run`."
+        )
+        raise typer.Exit(130)
+    typer.echo("Waiting for job to finish")
+    exit_code = _wait_until_done(kind, job_id, name)
+    _finalize_job(name, job_id, exit_code, log_path)
+
+
+def _detect_interpreter(target: str) -> list[str]:
+    """Return the interpreter to invoke a non-executable script with.
+
+    Reads the shebang if present; otherwise falls back to ``bash``.
+    """
+    interpreter: list[str] | None = None
+    try:
+        with open(target, "r", encoding="utf-8") as f:
+            first_line = f.readline().strip()
+        if first_line.startswith("#!"):
+            shebang = first_line[2:].strip()
+            if shebang:
+                interpreter = shlex.split(shebang)
+    except OSError:
+        interpreter = None
+    if interpreter is None:
+        interpreter = ["bash"]
+    return interpreter
+
+
+def _build_slurm_submit(
+    name: str,
+    target: str,
+    args: list[str],
+    options: list[str],
+    setup_cmds: list[str],
+    log_path: str,
+    is_command: bool,
+) -> tuple[list[str], str | None]:
+    cmd = [
+        "sbatch",
+        "--parsable",
+        "--job-name",
+        name,
+        "-o",
+        log_path,
+    ] + list(options)
+    if setup_cmds:
+        wrapped_target_parts = [target] + args
+        if not is_command and os.path.isfile(target):
+            if not os.access(target, os.X_OK):
+                wrapped_target_parts = (
+                    _detect_interpreter(target) + [target] + args
+                )
+        wrapped_target = shlex.join(wrapped_target_parts)
+        setup_chain = " && ".join([*setup_cmds, wrapped_target])
+        cmd += ["--wrap", setup_chain]
+    elif is_command:
+        cmd += ["--wrap", shlex.join([target] + args)]
+    else:
+        cmd += [target] + args
+    return cmd, None
+
+
+def _sanitize_pbs_job_name(name: str) -> str:
+    # qsub rejects names containing characters outside a narrow safe set
+    # (e.g. ``@`` and ``,``), which is exactly what matrix-iterated stage
+    # names look like (``stage@arg1,arg2,...``). Replace any disallowed
+    # character with ``_`` and cap the length at PBS Pro's 236-char limit.
+    return re.sub(r"[^A-Za-z0-9._+-]", "_", name)[:236]
+
+
+def _build_pbs_submit(
+    name: str,
+    target: str,
+    args: list[str],
+    options: list[str],
+    setup_cmds: list[str],
+    log_path: str,
+    is_command: bool,
+) -> tuple[list[str], str]:
+    target_invocation_parts = [target] + args
+    if not is_command and os.path.isfile(target):
+        if not os.access(target, os.X_OK):
+            target_invocation_parts = (
+                _detect_interpreter(target) + [target] + args
+            )
+    target_invocation = shlex.join(target_invocation_parts)
+    # PBS jobs start in ``$HOME`` by default (unlike SLURM, which inherits
+    # the submission directory). Both Torque/OpenPBS and PBS Pro export
+    # ``$PBS_O_WORKDIR``, so ``cd`` into it before anything else so
+    # relative paths in stage scripts resolve correctly.
+    cd_step = 'cd "$PBS_O_WORKDIR"'
+    job_script = " && ".join([cd_step, *setup_cmds, target_invocation])
+    # `-` tells qsub to read the job script from stdin; without it most PBS
+    # variants ignore the `input=` payload and wait for an interactive terminal.
+    cmd = (
+        [
+            "qsub",
+            "-N",
+            _sanitize_pbs_job_name(name),
+            "-j",
+            "oe",
+            "-o",
+            log_path,
+            "-V",
+        ]
+        + list(options)
+        + ["-"]
+    )
+    return cmd, job_script
+
+
+@scheduler_app.command(name="queue|q")
+def get_queue() -> None:
+    """List scheduler jobs submitted via Calkit (across SLURM and PBS)."""
+    jobs = _load_jobs()
+    if not jobs:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    if _mock_enabled():
+        typer.echo(f"{'NAME':<32}{'JOBID':<16}STATUS")
+        for job_name, info in jobs.items():
+            job_id = info.get("job_id", "")
+            status = "RUNNING" if _mock_active(job_id) else "DONE"
+            typer.echo(f"{job_name:<32}{job_id:<16}{status}")
+        raise typer.Exit(0)
+    by_kind: dict[str, list[str]] = {}
+    for info in jobs.values():
+        by_kind.setdefault(info.get("kind", "slurm"), []).append(
+            info["job_id"]
+        )
+    for kind, job_ids in by_kind.items():
+        query_bin = _BINARIES[kind]["query"]
+        if kind == "slurm":
+            subprocess.run(
+                [query_bin, "-j", ",".join(job_ids)],
+                capture_output=False,
+                text=True,
+                check=False,
+            )
+        else:
+            subprocess.run(
+                [query_bin] + job_ids,
+                capture_output=False,
+                text=True,
+                check=False,
+            )
+
+
+@scheduler_app.command(name="cancel")
+def cancel_jobs(
+    names: Annotated[
+        list[str],
+        typer.Argument(help="Names of jobs to cancel."),
+    ],
+) -> None:
+    """Cancel scheduler jobs by their name in the project."""
+    jobs = _load_jobs()
+    if not jobs:
+        typer.echo("No jobs found for this project")
+        raise typer.Exit(0)
+    for name in names:
+        if name not in jobs:
+            typer.echo(f"No job named '{name}' found for this project")
+            continue
+        job_info = jobs[name]
+        kind = job_info.get("kind", "slurm")
+        job_id = job_info["job_id"]
+        if not _is_active(kind, job_id):
+            typer.echo(
+                f"Job '{name}' ({kind} ID: {job_id}) is not running or queued"
+            )
+            continue
+        ok, stderr = _cancel(kind, job_id)
+        if not ok:
+            raise_error(f"Failed to cancel {kind} job ID {job_id}: {stderr}")
+        typer.echo(f"Canceled {kind} job '{name}' with ID {job_id}")
+
+
+@scheduler_app.command(name="logs")
+def get_logs(
+    names: Annotated[
+        list[str] | None,
+        typer.Argument(help="Names of the jobs to get logs for."),
+    ] = None,
+    follow: Annotated[
+        bool,
+        typer.Option(
+            "--follow", "-f", help="Follow the log output like tail -f."
+        ),
+    ] = False,
+) -> None:
+    """Get the logs for scheduler jobs by their name in the project.
+
+    If no names are given, every tracked job's log is shown.
+    """
+    if names is None:
+        names = list(_load_jobs().keys())
+    log_fpaths: list[str] = []
+    for name in names:
+        log_fpath = os.path.join(LOGS_DIR, f"{name}.out")
+        if os.path.isfile(log_fpath):
+            log_fpaths.append(log_fpath)
+    if not log_fpaths:
+        raise_error("No log files found")
+    if follow:
+        p = subprocess.Popen(["tail", "-f"] + log_fpaths)
+        try:
+            p.wait()
+        except KeyboardInterrupt:
+            p.terminate()
+            raise typer.Exit(0)
+    else:
+        for log_path in log_fpaths:
+            with open(log_path, "r") as f:
+                typer.echo(f.read())

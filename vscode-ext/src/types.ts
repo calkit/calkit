@@ -1,0 +1,138 @@
+import type { CalkitEnvironment } from "./environments";
+
+export interface PipelineStage {
+  kind?: string;
+  notebook_path?: string;
+  script_path?: string;
+  target_path?: string;
+  path?: string;
+  environment?: string;
+  inputs?: string[];
+  outputs?: (
+    | string
+    | { path: string; storage?: string; [key: string]: unknown }
+  )[];
+  slurm?: {
+    setup?: string[];
+    [key: string]: unknown;
+  };
+  scheduler?: {
+    log_path?: string;
+    [key: string]: unknown;
+  };
+  // When present, the stage is run once per iteration; its declared outputs are
+  // templated with calkit's `{arg_name}` placeholders.
+  iterate_over?: unknown;
+  [key: string]: unknown;
+}
+
+export interface NotebookEntry {
+  path: string;
+  environment?: string;
+  stage?: string;
+}
+
+export interface FigureEntry {
+  path: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
+export interface DatasetEntry {
+  path: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
+// Figures, datasets, results, presentations, and publications all share the
+// same basic shape in calkit.yaml (a path with optional title/stage/provenance).
+export interface ArtifactEntry {
+  path: string;
+  title?: string;
+  stage?: string;
+  imported_from?: unknown;
+  [key: string]: unknown;
+}
+
+// A question can be a plain string or, in the richer schema, an object with a
+// hypothesis, answer, and supporting evidence (figures or results). See the
+// Python `Question` model in calkit/models/core.py.
+export interface QuestionEvidence {
+  kind?: string;
+  path?: string;
+  key?: string;
+  explanation?: string;
+  [key: string]: unknown;
+}
+
+export interface QuestionEntry {
+  question: string;
+  hypothesis?: string;
+  answer?: string;
+  evidence?: QuestionEvidence[];
+  [key: string]: unknown;
+}
+
+export interface CalkitInfo {
+  name?: string;
+  environments?: Record<string, CalkitEnvironment>;
+  notebooks?: NotebookEntry[];
+  questions?: (string | QuestionEntry)[];
+  figures?: FigureEntry[];
+  datasets?: DatasetEntry[];
+  results?: ArtifactEntry[];
+  publications?: ArtifactEntry[];
+  presentations?: ArtifactEntry[];
+  apps?: Record<string, AppEntry>;
+  pipeline?: {
+    stages?: Record<string, PipelineStage>;
+  };
+}
+
+// An app in the project's ``apps`` mapping. ``stage`` is what ties it back
+// to the notebook or script that builds it.
+export interface AppEntry {
+  kind?: string;
+  path?: string;
+  title?: string;
+  description?: string;
+  stage?: string;
+}
+
+export interface EnvDescription {
+  kind?: string;
+  spec_path?: string;
+  lock_path?: string;
+  prefix?: string;
+  python?: string;
+}
+
+// Per-stage staleness detail from `calkit status --json` (the Python
+// `StaleStage` model). Used to show *what* is stale about a stage in the
+// sidebar, not just that it is.
+export interface StaleStageDetail {
+  stale_outputs?: string[];
+  modified_inputs?: string[];
+  modified_outputs?: string[];
+  modified_command?: boolean;
+  always_run?: boolean;
+  is_subproject?: boolean;
+}
+
+export interface DvcStage {
+  cmd?: string;
+  deps?: (string | Record<string, unknown>)[];
+  outs?: (string | Record<string, unknown>)[];
+  params?: unknown[];
+  desc?: string;
+  // Present on iterate_over stages: a map of arg name to its list of values.
+  // The deps/outs are templated with `${item.<arg>}` against this.
+  matrix?: Record<string, unknown[]>;
+  [key: string]: unknown;
+}
+
+export interface DvcYaml {
+  stages?: Record<string, DvcStage>;
+}

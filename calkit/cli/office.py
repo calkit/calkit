@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import platform
 
-import docx2pdf
 import typer
 from typing_extensions import Annotated
 
@@ -61,4 +60,6 @@ def word_to_pdf(
         ),
     ] = None,
 ):
+    import docx2pdf
+
     docx2pdf.convert(input_path=input_fpath, output_path=output_fpath)

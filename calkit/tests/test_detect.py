@@ -209,6 +209,48 @@ pdf("figure.pdf")
     assert "plot.png" in result["outputs"]
     assert "clean_data.csv" in result["outputs"]
     assert "figure.pdf" in result["outputs"]
+    # An orchestrator script that sources other scripts via here::here()
+    # should recursively attribute their I/O to the stage
+    os.makedirs("code", exist_ok=True)
+    master_content = """
+here::i_am("code/master.R")
+log_file <- here::here("output", "run.log")
+sink(log_file, split = TRUE)
+source(here::here("code", "clean.R"))
+source(here::here("code", "model.R"))
+sink()
+"""
+    clean_content = """
+raw <- read_excel("data/raw.xlsx", sheet = "Master")
+saveRDS(raw, file = "data/clean.rds")
+"""
+    model_content = """
+df <- readRDS("data/clean.rds")
+write.csv(df, file = "output/tables/summary.csv")
+ggsave("output/figures/plot.pdf", p)
+sink("output/tables/model.tex")
+"""
+    with open("code/master.R", "w") as f:
+        f.write(master_content)
+    with open("code/clean.R", "w") as f:
+        f.write(clean_content)
+    with open("code/model.R", "w") as f:
+        f.write(model_content)
+    master = detect_r_script_io("code/master.R")
+    # Sourced scripts are detected as inputs even when wrapped in here::here()
+    assert "code/clean.R" in master["inputs"]
+    assert "code/model.R" in master["inputs"]
+    # I/O from sourced scripts is attributed to the orchestrator
+    assert "data/raw.xlsx" in master["inputs"]
+    # Named file=/filename= write arguments are detected
+    assert "data/clean.rds" in master["outputs"]
+    assert "output/tables/summary.csv" in master["outputs"]
+    # sink(), here::here()-assigned variables, and ggsave() literals
+    assert "output/run.log" in master["outputs"]
+    assert "output/tables/model.tex" in master["outputs"]
+    assert "output/figures/plot.pdf" in master["outputs"]
+    # An intermediate produced and consumed within the stage is not an input
+    assert "data/clean.rds" not in master["inputs"]
 
 
 def test_detect_shell_script_io(tmp_dir):
@@ -382,7 +424,7 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
             {
                 "cell_type": "code",
                 "source": [
-                    "log_path_template = '../.calkit/slurm/logs/amip-{case}.out'\n",
+                    "log_path_template = '../.calkit/scheduler/logs/amip-{case}.out'\n",
                     "data_file = 'input_data.csv'\n",
                     "output_dir = 'results'\n",
                 ],
@@ -413,7 +455,7 @@ def test_detect_jupyter_notebook_io_with_variables(tmp_dir):
     # Variable references should be resolved
     assert "input_data.csv" in result["inputs"]
     # Template string from format should be detected
-    assert ".calkit/slurm/logs/amip-baseline.out" in result["inputs"]
+    assert ".calkit/scheduler/logs/amip-baseline.out" in result["inputs"]
 
 
 def test_detect_jupyter_notebook_io_julia(tmp_dir):
@@ -683,6 +725,14 @@ with open('output.txt', 'w') as f:
     result = detect_io(stage)
     assert "input.dat" in result["inputs"]
     assert "output.dat" in result["outputs"]
+    stage = {
+        "kind": "shell-command",
+        "command": "cp myfile otherfile",
+        "environment": "_system",
+    }
+    result = detect_io(stage)
+    assert result["inputs"] == ["myfile"]
+    assert result["outputs"] == ["otherfile"]
     # Test LaTeX stage
     latex_content = r"""
 \documentclass{article}
@@ -771,7 +821,7 @@ data = pd.read_csv("data.csv")
     deps = detect_python_dependencies(script_path="script.py")
     assert "numpy" in deps
     assert "pandas" in deps
-    assert "sklearn" in deps
+    assert "scikit-learn" in deps
     assert "matplotlib" in deps
     # stdlib modules should not be included
     assert "os" not in deps
@@ -789,6 +839,19 @@ import json  # stdlib
     assert "requests" in deps
     assert "flask" in deps
     assert "json" not in deps
+
+
+def test_detect_python_dependencies_distribution_mapping():
+    """Test mapping of Python import names to distribution names."""
+    code = """
+import sklearn
+import cv2
+"""
+    deps = detect_python_dependencies(code=code)
+    assert "scikit-learn" in deps
+    assert "opencv-python" in deps
+    assert "sklearn" not in deps
+    assert "cv2" not in deps
 
 
 def test_detect_r_dependencies_from_script(tmp_dir):
@@ -813,6 +876,41 @@ data <- read.csv("data.csv")
     assert "tidyr" in deps
     # Base packages should not be included
     assert "base" not in deps
+    # Qualified calls (pkg::fn), requireNamespace/loadNamespace, and
+    # pacman::p_load with a character vector should all be detected
+    pacman_content = """
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+here::i_am("code/master.R")
+loadNamespace("withr")
+pkgs <- c(
+  "haven", "readxl",
+  "dplyr", "ggplot2"
+)
+pacman::p_load(char = pkgs, install = TRUE, character.only = TRUE)
+pacman::p_load(stringr, tidyr)
+pacman::p_load("forcats", c("janitor", "lubridate"))
+"""
+    deps = detect_r_dependencies(code=pacman_content)
+    # Qualified call and the requireNamespace/loadNamespace guards
+    assert "here" in deps
+    assert "pacman" in deps
+    assert "withr" in deps
+    # Vector resolved via char =
+    assert "haven" in deps
+    assert "readxl" in deps
+    assert "ggplot2" in deps
+    # Bare non-standard-evaluation names
+    assert "stringr" in deps
+    assert "tidyr" in deps
+    # Quoted names and inline c() vectors
+    assert "forcats" in deps
+    assert "janitor" in deps
+    assert "lubridate" in deps
+    # The vector constructor and keyword-argument values are not packages
+    assert "c" not in deps
+    assert "TRUE" not in deps
+    assert "install" not in deps
+    assert "character.only" not in deps
 
 
 def test_detect_r_dependencies_from_code():
@@ -940,7 +1038,7 @@ def test_detect_dependencies_from_python_notebook(tmp_dir):
     deps = detect_dependencies_from_notebook("notebook.ipynb")
     assert "numpy" in deps
     assert "pandas" in deps
-    assert "sklearn" in deps
+    assert "scikit-learn" in deps
     assert "matplotlib" in deps
     assert "requests" in deps
 
@@ -1014,6 +1112,20 @@ def test_create_r_description_file(tmp_dir):
     assert "dplyr" in content
     assert "tidyr" in content
     assert "Imports:" in content
+    # The Package field reflects the project name (sanitized to a valid R
+    # package name), not a hard-coded placeholder
+    from calkit.environments import create_r_description_content
+
+    content = create_r_description_content(deps, project_name="AI-Games")
+    assert "Package: AI.Games" in content
+    assert "CalkitProject" not in content
+    # Names that don't start with a letter get a valid prefix
+    content = create_r_description_content(deps, project_name="2023-study")
+    package_line = [
+        ln for ln in content.splitlines() if ln.startswith("Package:")
+    ][0]
+    package_name = package_line.split(":", 1)[1].strip()
+    assert package_name[0].isalpha()
 
 
 def test_create_files_in_subdirectory(tmp_dir):
@@ -1025,3 +1137,274 @@ def test_create_files_in_subdirectory(tmp_dir):
 
     assert os.path.exists(output_path)
     assert os.path.exists(".calkit/envs/test-env")
+
+
+def test_is_figure_path():
+    """Figures must live in a figure-named directory."""
+    from calkit.detect import is_figure_path
+
+    # Detected: image-like extension under a figure directory, at any depth.
+    assert is_figure_path("figures/result.png")
+    assert is_figure_path("paper/figs/plot.pdf")
+    assert is_figure_path("Plots/Fig1.SVG")
+    # Plotly JSON under a figure-only directory counts as a figure.
+    assert is_figure_path("figures/interactive.json")
+    # Not detected: right extension, wrong (or no) directory.
+    assert not is_figure_path("result.png")
+    assert not is_figure_path("results/result.png")
+    assert not is_figure_path("output/plot.pdf")
+    assert not is_figure_path("img/logo.png")
+    # JSON under a data directory is not a figure.
+    assert not is_figure_path("data/records.json")
+    # Non-figure extension under a figure directory.
+    assert not is_figure_path("figures/notes.txt")
+
+
+def test_is_dataset_path():
+    """Datasets must live in a data-named directory."""
+    from calkit.detect import is_dataset_path
+
+    assert is_dataset_path("data/raw.csv")
+    assert is_dataset_path("datasets/measurements.parquet")
+    assert is_dataset_path("project/Data/records.json")
+    # Wrong directory.
+    assert not is_dataset_path("results/raw.csv")
+    assert not is_dataset_path("raw.csv")
+    # A .json under a figure-only dir is a figure, not a dataset.
+    assert not is_dataset_path("figures/plot.json")
+    # Non-dataset extension under a data directory.
+    assert not is_dataset_path("data/readme.md")
+
+
+def test_detect_figures():
+    """detect_figures filters hidden and reserved paths."""
+    from calkit.detect import detect_figures
+
+    candidates = [
+        "figures/a.png",
+        "figs/b.pdf",
+        "result.png",
+        ".cache/figures/c.png",
+        "figures/reserved.png",
+    ]
+    out = detect_figures(candidates, reserved_paths=["figures/reserved.png"])
+    assert out == ["figs/b.pdf", "figures/a.png"]
+    # Files inside a reserved directory are excluded too.
+    out = detect_figures(
+        ["figures/sub/x.png", "figures/y.png"], reserved_paths=["figures/sub"]
+    )
+    assert out == ["figures/y.png"]
+
+
+def test_detect_datasets():
+    """detect_datasets excludes figures and collapses folders."""
+    from calkit.detect import detect_datasets
+
+    candidates = [
+        "data/a.csv",
+        "data/sub/b.csv",
+        "data/sub/c.csv",
+        "figures/plot.json",
+        ".venv/data/d.csv",
+    ]
+    out = detect_datasets(candidates, figure_paths=["figures/plot.json"])
+    # data/sub holds two files, so it collapses to the folder; data/a.csv has
+    # only one file in its folder, so it stays a file.
+    assert out == ["data/a.csv", "data/sub"]
+
+
+def test_is_result_path():
+    """Results are data-like files under a results-named directory."""
+    from calkit.detect import is_result_path
+
+    assert is_result_path("results/metrics.json")
+    assert is_result_path("results/summary.csv")
+    assert is_result_path("project/result/table.html")
+    # Wrong directory.
+    assert not is_result_path("metrics.json")
+    assert not is_result_path("data/raw.csv")
+    # A figure under results is not a result.
+    assert not is_result_path("results/plot.png")
+
+
+def test_is_presentation_path():
+    """Presentations are slide decks by directory or by name."""
+    from calkit.detect import is_presentation_path
+
+    assert is_presentation_path("slides/deck.pdf")
+    assert is_presentation_path("presentations/kickoff.pptx")
+    # Presentation-like name anywhere.
+    assert is_presentation_path("slides.pdf")
+    assert is_presentation_path("docs/presentation.pdf")
+    # A PDF that isn't a slide deck and isn't in a presentation dir.
+    assert not is_presentation_path("paper/manuscript.pdf")
+    # A figure PDF is not a presentation.
+    assert not is_presentation_path("figures/plot.pdf")
+
+
+def test_is_publication_path():
+    # Publications are documents by directory or by name
+    from calkit.detect import is_publication_path
+
+    assert is_publication_path("paper/manuscript.pdf")
+    assert is_publication_path("publications/report.docx")
+    assert is_publication_path("thesis/main.tex")
+    # Publication-like name anywhere.
+    assert is_publication_path("manuscript.pdf")
+    assert is_publication_path("docs/main.tex")
+    # A slide deck or figure is not a publication.
+    assert not is_publication_path("slides/deck.pdf")
+    assert not is_publication_path("figures/plot.pdf")
+    # A document outside a publication dir without a publication name.
+    assert not is_publication_path("notes/random.pdf")
+
+
+def test_detect_artifact_kind():
+    # Artifact kind is inferred from the path, with figures taking priority
+    from calkit.detect import detect_artifact_kind
+
+    assert detect_artifact_kind("figures/plot.png") == "figure"
+    assert detect_artifact_kind("slides/slides.pdf") == "presentation"
+    assert detect_artifact_kind("paper/manuscript.pdf") == "publication"
+    assert detect_artifact_kind("data/raw.csv") == "dataset"
+    # A figure PDF wins over presentation/publication detection.
+    assert detect_artifact_kind("figures/diagram.pdf") == "figure"
+    # Nothing recognizable.
+    assert detect_artifact_kind("notes.txt") is None
+
+
+def test_detect_results_and_presentations():
+    """detect_results/detect_presentations filter hidden and reserved paths."""
+    from calkit.detect import detect_presentations, detect_results
+
+    results = detect_results(
+        [
+            "results/a.json",
+            "results/b.csv",
+            "data/c.csv",
+            ".cache/results/d.json",
+        ],
+        reserved_paths=["results/b.csv"],
+    )
+    assert results == ["results/a.json"]
+    presentations = detect_presentations(
+        ["slides/x.pdf", "presentation.pdf", "figures/p.pdf"]
+    )
+    assert presentations == ["presentation.pdf", "slides/x.pdf"]
+
+
+def test_detect_project_artifacts_includes_results_and_presentations(tmp_dir):
+    """detect_project_artifacts reports the new kinds for a real repo."""
+    import subprocess
+
+    import calkit.detect
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    os.makedirs("slides")
+    with open("results/metrics.json", "w") as f:
+        f.write("{}")
+    with open("slides/deck.pdf", "w") as f:
+        f.write("%PDF-1.4")
+    out = calkit.detect.detect_project_artifacts(ck_info={})
+    assert "results/metrics.json" in out["results"]
+    assert "slides/deck.pdf" in out["presentations"]
+
+
+def test_detection_ignore(tmp_dir):
+    from calkit.detect import (
+        detect_artifact_kind,
+        detect_figures,
+        load_detection_ignore,
+    )
+
+    # (e) No ignore file -> unchanged detection.
+    assert load_detection_ignore() is None
+    assert detect_figures(["figures/a.png"]) == ["figures/a.png"]
+    os.makedirs(".calkit", exist_ok=True)
+    with open(".calkit/ignore", "w") as f:
+        f.write(
+            "\n".join(
+                [
+                    "# this is a comment",
+                    "",
+                    "paper/figs/report.pdf",
+                    "*.ipynb",
+                    "*.csv",
+                    "notebooks/scratch/",
+                ]
+            )
+        )
+    ignore = load_detection_ignore()
+    # (a) a path listed in .calkit/ignore is not detected as ANY artifact type
+    path = "paper/figs/report.pdf"
+    assert detect_artifact_kind(path) == "figure"
+    assert detect_artifact_kind(path, ignore=ignore) is None
+    assert path not in detect_figures([path], ignore=ignore)
+    # (b) comments and blank lines are ignored (implied by parsing succeeding)
+    assert ignore is not None
+    assert not ignore.match_file("# this is a comment")
+    # (c) a glob pattern excludes matching files
+    globbed = "data/raw.csv"
+    assert detect_artifact_kind(globbed) == "dataset"
+    assert detect_artifact_kind(globbed, ignore=ignore) is None
+    assert ignore.match_file("analysis.ipynb") is True
+    # (d) a directory pattern excludes files under it
+    in_dir = "notebooks/scratch/data/raw.parquet"
+    assert detect_artifact_kind(in_dir) == "dataset"
+    assert detect_artifact_kind(in_dir, ignore=ignore) is None
+
+
+def test_filter_covered_inputs():
+    from calkit.detect import filter_covered_inputs
+
+    # A declared directory covers everything inside it, at any depth
+    assert filter_covered_inputs(
+        ["figures/a.png", "figures/sub/b.png", "refs.bib"], ["figures"]
+    ) == ["refs.bib"]
+    # A trailing slash on either side means the same directory
+    assert filter_covered_inputs(["figures/a.png"], ["figures/"]) == []
+    # An exact repeat is covered too, and duplicates within the detected
+    # list collapse
+    assert filter_covered_inputs(
+        ["refs.bib", "refs.bib", "paper/x.cls"], ["refs.bib"]
+    ) == ["paper/x.cls"]
+    # A partial name segment is not a parent directory
+    assert filter_covered_inputs(["figures-old/a.png"], ["figures"]) == [
+        "figures-old/a.png"
+    ]
+    # Nothing declared means nothing filtered, and order is preserved
+    assert filter_covered_inputs(["b.png", "a.png"], []) == ["b.png", "a.png"]
+
+
+def test_detect_latex_io_finds_class_and_style_files(tmp_dir):
+    # What LaTeX resolves by name rather than by path: the document class,
+    # a local style file the class itself loads, the bibliography style,
+    # and a figure written without its extension
+    with open("jfm.cls", "w") as f:
+        f.write("\\usepackage{upmath}\n")
+    with open("upmath.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("jfm.bst", "w") as f:
+        f.write("% nothing\n")
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.pdf", "wb") as f:
+        f.write(b"%PDF-1.4")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("paper.tex", "w") as f:
+        f.write(
+            "\\documentclass{jfm}\n"
+            "\\usepackage{graphicx}\n"
+            "\\bibliographystyle{jfm}\n"
+            "\\includegraphics{figures/fig}\n"
+            "\\bibliography{refs}\n"
+        )
+    inputs = detect_latex_io("paper.tex")["inputs"]
+    assert "jfm.cls" in inputs
+    assert "upmath.sty" in inputs
+    assert "jfm.bst" in inputs
+    assert "figures/fig.pdf" in inputs
+    assert "refs.bib" in inputs
+    # graphicx comes from TeX Live, not the project
+    assert "graphicx.sty" not in inputs

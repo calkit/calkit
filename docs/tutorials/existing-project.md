@@ -20,13 +20,13 @@ as possible with reasonable defaults.
 Before we get started,
 make sure that Calkit is installed,
 you have an account on [calkit.io](https://calkit.io),
-and have [set a token in your local config](../cloud-integration.md).
+and have [set a token in your local config](../hub/index.md).
 
 The basic steps we'll take here are:
 
 1. Organize the project folder.
 1. Create a new Calkit project.
-1. Add all existing files to version control and back them up in the cloud.
+1. Add all existing files to version control and back them up on the hub.
 1. Add all computational processes to the pipeline, ensuring they run in
    defined environments.
 1. Define the project artifacts for presentation and consumption.
@@ -119,7 +119,7 @@ the files should always be downloaded back to the main project folder.
 
 !!! tip
 
-    Don't be afraid to repeat yourself in code.
+    Don't be afraid to repeat yourself a few times in code.
     There is a software engineering principle
     "don't repeat yourself," (DRY), which if applied too aggressively,
     can make it very difficult to track dependencies,
@@ -151,7 +151,7 @@ calkit new project . \
     --name my-phd-research \
     --title "Experimental investigation of something" \
     --description "Investigating the effects of a thing." \
-    --cloud
+    --hub
 ```
 
 In this command, the `.` means the current working directory,
@@ -163,12 +163,12 @@ the title should be sentence or title case,
 and the description should include punctuation,
 kind of like an abstract.
 
-The `--cloud` flag is going to create a GitHub repo and Calkit Cloud project
+The `--hub` flag is going to create a GitHub repo and hub project
 for us, which will be linked together.
 In the next step,
 when we put the files in version control,
 the code and text files will go to GitHub,
-and the larger data files will go to the Calkit Cloud.
+and the larger data files will go to the hub.
 This will be handled seamlessly and transparently.
 
 Note you can add a `--public` flag if you want the project to be public
@@ -180,7 +180,7 @@ so let's start with it private for now.
 To summarize, this command will:
 
 - Initialize a Git repository with GitHub as the remote
-- Initialize a DVC configuration with the Calkit Cloud as the remote
+- Initialize a DVC configuration with the hub as the remote
 - Create a `calkit.yaml` file for the project metadata
 - Create a dev container specification in `.devcontainer` for use with VS Code
   or GitHub Codespaces
@@ -189,17 +189,17 @@ To summarize, this command will:
 ## Put everything in version control
 
 Now that we have everything in one project folder
-and we have the project created in the cloud,
+and we have the project created on the hub,
 it's time to add files to version control.
 If you run `calkit status`,
 you'll see an output like:
 
-```sh
+```
 $ calkit status
 ---------------------------- Project -----------------------------
 Project status not set. Use "calkit new status" to update.
 
---------------------------- Code (Git) ---------------------------
+------------------------------ Git -------------------------------
 On branch main
 Your branch is up to date with 'origin/main'.
 
@@ -216,12 +216,11 @@ Untracked files:
 
 nothing added to commit but untracked files present (use "git add" to track)
 
---------------------------- Data (DVC) ---------------------------
+------------------------------ DVC -------------------------------
 No changes.
 
-------------------------- Pipeline (DVC) -------------------------
-There are no data or pipelines tracked in this project yet.
-See <https://dvc.org/doc/start> to get started!
+---------------------------- Pipeline ----------------------------
+This project has no pipeline.
 ```
 
 We have a list of files and folders that are untracked,
@@ -296,10 +295,10 @@ you can use the `--to=git` or `--to=dvc` option.
 Also, if you make a mistake along the way you can use the `git revert`
 command, after finding the offending commit with `git log`.
 
-### Back up the project in the cloud
+### Back up the project on the hub
 
 After all relevant files are added and committed to the repo,
-we can push to both GitHub and the Calkit Cloud with `calkit push`:
+we can push to both GitHub and the hub with `calkit push`:
 
 ```sh
 $ calkit push
@@ -463,7 +462,7 @@ If you have other kinds of stages, e.g., MATLAB, R, or shell scripts to run,
 see the output of `calkit new --help` for information on how to
 create those.
 
-### Check that the pipeline runs and push outputs to the cloud
+### Check that the pipeline runs and push outputs to the hub
 
 Now that the pipeline is built,
 we can check that it runs properly by calling:
@@ -473,7 +472,7 @@ calkit run
 ```
 
 If there are no errors,
-we can commit the outputs and push them up to the cloud with `calkit save`:
+we can commit the outputs and push them up to the hub with `calkit save`:
 
 ```sh
 calkit save -am "Run pipeline"
@@ -537,16 +536,12 @@ these figures.
 This will allow users to trace back from the figure to the code that
 produced it.
 
-Lastly, let's add our publications to `calkit.yaml`,
-which will make them viewable on the project publications page on
+Lastly, let's add our publications and presentations to `calkit.yaml`,
+which will make them viewable on their respective pages on
 calkit.io:
 
 ```yaml
 publications:
-  - path: pubs/2025-aps-dfd-slides/slides.pdf
-    kind: presentation
-    title: This is the title of the talk
-    stage: build-aps-slides
   - path: pubs/2025-article-1/paper.pdf
     kind: journal-article
     title: This is the title of the paper
@@ -555,6 +550,11 @@ publications:
     kind: phd-thesis
     title: This is the title of the thesis
     stage: build-thesis
+
+presentations:
+  - path: pubs/2025-aps-dfd-slides/slides.pdf
+    title: This is the title of the talk
+    stage: build-aps-slides
 ```
 
 We can then commit and push the changes to `calkit.yaml` with:

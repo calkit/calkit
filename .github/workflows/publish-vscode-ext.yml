@@ -1,0 +1,113 @@
+name: Publish VS Code extension
+
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  build:
+    name: Build extension package
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      artifact-name: ${{ steps.artifact.outputs.name }}
+      vsix-path: ${{ steps.artifact.outputs.vsix-path }}
+    defaults:
+      run:
+        working-directory: vscode-ext
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The changelog is derived from the vscode-ext/v* tags, which a
+          # shallow checkout doesn't fetch
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-ext/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Derive version from release tag
+        id: version
+        env:
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          # Tags look like vscode-ext/vX.Y.Z; the package version is the X.Y.Z part.
+          version="${TAG_NAME#vscode-ext/v}"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-+].+)?$'; then
+            echo "Tag $TAG_NAME does not contain a valid version"
+            exit 1
+          fi
+          # Write it into package.json (and the lockfile) so the packaged
+          # extension version always mirrors the release tag.
+          npm version "$version" --no-git-tag-version --allow-same-version
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Run extension tests
+        run: npm test
+      - name: Generate changelog
+        # Like the version above, the changelog mirrors the release tags
+        # rather than being maintained by hand, so it can't go stale. The tag
+        # for this release already exists, so it lands at the top.
+        run: npm run changelog
+      - name: Package extension
+        run: |
+          mkdir -p dist
+          npx --yes @vscode/vsce@latest package \
+            -o "dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix"
+      - name: Set artifact metadata
+        id: artifact
+        run: |
+          echo "name=calkit-vscode-${{ steps.version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "vsix-path=vscode-ext/dist/calkit-vscode-${{ steps.version.outputs.version }}.vsix" >> "$GITHUB_OUTPUT"
+      - name: Upload extension package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: ${{ steps.artifact.outputs.vsix-path }}
+
+  publish-marketplace:
+    name: Publish to Visual Studio Marketplace
+    needs:
+      - build
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download extension package
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist
+      - name: Publish extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          npx --yes @vscode/vsce@latest publish \
+            --packagePath "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            --pat "$VSCE_PAT"
+
+  publish-open-vsx:
+    name: Publish to Open VSX
+    needs:
+      - build
+    if: startsWith(github.event.release.tag_name, 'vscode-ext/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download extension package
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist
+      - name: Publish extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          npx --yes ovsx@latest publish \
+            "dist/calkit-vscode-${{ needs.build.outputs.version }}.vsix" \
+            -p "$OVSX_PAT"

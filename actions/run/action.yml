@@ -1,0 +1,349 @@
+name: Run Calkit
+description: >
+  Run a Calkit project pipeline and optionally commit and push results to Git
+  and DVC remotes.
+branding:
+  icon: arrow-right
+  color: green
+inputs:
+  save:
+    description: Whether or not to save (commit and push) results to Git and DVC remotes.
+    default: "true"
+  dvc_token:
+    description:
+      DVC token for pushing results. If not provided, will be obtained
+      via GitHub OIDC.
+    required: false
+  pull_dvc:
+    description: Whether or not to pull DVC data before running.
+    required: false
+    default: "true"
+  cache_dvc:
+    description: Whether or not to cache DVC data.
+    required: false
+    default: "true"
+  run_args:
+    description: Arguments passed to calkit run command.
+    required: false
+    default: ""
+outputs: {}
+runs:
+  using: composite
+  steps:
+    - name: Check for uv and Calkit
+      id: tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        if command -v uv >/dev/null 2>&1; then
+          echo "uv_missing=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "uv_missing=true" >> "$GITHUB_OUTPUT"
+        fi
+        if command -v calkit >/dev/null 2>&1; then
+          echo "calkit_missing=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "calkit_missing=true" >> "$GITHUB_OUTPUT"
+        fi
+
+    # uv is only needed up front to install Calkit; uv-venv projects that
+    # need uv but already have Calkit are handled by the uv step after
+    # detection.
+    - name: Setup uv
+      if: ${{ steps.tools.outputs.uv_missing == 'true' && steps.tools.outputs.calkit_missing == 'true' }}
+      uses: astral-sh/setup-uv@v5
+
+    - name: Install Calkit
+      if: ${{ steps.tools.outputs.calkit_missing == 'true' }}
+      shell: bash
+      run: |
+        uv tool install calkit-python
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Detect setup requirements
+      id: detect
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        # Let Calkit parse its own config so we only look at the
+        # `environments` section (a real YAML parse that also resolves
+        # includes), rather than grepping every `kind:` in the file --
+        # pipeline stages, dependencies, datasets, etc. all use `kind:` too.
+        kinds=$(calkit list environments 2>/dev/null \
+          | grep -E '^[[:space:]]+kind:' \
+          | sed -E 's/^[[:space:]]+kind:[[:space:]]*//; s/[[:space:]]+#.*$//' \
+          | tr -d "\"'" | sort -u || true)
+        echo "Detected environment kinds: $(echo "$kinds" | paste -sd, -)"
+
+        has_kind() {
+          printf '%s\n' "$kinds" | grep -qx "$1"
+        }
+
+        if command -v python >/dev/null 2>&1 || command -v python3 >/dev/null 2>&1; then
+          python_missing=false
+        else
+          python_missing=true
+        fi
+
+        if command -v uv >/dev/null 2>&1; then
+          uv_missing=false
+        else
+          uv_missing=true
+        fi
+
+        if command -v conda >/dev/null 2>&1; then
+          conda_missing=false
+        else
+          conda_missing=true
+        fi
+
+        if command -v pixi >/dev/null 2>&1; then
+          pixi_missing=false
+        else
+          pixi_missing=true
+        fi
+
+        # Calkit manages Julia versions via juliaup (e.g. `juliaup add
+        # 1.11.7` for a `julia: "1.11.7"` environment), so juliaup -- not a
+        # fixed Julia -- is what must be present. We deliberately gate only on
+        # juliaup and ignore any plain `julia` on the runner: hosted runner
+        # images ship a pinned Julia that usually won't match the project's
+        # required version, and without juliaup Calkit can't install the right
+        # one. Users who manage Julia themselves should install juliaup, which
+        # this then detects and leaves alone.
+        if command -v juliaup >/dev/null 2>&1; then
+          juliaup_missing=false
+        else
+          juliaup_missing=true
+        fi
+
+        if command -v Rscript >/dev/null 2>&1 || command -v R >/dev/null 2>&1; then
+          r_missing=false
+        else
+          r_missing=true
+        fi
+
+        if command -v matlab >/dev/null 2>&1; then
+          matlab_missing=false
+        else
+          matlab_missing=true
+        fi
+
+        if command -v docker >/dev/null 2>&1 && docker buildx version >/dev/null 2>&1; then
+          docker_buildx_missing=false
+        else
+          docker_buildx_missing=true
+        fi
+
+        needs_python=false
+        needs_uv=false
+        needs_conda=false
+        needs_pixi=false
+        needs_julia=false
+        needs_r=false
+        needs_matlab=false
+        needs_docker=false
+        docker_cli_missing=false
+        unsupported_kinds=""
+
+        if has_kind "uv-venv" || has_kind "venv" || has_kind "uv"; then
+          if [ "$python_missing" = true ]; then
+            needs_python=true
+          fi
+        fi
+        # uv is installed up front to install Calkit, so it is normally
+        # already present here; this covers the case where Calkit was
+        # pre-installed (so we skipped the initial uv setup) but uv is not.
+        if has_kind "uv-venv" || has_kind "uv"; then
+          if [ "$uv_missing" = true ]; then
+            needs_uv=true
+          fi
+        fi
+        if has_kind "conda"; then
+          if [ "$conda_missing" = true ]; then
+            needs_conda=true
+          fi
+          if [ "$python_missing" = true ]; then
+            needs_python=true
+          fi
+        fi
+        if has_kind "pixi"; then
+          if [ "$pixi_missing" = true ]; then
+            needs_pixi=true
+          fi
+        fi
+        if has_kind "julia"; then
+          if [ "$juliaup_missing" = true ]; then
+            needs_julia=true
+          fi
+        fi
+        if has_kind "renv"; then
+          if [ "$r_missing" = true ]; then
+            needs_r=true
+          fi
+        fi
+        if has_kind "matlab"; then
+          if [ "$matlab_missing" = true ]; then
+            needs_matlab=true
+          fi
+        fi
+        if has_kind "docker"; then
+          if command -v docker >/dev/null 2>&1; then
+            if [ "$docker_buildx_missing" = true ]; then
+              needs_docker=true
+            fi
+          else
+            docker_cli_missing=true
+          fi
+        fi
+
+        # These kinds do not have a direct setup action in this composite action.
+        if has_kind "ssh"; then unsupported_kinds="${unsupported_kinds}ssh,"; fi
+        if has_kind "slurm"; then unsupported_kinds="${unsupported_kinds}slurm,"; fi
+        if has_kind "pbs"; then unsupported_kinds="${unsupported_kinds}pbs,"; fi
+        if has_kind "nix"; then unsupported_kinds="${unsupported_kinds}nix,"; fi
+        unsupported_kinds="${unsupported_kinds%,}"
+
+        echo "needs_python=${needs_python}" >> "$GITHUB_OUTPUT"
+        echo "needs_uv=${needs_uv}" >> "$GITHUB_OUTPUT"
+        echo "needs_conda=${needs_conda}" >> "$GITHUB_OUTPUT"
+        echo "needs_pixi=${needs_pixi}" >> "$GITHUB_OUTPUT"
+        echo "needs_julia=${needs_julia}" >> "$GITHUB_OUTPUT"
+        echo "needs_r=${needs_r}" >> "$GITHUB_OUTPUT"
+        echo "needs_matlab=${needs_matlab}" >> "$GITHUB_OUTPUT"
+        echo "needs_docker=${needs_docker}" >> "$GITHUB_OUTPUT"
+        echo "docker_cli_missing=${docker_cli_missing}" >> "$GITHUB_OUTPUT"
+        echo "unsupported_kinds=${unsupported_kinds}" >> "$GITHUB_OUTPUT"
+
+    - name: Setup uv for uv and uv-venv environments
+      if: ${{ steps.detect.outputs.needs_uv == 'true' }}
+      uses: astral-sh/setup-uv@v5
+
+    - name: Setup Python
+      if: ${{ steps.detect.outputs.needs_python == 'true' }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.x"
+
+    - name: Setup Miniconda
+      if: ${{ steps.detect.outputs.needs_conda == 'true' }}
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        auto-activate-base: true
+        conda-remove-defaults: true
+
+    - name: Setup Pixi
+      if: ${{ steps.detect.outputs.needs_pixi == 'true' }}
+      uses: prefix-dev/setup-pixi@v0.9.6
+      with:
+        run-install: false
+
+    # Install juliaup (not a fixed Julia) so Calkit can install and select
+    # the exact Julia version(s) declared in each environment via
+    # `juliaup add`. The channel here is just a default bootstrap install.
+    - name: Setup juliaup
+      if: ${{ steps.detect.outputs.needs_julia == 'true' }}
+      uses: julia-actions/install-juliaup@v2
+      with:
+        channel: "1"
+
+    - name: Setup R
+      if: ${{ steps.detect.outputs.needs_r == 'true' }}
+      uses: r-lib/actions/setup-r@v2
+
+    - name: Setup MATLAB
+      if: ${{ steps.detect.outputs.needs_matlab == 'true' }}
+      uses: matlab-actions/setup-matlab@v2
+
+    - name: Setup Docker Buildx
+      if: ${{ steps.detect.outputs.needs_docker == 'true' }}
+      uses: docker/setup-buildx-action@v3
+
+    - name: Report unsupported environment kinds
+      if: ${{ steps.detect.outputs.unsupported_kinds != '' }}
+      shell: bash
+      run: |
+        echo "::notice::Detected environment kinds without explicit setup action: ${{ steps.detect.outputs.unsupported_kinds }}"
+
+    - name: Report missing Docker CLI for docker environments
+      if: ${{ steps.detect.outputs.docker_cli_missing == 'true' }}
+      shell: bash
+      run: |
+        echo "::notice::Detected kind 'docker' in calkit.yaml, but Docker CLI is not available on this runner. Install Docker on the runner to use docker environments."
+
+    - name: Restore DVC cache for current branch
+      if: ${{ inputs.cache_dvc == 'true' }}
+      id: cache-dvc-restore
+      uses: actions/cache/restore@v5
+      with:
+        path: .dvc/cache
+        key: >-
+          ${{ runner.os }}-dvc-cache-${{ github.head_ref || github.ref_name }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-dvc-cache-${{ github.head_ref || github.ref_name }}-
+          ${{ runner.os }}-dvc-cache-${{ github.event.repository.default_branch }}-
+
+    - name: Get GitHub OIDC token
+      if: ${{ !inputs.dvc_token && (inputs.save == 'true' || inputs.pull_dvc ==
+        'true') }}
+      id: get-oidc-token
+      shell: bash
+      run: |
+        OIDC_TOKEN=$(curl -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=calkit.io" -s | jq -r '.value')
+        if [ -z "$OIDC_TOKEN" ] || [ "$OIDC_TOKEN" == "null" ]; then
+          echo "Failed to obtain OIDC token"
+          exit 1
+        fi
+        echo "::add-mask::$OIDC_TOKEN"
+        echo "oidc-token=$OIDC_TOKEN" >> $GITHUB_OUTPUT
+
+    - name: Exchange OIDC token for Calkit token
+      if: ${{ !inputs.dvc_token && (inputs.save == 'true' || inputs.pull_dvc ==
+        'true') }}
+      id: get-calkit-token
+      shell: bash
+      run: |
+        CALKIT_TOKEN=$(curl -X POST https://api.calkit.io/login/github-oidc \
+          -H "Authorization: Bearer ${{ steps.get-oidc-token.outputs.oidc-token }}" \
+          -s | jq -r '.access_token')
+        if [ -z "$CALKIT_TOKEN" ] || [ "$CALKIT_TOKEN" == "null" ]; then
+          echo "Failed to obtain Calkit token"
+          exit 1
+        fi
+        echo "::add-mask::$CALKIT_TOKEN"
+        echo "calkit-token=$CALKIT_TOKEN" >> $GITHUB_OUTPUT
+
+    - run: calkit config remote-auth
+      if: ${{ inputs.save == 'true' || inputs.pull_dvc == 'true' }}
+      shell: bash
+      env:
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+
+    - run: calkit dvc pull
+      if: ${{ inputs.pull_dvc == 'true' }}
+      shell: bash
+      continue-on-error: true
+      env:
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+
+    - run: calkit run ${{ inputs.run_args }}
+      shell: bash
+
+    - run: calkit save -am "Run pipeline"
+      if: ${{ inputs.save == 'true' }}
+      shell: bash
+      env:
+        CALKIT_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+        CALKIT_DVC_TOKEN: ${{ inputs.dvc_token || steps.get-calkit-token.outputs.calkit-token }}
+
+    - name: Save DVC cache
+      if: ${{ inputs.cache_dvc == 'true' }}
+      id: cache-dvc-save
+      uses: actions/cache/save@v5
+      with:
+        path: .dvc/cache
+        key: >-
+          ${{ runner.os }}-dvc-cache-${{ github.head_ref || github.ref_name }}-${{ github.sha }}

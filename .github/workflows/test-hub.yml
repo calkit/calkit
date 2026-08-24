@@ -1,0 +1,179 @@
+name: Test hub
+
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
+on:
+  pull_request:
+
+env:
+  POSTGRES_PASSWORD: test-password-for-ci
+  OBJECT_STORAGE_SECRET: test-password-for-ci
+  GH_CLIENT_ID: test-github-client-id-for-ci
+  GH_CLIENT_SECRET: test-github-client-secret-for-ci
+  STRIPE_PUBLISHABLE_KEY: test-stripe-publishable-key-for-ci
+  STRIPE_SECRET_KEY: test-stripe-secret-key-for-ci
+  MIXPANEL_TOKEN: test-mixpanel-token-for-ci
+  ZENODO_CLIENT_ID: test-zenodo-client-id-for-ci
+  ZENODO_CLIENT_SECRET: test-zenodo-client-secret-for-ci
+  GOOGLE_CLIENT_ID: test-google-client-id-for-ci
+  GOOGLE_CLIENT_SECRET: test-google-client-secret-for-ci
+  ZOTERO_CLIENT_KEY: test-zotero-client-key-for-ci
+  ZOTERO_CLIENT_SECRET: test-zotero-client-secret-for-ci
+  FIRST_SUPERUSER: test-user-for-ci@example.com
+  FIRST_SUPERUSER_GITHUB_USERNAME: test-user-for-ci
+  FIRST_SUPERUSER_PASSWORD: test-password-for-ci
+  SECRET_KEY: test-secret-key-for-ci
+  # Must be 32 url-safe base64-encoded bytes, i.e. a real Fernet key, since
+  # tests encrypt credentials. This one decodes to a throwaway string.
+  FERNET_KEY: Y2Fsa2l0LXRlc3QtZmVybmV0LWtleS1mb3ItY2khISE=
+  FERNET_KEYS: Y2Fsa2l0LXRlc3QtZmVybmV0LWtleS1mb3ItY2khISE=
+  GRAFANA_ADMIN_PASSWORD: test-grafana-admin-password-for-ci
+
+jobs:
+  # Always runs so the gated jobs below can be branch protection required
+  # checks; a workflow-level paths filter would leave them pending forever
+  # on PRs that don't touch the hub
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        id: filter
+        with:
+          # Paths are listed positively rather than as 'hub/** minus
+          # frontend': negated patterns need the 'every' quantifier, which
+          # can't work for a filter whose patterns are alternatives.
+          # The backend image builds calkit-python from the workspace, so
+          # package changes must run the backend tests too.
+          filters: |
+            backend:
+              - 'hub/backend/**'
+              - 'hub/config/**'
+              - 'hub/scripts/**'
+              - 'hub/texmf-proxy/**'
+              - 'hub/docker-compose*.yml'
+              - 'hub/.env.example'
+              - 'hub/Makefile'
+              - 'calkit/**'
+              - 'agent-plugin/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - '.dockerignore'
+            frontend:
+              - 'hub/frontend/**'
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - run: cp .env.example .env
+      - run: docker compose build backend
+      - run: docker compose down -v --remove-orphans
+      - run: docker compose --profile objects up -d
+      - name: Run tests
+        run: docker compose exec -T backend bash /app/hub/backend/tests-start.sh
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
+      - name: Store coverage files
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html
+          path: hub/backend/htmlcov
+
+  frontend-unit:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.5"
+          cache: npm
+          cache-dependency-path: hub/frontend/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: hub/frontend
+      - name: Run unit tests
+        run: npm run test:unit
+        working-directory: hub/frontend
+
+  end-to-end:
+    needs: [changes, frontend-unit]
+    # Runs on backend-only changes too, in which case frontend-unit is
+    # skipped and must not block us
+    if: >-
+      !cancelled() &&
+      (needs.frontend-unit.result == 'success' || needs.frontend-unit.result == 'skipped') &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true')
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hub
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20.19.5"
+          cache: npm
+          cache-dependency-path: hub/frontend/package-lock.json
+      - name: Cache Playwright browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('hub/frontend/package-lock.json') }}
+      - name: Install dependencies
+        run: npm ci
+        working-directory: hub/frontend
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: hub/frontend
+      - run: cp .env.example .env
+      - run: docker compose build
+      - run: docker compose down -v --remove-orphans
+      - run: docker compose --profile objects up -d
+      - name: Wait for services
+        run: |
+          echo "127.0.0.1 api.localhost" | sudo tee -a /etc/hosts
+          echo "Waiting for backend..."
+          timeout 180 bash -c 'until curl -sf http://api.localhost/openapi.json > /dev/null 2>&1; do sleep 3; done'
+          echo "Waiting for frontend..."
+          timeout 300 bash -c 'until curl -sf http://localhost:5173 > /dev/null 2>&1; do sleep 3; done'
+          echo "All services ready"
+      - name: Run Playwright tests
+        run: npx playwright test
+        working-directory: hub/frontend
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans
+      - name: Store Playwright report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: hub/frontend/playwright-report/
+          retention-days: 30
+      - name: Store Playwright test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: hub/frontend/test-results/
+          retention-days: 7

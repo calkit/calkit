@@ -1,26 +1,65 @@
+# Python linting/formatting runs the uv-managed ruff over the whole repo
+# with the root pyproject config, so the version and rules can't drift
+# between packages. The hub frontend is formatted by its own pinned Biome
+# to match hub/frontend/biome.json exactly.
 repos:
+  # renv generates renv/activate.R and rewrites it whenever it activates,
+  # trailing whitespace and all. Trimming it here would only make the
+  # committed copy differ from what renv writes, so it is left alone.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v4.4.0"
     hooks:
+      - id: check-added-large-files
       - id: check-case-conflict
       - id: check-merge-conflict
+        exclude: ^docs/overleaf\.md$
+      - id: check-toml
+      # The example projects' results files are stage outputs: a stage
+      # writes them, and a formatted copy is a changed output that makes
+      # the stage stale, so they are left exactly as written.
       - id: end-of-file-fixer
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
       - id: trailing-whitespace
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
+        # The hub has JSONC files (tsconfig.json, .vscode/launch.json)
+        exclude: ^hub/
 
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: "v0.6.3"
+  - repo: local
     hooks:
-      - id: ruff
-        args: [--exit-non-zero-on-fix]
+      - id: ruff-check
+        name: ruff check
+        language: system
+        entry: bash -c 'uv run ruff check --fix --exit-non-zero-on-fix .'
+        pass_filenames: false
+        files: \.pyi?$
       - id: ruff-format
+        name: ruff format
+        language: system
+        entry: bash -c 'uv run ruff format .'
+        pass_filenames: false
+        files: \.pyi?$
 
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: "v3.0.3"
     hooks:
       - id: prettier
-        exclude: calkit
-        args:
-          - --config=package.json
+        # dvc.yaml and dvc.lock are generated---by calkit and DVC
+        # respectively---and are rewritten wholesale whenever the pipeline
+        # changes. Prettier and ruamel disagree about where a long 'desc:'
+        # value goes, so formatting them here just means the two take turns
+        # reformatting the same file.
+        # Likewise the example projects' results files, which are stage
+        # outputs and have to match what the stage wrote byte for byte.
+        exclude: calkit|^hub/|(^|/)dvc\.(yaml|lock)$|^examples/.*/results/
+
+  - repo: local
+    hooks:
+      - id: biome-format-hub-frontend
+        name: biome format (hub frontend)
+        language: system
+        entry: bash -c 'cd hub/frontend && npx biome format --write ./src'
+        pass_filenames: false
+        files: ^hub/frontend/src/.*\.(jsx?|tsx?|jsonc?|css)$

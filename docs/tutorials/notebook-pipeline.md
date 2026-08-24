@@ -37,7 +37,7 @@ changing cells but forgetting to rerun them, etc.
 
 At the end of this process we should be left with a notebook that runs
 very quickly after it's been run once,
-and all of our important outputs will be cached and pushed to the cloud,
+and all of our important outputs will be cached and pushed to the hub,
 but kept out of our Git repo.
 Our collaborators will be able to pull everything and similarly
 run the notebook very quickly on the first go,
@@ -166,7 +166,7 @@ fig
 ```
 
 If we call `calkit list figures`, we'll see our figure,
-and after pushing to the cloud, we'll be able to see it there as well.
+and after pushing to the hub, we'll be able to see it there as well.
 
 Note that we could also go back and add `--out-type=dataset` to the
 `get-data` cell,
@@ -205,4 +205,4 @@ with DVC (though the storage location is configurable).
 If you'd like to try this out or explore further,
 you can view this project up on
 [GitHub](https://github.com/calkit/example-notebook-pipeline)
-or the [Calkit cloud](https://calkit.io/calkit/example-notebook-pipeline).
+or the [hub](https://calkit.io/calkit/example-notebook-pipeline).

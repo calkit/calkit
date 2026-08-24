@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+    paths:
+      - docs/**
+      - mkdocs.yml
 
 permissions:
   contents: write
@@ -12,15 +15,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Configure Git Credentials
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - run: uv run mkdocs gh-deploy --force

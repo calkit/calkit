@@ -4,6 +4,16 @@ A computational environment describes the
 necessary conditions for code to run properly.
 Ensuring that every stage in your pipeline is run within a
 defined environment is a great way to improve reproducibility.
+Typically these will be created inside the global system environment,
+where the system environment has an environment manager installed.
+Because the system environment itself is somewhat of a "primary artifact"
+(cf. [reproducibility](./reproducibility.md)), i.e.,
+it is manually manipulated by the user,
+we want to minimize its uniqueness or changes to it,
+since there's a risk we may not properly document its state.
+This means we want to limit foundational dependencies to very common tools
+like Git, common shells like Bash, and environment managers.
+
 There are many different environment management tools out there to choose
 from, and Calkit attempts to provide a similar interface for all of them.
 Calkit also attempts to enforce
@@ -32,8 +42,9 @@ Calkit supports the following environment types:
 - [`renv`](https://rstudio.github.io/renv/index.html)
 - [Julia](https://julialang.org/)
 - [MATLAB](https://www.mathworks.com/products/matlab.html)
+- [Nix](https://nixos.org/) (flake-based)
 - [SLURM](https://slurm.schedmd.com/documentation.html)
-- `ssh`
+- `system` (the machine itself, local or reached over SSH)
 
 Environment definitions live in the project's `calkit.yaml` file
 in the `environments` section.
@@ -103,6 +114,39 @@ All project environments can be checked at once with:
 calkit check envs
 ```
 
+## Inspecting environment paths
+
+To see where an environment's specification and lock file live, use:
+
+```sh
+calkit describe env --name {env-name}
+```
+
+Adding `--json` prints the same information as machine-readable JSON,
+which is handy for other tools that need to locate these files:
+
+```sh
+calkit describe env --name {env-name} --json
+```
+
+The output is a single line, shown formatted here for readability
+(pipe it through something like `jq` to format it yourself):
+
+```json
+{
+  "kind": "uv-venv",
+  "spec_path": "requirements.txt",
+  "lock_path": ".calkit/env-locks/my-env/linux-64.txt",
+  "prefix": null,
+  "python": "3.13"
+}
+```
+
+All keys are always present, so a null value means the field doesn't apply
+to that kind of environment.
+To describe every environment at once, keyed by name, use
+`calkit describe envs [--json]`.
+
 ## Choosing an environment type
 
 So which type of environment should you use?
@@ -171,6 +215,30 @@ You can similarly jump into an interactive `bash` terminal with:
 
 ```sh
 calkit xenv -n foam bash
+```
+
+Some Docker images are CLI tools with an image entrypoint already defined
+(for example `minlag/mermaid-cli`).
+In that case, use `command_mode: entrypoint` so Calkit passes your command
+arguments directly to the container entrypoint instead of running
+`shell -c ...`.
+
+```yaml
+# In calkit.yaml
+environments:
+  mermaid:
+    kind: docker
+    image: minlag/mermaid-cli
+    wdir: /data
+    command_mode: entrypoint
+```
+
+Then execute with:
+
+```sh
+calkit xenv -n mermaid -- \
+  -i figures/my-mermaid-diagram.mmd \
+  -o figures/my-mermaid-diagram.pdf
 ```
 
 But what if there isn't an image out there that has everything you need
@@ -359,50 +427,213 @@ environments:
     host: hpc.myinstitute.org
 ```
 
-To run a script in a `slurm` environment, use the
-[`sbatch` pipeline stage type](pipeline/index.md#sbatch).
+See the [HPC guide](hpc.md) for how to use SLURM (and PBS) environments in pipeline stages.
 
-### SSH
+### System
 
-It's possible to define a remote environment that uses `ssh` to connect
-and run commands,
-and `scp` to copy files back and forth.
-This could be useful, e.g.,
-for running one or more pipeline stages on an HPC cluster,
-or simply offloading some work to a virtual machine in the cloud
-with specialized hardware like a more powerful GPU.
+A `system` environment is the machine as it is,
+with nothing built, installed, or isolated by Calkit.
+It's an escape hatch for software Calkit doesn't manage,
+e.g., a site-wide module system or a hand-built toolchain.
 
-It is assumed that dependencies on the remote machine are managed separately.
+The simplest form is the machine you're on:
 
-An SSH environment defined in `calkit.yaml` looks like:
+```yaml
+environments:
+  local:
+    kind: system
+    lock:
+      - os
+      - python-version
+```
+
+Nothing is pinned by default, since opting out of isolation is the whole
+point of this kind.
+The `lock` property is how a project says which properties of the machine
+its results actually depend on.
+Locked properties are written to the environment's lock file,
+which stages depend on,
+so moving to a machine where one of them differs reruns the stage
+rather than silently reusing a cached result.
+
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->
+
+The properties that can be locked are:
+
+| Property                | Description                                                                                                                                                                                                                                                                                                     |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `os`                    | Operating system name, e.g. 'Linux' or 'Darwin'.                                                                                                                                                                                                                                                                |
+| `os-version`            | Operating system release, e.g. a kernel version.                                                                                                                                                                                                                                                                |
+| `platform`              | Full platform string, which folds in most of the above.                                                                                                                                                                                                                                                         |
+| `machine`               | Machine architecture, e.g. 'x86_64' or 'arm64'.                                                                                                                                                                                                                                                                 |
+| `processor`             | Processor name, where the OS reports one.                                                                                                                                                                                                                                                                       |
+| `hostname`              | The machine's name. Pins results to one specific host, but only by name: renaming the machine breaks the pin, and a machine elsewhere with the same name satisfies it. Prefer 'machine-id'.                                                                                                                     |
+| `machine-id`            | A stable identifier for the machine itself, read from the platform. Pins results to one specific machine, and unlike 'hostname' survives renaming it. Declaring a 'machine_id' on the environment says where to run, not that results depend on it, so lock this to also rerun stages when the machine changes. |
+| `cpu-count`             | Number of CPUs, which can change what a run produces where results depend on how work was divided.                                                                                                                                                                                                              |
+| `memory-gb`             | Total memory in GB.                                                                                                                                                                                                                                                                                             |
+| `python-version`        | Version of the Python running Calkit.                                                                                                                                                                                                                                                                           |
+| `python-implementation` | Python implementation, e.g. 'CPython'.                                                                                                                                                                                                                                                                          |
+| `git-version`           | Installed Git version.                                                                                                                                                                                                                                                                                          |
+| `docker-version`        | Installed Docker version.                                                                                                                                                                                                                                                                                       |
+| `conda-version`         | Installed Conda version.                                                                                                                                                                                                                                                                                        |
+| `mamba-version`         | Installed Mamba version.                                                                                                                                                                                                                                                                                        |
+| `uv-version`            | Installed uv version.                                                                                                                                                                                                                                                                                           |
+| `pixi-version`          | Installed Pixi version.                                                                                                                                                                                                                                                                                         |
+| `julia-version`         | Installed Julia version.                                                                                                                                                                                                                                                                                        |
+| `juliaup-version`       | Installed Juliaup version.                                                                                                                                                                                                                                                                                      |
+| `rscript-version`       | Installed Rscript version.                                                                                                                                                                                                                                                                                      |
+| `brew-version`          | Installed Homebrew version. macOS only.                                                                                                                                                                                                                                                                         |
+
+Run `calkit describe system` to see what these are on the machine you're on.
+
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->
+
+The built-in `_system` environment is shorthand for this kind
+on `localhost` with nothing locked.
+
+#### Requirements
+
+A `system` environment can also declare
+[requirements](requirements.md)---what has to be true of that machine
+before stages run on it:
 
 ```yaml
 environments:
   cluster:
-    kind: ssh
-    host: "10.225.22.25"
-    user: my-user-name
-    wdir: /home/my-user-name/calkit/example-ssh
-    key: ~/.ssh/id_ed25519
-    send_paths:
-      - script.sh
-    get_paths:
-      - results
+    kind: system
+    host: hpc.example.edu
+    requirements:
+      - kind: cpu-count
+        min: 16
+      - julia>=1.10
+    lock:
+      - cpu-count
+      - julia-version
 ```
 
-In the example above, we define an environment called `cluster`,
-where we specify the host IP address, our username on that machine,
-the working directory, the path to an SSH key on our local machine
-(so we can connect without a password),
-which paths we want to send before executing commands,
-and which we want to copy back after they finish.
-Wildcards in paths are supported, so the entire directory could be copied
-if desired by specifying `*`.
+`requirements` and `lock` answer different questions,
+which is why a property can appear in both.
+A requirement is a precondition: it's checked before anything runs,
+and one that isn't met stops the run and says what was found and what
+was needed.
+A lock is a cache input: nothing is checked, but the property's observed
+value is recorded, and a stage reruns when it changes.
+So the example above means "refuse to run on fewer than 16 CPUs,"
+and separately "rerun everything if the number of CPUs isn't what it was
+last time."
 
-To register an SSH key with the host, use `ssh-copy-id`. For example:
+If you don't care what a property is but do care when it changes,
+lock it and leave it out of `requirements`.
+A requirement that constrains nothing is rejected, since it asserts
+nothing.
+
+Requirements are checked _on the machine the environment names_.
+For a host that isn't this one, that means an app is looked for on that
+host's `PATH`, a variable is read from the shell a login gets there, and
+a `setup` requirement's `check_command` runs there.
+Nothing is offered as a fix in that case---installing something on
+another machine belongs to whoever administers it---so Calkit reports
+what was missing and where.
+Checking a requirement about the machine itself, like `cpu-count`, needs
+Calkit installed on that host, since that's what reports its properties.
+
+The project's own top-level `requirements` describe the host you're
+driving from, which is the `_system` environment.
+They're checked on every `calkit run`, wherever stages end up running,
+because that machine still has to be able to drive the pipeline.
+
+#### Running on another machine
+
+A `system` environment's `host` names the machine the work belongs on.
+SSH is how a machine is reached, not a kind of environment in its own
+right, so there's no separate `ssh` kind:
+if `host` names the machine you're on, the stage runs right there,
+and otherwise Calkit connects over `ssh` and copies files with `scp`.
+This is useful, e.g., for offloading work to a cluster login node
+or a cloud VM with a more powerful GPU.
+
+It is assumed that dependencies on the other machine are managed
+separately, unless you pair it with an inner environment (see below).
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: "10.225.22.25"
+```
+
+The host is the only thing you have to declare.
+Everything else has a sensible default:
+
+- `user` is left to SSH, which resolves it from `~/.ssh/config` or falls
+  back to your current account.
+  Repeating it here would only be a second place for it to be wrong.
+- `wdir`---the project's _workspace_ on that machine, a clone of the
+  project and the directory stages run in---defaults to
+  `~/.calkit/workspaces/<hub>/<owner>/<name>`.
+  A relative path is taken from the connecting user's home directory.
+  It's qualified by hub and owner because a host is shared: two projects
+  named `example-ssh` from different owners are different projects.
+  It's hidden because Calkit checks the workspace out with `--force`, so
+  it must not look like somewhere you'd keep your own work.
+- `ssh_key` is left to SSH and its agent.
+  If a particular host needs a particular key, that belongs in
+  `~/.ssh/config`, which already answers "which key for which host"
+  and is where people look for it.
+  The field is for cases where that isn't available, such as CI
+  dropping a key at a known path.
+
+So the fuller form, if you do need to be explicit, is:
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: "10.225.22.25"
+    user: my-user-name
+    wdir: /home/my-user-name/calkit/example
+    ssh_key: ~/.ssh/id_ed25519
+```
+
+#### Getting set up
+
+Check that the host is actually reachable before running anything:
+
+```sh
+calkit check env -n cluster
+```
+
+`calkit run` does the same check for every environment in the pipeline, so
+you don't have to remember to.
+Either way it connects without allowing a password prompt, so an
+unauthorized key is reported now rather than hanging halfway through a
+pipeline.
+
+In a terminal, that check walks you through whatever is missing, asking
+before each step:
+
+- Any environment variable the definition refers to, such as a host
+  written as `${CK_SSH_HOST}`, is prompted for and saved to `.env`, so
+  it's only asked once.
+  `.env` is added to `.gitignore` if it isn't already.
+- If you have no SSH key, it offers to create one (`ed25519`, no
+  passphrase, so stages can run unattended).
+- If this machine isn't authorized on the host yet, it offers to run
+  `ssh-copy-id`, then re-checks rather than assuming it worked.
+- If Calkit isn't installed on the host, it offers to install it there.
+  That's needed to activate an inner environment or to read the machine's
+  properties for a `lock`.
+
+Nothing happens without you agreeing to it, since creating a key and
+authorizing a machine both change things outside the project.
+
+Without a terminal---in CI, say---none of this is attempted, because
+there's nobody to answer.
+It fails instead with the exact commands to run, e.g.:
 
 ```sh
 ssh-copy-id -i ~/.ssh/id_ed25519 my-user-name@10.225.22.25
+ssh my-user-name@10.225.22.25 'curl -LsSf install.calkit.org | sh'
 ```
 
 To execute a command in this environment, we can add a stage like this
@@ -413,10 +644,85 @@ pipeline:
   stages:
     run-simulation:
       kind: shell-script
+      environment: cluster
       script_path: script.sh
       outputs:
         - results
 ```
+
+#### How the workspace is kept in sync
+
+Notice that nothing above says which files to copy back and forth, and
+nothing in the compiled pipeline does either.
+Calkit works it out, because a list of paths written down anywhere is a
+list that can fall behind the pipeline---at which point the stage quietly
+runs against stale inputs, which is the failure you'd least want here.
+
+Before the command runs, Calkit captures your working tree---including
+edits you haven't committed---as a Git snapshot, pushes it straight to the
+workspace, and checks it out there detached.
+No branch is created on either side, so several people (or several clones)
+can share one workspace without their branch names colliding, and cleaning
+up afterwards is a single reserved namespace rather than a set of names
+someone has to recognize.
+Data that DVC tracks is ignored by Git, so it can't ride along in the
+snapshot.
+It travels through the workspace's own DVC cache instead, which Calkit
+addresses as a DVC remote: only the objects the workspace is missing cross
+the wire, deduplicated by content.
+
+Afterwards, the workspace is asked what the run produced---anything it
+reports as changed or newly appeared since the snapshot it was given---and
+that is what comes back.
+`dvc.lock` is deliberately never carried back: your DVC writes its own
+from what it hashes locally.
+
+The workspace is reused between runs, which is what keeps environments,
+the DVC cache, and the Git history warm---a fresh one would rebuild all
+three every time.
+Because it's a single checkout at a single commit, a run holds a lock on
+it, and a second run that wants the same workspace is told who has it
+rather than checking out over them.
+The lock sits beside the workspace, not inside it, and is released once a
+run's outputs have been collected; if the run is interrupted while the
+remote job is still going, the lock stays, because the workspace really is
+still busy.
+
+One consequence worth knowing: if the project changes locally while a stage
+is running elsewhere, Calkit refuses to collect the results rather than
+recording them.
+DVC hashes a stage's dependencies from your local files once the command
+returns, so recording a result in that situation would write a `dvc.lock`
+pairing inputs that were never used with outputs they never produced---and
+unlike a stale stage, which simply reruns, a lock file like that goes on
+looking up to date indefinitely.
+
+`lock` works the same way here as it does locally, except that the
+properties recorded are the _host's_---what a stage's results depend on is
+the machine it actually ran on.
+Calkit reads them from that machine when the environment is checked, which
+means Calkit has to be installed there.
+It already is if you pair the environment with a runtime (see below), since
+that's what activates the inner environment on the far end.
+
+#### Pairing with a runtime
+
+Because a `system` environment says _where_ a stage runs rather than what
+it runs in, it can wrap another environment the same way a SLURM
+environment can, using the composite `<outer>:<inner>` syntax:
+
+```yaml
+pipeline:
+  stages:
+    simulate:
+      kind: python-script
+      environment: cluster:py
+      script_path: simulate.py
+```
+
+Calkit dispatches to `cluster` first, then activates the `py` environment
+once there, so the workspace on that machine needs both Calkit and the
+project.
 
 ### MATLAB
 
@@ -471,6 +777,71 @@ environments:
     path: pixi.toml
 ```
 
+### Nix
+
+Calkit supports [Nix](https://nixos.org/) environments via
+[flakes](https://nixos.wiki/wiki/Flakes).
+Reproducibility comes from `flake.lock`, which pins every input (including
+`nixpkgs`) to an exact revision. Calkit tracks `flake.lock` as a DVC
+dependency, so pipeline stages re-run when the environment changes.
+
+Create one with:
+
+```sh
+calkit new nix-env --name my-nix-env python3 R uv
+```
+
+In `calkit.yaml`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: flake.nix
+```
+
+Projects can contain multiple Nix envs. The first one lands at the repo
+root (`flake.nix`); subsequent ones get nested under
+`.calkit/envs/{name}/flake.nix` so each env has its own independent
+`flake.lock`. You can override the path with `--path` if you want a
+different layout.
+
+To enter a specific dev shell from the flake (instead of the default),
+set `shell`:
+
+```yaml
+environments:
+  my-nix-env:
+    kind: nix
+    path: envs/my-nix-env/flake.nix
+    shell: r-shell
+```
+
+Run a command in a Nix environment:
+
+```sh
+calkit xenv -n my-nix-env -- python --version
+```
+
+Add more packages to an existing Nix env (this edits the flake's
+`packages = with pkgs; [ ... ]` list, refreshes `flake.lock`, and commits):
+
+```sh
+calkit update env --name my-nix-env --add-package R --add-package polars
+```
+
+On Linux and macOS, install Nix with `calkit install nix` — this runs the
+[Determinate Systems installer](https://install.determinate.systems),
+which enables flakes by default. Nix is not supported natively on
+Windows; run Calkit inside
+[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and install
+Nix there.
+
+Calkit itself is also available as a flake — see
+[Nix in the installation guide](installation.md#nix) to add the Calkit
+CLI to your own Nix environments via `inputs.calkit.url =
+"github:calkit/calkit"`.
+
 ### R
 
 R environments can be managed with Conda, Pixi, or `renv` (recommended).
@@ -491,3 +862,269 @@ Version: 0.0.1
 Title: Auto-generated R environment
 Imports: tidyverse
 ```
+
+## System environments
+
+A `system` environment runs things on the machine as it is, with nothing
+built, installed, or isolated.
+It's the escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain.
+
+Nothing about the machine is pinned by default, since opting out of
+isolation is the point of this kind.
+`lock` is how a project says which properties its results actually depend
+on:
+
+```yaml
+environments:
+  cluster:
+    kind: system
+    host: gpu-node-1.example.edu
+    lock:
+      - os
+      - julia-version
+```
+
+Locked properties are written to the environment's lock file, which stages
+depend on, so running on a machine where one of them differs invalidates
+the cached result instead of silently reusing it.
+Locking a property the machine can't supply, e.g., a tool that isn't
+installed, is an error rather than a recorded null---a stage that claims to
+be pinned to something it isn't is worse than one that pins nothing.
+
+<!-- prettier-ignore -->
+!!! note
+    The properties available to `lock` are a fixed set, so editors can offer
+    them and a typo is reported rather than silently locking nothing. See
+    the `system` entry in the reference below for the full list.
+
+<!-- AUTO-GENERATED: ENV-KINDS:START -->
+
+### Environment kind reference
+
+Environment definitions belong in the `environments` section of `calkit.yaml`.
+
+#### `conda`
+
+Model class: `CondaEnvironment`
+
+| Parameter   | Type             | Required | Description                              |
+| ----------- | ---------------- | -------- | ---------------------------------------- |
+| kind        | Literal['conda'] | yes      | What kind of environment this is.        |
+| path        | str              | yes      | Path to the Conda environment YAML file. |
+| prefix      | str              | no       | Path at which to create the environment. |
+| description | str              | no       | A description of the environment.        |
+
+#### `docker`
+
+Model class: `DockerEnvironment`
+
+| Parameter      | Type                           | Required | Description                                                                                                                                       |
+| -------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                 |
+| path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                    |
+| image          | str                            | yes      | Name of the Docker image.                                                                                                                         |
+| layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                             |
+| shell          | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                          |
+| command_mode   | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                   |
+| platform       | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                          |
+| wdir           | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                      |
+| user           | str                            | no       | User to run the container as. Defaults to the host user.                                                                                          |
+| deps           | list[str]                      | no       | Files added to the container as dependencies.                                                                                                     |
+| env_vars       | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                  |
+| ports          | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                 |
+| gpus           | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                            |
+| args           | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                           |
+| jupyter_kernel | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images. |
+| description    | str                            | no       | A description of the environment.                                                                                                                 |
+
+#### `julia`
+
+Model class: `JuliaEnvironment`
+
+| Parameter   | Type             | Required | Description                               |
+| ----------- | ---------------- | -------- | ----------------------------------------- |
+| kind        | Literal['julia'] | yes      | What kind of environment this is.         |
+| path        | str              | yes      | Path to the Julia project's Project.toml. |
+| julia       | str              | yes      | Julia version to use.                     |
+| description | str              | no       | A description of the environment.         |
+
+#### `matlab`
+
+Model class: `MatlabEnvironment`
+
+| Parameter   | Type              | Required | Description                           |
+| ----------- | ----------------- | -------- | ------------------------------------- |
+| kind        | Literal['matlab'] | yes      | What kind of environment this is.     |
+| version     | str               | no       | MATLAB version to use.                |
+| products    | list[str]         | no       | MATLAB products (toolboxes) required. |
+| description | str               | no       | A description of the environment.     |
+
+#### `nix`
+
+Model class: `NixEnvironment`
+
+| Parameter   | Type           | Required | Description                                                                                                                          |
+| ----------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| kind        | Literal['nix'] | yes      | What kind of environment this is.                                                                                                    |
+| path        | str            | yes      | Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency. |
+| shell       | str            | no       | Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.                      |
+| description | str            | no       | A description of the environment.                                                                                                    |
+
+#### `pbs`
+
+Model class: `PBSEnvironment`
+
+| Parameter           | Type           | Required | Description                                                                                             |
+| ------------------- | -------------- | -------- | ------------------------------------------------------------------------------------------------------- |
+| kind                | Literal['pbs'] | yes      | What kind of environment this is.                                                                       |
+| host                | str            | no       | Host on which to submit jobs, over SSH if not localhost.                                                |
+| default_options     | list[str]      | no       | Options passed to qsub by default.                                                                      |
+| default_setup       | list[str]      | no       | Commands run at the start of every job script.                                                          |
+| max_concurrent_jobs | int            | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit. |
+| description         | str            | no       | A description of the environment.                                                                       |
+
+#### `pixi`
+
+Model class: `PixiEnvironment`
+
+| Parameter   | Type            | Required | Description                                       |
+| ----------- | --------------- | -------- | ------------------------------------------------- |
+| kind        | Literal['pixi'] | yes      | What kind of environment this is.                 |
+| path        | str             | yes      | Path to the Pixi manifest file.                   |
+| name        | str             | no       | Name of the environment within the Pixi manifest. |
+| description | str             | no       | A description of the environment.                 |
+
+#### `renv`
+
+Model class: `REnvironment`
+
+| Parameter   | Type            | Required | Description                                                                       |
+| ----------- | --------------- | -------- | --------------------------------------------------------------------------------- |
+| kind        | Literal['renv'] | yes      | What kind of environment this is.                                                 |
+| path        | str             | yes      | Path to the project's DESCRIPTION file. The renv lock file is created next to it. |
+| prefix      | str             | no       | Path at which to create the environment.                                          |
+| description | str             | no       | A description of the environment.                                                 |
+
+#### `slurm`
+
+Model class: `SlurmEnvironment`
+
+| Parameter           | Type             | Required | Description                                                                                                                                                                                                                                                     |
+| ------------------- | ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind                | Literal['slurm'] | yes      | What kind of environment this is.                                                                                                                                                                                                                               |
+| host                | str              | no       | Host on which to submit jobs, over SSH if not localhost.                                                                                                                                                                                                        |
+| default_options     | list[str]        | no       | Options passed to sbatch by default.                                                                                                                                                                                                                            |
+| default_setup       | list[str]        | no       | Commands run at the start of every job script.                                                                                                                                                                                                                  |
+| max_concurrent_jobs | int              | no       | How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit. |
+| description         | str              | no       | A description of the environment.                                                                                                                                                                                                                               |
+
+#### `system`
+
+Model class: `SystemEnvironment`
+
+The machine as it is, with nothing built, installed, or isolated.
+
+An escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain. Nothing is pinned by default,
+since opting out of isolation is the whole point of this kind, so
+`lock` is how a project says which properties of the machine its
+results actually depend on.
+
+Locked properties are written to the environment's lock file, which
+stages depend on, so moving to a machine where one of them differs
+invalidates the cached result rather than silently reusing it.
+
+`requirements` is the other half, and answers a different question.
+It says what must be _true_ of this machine -- apps that must be
+installed, variables that must be set, at least this many CPUs -- and
+is checked before anything runs, on the machine the environment names.
+A requirement that fails stops the run and says how to fix it; a locked
+property that changes silently invalidates a cached result. One gates,
+the other pins, so a property that matters both ways is written in both
+places.
+
+`host` names the machine. SSH is how a machine is reached, not a kind
+of environment, so there is no separate `ssh` kind: a system env whose
+host isn't this machine is reached over SSH, and one whose host is this
+machine runs here, the same way a SLURM env does. The built-in
+`_system` environment is shorthand for this kind on `localhost`
+with nothing locked.
+
+`machine_id` says _which_ machine, where `host` only says what it
+answers to. Names are renamed, resolve differently from different
+networks, and are reused; a project that means one particular machine
+can name it here instead and have that survive all of it. It replaces
+the name in deciding whether this is that machine, and is checked again
+on the far end when it isn't -- so a host that has come to point at a
+different box is reported rather than run on. `host` is still what
+reaches it, so both are worth declaring for a machine that isn't this
+one. Run `calkit describe system` on a machine to read its ID.
+
+Declaring one says where to run, which is a separate question from
+whether results depend on the machine: moving a project to a new one
+and updating this need not invalidate everything computed on the old
+one. Whether it does is left to `lock`, where `machine-id` is
+available for projects whose results really are machine-specific.
+
+`wdir` is the project's workspace on that host -- the directory the
+stage runs in. It defaults to
+`~/.calkit/workspaces/<hub>/<owner>/<name>`, so a project that just
+names a host lands somewhere predictable rather than having to spell
+out a path that is the same on every machine anyway. Qualified by hub
+and owner because a host is shared, and hidden because transfers check
+out with `--force`: a path that looks like the user's own checkout is
+one whose edits would be silently destroyed.
+
+What moves in and out of that workspace is deliberately not declared
+here. An environment doesn't know which files a stage reads, so a list
+kept alongside it can fall behind the pipeline and quietly run against
+stale inputs; the paths are taken from the stage instead.
+
+| Parameter    | Type                                                                                                                                                                                                                                                                                                                                         | Required | Description                                                                                                                                                                                                                                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind         | Literal['system']                                                                                                                                                                                                                                                                                                                            | yes      | What kind of environment this is.                                                                                                                                                                                                                                                                                         |
+| host         | str                                                                                                                                                                                                                                                                                                                                          | no       | Host on which to run. Reached over SSH unless it names this machine.                                                                                                                                                                                                                                                      |
+| machine_id   | str                                                                                                                                                                                                                                                                                                                                          | no       | Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that. |
+| user         | str                                                                                                                                                                                                                                                                                                                                          | no       | User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.                                                                                                                                                                                                       |
+| ssh_key      | str                                                                                                                                                                                                                                                                                                                                          | no       | Path to the SSH private key used to reach another host. Left to SSH and its agent by default.                                                                                                                                                                                                                             |
+| wdir         | str                                                                                                                                                                                                                                                                                                                                          | no       | The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.                                                                                                                                      |
+| lock         | list[Literal['os'\|'os-version'\|'platform'\|'machine'\|'processor'\|'hostname'\|'machine-id'\|'cpu-count'\|'memory-gb'\|'python-version'\|'python-implementation'\|'git-version'\|'docker-version'\|'conda-version'\|'mamba-version'\|'uv-version'\|'pixi-version'\|'julia-version'\|'juliaup-version'\|'rscript-version'\|'brew-version']] | no       | Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.                                                                                                                                                             |
+| requirements | list[str \| SystemNumberRequirement \| SystemValueRequirement \| SetupRequirement \| Requirement \| dict[str, RequirementAttrs]]                                                                                                                                                                                                             | no       | What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.                                                                            |
+| description  | str                                                                                                                                                                                                                                                                                                                                          | no       | A description of the environment.                                                                                                                                                                                                                                                                                         |
+
+#### `uv`
+
+Model class: `UvEnvironment`
+
+| Parameter   | Type          | Required | Description                              |
+| ----------- | ------------- | -------- | ---------------------------------------- |
+| kind        | Literal['uv'] | yes      | What kind of environment this is.        |
+| path        | str           | yes      | Path to the uv project's pyproject.toml. |
+| description | str           | no       | A description of the environment.        |
+
+#### `uv-venv`
+
+Model class: `UvVenvEnvironment`
+
+| Parameter   | Type               | Required | Description                                                                                                                                                                     |
+| ----------- | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['uv-venv'] | yes      | What kind of environment this is.                                                                                                                                               |
+| path        | str                | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
+| prefix      | str                | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
+| python      | str                | no       | Python version to use when creating the environment.                                                                                                                            |
+| description | str                | no       | A description of the environment.                                                                                                                                               |
+
+#### `venv`
+
+Model class: `VenvEnvironment`
+
+| Parameter   | Type            | Required | Description                                                                                                                                                                     |
+| ----------- | --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind        | Literal['venv'] | yes      | What kind of environment this is.                                                                                                                                               |
+| path        | str             | yes      | Path to the requirements file, e.g., requirements.txt.                                                                                                                          |
+| prefix      | str             | no       | Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict. |
+| python      | str             | no       | Python version to use when creating the environment.                                                                                                                            |
+| description | str             | no       | A description of the environment.                                                                                                                                               |
+
+<!-- AUTO-GENERATED: ENV-KINDS:END -->

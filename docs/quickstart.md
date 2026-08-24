@@ -1,5 +1,10 @@
 # Quickstart
 
+<!-- prettier-ignore -->
+!!! note
+    `ck` is an abbreviated alias for the `calkit` executable.
+    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+
 ## From an existing project
 
 If you want to use Calkit with an existing project,
@@ -54,13 +59,13 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [cloud integration](cloud-integration.md)
+Note the `--hub` flag requires [a hub connection](hub/index.md)
 to be set up, but can be omitted if the project doesn't need to be backed up to
-the cloud or shared with collaborators.
-Cloud integration can also be set up later.
+the hub or shared with collaborators.
+Hub integration can also be set up later.
 
 Next, move into the project folder and run the pipeline,
 which consists of several stages defined in `calkit.yaml`:
@@ -90,3 +95,13 @@ To back up or save the project, call:
 ```sh
 calkit save -am "Run pipeline"
 ```
+
+## With an AI coding agent
+
+Simply tell the [AI agent](ai-tools.md):
+
+> Turn this folder into a Calkit project
+
+or
+
+> Create me a new Calkit project for investigating...

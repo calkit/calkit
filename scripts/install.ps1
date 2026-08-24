@@ -5,4 +5,7 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 # Install Calkit using uv
-uv tool install --upgrade calkit-python
+uv tool install --upgrade calkit-python --python=3.14
+
+# Install shell completion
+calkit --install-completion

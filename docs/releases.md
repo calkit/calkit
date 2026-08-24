@@ -13,19 +13,19 @@ files in order to reproduce or reuse the results.
 Calkit can archive whole projects or individual artifacts to
 [Zenodo](https://zenodo.org).
 To enable this functionality,
-you will either need to connect your Zenodo account with the Calkit Cloud or
+you will either need to connect your Zenodo account with the hub or
 create a Zenodo personal access token (PAT) and set it
 in your machine's Calkit config or as an environmental variable.
 
-### Option 1: Connecting to the Calkit Cloud
+### Option 1: Connecting to the hub
 
-Visit the [Calkit Cloud user settings page](https://calkit.io/settings)
+Visit the [hub user settings page](https://calkit.io/settings)
 and click the connect button to authorize the Calkit app to upload to
 Zenodo on your behalf.
 
 ![Connect to Zenodo](img/connect-zenodo.png){ width="500px" }
 /// caption
-The Calkit Cloud user settings page.
+The hub user settings page.
 ///
 
 ### Option 2: Using a Zenodo PAT
@@ -72,6 +72,27 @@ When this is called, Calkit will:
 - Add a BibTeX entry for the release to a references file
   (`references.bib` by default).
 - Create a GitHub release with a link to the Zenodo record.
+
+## Licenses and authors
+
+The archived record needs both license and author metadata.
+
+Calkit detects the project's license(s) automatically from a `LICENSE` file
+(common names like `LICENSE.txt`, `LICENSE.md`, and `COPYING` are also
+recognized), supporting common licenses such as MIT, Apache-2.0, the BSD
+family, the GPL family, CC-BY-4.0, and others.
+If no license is found, you'll be prompted to generate a sensible default
+(MIT for code, CC-BY-4.0 for other content).
+You can also specify license(s) explicitly with one or more `--license`
+options using [SPDX identifiers](https://spdx.org/licenses), e.g.,
+`--license mit`.
+
+Authors are stored in the project's `CITATION.cff` file, which is the single
+source of truth for citation authors and is itself created/updated by Calkit
+on each project release.
+When creating a release, Calkit reads the authors from `CITATION.cff`; if
+none are defined yet, it will prompt you to enter them and write them to
+`CITATION.cff` (existing author entries are always preserved).
 
 ## Releasing other types of artifacts individually
 

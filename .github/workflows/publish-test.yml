@@ -1,5 +1,9 @@
 name: Publish to TestPyPI
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on:
   release:
     types: [published]
@@ -8,16 +12,21 @@ jobs:
   build:
     name: Build distribution 📦
     runs-on: ubuntu-latest
+    if: "!contains(github.event.release.tag_name, '/')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.x"
       - name: Setup uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
       - name: Install pypa/build
@@ -28,6 +37,7 @@ jobs:
           --user
       - name: Install JupyterLab extension dependencies and build
         run: |
+          cd jupyterlab-ext
           uv run jlpm install --immutable
           uv run jlpm run build:prod
       - name: Build a binary wheel and a source tarball
@@ -37,7 +47,7 @@ jobs:
           bash scripts/make-calk9.sh
           python3 -m build calk9 -o dist/
       - name: Store the distribution packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: python-package-distributions
           path: dist/
@@ -53,11 +63,11 @@ jobs:
       id-token: write # IMPORTANT: mandatory for trusted publishing
     steps:
       - name: Download all the dists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: python-package-distributions
           path: dist/
       - name: Publish distribution 📦 to TestPyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/

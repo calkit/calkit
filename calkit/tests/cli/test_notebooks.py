@@ -5,10 +5,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
 import calkit
+import calkit.notebooks
 
 
 def test_clean_notebook_outputs(tmp_dir):
@@ -139,6 +141,10 @@ def test_execute_notebook(tmp_dir):
     assert params_out["my_dict"] == params["my_dict"]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
 def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         [
@@ -172,6 +178,46 @@ def test_execute_notebook_julia(tmp_dir):
     subprocess.check_call(
         ["calkit", "nb", "execute", "-e", "main", "notebooks/main.ipynb"]
     )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
+def test_check_env_kernel_julia(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "julia-env",
+            "--name",
+            "main",
+            "--julia",
+            "1.11",
+        ]
+    )
+    res = subprocess.run(
+        ["calkit", "nb", "check-kernel", "-e", "main"], capture_output=True
+    )
+    assert res.returncode != 0
+    assert (
+        "IJulia is not installed in this Julia environment"
+        in res.stderr.decode()
+    )
+    # Now let's use the auto-add-deps option
+    res = subprocess.run(
+        [
+            "calkit",
+            "nb",
+            "check-kernel",
+            "-e",
+            "main",
+            "--auto-add-deps",
+        ],
+        capture_output=True,
+    )
+    assert res.returncode == 0
 
 
 def test_execute_notebook_auto_env(tmp_dir):
@@ -219,3 +265,87 @@ def test_execute_notebook_auto_env(tmp_dir):
     # TODO: Check if the notebook is saved in the project and if it
     # has an environment specified, either in the notebooks section or a
     # pipeline stage
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Docker Linux images are unavailable on windows-latest GHA runners",
+)
+def test_execute_notebook_docker(tmp_dir):
+    # A Docker environment runs the kernel inside the container, so we execute
+    # with Papermill inside the container rather than registering a host kernel
+    if shutil.which("docker") is None:
+        pytest.skip("Docker is not available")
+    image = "calkit-nb-docker-test:latest"
+    # Bake ipykernel and Papermill into the image so execution is deterministic
+    with open("Dockerfile", "w") as f:
+        f.write(
+            "FROM python:3.10-slim\n"
+            "RUN pip install --no-cache-dir ipykernel papermill\n"
+            "WORKDIR /work\n"
+        )
+    subprocess.check_call(["docker", "build", "-t", image, "."])
+    subprocess.check_call(["calkit", "init"])
+    ck_info = {
+        "environments": {
+            "docker-env": {"kind": "docker", "image": image, "wdir": "/work"}
+        }
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # A notebook with a 'parameters' cell so we can verify injection
+    nb = {
+        "cells": [
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "id": "params",
+                "metadata": {"tags": ["parameters"]},
+                "outputs": [],
+                "source": ["a = 1\n"],
+            },
+            {
+                "cell_type": "code",
+                "execution_count": None,
+                "id": "compute",
+                "metadata": {},
+                "outputs": [],
+                "source": ["result = a * 10\n", "print('result =', result)\n"],
+            },
+        ],
+        "metadata": {},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+    os.makedirs("notebooks")
+    with open(os.path.join("notebooks", "main.ipynb"), "w") as f:
+        json.dump(nb, f)
+    subprocess.check_call(
+        [
+            "calkit",
+            "nb",
+            "exec",
+            "-e",
+            "docker-env",
+            "--no-check",
+            "-p",
+            "a=4",
+            "notebooks/main.ipynb",
+        ]
+    )
+    # The injected parameter should have produced result = 40 in the executed
+    # notebook saved under .calkit/notebooks/executed
+    exec_path = calkit.notebooks.get_executed_notebook_path(
+        notebook_path="notebooks/main.ipynb",
+        to="notebook",
+        parameters={"a": 4},
+    )
+    with open(exec_path) as f:
+        executed = json.load(f)
+    text = "".join(
+        "".join(o.get("text", []))
+        for cell in executed["cells"]
+        for o in cell.get("outputs", [])
+        if o.get("name") == "stdout"
+    )
+    assert "result = 40" in text

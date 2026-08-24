@@ -17,10 +17,10 @@ since Git was not designed for large and/or binary files,
 Calkit uses [DVC](https://dvc.org) to version these file types.
 
 [GitHub](https://github.com) is currently the most popular location to back up
-Git repositories, or repos, in the cloud, but like Git,
+Git repositories, or repos, remotely, but like Git,
 is primarily designed for software development.
 Similar to how Calkit is a layer on top of Git,
-The Calkit Cloud ([calkit.io](https://calkit.io))
+The Calkit hub ([calkit.io](https://calkit.io))
 integrates with GitHub to add a more purpose-built
 interface for research projects.
 It also serves as a default DVC remote,
@@ -35,11 +35,11 @@ for more complex operations.
 In order to start working on a project,
 the project repository must exist on your local machine.
 This can be achieved either by creating a new repo or
-downloading, or "cloning," an existing one from the cloud.
+downloading, or "cloning," an existing one from a remote.
 After a repo exists on your local machine,
 it is typical to repeat the cycle of
 committing new or changed files with a message describing them,
-and then pushing those commits to the cloud.
+and then pushing those commits to the remote.
 This can be achieved with three workflow variants that trade off
 automation for control.
 
@@ -47,7 +47,7 @@ The simplest and most hands-off uses `calkit save`,
 which will automatically make decisions about which files belong in Git
 which belong in DVC, which don't belong in either,
 commit them,
-and push them to the cloud all with a single command:
+and push them to the hub all with a single command:
 
 ```mermaid
 graph LR
@@ -122,7 +122,7 @@ The multi-step equivalent would be:
 - `calkit config remote`
 - `dvc pull`
 
-If the project is hosted on the Calkit Cloud, it can be referenced by
+If the project is hosted on a hub, it can be referenced by
 name rather than Git repo URL. For example:
 
 ```sh
@@ -136,15 +136,18 @@ For example:
 
 ```sh
 $ calkit status
---------------------------- Code (Git) ---------------------------
+---------------------------- Project -----------------------------
+Project status not set. Use "calkit new status" to update.
+
+------------------------------ Git -------------------------------
 On branch main
 nothing to commit, working tree clean
 
---------------------------- Data (DVC) ---------------------------
+------------------------------ DVC -------------------------------
 No changes.
 
-------------------------- Pipeline (DVC) -------------------------
-Data and pipelines are up to date.
+---------------------------- Pipeline ----------------------------
+Pipeline is up to date.
 ```
 
 ### `save`
@@ -167,8 +170,26 @@ Options:
 
 ### `sync`
 
-`calkit sync` will pull from then push to the cloud,
-ensuring both copies are in sync.
+`calkit sync` is a group of commands for syncing with different systems.
+The available targets are:
+
+- `calkit sync git`: sync files stored in Git by pulling and then pushing.
+- `calkit sync dvc`: sync files stored in DVC by pulling and then pushing.
+- `calkit sync overleaf`: sync folders linked to Overleaf projects.
+- `calkit sync all`: sync all registered systems,
+  reporting any that are not set up.
+
+For example, to sync the Git repository only:
+
+```sh
+calkit sync git
+```
+
+To sync every configured system at once:
+
+```sh
+calkit sync all
+```
 
 ### `add`
 
@@ -179,9 +200,52 @@ with Git or DVC and act accordingly.
 
 Options:
 
-- `--to`, `-t`: Manually specify `git` or `dvc` as the tracking mechanism.
+- `--to`, `-t`: Manually specify `git`, `dvc`, or `dvc-zip` as the tracking
+  mechanism.
 - `--commit-message`, `-m`: Create a commit after adding
   and use the provided message.
 - `--auto-commit-message`, `-M`: Commit with an automatically-generated message.
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
+
+## Large folders of many small files
+
+DVC is designed to track individual files efficiently,
+but some workflows produce directories containing many small files,
+e.g., a simulation that writes thousands of timestep output files.
+Tracking each file individually in DVC creates overhead and slows down
+transfers significantly.
+
+For these cases, Calkit supports a `dvc-zip` storage mode,
+where the entire directory is zipped into a single archive,
+tracked by DVC, and automatically unzipped to its workspace location
+as needed.
+Calkit will automatically detect a directory as a `dvc-zip` candidate
+when it contains at least 10 files, exceeds the DVC size threshold,
+and has a small average file size (under 10 MB per file).
+You can also specify it explicitly:
+
+```sh
+calkit add my-output-folder --to dvc-zip
+```
+
+The zip archive is stored in `.calkit/zip/` and tracked by DVC.
+The workspace directory is gitignored and kept out of DVC,
+so only the zip moves between machines.
+After a `calkit pull` or `calkit clone`,
+the directory is automatically unzipped to its original location.
+
+`dvc-zip` can also be used as the storage type for a pipeline stage output
+in `calkit.yaml`:
+
+```yaml
+pipeline:
+  stages:
+    my-stage:
+      kind: python-script
+      script_path: run.py
+      environment: main
+      outputs:
+        - path: results
+          storage: dvc-zip
+```

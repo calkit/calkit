@@ -11,24 +11,294 @@ import subprocess
 from typing import Annotated, Callable
 
 import dotenv
-import git
 import typer
 
 import calkit
-import calkit.environments
-import calkit.matlab
-import calkit.pipeline
-from calkit.check import check_reproducibility
-from calkit.cli import raise_error, warn
+from calkit.cli import AliasGroup, raise_error, warn
 from calkit.core import get_md5
-from calkit.environments import (
-    get_all_conda_lock_fpaths,
-    get_all_docker_lock_fpaths,
-    get_all_venv_lock_fpaths,
-    get_env_lock_fpath,
-)
 
-check_app = typer.Typer(no_args_is_help=True)
+check_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
+
+
+def _juliaup_version_installed(julia_version: str) -> bool:
+    """Return True if juliaup already has the given channel installed locally."""
+    try:
+        result = subprocess.run(
+            ["juliaup", "status"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return False
+    except subprocess.TimeoutExpired:
+        warn("Timed out while running `juliaup status`.")
+        return False
+    if result.returncode != 0:
+        err_output = (result.stderr or result.stdout or "").strip()
+        if err_output:
+            warn(f"`juliaup status` failed: {err_output}")
+        else:
+            warn(
+                f"`juliaup status` failed with exit code {result.returncode}."
+            )
+        return False
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        # Columns: [Default?] Channel Version [Update?]
+        # Default column is either empty or "*", so channel is parts[0] or parts[1]
+        for col in parts[:2]:
+            if col == julia_version:
+                return True
+    return False
+
+
+def _check_julia_env(
+    env_path: str,
+    julia_version: str | None = None,
+    verbose: bool = False,
+    cache_key: str | None = None,
+) -> str:
+    """Check a Julia environment and instantiate only when needed."""
+    abs_env_path = os.path.abspath(env_path)
+    env_fname = os.path.basename(abs_env_path)
+    if env_fname != "Project.toml":
+        raise_error(
+            "Julia environments require a path pointing to Project.toml"
+        )
+    env_dir = os.path.dirname(abs_env_path) or "."
+    env_path_for_cache = os.path.basename(abs_env_path)
+    env = {
+        "kind": "julia",
+        "path": env_path_for_cache,
+        "julia": julia_version or "",
+    }
+    cache_env_name = cache_key or (
+        f"julia::{abs_env_path}::{julia_version or ''}"
+    )
+    if calkit.environments.check_cache(
+        env_name=cache_env_name,
+        env=env,
+        wdir=env_dir,
+        respect_ttl=False,
+    ):
+        if verbose:
+            typer.echo(
+                "Julia environment cache is valid; skipping Pkg.instantiate()"
+            )
+        lock_fpath = calkit.environments.get_env_lock_fpath(
+            env=env,
+            env_name=cache_env_name,
+            wdir=env_dir,
+            as_posix=False,
+        )
+        return lock_fpath or os.path.join(env_dir, "Manifest.toml")
+    if julia_version:
+        if shutil.which("juliaup") is not None:
+            if _juliaup_version_installed(julia_version):
+                if verbose:
+                    typer.echo(
+                        f"Julia {julia_version} is already installed; "
+                        "skipping juliaup add"
+                    )
+            else:
+                cmd = ["juliaup", "add", julia_version]
+                if verbose:
+                    typer.echo(f"Running command: {cmd}")
+                try:
+                    subprocess.run(cmd, check=True)
+                except subprocess.CalledProcessError:
+                    raise_error(
+                        f"Failed to install Julia version {julia_version}"
+                    )
+        else:
+            try:
+                compatible = calkit.julia.current_version_is_compatible(
+                    julia_version
+                )
+            except ValueError as e:
+                raise_error(str(e))
+            if not compatible:
+                raise_error(
+                    "Current Julia version is not compatible with required "
+                    f"version ({julia_version}), and juliaup is not "
+                    "available to install it"
+                )
+    deps_to_add: list[str] = []
+    try:
+        with open(abs_env_path, "r") as f:
+            content = f.read()
+        lines = [line.rstrip() for line in content.splitlines()]
+        deps_section = False
+        deps_found = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped == "[deps]":
+                deps_section = True
+                continue
+            if deps_section:
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    break
+                if stripped and not stripped.startswith("#"):
+                    if "=" in stripped:
+                        deps_found = True
+                        break
+        if not deps_found:
+            for idx, line in enumerate(lines):
+                marker = "# Dependencies (add with Julia's Pkg.add):"
+                if line.strip() == marker and idx + 1 < len(lines):
+                    dep_line = lines[idx + 1].strip()
+                    if dep_line.startswith("#"):
+                        dep_line = dep_line.lstrip("#").strip()
+                    deps_to_add = [
+                        dep.strip()
+                        for dep in dep_line.split(",")
+                        if dep.strip()
+                    ]
+                    break
+    except OSError:
+        deps_to_add = []
+    if deps_to_add:
+        pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
+        cmd = [calkit.julia.get_julia_exe()]
+        if julia_version:
+            cmd.append(f"+{julia_version}")
+        cmd += [
+            f"--project={env_dir}",
+            "-e",
+            f"using Pkg; Pkg.add([{pkg_list}]);",
+        ]
+        if julia_version:
+            try:
+                cmd = calkit.julia.check_version_in_command(cmd)
+            except Exception as e:
+                raise_error(f"Failed to check Julia version: {e}")
+        cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
+        try:
+            subprocess.check_call(
+                cmd,
+                env=os.environ.copy()
+                | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
+            )
+        except subprocess.CalledProcessError:
+            calkit.environments.save_cache(
+                env_name=cache_env_name,
+                env=env,
+                wdir=env_dir,
+                success=False,
+            )
+            raise_error("Failed to add Julia dependencies")
+    cmd = [calkit.julia.get_julia_exe()]
+    if julia_version:
+        cmd.append(f"+{julia_version}")
+    cmd += [
+        f"--project={env_dir}",
+        "-e",
+        # Resolve only when the manifest no longer matches the project
+        # (e.g. a dependency was added, or the manifest was written by a
+        # different Julia version): plain instantiate would install it
+        # as-is and fail later at precompile. A current manifest is
+        # installed exactly as locked, with no registry involved---
+        # resolving one unconditionally can fail spuriously (and would
+        # rewrite the lock). Older Julias without the check keep the
+        # plain instantiate they always had.
+        "using Pkg; "
+        "if hasmethod(Pkg.is_manifest_current, Tuple{String}) && "
+        "Pkg.is_manifest_current(dirname(Base.active_project())) == false; "
+        "Pkg.resolve(); end; "
+        "Pkg.instantiate();",
+    ]
+    if julia_version:
+        try:
+            cmd = calkit.julia.check_version_in_command(cmd)
+        except Exception as e:
+            raise_error(f"Failed to check Julia version: {e}")
+    cmd = calkit.julia.ensure_startup_file_disabled_in_command(cmd)
+    try:
+        subprocess.check_call(
+            cmd,
+            env=os.environ.copy()
+            | {"JULIA_LOAD_PATH": calkit.julia.load_path()},
+        )
+    except subprocess.CalledProcessError:
+        calkit.environments.save_cache(
+            env_name=cache_env_name,
+            env=env,
+            wdir=env_dir,
+            success=False,
+        )
+        raise_error("Failed to check julia environment")
+    calkit.environments.save_cache(
+        env_name=cache_env_name,
+        env=env,
+        wdir=env_dir,
+        success=True,
+    )
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=env,
+        env_name=cache_env_name,
+        wdir=env_dir,
+        as_posix=False,
+    )
+    return lock_fpath or os.path.join(env_dir, "Manifest.toml")
+
+
+def _require_nix_available() -> None:
+    """Ensure the ``nix`` CLI is on PATH, with a friendly error otherwise.
+
+    On Windows we steer users to WSL2 rather than attempting native Nix,
+    which isn't officially supported.
+    """
+    if shutil.which("nix") is not None:
+        return
+    if _platform.system() == "Windows":
+        raise_error(
+            "Nix is not available natively on Windows. Run Calkit inside "
+            "WSL2 (https://learn.microsoft.com/en-us/windows/wsl/install) "
+            "and install Nix there."
+        )
+    raise_error(
+        "The 'nix' command was not found. Install it with "
+        "'calkit install nix' or from https://nixos.org/download."
+    )
+
+
+def check_nix_env(env: dict, verbose: bool = False) -> str:
+    """Materialize / refresh ``flake.lock`` next to the flake.
+
+    Running ``nix flake lock`` writes ``flake.lock`` if missing and is a
+    no-op when the lock is already up-to-date. The lock file is what we
+    track as a DVC dep, so an out-of-date lock invalidates dependent
+    stages on the next ``calkit run``.
+    """
+    env_path = env.get("path")
+    if env_path is None:
+        raise_error("Nix environments require a path pointing to flake.nix")
+    assert isinstance(env_path, str)
+    if os.path.basename(env_path) != "flake.nix":
+        raise_error("Nix environments require a path pointing to flake.nix")
+    if not os.path.isfile(env_path):
+        raise_error(f"Nix flake not found: {env_path}")
+    _require_nix_available()
+    env_dir = os.path.dirname(os.path.abspath(env_path)) or "."
+    cmd = [
+        "nix",
+        "--extra-experimental-features",
+        "nix-command flakes",
+        "flake",
+        "lock",
+    ]
+    if verbose:
+        typer.echo(f"Running command: {cmd} (cwd={env_dir})")
+    try:
+        subprocess.check_call(cmd, cwd=env_dir)
+    except subprocess.CalledProcessError:
+        raise_error("Failed to lock Nix flake")
+    lock_fpath = os.path.join(os.path.dirname(env_path), "flake.lock")
+    return lock_fpath
 
 
 @check_app.command(name="repro")
@@ -38,8 +308,10 @@ def check_repro(
     ] = ".",
 ) -> None:
     """Check the reproducibility of a project."""
+    from calkit.check import check_reproducibility
+
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
-    typer.echo(res.to_pretty().encode("utf-8", errors="replace"))
+    calkit.echo(res.to_pretty())
 
 
 @check_app.command(
@@ -57,8 +329,18 @@ def check_environment(
     ] = False,
 ) -> str | None:
     """Check that an environment is up-to-date."""
+    from calkit.environments import (
+        get_all_conda_lock_fpaths,
+        get_all_docker_lock_fpaths,
+        get_all_venv_lock_fpaths,
+        get_default_venv_prefix,
+        get_env_lock_fpath,
+        write_scheduler_env_lock,
+        write_system_env_lock,
+    )
+
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -116,7 +398,7 @@ def check_environment(
             quiet=not verbose,
         )
     elif env["kind"] == "pixi":
-        cmd = ["pixi", "lock"]
+        cmd = ["pixi", "install"]
         env_dir = os.path.dirname(env["path"])
         if env_dir:
             cmd += ["--manifest-path", env["path"]]
@@ -138,12 +420,14 @@ def check_environment(
         except subprocess.CalledProcessError:
             raise_error("Failed to check uv environment")
     elif (kind := env["kind"]) in ["uv-venv", "venv"]:
-        if "prefix" not in env:
-            raise_error("venv environments require a prefix")
         if "path" not in env:
             raise_error("venv environments require a path")
-        prefix = env["prefix"]
-        path = env["path"]
+        path = os.path.expandvars(env["path"])
+        # Resolve the prefix on the fly if it isn't pinned in calkit.yaml
+        prefix = env.get("prefix")
+        if prefix is None:
+            prefix = get_default_venv_prefix(envs, path, env_name)
+        prefix = os.path.expandvars(prefix)
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )
@@ -162,12 +446,6 @@ def check_environment(
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
             alt_lock_fpaths=alt_lock_fpaths,
             verbose=verbose,
-        )
-    elif env["kind"] == "ssh":
-        # TODO: How to check SSH environments?
-        # Maybe just check that we can connect
-        raise_error(
-            "Environment checking not implemented for SSH environments"
         )
     elif env["kind"] == "renv":
         env_path = env.get("path")
@@ -190,114 +468,151 @@ def check_environment(
         julia_version = env.get("julia")
         if julia_version is None:
             raise_error("Julia environments require a Julia version")
-        env_fname = os.path.basename(env_path)
-        if not env_fname == "Project.toml":
-            raise_error(
-                "Julia environments require a path pointing to Project.toml"
-            )
-        # First ensure the Julia version exists
-        if shutil.which("juliaup") is not None:
-            cmd = ["juliaup", "add", julia_version]
-            if verbose:
-                typer.echo(f"Running command: {cmd}")
+        _check_julia_env(
+            env_path=env_path,
+            julia_version=julia_version,
+            verbose=verbose,
+            cache_key=env_name,
+        )
+    elif env["kind"] in ("slurm", "pbs"):
+        # Job-scheduler envs have no external manifest to validate; the
+        # "check" is just writing a deterministic JSON lock file from the
+        # env config so DVC stages that depend on the env get invalidated
+        # when the config changes.
+        write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == "system":
+        # Nothing is installed or built for a system env; checking it means
+        # making sure the machine is as the project requires, then reading
+        # the properties it declared it depends on and recording them, so
+        # stages depending on the env see them change.
+        if calkit.environments.env_is_local(env):
             try:
-                subprocess.run(cmd, check=True)
-            except subprocess.CalledProcessError:
-                raise_error(f"Failed to install Julia version {julia_version}")
-        else:
-            try:
-                compatible = calkit.julia.current_version_is_compatible(
-                    julia_version
+                calkit.check_requirements(
+                    requirements=env.get("requirements", [])
                 )
+                write_system_env_lock(env_name=env_name, env=env)
             except ValueError as e:
-                raise_error(str(e))
-            if not compatible:
-                raise_error(
-                    f"Current Julia version is not compatible with required "
-                    f"version ({julia_version}), and juliaup is not available "
-                    "to install it"
-                )
-        env_dir = os.path.dirname(env_path)
-        if not env_dir:
-            env_dir = "."
-        # If auto-detection couldn't resolve UUIDs, Project.toml includes a
-        # commented dependency list
-        # In that case, add those packages with
-        # Pkg.add before instantiating so the env is usable at run time
-        deps_to_add: list[str] = []
-        try:
-            with open(env_path, "r") as f:
-                content = f.read()
-            lines = [line.rstrip() for line in content.splitlines()]
-            deps_section = False
-            deps_found = False
-            for line in lines:
-                stripped = line.strip()
-                if stripped == "[deps]":
-                    deps_section = True
-                    continue
-                if deps_section:
-                    if stripped.startswith("[") and stripped.endswith("]"):
-                        break
-                    if stripped and not stripped.startswith("#"):
-                        if "=" in stripped:
-                            deps_found = True
-                            break
-            if not deps_found:
-                for idx, line in enumerate(lines):
-                    marker = "# Dependencies (add with Julia's Pkg.add):"
-                    if line.strip() == marker and idx + 1 < len(lines):
-                        dep_line = lines[idx + 1].strip()
-                        if dep_line.startswith("#"):
-                            dep_line = dep_line.lstrip("#").strip()
-                        deps_to_add = [
-                            dep.strip()
-                            for dep in dep_line.split(",")
-                            if dep.strip()
-                        ]
-                        break
-        except OSError:
-            deps_to_add = []
-        if deps_to_add:
-            pkg_list = ", ".join(f'"{dep}"' for dep in deps_to_add)
-            cmd = [
-                "julia",
-                f"+{julia_version}",
-                f"--project={env_dir}",
-                "-e",
-                f"using Pkg; Pkg.add([{pkg_list}]);",
-            ]
+                # A requirement that isn't met, or a property that can't be
+                # locked -- a misspelled one, or a tool that isn't
+                # installed. Both are the user's to fix. The remote branch
+                # below already reports these; this one used to let them
+                # out as a traceback.
+                raise_error(f"Environment '{env_name}': {e}")
+        else:
+            # For a host that isn't this one, checking means getting to the
+            # point where we can actually reach it -- better sorted out here
+            # than partway through a pipeline -- and reading the properties
+            # from that machine, since those are the ones the results
+            # depend on.
+            import calkit.workspace as workspace
+            from calkit.dependencies import _is_interactive
+
+            interactive = _is_interactive()
+            ck_info = calkit.load_calkit_info()
             try:
-                cmd = calkit.julia.check_version_in_command(cmd)
-            except Exception as e:
-                raise_error(f"Failed to check Julia version: {e}")
-            try:
-                subprocess.check_call(
-                    cmd,
-                    env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"},
+                # Anything written as ${CK_SSH_HOST} is the first thing to
+                # be missing for anyone but the project's author, since a
+                # project shares its calkit.yaml but not its .env
+                env = dict(env)
+                for key in workspace.CONNECTION_FIELDS:
+                    if isinstance(env.get(key), str):
+                        env[key] = workspace.expand_with_prompts(
+                            env[key],
+                            interactive=interactive,
+                            described_as=(
+                                f"environment '{env_name}' "
+                                f"{key.replace('_', ' ')}"
+                            ),
+                        )
+                ws = workspace.Workspace.from_env(
+                    env=env,
+                    env_name=env_name,
+                    ck_info=ck_info,
                 )
-            except subprocess.CalledProcessError:
-                raise_error("Failed to add Julia dependencies")
-        cmd = [
-            "julia",
-            f"+{julia_version}",
-            f"--project={env_dir}",
-            "-e",
-            "using Pkg; Pkg.instantiate();",
-        ]
-        try:
-            cmd = calkit.julia.check_version_in_command(cmd)
-        except Exception as e:
-            raise_error(f"Failed to check Julia version: {e}")
-        try:
-            subprocess.check_call(
-                cmd, env=os.environ.copy() | {"JULIA_LOAD_PATH": "@:@stdlib"}
-            )
-        except subprocess.CalledProcessError:
-            raise_error("Failed to check julia environment")
+                # Reassigned: a key created during setup belongs to the
+                # workspace we go on to use
+                ws = workspace.ensure_reachable(
+                    ws, interactive=interactive, verbose=verbose
+                )
+                # Calkit is needed there to read the machine's properties,
+                # and to activate an inner env, but an environment that
+                # only dispatches a command never calls it. A declared
+                # machine ID needs it for the same reason a lock does: the
+                # far end is what reports its own ID, so it has to be asked.
+                # Requirements only need it when one of them asks about the
+                # machine itself rather than about what's installed on it.
+                locks = bool(env.get("lock"))
+                requirements = env.get("requirements", []) or []
+                needs_system_info = (
+                    locks
+                    or bool(ws.machine_id)
+                    or workspace.requirements_need_system_info(requirements)
+                )
+                workspace.ensure_calkit_installed(
+                    ws,
+                    interactive=interactive,
+                    required=needs_system_info,
+                    verbose=verbose,
+                )
+                system_info = None
+                if needs_system_info:
+                    system_info = workspace.remote_system_info(ws)
+                    # Before anything else is decided from it, so a
+                    # mismatched machine is reported rather than measured
+                    # and recorded as what results depend on
+                    workspace.verify_machine_id(ws, system_info)
+                # Before the lock: a machine that doesn't meet the project's
+                # requirements shouldn't have its properties written down as
+                # though stages had run there.
+                workspace.check_requirements(
+                    ws,
+                    requirements,
+                    system_info=system_info,
+                    verbose=verbose,
+                )
+                if locks:
+                    write_system_env_lock(
+                        env_name=env_name,
+                        env=env,
+                        system_info=system_info,
+                    )
+            except ValueError as e:
+                raise_error(f"Environment '{env_name}': {e}")
+    elif env["kind"] == "nix":
+        check_nix_env(env=env, verbose=verbose)
     else:
         raise_error(f"Environment kind '{env['kind']}' not supported")
     return get_env_lock_fpath(env=env, env_name=env_name, as_posix=False)
+
+
+@check_app.command(
+    name="julia-env",
+    help=(
+        "Check a Julia environment and instantiate only when project, "
+        "manifest, and package cache state have changed."
+    ),
+)
+def check_julia_env(
+    env_path: Annotated[
+        str,
+        typer.Argument(help="Path to Julia Project.toml file."),
+    ] = "Project.toml",
+    julia_version: Annotated[
+        str | None,
+        typer.Option(
+            "--julia",
+            help="Julia version to enforce (e.g., 1.11).",
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+) -> str:
+    return _check_julia_env(
+        env_path=env_path,
+        julia_version=julia_version,
+        verbose=verbose,
+    )
 
 
 @check_app.command(
@@ -310,11 +625,15 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
         return
+    # Set any project-level environmental variables before checking
+    # environments
+    dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    calkit.set_env_vars(ck_info=ck_info, cli=True)
     failures = []
     for env_name, env in envs.items():
         if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
@@ -326,6 +645,12 @@ def check_environments(
         typer.echo(f"Checking environment: '{env_name}'")
         try:
             check_environment(env_name=env_name, verbose=verbose)
+        except typer.Exit:
+            # The check reported its own reason through raise_error, which
+            # has already printed it. Repeating it here would replace a
+            # real message ("Unknown system property to lock: ...") with
+            # the exit code, since that is all this exception carries.
+            failures.append(env_name)
         except Exception as e:
             warn(f"Error checking environment '{env_name}': {e}")
             failures.append(env_name)
@@ -333,6 +658,41 @@ def check_environments(
         raise_error(
             f"Failed to check the following environments: {', '.join(failures)}"
         )
+
+
+def _renv_snapshot_from_description(env_dir: str, verbose: bool) -> None:
+    """Install packages from DESCRIPTION and (re)write renv.lock.
+
+    Used to create the initial lock, to add newly declared packages, and as a
+    fallback when an existing lock can't be restored (e.g. its versions don't
+    build against the installed R version).
+    """
+    hydrate_cmd = [
+        "Rscript",
+        "--vanilla",
+        "-e",
+        "renv::load(); renv::hydrate()",
+    ]
+    if verbose:
+        typer.echo(f"Running: {' '.join(hydrate_cmd)}")
+    try:
+        subprocess.check_call(hydrate_cmd, cwd=env_dir)
+    except subprocess.CalledProcessError:
+        # Hydrate may fail if some packages aren't available; snapshot anyway
+        if verbose:
+            typer.echo("Warning: hydrate had issues, continuing to snapshot")
+    snapshot_cmd = [
+        "Rscript",
+        "--vanilla",
+        "-e",
+        "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
+    ]
+    if verbose:
+        typer.echo(f"Running: {' '.join(snapshot_cmd)}")
+    try:
+        subprocess.check_call(snapshot_cmd, cwd=env_dir)
+    except subprocess.CalledProcessError:
+        raise_error(f"Failed to snapshot renv in {env_dir}")
 
 
 @check_app.command(name="renv")
@@ -398,136 +758,14 @@ def check_renv(
             subprocess.check_call(init_cmd, cwd=env_dir)
         except subprocess.CalledProcessError:
             raise_error(f"Failed to initialize renv in {env_dir}")
-        # Use hydrate to install packages from DESCRIPTION and snapshot
+        # Install packages from DESCRIPTION and write the lock file
         if verbose:
             typer.echo("Setting up environment from DESCRIPTION")
-        hydrate_cmd = [
-            "Rscript",
-            "--vanilla",
-            "-e",
-            "renv::load(); renv::hydrate()",
-        ]
-        if verbose:
-            typer.echo(f"Running: {' '.join(hydrate_cmd)}")
-        try:
-            subprocess.check_call(hydrate_cmd, cwd=env_dir)
-        except subprocess.CalledProcessError:
-            # Hydrate might fail if packages aren't available, continue anyway
-            if verbose:
-                typer.echo(
-                    "Warning: hydrate had issues, continuing to snapshot"
-                )
-        # Always snapshot after hydrate to create lock file from DESCRIPTION
-        if verbose:
-            typer.echo("Creating lock file from DESCRIPTION")
-        snapshot_cmd = [
-            "Rscript",
-            "--vanilla",
-            "-e",
-            "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
-        ]
-        if verbose:
-            typer.echo(f"Running: {' '.join(snapshot_cmd)}")
-        try:
-            subprocess.check_call(snapshot_cmd, cwd=env_dir)
-        except subprocess.CalledProcessError:
-            raise_error(f"Failed to snapshot renv in {env_dir}")
+        _renv_snapshot_from_description(env_dir, verbose=verbose)
     else:
-        # Lock file exists, check if it's in sync with DESCRIPTION
-        if verbose:
-            typer.echo("Checking if lockfile is in sync with DESCRIPTION")
-        # Check status to see if lockfile needs updating
-        status_cmd = [
-            "Rscript",
-            "--vanilla",
-            "-e",
-            "renv::load(); status <- renv::status(); cat(status$synchronized)",
-        ]
-        try:
-            result = subprocess.run(
-                status_cmd,
-                cwd=env_dir,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            lockfile_synced = "TRUE" in result.stdout
-        except subprocess.CalledProcessError:
-            # If status fails, assume we need to update
-            lockfile_synced = False
-            if verbose:
-                typer.echo("Warning: status check failed, will update lock")
-        if not lockfile_synced:
-            if verbose:
-                typer.echo("Lockfile out of sync, updating from DESCRIPTION")
-            # Use hydrate to update from DESCRIPTION
-            hydrate_cmd = [
-                "Rscript",
-                "--vanilla",
-                "-e",
-                "renv::load(); renv::hydrate()",
-            ]
-            if verbose:
-                typer.echo(f"Running: {' '.join(hydrate_cmd)}")
-            try:
-                subprocess.check_call(hydrate_cmd, cwd=env_dir)
-            except subprocess.CalledProcessError:
-                if verbose:
-                    typer.echo(
-                        "Warning: hydrate had issues, continuing to snapshot"
-                    )
-            # Snapshot to update lock
-            snapshot_cmd = [
-                "Rscript",
-                "--vanilla",
-                "-e",
-                "renv::load(); renv::snapshot(type='explicit', prompt=FALSE)",
-            ]
-            if verbose:
-                typer.echo(f"Running: {' '.join(snapshot_cmd)}")
-            try:
-                subprocess.check_call(snapshot_cmd, cwd=env_dir)
-            except subprocess.CalledProcessError:
-                if verbose:
-                    typer.echo("Warning: snapshot failed, using existing lock")
-        else:
-            if verbose:
-                typer.echo("Lockfile is already in sync with DESCRIPTION")
-    # Check if library needs restoring
-    if verbose:
-        typer.echo("Checking if library is in sync with lockfile")
-    lib_status_cmd = [
-        "Rscript",
-        "--vanilla",
-        "-e",
-        (
-            "renv::load(); "
-            "status <- tryCatch({"
-            "  renv::status();"
-            "  cat('synchronized');"
-            "}, error = function(e) {"
-            "  cat('needs_restore');"
-            "})"
-        ),
-    ]
-    try:
-        result = subprocess.run(
-            lib_status_cmd,
-            cwd=env_dir,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        needs_restore = "needs_restore" in result.stdout or (
-            "synchronized" not in result.stdout
-        )
-    except subprocess.CalledProcessError:
-        # If check fails, restore to be safe
-        needs_restore = True
-        if verbose:
-            typer.echo("Warning: library status check failed, will restore")
-
-    if needs_restore:
+        # A lock file exists, so treat it as the source of truth: restore the
+        # library to the exact recorded versions rather than re-resolving from
+        # DESCRIPTION (which would bump packages and overwrite the lock).
         if verbose:
             typer.echo("Restoring library from lockfile")
         restore_cmd = [
@@ -540,11 +778,54 @@ def check_renv(
             typer.echo(f"Running: {' '.join(restore_cmd)}")
         try:
             subprocess.check_call(restore_cmd, cwd=env_dir)
+            restored = True
         except subprocess.CalledProcessError:
-            raise_error(f"Failed to restore renv in {env_dir}")
-    else:
-        if verbose:
-            typer.echo("Library is already in sync with lockfile")
+            restored = False
+        if not restored:
+            # The locked versions couldn't be installed (e.g. they don't build
+            # against the installed R version). Fall back to re-resolving from
+            # DESCRIPTION, which updates renv.lock to a working set.
+            warn(
+                f"Could not restore renv environment in {env_dir} from "
+                "renv.lock; the locked versions may be incompatible with the "
+                "installed R version. Re-resolving from DESCRIPTION and "
+                "updating renv.lock."
+            )
+            _renv_snapshot_from_description(env_dir, verbose=verbose)
+        else:
+            # Only update the lock if DESCRIPTION declares dependencies the
+            # lock doesn't cover (e.g. the user added a package). After the
+            # restore the library matches the lock, so status is unsynchronized
+            # only when DESCRIPTION and the lock genuinely disagree---not merely
+            # because packages were missing on a fresh checkout.
+            if verbose:
+                typer.echo("Checking if DESCRIPTION matches lockfile")
+            status_cmd = [
+                "Rscript",
+                "--vanilla",
+                "-e",
+                "renv::load(); cat(renv::status()$synchronized)",
+            ]
+            try:
+                result = subprocess.run(
+                    status_cmd,
+                    cwd=env_dir,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                in_sync = "TRUE" in result.stdout
+            except subprocess.CalledProcessError:
+                # If status fails, keep the lock rather than risk clobbering it
+                in_sync = True
+                if verbose:
+                    typer.echo("Warning: status check failed, keeping lock")
+            if not in_sync:
+                if verbose:
+                    typer.echo("DESCRIPTION changed; updating lockfile")
+                _renv_snapshot_from_description(env_dir, verbose=verbose)
+            elif verbose:
+                typer.echo("Lockfile is already in sync with DESCRIPTION")
 
 
 @check_app.command(name="docker-env")
@@ -734,15 +1015,26 @@ def check_docker_env(
                     typer.echo(f"Found modified dependency: {dep}")
                     rebuild_or_pull = True
                     break
+
+    def delete_lock_on_failure() -> None:
+        if lock_fpath and os.path.exists(lock_fpath):
+            os.remove(lock_fpath)
+
     if fpath is not None and rebuild_or_pull:
-        wdir, fname = os.path.split(fpath)
-        if not wdir:
-            wdir = None
-        cmd = ["docker", "build", "-t", tag, "-f", fname]
+        dockerfile_dir, dockerfile_name = os.path.split(fpath)
+        if not dockerfile_dir:
+            dockerfile_dir = None
+        cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
         if platform is not None:
             cmd += ["--platform", platform]
         cmd.append(".")
-        subprocess.check_output(cmd, cwd=wdir)
+        try:
+            subprocess.check_output(cmd, cwd=dockerfile_dir)
+        except subprocess.CalledProcessError:
+            delete_lock_on_failure()
+            raise_error(
+                f"Failed to build Docker image with tag {tag} from {fpath}"
+            )
     elif fpath is None and rebuild_or_pull:
         # First try to pull by repo digest
         pulled = False
@@ -759,6 +1051,7 @@ def check_docker_env(
                     subprocess.check_output(tag_cmd)
                     pulled = True
                 except subprocess.CalledProcessError:
+                    delete_lock_on_failure()
                     warn(
                         f"Failed to pull image by digest: {image_with_digest}; "
                         "falling back to pulling by tag"
@@ -770,6 +1063,7 @@ def check_docker_env(
             try:
                 subprocess.check_output(cmd)
             except subprocess.CalledProcessError:
+                delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
     # Write the lock file
     inspect = get_docker_inspect()
@@ -851,7 +1145,7 @@ def check_conda_env(
     try:
         calkit.conda.check_env(
             env_fpath=env_fpath,
-            output_fpath=output_fpath,
+            lock_fpath=output_fpath,
             alt_lock_fpaths=alt_lock_fpaths,
             alt_lock_fpaths_delete=alt_lock_fpaths_delete,
             log_func=log_func,
@@ -931,6 +1225,9 @@ def check_venv(
         pip_install_args += f" --python {python}"
     # Ensure prefix is natively formatted for the OS
     prefix = os.path.normpath(prefix)
+    prefix_full_path = (
+        prefix if os.path.isabs(prefix) else os.path.join(wdir or ".", prefix)
+    )
 
     def create_venv() -> None:
         if verbose:
@@ -940,13 +1237,47 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
         if not os.path.isfile(gitignore_fpath):
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
 
-    if not os.path.isdir(prefix):
+    def venv_was_moved() -> bool:
+        """Check if the venv's activate script points somewhere else.
+
+        Renaming or moving a project leaves the absolute path baked into the
+        activate script pointing at the old location, so activating prepends a
+        nonexistent directory to PATH and commands silently resolve to whatever
+        is outside the environment.
+        """
+        if _platform.system() == "Windows":
+            activate_fpath = os.path.join(
+                prefix_full_path, "Scripts", "activate.bat"
+            )
+        else:
+            activate_fpath = os.path.join(prefix_full_path, "bin", "activate")
+        if not os.path.isfile(activate_fpath):
+            return True
+        with open(activate_fpath) as f:
+            content = f.read()
+        this_prefix = os.path.abspath(prefix_full_path)
+        return os.path.normcase(this_prefix) not in os.path.normcase(content)
+
+    if not os.path.isdir(prefix_full_path):
         create_venv()
+    elif venv_was_moved():
+        if not quiet:
+            typer.echo(f"Recreating {kind} at {prefix} since it was moved")
+        # uv refuses to create over an existing env, and packages are
+        # reinstalled from the lock file below
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            # Removal can fail if the environment is in use, e.g., on Windows,
+            # where files can't be removed while open, in which case we keep
+            # it and let the install below attempt a rebuild
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -1014,16 +1345,14 @@ def check_venv(
                 typer.echo(
                     f"Removing existing {kind} at {prefix} and rebuilding"
                 )
-            prefix_full_path = (
-                prefix
-                if os.path.isabs(prefix)
-                else os.path.join(wdir or ".", prefix)
-            )
             if os.path.isdir(prefix_full_path):
+                # This can fail if the environment is in use, e.g., on
+                # Windows, where files can't be removed while open, in which
+                # case we keep it and fall back to rebuilding from the spec
                 shutil.rmtree(prefix_full_path)
             create_venv()
             pip_install_and_freeze(dep_file_txt)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, OSError):
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"
@@ -1079,24 +1408,41 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="dependencies")
-@check_app.command(name="deps")
-def check_dependencies(
+@check_app.command(
+    name="deps|dependencies",
+    hidden=True,
+    help=(
+        "Check that a project's system-level requirements are met "
+        "(alias for 'reqs')."
+    ),
+)
+@check_app.command(name="reqs|requirements")
+def check_project_requirements(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
+    no_cache: Annotated[
+        bool,
+        typer.Option(
+            "--no-cache",
+            help=(
+                "Re-probe every setup requirement, ignoring (and clearing) "
+                "the cache at .calkit/local/dep-checks.sqlite."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Check that a project's system-level dependencies are set up
-    correctly.
-    """
-    typer.echo("Checking project dependencies")
+    """Check that a project's system-level requirements are met."""
+    typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    if no_cache:
+        calkit.dependencies.cache_clear()
     try:
-        calkit.check_system_deps()
+        calkit.check_requirements(use_cache=not no_cache)
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
 
 
 @check_app.command(name="env-vars")
@@ -1109,39 +1455,29 @@ def check_env_vars(
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
-    deps = ck_info.get("dependencies", [])
+    deps = calkit.get_requirements(ck_info)
     env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
     for name in env_var_dep_names:
         if verbose:
             typer.echo(f"Checking for environmental variable '{name}'")
-        attrs = {}
+        # Pull the dep's attrs to honor any per-var default.
+        attrs: dict = {}
         for dep in deps:
-            if isinstance(dep, dict) and "name" in dep:
+            if isinstance(dep, dict) and dep.get("name") == name:
                 attrs = dep
                 break
-            elif isinstance(dep, dict) and list(dep.keys()) == [name]:
-                attrs = dep[name]
+            if isinstance(dep, dict) and list(dep.keys()) == [name]:
+                attrs = dep[name] or {}
                 break
         if name not in os.environ:
             typer.echo(f"Missing env var '{name}'")
-            if "default" in attrs:
-                default = attrs["default"]
-            else:
-                default = None
-            value = typer.prompt(
-                f"Enter a value for {name}", default=default, type=str
+            value = calkit.dependencies.prompt_and_store_env_var(
+                name, default=attrs.get("default")
             )
-            dotenv.set_key(
-                dotenv_path=".env", key_to_set=name, value_to_set=value
-            )
-    # Ensure that .env is ignored by git
-    repo = git.Repo()
-    if not repo.ignored(".env"):
-        typer.echo("Adding .env to .gitignore")
-        with open(".gitignore", "a") as f:
-            f.write("\n.env\n")
+            if value is None:
+                raise_error(f"No value provided for '{name}'")
     message = "✅ All set!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
 
 
 @check_app.command(name="pipeline")
@@ -1171,7 +1507,7 @@ def check_pipeline(
         if stage_name.startswith("_"):
             raise_error("Stage names cannot start with an underscore")
     message = "✅ This project's pipeline is defined correctly!"
-    typer.echo(message.encode("utf-8", errors="replace"))
+    calkit.echo(message)
     if compile_to_dvc:
         typer.echo("Attempting to compile to DVC stages")
         try:

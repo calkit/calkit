@@ -5,20 +5,20 @@ change is pushed, either to the main branch or on a pull request,
 using GitHub Actions.
 The latter allows for inspection of outputs before merging into main.
 
-To get started, generate a DVC token and set it in your GitHub Actions
-secrets as `CALKIT_DVC_TOKEN`,
-either at your account or project level.
-On calkit.io, there are shortcuts on the project page for managing both
-Calkit tokens and GitHub Actions secrets:
+Add a Calkit GitHub Actions workflow to the project with:
 
-![Project quick actions links](img/quick-actions.png)
+```sh
+calkit update github-actions
+```
 
-![DVC token](img/latex-codespaces/new-token.png)
+Note that this command can be run at any time to update to the latest
+recommended workflow configuration.
+The action is pinned to the version of Calkit that wrote the workflow,
+so after upgrading Calkit, rerun the command to move the pin.
+If the workflow has been customized, only the action's version is updated,
+and everything else in it is left alone.
 
-![Actions repo secrets](img/actions-repo-secrets.png)
-
-Next, add a workflow to the project in the `.github/workflows` folder.
-For example, we can put the content below into `.github/workflows/run.yml`:
+Inside `.github/workflows/run-calkit.yml` you'll then see something like:
 
 ```yaml
 name: Run pipeline
@@ -28,9 +28,11 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: write
+  id-token: write
 
 # Make sure we only ever run one per branch so we don't have issues pushing
 # after running the pipeline
@@ -57,9 +59,7 @@ jobs:
       - name: Install Calkit
         run: uv tool install calkit-python
       - name: Run Calkit
-        uses: calkit/run-action@v1
-        with:
-          dvc_token: ${{ secrets.CALKIT_DVC_TOKEN }}
+        uses: calkit/calkit/actions/run@main
 ```
 
 This particular example installs Calkit with uv,
@@ -79,5 +79,6 @@ to the same branch at the same time.
 
 It's possible to configure the action to not save results, e.g., if you
 just want to check that the pipeline can run without errors.
-See the [documentation](https://github.com/marketplace/actions/run-calkit)
+See the
+[documentation](https://github.com/calkit/calkit/tree/main/actions/run)
 for all available options.

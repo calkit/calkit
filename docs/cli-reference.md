@@ -1,3 +1,3711 @@
 # CLI reference
 
-Use `calkit --help` to see all the available commands and options.
+<!-- prettier-ignore -->
+!!! note
+    `ck` is an abbreviated alias for the `calkit` executable.
+    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
+
+## Top-level commands
+
+| Command                                          | Description                                                                                                  |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| [`init`](#top-command-init)                      | Initialize the current working directory.                                                                    |
+| [`clone`](#top-command-clone)                    | Clone or download a copy of a project.                                                                       |
+| [`status\|st`](#top-command-status-st)           | View status (project, version control, and/or pipeline).                                                     |
+| [`diff`](#top-command-diff)                      | Get a unified Git and DVC diff.                                                                              |
+| [`add`](#top-command-add)                        | Add paths to the repo.                                                                                       |
+| [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
+| [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
+| [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
+| [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
+| [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
+| [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
+| [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
+| [`manual-step`](#top-command-manual-step)        | Execute a manual step.                                                                                       |
+| [`xenv\|runenv`](#top-command-xenv-runenv)       | Execute a command in an environment.                                                                         |
+| [`install`](#top-command-install)                | Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform. |
+| [`xproc\|runproc`](#top-command-xproc-runproc)   | Execute a procedure.                                                                                         |
+| [`calc`](#top-command-calc)                      | Run a project's calculation.                                                                                 |
+| [`set-env-var`](#top-command-set-env-var)        | Set an environmental variable for the project in its '.env' file.                                            |
+| [`upgrade`](#top-command-upgrade)                | Upgrade Calkit.                                                                                              |
+| [`switch-branch`](#top-command-switch-branch)    | Switch to a different branch.                                                                                |
+| [`stash`](#top-command-stash)                    | Stash or restore workspace changes including dvc-zip tracked dirs.                                           |
+| [`dvc`](#top-command-dvc)                        | Run a command with the DVC CLI.                                                                              |
+| [`jupyter`](#top-command-jupyter)                | Run a command with the Jupyter CLI.                                                                          |
+| [`map-paths`](#top-command-map-paths)            | Map paths in a project.                                                                                      |
+| [`xr`](#top-command-xr)                          | Execute a command and if successful, record in the pipeline.                                                 |
+| [`config`](#command-group-config)                | Configure Calkit.                                                                                            |
+| [`new\|create`](#command-group-new-create)       | Create a new Calkit object.                                                                                  |
+| [`delete\|rm`](#command-group-delete-rm)         | Delete a Calkit object.                                                                                      |
+| [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
+| [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
+| [`import`](#command-group-import)                | Import objects.                                                                                              |
+| [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
+| [`update`](#command-group-update)                | Update objects.                                                                                              |
+| [`check`](#command-group-check)                  | Check things.                                                                                                |
+| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
+| [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
+| [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
+| [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
+| [`dev`](#command-group-dev)                      | Developer tools.                                                                                             |
+| [`sync`](#command-group-sync)                    | Sync with external systems.                                                                                  |
+
+## Top-level command details
+
+<a id="top-command-init"></a>
+
+### `calkit init`
+
+Initialize the current working directory.
+
+Usage:
+
+```text
+calkit init [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                               |
+| --------------- | ------- | -------- | ------- | --------------------------------------------------------- |
+| `--force`, `-f` | boolean | no       | False   | Re-initialize even if the project is already initialized. |
+| `--no-commit`   | boolean | no       | False   | Stage the initial files rather than committing them.      |
+
+<a id="top-command-clone"></a>
+
+### `calkit clone`
+
+Clone or download a copy of a project.
+
+Usage:
+
+```text
+calkit clone [OPTIONS] URL [LOCATION]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                          |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------- |
+| `url`      | text | yes      |         | Repo URL.                                            |
+| `location` | text | no       |         | Location to clone to (default will be ./{repo_name}) |
+
+Options:
+
+| Option               | Type    | Required | Default | Description                                       |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------- |
+| `--ssh`              | boolean | no       | False   | Use SSH with Git.                                 |
+| `--no-config-remote` | boolean | no       | False   | Do not automatically configure Calkit DVC remote. |
+| `--no-dvc-pull`      | boolean | no       | False   | Do not pull DVC objects.                          |
+| `--no-recursive`     | boolean | no       | False   | Do not recursively clone submodules.              |
+
+<a id="top-command-status-st"></a>
+
+### `calkit status|st`
+
+View status (project, version control, and/or pipeline).
+
+Usage:
+
+```text
+calkit status|st [OPTIONS] [TARGETS...]
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                                            |
+| --------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------- |
+| `targets` | text | no       |         | Optional targets to check status for. These may be pipeline stage names or repo paths. |
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                                                                                                  |
+| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
+| `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
+| `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                       |
+
+<a id="top-command-diff"></a>
+
+### `calkit diff`
+
+Get a unified Git and DVC diff.
+
+Usage:
+
+```text
+calkit diff [OPTIONS]
+```
+
+Options:
+
+| Option     | Type    | Required | Default | Description                             |
+| ---------- | ------- | -------- | ------- | --------------------------------------- |
+| `--staged` | boolean | no       | False   | Show a diff from files staged with Git. |
+
+<a id="top-command-add"></a>
+
+### `calkit add`
+
+Add paths to the repo.
+
+Code will be added to Git and data will be added to DVC.
+
+Note: This will enable the 'autostage' feature of DVC, automatically adding any .dvc files to Git when adding to DVC.
+
+Usage:
+
+```text
+calkit add [OPTIONS] PATHS...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `paths`  | text | yes      |         |             |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                          |
+| ------------------------ | ------- | -------- | ------- | ---------------------------------------------------- |
+| `-m`, `--commit-message` | text    | no       |         | Automatically commit and use this as a message.      |
+| `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.      |
+| `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                                 |
+| `--push`                 | boolean | no       | False   | Push after committing.                               |
+| `--to`, `-t`             | text    | no       |         | System with which to add (git, dvc, or dvc-zip).     |
+| `--dry-run`, `--dry`     | boolean | no       | False   | Show what would be added without actually adding it. |
+
+<a id="top-command-commit"></a>
+
+### `calkit commit`
+
+Commit a change to the repo.
+
+Usage:
+
+```text
+calkit commit [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------ |
+| `--all`, `-a`     | boolean | no       | False   | Automatically stage all changed files.     |
+| `--message`, `-m` | text    | no       |         | Commit message.                            |
+| `--push`          | boolean | no       | False   | Push to both Git and DVC after committing. |
+
+<a id="top-command-save-sv"></a>
+
+### `calkit save|sv`
+
+Save paths by committing and pushing.
+
+This is essentially git/dvc add, commit, and push in one step.
+
+Usage:
+
+```text
+calkit save|sv [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                  |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `paths`  | text | no       |         | Paths to add and commit. If not provided, will default to any changed files that have been added previously. |
+
+Options:
+
+| Option                 | Type    | Required | Default | Description                                            |
+| ---------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--all`, `-a`          | boolean | no       | False   | Save all, automatically handling staging and ignoring. |
+| `--message`, `-m`      | text    | no       |         | Commit message.                                        |
+| `--auto-message`, `-M` | boolean | no       | False   | Commit with an automatically-generated message.        |
+| `--to`, `-t`           | text    | no       |         | System with which to add (git or dvc).                 |
+| `--no-push`            | boolean | no       | False   | Do not push to Git and DVC after committing.           |
+| `--git-push`           | text    | no       |         | Additional Git args to pass when pushing.              |
+| `--dvc-push`           | text    | no       |         | Additional DVC args to pass when pushing.              |
+| `--no-recursive`       | boolean | no       | False   | Do not push to submodules.                             |
+| `--overleaf`, `-O`     | boolean | no       | False   | Sync with Overleaf after saving.                       |
+| `--verbose`, `-v`      | boolean | no       | False   | Print verbose output.                                  |
+
+<a id="top-command-pull"></a>
+
+### `calkit pull`
+
+Pull with both Git and DVC.
+
+Usage:
+
+```text
+calkit pull [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                        |
+| ----------------- | ------- | -------- | ------- | -------------------------------------------------- |
+| `--no-check-auth` | boolean | no       | False   |                                                    |
+| `--no-dvc`        | boolean | no       | False   | Do not pull from DVC.                              |
+| `--no-git`        | boolean | no       | False   | Do not pull from Git.                              |
+| `--git-arg`       | text    | no       |         | Additional Git args.                               |
+| `--dvc-arg`       | text    | no       |         | Additional DVC args.                               |
+| `--force`, `-f`   | boolean | no       | False   | Force pull, potentially overwriting local changes. |
+| `--no-recursive`  | boolean | no       | False   | Do not recursively pull from submodules.           |
+
+<a id="top-command-push"></a>
+
+### `calkit push`
+
+Push with both Git and DVC.
+
+Usage:
+
+```text
+calkit push [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                |
+| ----------------- | ------- | -------- | ------- | -------------------------- |
+| `--no-check-auth` | boolean | no       | False   |                            |
+| `--no-dvc`        | boolean | no       | False   |                            |
+| `--no-git`        | boolean | no       | False   |                            |
+| `--git-arg`       | text    | no       |         | Additional Git args.       |
+| `--dvc-arg`       | text    | no       |         | Additional DVC args.       |
+| `--no-recursive`  | boolean | no       | False   | Do not push to submodules. |
+
+<a id="top-command-ignore"></a>
+
+### `calkit ignore`
+
+Ignore a file, i.e., keep it out of version control.
+
+Usage:
+
+```text
+calkit ignore [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description     |
+| -------- | ---- | -------- | ------- | --------------- |
+| `path`   | text | yes      |         | Path to ignore. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                          |
+| ------------- | ------- | -------- | ------- | ------------------------------------ |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to .gitignore. |
+
+<a id="top-command-local-server"></a>
+
+### `calkit local-server`
+
+Run the local server to interact over HTTP.
+
+Usage:
+
+```text
+calkit local-server
+```
+
+<a id="top-command-run"></a>
+
+### `calkit run`
+
+Check requirements and run the pipeline.
+
+Usage:
+
+```text
+calkit run [OPTIONS] [TARGETS...]
+```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description    |
+| --------- | ---- | -------- | ------- | -------------- |
+| `targets` | text | no       |         | Stages to run. |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                                                  |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `-q`, `--quiet`          | boolean | no       | False   | Be quiet.                                                                                    |
+| `-v`, `--verbose`        | boolean | no       | False   | Print verbose output.                                                                        |
+| `-f`, `--force`          | boolean | no       | False   | Run even if stages or inputs have not changed.                                               |
+| `-i`, `--interactive`    | boolean | no       | False   | Ask for confirmation before running each stage.                                              |
+| `-s`, `--single-item`    | boolean | no       | False   | Run only a single stage without any dependents.                                              |
+| `-p`, `--pipeline`       | text    | no       |         |                                                                                              |
+| `-P`, `--all-pipelines`  | boolean | no       | False   | Run all pipelines in the repo.                                                               |
+| `-R`, `--recursive`      | boolean | no       | False   | Run pipelines in subdirectories.                                                             |
+| `--downstream`           | text    | no       |         | Start from the specified stage and run all downstream.                                       |
+| `--force-downstream`     | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.                            |
+| `--pull`                 | boolean | no       | False   | Try automatically pulling missing data.                                                      |
+| `--allow-missing`        | boolean | no       | False   | Skip stages with missing data.                                                               |
+| `--dry`, `--dry-run`     | boolean | no       | False   | Only print commands that would execute.                                                      |
+| `--keep-going`, `-k`     | boolean | no       | False   | Continue executing, skipping stages with failed inputs from other stages.                    |
+| `--ignore-errors`        | boolean | no       | False   | Ignore errors from stages.                                                                   |
+| `--glob`                 | boolean | no       | False   | Match stages with glob-style patterns.                                                       |
+| `--no-commit`            | boolean | no       | False   | Do not save to the run cache.                                                                |
+| `--no-run-cache`         | boolean | no       | False   | Ignore the run cache.                                                                        |
+| `--log`, `-l`            | boolean | no       | False   | Log the run and system information.                                                          |
+| `--save`, `-S`           | boolean | no       | False   | Save the project after running.                                                              |
+| `--save-message`, `-m`   | text    | no       |         | Commit message for saving.                                                                   |
+| `--input`, `--dep`       | text    | no       |         | Run stages that depend on given input dependency path.                                       |
+| `--output`, `--out`      | text    | no       |         | Run stages that produce the given output path.                                               |
+| `--overleaf`, `-O`       | boolean | no       | False   | Sync with Overleaf before and after running.                                                 |
+| `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                     |
+| `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler. |
+
+<a id="top-command-manual-step"></a>
+
+### `calkit manual-step`
+
+Execute a manual step.
+
+Usage:
+
+```text
+calkit manual-step [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                     |
+| ----------------- | ------- | -------- | ------- | ------------------------------- |
+| `--message`, `-m` | text    | yes      |         | Message to display as a prompt. |
+| `--cmd`           | text    | no       |         | Command to run.                 |
+| `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
+| `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
+
+<a id="top-command-xenv-runenv"></a>
+
+### `calkit xenv|runenv`
+
+Execute a command in an environment.
+
+Usage:
+
+```text
+calkit xenv|runenv [OPTIONS] CMD...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                        |
+| -------- | ---- | -------- | ------- | ---------------------------------- |
+| `cmd`    | text | yes      |         | Command to run in the environment. |
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                                                                                      |
+| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
+| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
+| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                |
+| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                       |
+| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
+| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
+
+<a id="top-command-install"></a>
+
+### `calkit install`
+
+Install a registered native dependency (e.g., pixi, uv) via its upstream installer for the current platform.
+
+Usage:
+
+```text
+calkit install [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                              |
+| -------- | ---- | -------- | ------- | ---------------------------------------- |
+| `name`   | text | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                           |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------- |
+| `--yes`, `-y` | boolean | no       | False   | Skip the confirmation prompt and install immediately. |
+
+<a id="top-command-xproc-runproc"></a>
+
+### `calkit xproc|runproc`
+
+Execute a procedure.
+
+Usage:
+
+```text
+calkit xproc|runproc [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                |
+| -------- | ---- | -------- | ------- | -------------------------- |
+| `name`   | text | yes      |         | The name of the procedure. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                      |
+| ------------- | ------- | -------- | ------- | -------------------------------- |
+| `--no-commit` | boolean | no       | False   | Do not commit after each action. |
+
+<a id="top-command-calc"></a>
+
+### `calkit calc`
+
+Run a project's calculation.
+
+Usage:
+
+```text
+calkit calc [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description       |
+| -------- | ---- | -------- | ------- | ----------------- |
+| `name`   | text | yes      |         | Calculation name. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                               |
+| --------------- | ------- | -------- | ------- | ----------------------------------------- |
+| `--input`, `-i` | text    | no       |         | Inputs defined like x=1 (with no spaces.) |
+| `--no-format`   | boolean | no       | False   | Do not format output before printing      |
+
+<a id="top-command-set-env-var"></a>
+
+### `calkit set-env-var`
+
+Set an environmental variable for the project in its '.env' file.
+
+Usage:
+
+```text
+calkit set-env-var NAME VALUE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description            |
+| -------- | ---- | -------- | ------- | ---------------------- |
+| `name`   | text | yes      |         | Name of the variable.  |
+| `value`  | text | yes      |         | Value of the variable. |
+
+<a id="top-command-upgrade"></a>
+
+### `calkit upgrade`
+
+Upgrade Calkit.
+
+Usage:
+
+```text
+calkit upgrade [OPTIONS]
+```
+
+Options:
+
+| Option     | Type    | Required | Default | Description                   |
+| ---------- | ------- | -------- | ------- | ----------------------------- |
+| `--skills` | boolean | no       | False   | Upgrade agent skills as well. |
+
+<a id="top-command-switch-branch"></a>
+
+### `calkit switch-branch`
+
+Switch to a different branch.
+
+Usage:
+
+```text
+calkit switch-branch NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description  |
+| -------- | ---- | -------- | ------- | ------------ |
+| `name`   | text | yes      |         | Branch name. |
+
+<a id="top-command-stash"></a>
+
+### `calkit stash`
+
+Stash or restore workspace changes including dvc-zip tracked dirs.
+
+Without --pop: zips any modified workspace dirs into the DVC cache, then git-stashes (saving the updated .dvc files), checks out the committed DVC state, and unzips it to the workspace.
+
+With --pop: pops the git stash (restoring the saved .dvc files), checks out the stashed DVC state, and unzips it to the workspace.
+
+Usage:
+
+```text
+calkit stash [OPTIONS]
+```
+
+Options:
+
+| Option  | Type    | Required | Default | Description                |
+| ------- | ------- | -------- | ------- | -------------------------- |
+| `--pop` | boolean | no       | False   | Pop the most recent stash. |
+
+<a id="top-command-dvc"></a>
+
+### `calkit dvc`
+
+Run a command with the DVC CLI.
+
+Useful if Calkit is installed as a tool, e.g., with `uv tool` or `pipx`, and DVC is not installed.
+
+Usage:
+
+```text
+calkit dvc [OPTIONS]
+```
+
+<a id="top-command-jupyter"></a>
+
+### `calkit jupyter`
+
+Run a command with the Jupyter CLI.
+
+Usage:
+
+```text
+calkit jupyter [OPTIONS]
+```
+
+<a id="top-command-map-paths"></a>
+
+### `calkit map-paths`
+
+Map paths in a project.
+
+Currently this is done with copying. Outputs are ensured to be ignored by Git.
+
+Usage:
+
+```text
+calkit map-paths [OPTIONS]
+```
+
+Options:
+
+| Option                 | Type | Required | Default | Description                                                                                                                                                   |
+| ---------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--file-to-file`       | text | no       |         | Map a file to another file, e.g., --file-to-file 'results.tex->paper/results.tex'.                                                                            |
+| `--file-to-dir`        | text | no       |         | Map a file into a directory, e.g., --file-to-dir 'results.tex->paper/results'.                                                                                |
+| `--dir-to-dir-replace` | text | no       |         | Copy directory to another directory and replace it, e.g., --dir-to-dir-replace 'figures->paper/figures'.                                                      |
+| `--dir-to-dir-merge`   | text | no       |         | Merge directory into another directory. This is useful for merging contents of one directory into another, e.g., --dir-to-dir-merge 'figures->paper/figures'. |
+
+<a id="top-command-xr"></a>
+
+### `calkit xr`
+
+Execute a command and if successful, record in the pipeline.
+
+Usage:
+
+```text
+calkit xr [OPTIONS] CMD...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                                                                                                           |
+| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cmd`    | text | yes      |         | Command to execute and record. If the first argument is a script, notebook or LaTeX file, it will be treated as a stage with that file as the target. Any command, including arguments, is supported. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e` | text    | no       |         | Name of or path the spec file for the environment to use.                                                                                                                                                                                                                                                       |
+| `--input`, `-i`       | text    | no       |         | Input paths to record.                                                                                                                                                                                                                                                                                          |
+| `--output`, `-o`      | text    | no       |         | Output paths to record.                                                                                                                                                                                                                                                                                         |
+| `--no-detect-io`      | boolean | no       | False   | Don't attempt to detect inputs and outputs from the command, script, or notebook.                                                                                                                                                                                                                               |
+| `--stage`             | text    | no       |         | Name of the DVC stage to create for this command. If not provided, a name will be generated automatically.                                                                                                                                                                                                      |
+| `--dry-run`, `-d`     | boolean | no       | False   | Print the environment and stage that would be created without modifying calkit.yaml or executing the command.                                                                                                                                                                                                   |
+| `--no-record`         | boolean | no       | False   | Execute without recording: run as usual, then restore calkit.yaml, dvc.yaml and .dvc and remove derived files, keeping only what the run produced (annotations, injected output, stage outputs) and the run log. Useful for checking that a Markdown file is runnable in a project that isn't a Calkit project. |
+| `--json`              | boolean | no       | False   | Print xr results as JSON.                                                                                                                                                                                                                                                                                       |
+| `--force`, `-f`       | boolean | no       | False   | Force running stage even if it's up-to-date.                                                                                                                                                                                                                                                                    |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                                                                                                           |
+
+## Command groups
+
+<a id="command-group-config"></a>
+
+### `calkit config`
+
+Configure Calkit.
+
+| Command                                                   | Description                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [`set`](#subcommand-config-set)                           | Set a value in the config.                                                             |
+| [`get`](#subcommand-config-get)                           | Get and print a value from the config.                                                 |
+| [`unset`](#subcommand-config-unset)                       | Unset a value in the config, returning it to default.                                  |
+| [`remote`](#subcommand-config-remote)                     | Set up the Calkit hub as the default DVC remote and store a token in the local config. |
+| [`remote-auth`](#subcommand-config-remote-auth)           | Store a Calkit hub token in the local DVC config for all Calkit remotes.               |
+| [`list`](#subcommand-config-list)                         | List keys in the config.                                                               |
+| [`github-ssh`](#subcommand-config-github-ssh)             | Walk through the process of adding an SSH key to GitHub.                               |
+| [`github-codespace`](#subcommand-config-github-codespace) | Configure a GitHub Codespace.                                                          |
+
+<a id="subcommand-config-set"></a>
+
+#### `calkit config set`
+
+Set a value in the config.
+
+Usage:
+
+```text
+calkit config set KEY VALUE
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | text | yes      |         |             |
+| `value`  | text | yes      |         |             |
+
+<a id="subcommand-config-get"></a>
+
+#### `calkit config get`
+
+Get and print a value from the config.
+
+Usage:
+
+```text
+calkit config get KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | text | yes      |         |             |
+
+<a id="subcommand-config-unset"></a>
+
+#### `calkit config unset`
+
+Unset a value in the config, returning it to default.
+
+Usage:
+
+```text
+calkit config unset KEY
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `key`    | text | yes      |         |             |
+
+<a id="subcommand-config-remote"></a>
+
+#### `calkit config remote`
+
+Set up the Calkit hub as the default DVC remote and store a token in the local config.
+
+Usage:
+
+```text
+calkit config remote [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                         |
+| ------------- | ------- | -------- | ------- | ------------------------------------------------------------------- |
+| `--http`      | boolean | no       | False   | Use the legacy HTTP URL for the Calkit DVC remote instead of ck://. |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to DVC config.                                |
+
+<a id="subcommand-config-remote-auth"></a>
+
+#### `calkit config remote-auth`
+
+Store a Calkit hub token in the local DVC config for all Calkit remotes.
+
+Usage:
+
+```text
+calkit config remote-auth
+```
+
+<a id="subcommand-config-list"></a>
+
+#### `calkit config list`
+
+List keys in the config.
+
+Usage:
+
+```text
+calkit config list
+```
+
+<a id="subcommand-config-github-ssh"></a>
+
+#### `calkit config github-ssh`
+
+Walk through the process of adding an SSH key to GitHub.
+
+Usage:
+
+```text
+calkit config github-ssh
+```
+
+<a id="subcommand-config-github-codespace"></a>
+
+#### `calkit config github-codespace`
+
+Configure a GitHub Codespace.
+
+Typically this will simply mean we exchange a GitHub token for a Calkit token to use for pushing with DVC.
+
+If this is run outside a Codespace, typically nothing will happen.
+
+Usage:
+
+```text
+calkit config github-codespace
+```
+
+<a id="command-group-new-create"></a>
+
+### `calkit new|create`
+
+Create a new Calkit object.
+
+| Command                                                                   | Description                                                           |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| [`project`](#subcommand-new-create-project)                               | Create a new project.                                                 |
+| [`figure\|fig`](#subcommand-new-create-figure-fig)                        | Create a new figure.                                                  |
+| [`result`](#subcommand-new-create-result)                                 | Declare a new result.                                                 |
+| [`presentation\|pres`](#subcommand-new-create-presentation-pres)          | Declare a new presentation.                                           |
+| [`question`](#subcommand-new-create-question)                             | Add a new question.                                                   |
+| [`notebook\|nb`](#subcommand-new-create-notebook-nb)                      | Add a new notebook.                                                   |
+| [`docker-env`](#subcommand-new-create-docker-env)                         | Create a new Docker environment.                                      |
+| [`foreach-stage`](#subcommand-new-create-foreach-stage)                   | Create a new DVC 'foreach' stage.                                     |
+| [`dataset`](#subcommand-new-create-dataset)                               | Create a new dataset.                                                 |
+| [`publication\|pub`](#subcommand-new-create-publication-pub)              | Create a new publication.                                             |
+| [`conda-env`](#subcommand-new-create-conda-env)                           | Create a new Conda environment.                                       |
+| [`uv-env`](#subcommand-new-create-uv-env)                                 | Create a new uv project environment.                                  |
+| [`slurm-env`](#subcommand-new-create-slurm-env)                           | Create a new SLURM environment.                                       |
+| [`pbs-env`](#subcommand-new-create-pbs-env)                               | Create a new PBS environment.                                         |
+| [`uv-venv`](#subcommand-new-create-uv-venv)                               | Create a new uv virtual environment.                                  |
+| [`venv`](#subcommand-new-create-venv)                                     | Create a new Python virtual environment with venv.                    |
+| [`pixi-env`](#subcommand-new-create-pixi-env)                             | Create a new pixi virtual environment.                                |
+| [`julia-env`](#subcommand-new-create-julia-env)                           | Create a new Julia environment or add an existing one to calkit.yaml. |
+| [`renv`](#subcommand-new-create-renv)                                     | Create a new R environment with renv.                                 |
+| [`nix-env`](#subcommand-new-create-nix-env)                               | Create a new Nix flake-based environment.                             |
+| [`status`](#subcommand-new-create-status)                                 | Add a new project status to the log.                                  |
+| [`python-script-stage`](#subcommand-new-create-python-script-stage)       | Add a stage to the pipeline that runs a Python script.                |
+| [`julia-script-stage`](#subcommand-new-create-julia-script-stage)         | Add a stage to the pipeline that runs a Julia script.                 |
+| [`matlab-script-stage`](#subcommand-new-create-matlab-script-stage)       | Add a stage to the pipeline that runs a MATLAB script.                |
+| [`latex-stage`](#subcommand-new-create-latex-stage)                       | Add a stage to the pipeline that compiles a LaTeX document.           |
+| [`jupyter-notebook-stage`](#subcommand-new-create-jupyter-notebook-stage) | Add a stage to the pipeline that runs a Jupyter notebook.             |
+| [`release`](#subcommand-new-create-release)                               | Create a new release.                                                 |
+
+<a id="subcommand-new-create-project"></a>
+
+#### `calkit new|create project`
+
+Create a new project.
+
+Usage:
+
+```text
+calkit new|create project [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                  |
+| -------- | ---- | -------- | ------- | ---------------------------- |
+| `path`   | text | yes      |         | Where to create the project. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
+| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
+| `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
+
+<a id="subcommand-new-create-figure-fig"></a>
+
+#### `calkit new|create figure|fig`
+
+Create a new figure.
+
+Usage:
+
+```text
+calkit new|create figure|fig [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                    |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------- |
+| `--title`                | text    | yes      |         |                                                                |
+| `--description`          | text    | yes      |         |                                                                |
+| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this figure.         |
+| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                     |
+| `--dep`                  | text    | no       |         | Path to stage dependency.                                      |
+| `--out`                  | text    | no       |         | Path to stage output. Figure path will be added automatically. |
+| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.          |
+| `--no-commit`            | boolean | no       | False   |                                                                |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                       |
+
+<a id="subcommand-new-create-result"></a>
+
+#### `calkit new|create result`
+
+Declare a new result.
+
+Usage:
+
+```text
+calkit new|create result [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                    |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--name`            | text    | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
+| `--title`           | text    | no       |         |                                                                                                |
+| `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
+| `--description`     | text    | no       |         |                                                                                                |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result.                                         |
+| `--no-commit`       | boolean | no       | False   |                                                                                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.                                                       |
+
+<a id="subcommand-new-create-presentation-pres"></a>
+
+#### `calkit new|create presentation|pres`
+
+Declare a new presentation.
+
+Usage:
+
+```text
+calkit new|create presentation|pres [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                  |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
+| `--title`           | text    | yes      |         |                                                              |
+| `--description`     | text    | no       |         |                                                              |
+| `--kind`            | text    | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
+| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
+| `--no-commit`       | boolean | no       | False   |                                                              |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
+
+<a id="subcommand-new-create-question"></a>
+
+#### `calkit new|create question`
+
+Add a new question.
+
+Usage:
+
+```text
+calkit new|create question [OPTIONS] QUESTION
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description |
+| ---------- | ---- | -------- | ------- | ----------- |
+| `question` | text | yes      |         |             |
+
+Options:
+
+| Option     | Type    | Required | Default | Description |
+| ---------- | ------- | -------- | ------- | ----------- |
+| `--commit` | boolean | no       | False   |             |
+
+<a id="subcommand-new-create-notebook-nb"></a>
+
+#### `calkit new|create notebook|nb`
+
+Add a new notebook.
+
+Usage:
+
+```text
+calkit new|create notebook|nb [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `path`   | text | yes      |         | Notebook path (relative) |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                         |
+| --------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--title`       | text    | yes      |         |                                                     |
+| `--description` | text    | no       |         |                                                     |
+| `--stage`       | text    | no       |         | Name of the pipeline stage that runs this notebook. |
+| `--commit`      | boolean | no       | False   |                                                     |
+
+<a id="subcommand-new-create-docker-env"></a>
+
+#### `calkit new|create docker-env`
+
+Create a new Docker environment.
+
+Usage:
+
+```text
+calkit new|create docker-env [OPTIONS]
+```
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                           |
+| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                      |
+| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                       |
+| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                       |
+| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                        |
+| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                              |
+| `--gpus`            | text    | no       |         |                                                                                                                             |
+| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                    |
+| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                 |
+| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                          |
+| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint. |
+| `--user`            | text    | no       |         | User account to use to run the container.                                                                                   |
+| `--platform`        | text    | no       |         | Which platform(s) to build for.                                                                                             |
+| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                         |
+| `--description`     | text    | no       |         | Description.                                                                                                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                          |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                      |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                      |
+
+<a id="subcommand-new-create-foreach-stage"></a>
+
+#### `calkit new|create foreach-stage`
+
+Create a new DVC 'foreach' stage.
+
+The list of values must be a simple list. For more complex objects, edit dvc.yaml directly.
+
+Usage:
+
+```text
+calkit new|create foreach-stage [OPTIONS] VALS...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description            |
+| -------- | ---- | -------- | ------- | ---------------------- |
+| `vals`   | text | yes      |         | Values to iterate over |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                              |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------- |
+| `--cmd`             | text    | yes      |         | Command to run. Can include {var} to fill with variable. |
+| `--name`, `-n`      | text    | yes      |         | Stage name.                                              |
+| `--dep`             | text    | no       |         | Path to add as a dependency.                             |
+| `--out`             | text    | no       |         | Path to add as an output.                                |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite stage if one already exists.                   |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                   |
+
+<a id="subcommand-new-create-dataset"></a>
+
+#### `calkit new|create dataset`
+
+Create a new dataset.
+
+Usage:
+
+```text
+calkit new|create dataset [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                     |
+| ------------------------ | ------- | -------- | ------- | --------------------------------------------------------------- |
+| `--title`                | text    | yes      |         |                                                                 |
+| `--description`          | text    | yes      |         |                                                                 |
+| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this dataset.         |
+| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                      |
+| `--dep`                  | text    | no       |         | Path to stage dependency.                                       |
+| `--out`                  | text    | no       |         | Path to stage output. Dataset path will be added automatically. |
+| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.           |
+| `--no-commit`            | boolean | no       | False   |                                                                 |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                       |
+
+<a id="subcommand-new-create-publication-pub"></a>
+
+#### `calkit new|create publication|pub`
+
+Create a new publication.
+
+Usage:
+
+```text
+calkit new|create publication|pub [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                               |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `path`   | text | yes      |         | Path for the publication. If using a template, this could be a directory. |
+
+Options:
+
+| Option                   | Type    | Required | Default | Description                                                                            |
+| ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
+| `--title`                | text    | yes      |         | The title of the publication.                                                          |
+| `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | text    | no       |         | A description of the publication.                                                      |
+| `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
+| `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
+| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |
+| `--template`, `-t`       | text    | no       |         | Template with which to create the source files. Should be in the format {type}/{name}. |
+| `--environment`          | text    | no       |         | Name of the build environment to create, if desired.                                   |
+| `--no-commit`            | boolean | no       | False   | Do not commit resulting changes to the repo.                                           |
+| `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing objects if they already exist.                                      |
+
+<a id="subcommand-new-create-conda-env"></a>
+
+#### `calkit new|create conda-env`
+
+Create a new Conda environment.
+
+Usage:
+
+```text
+calkit new|create conda-env [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | no       |         | Packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default         | Description                                                                                                                                                                                     |
+| ------------------- | ------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |                 | Environment name.                                                                                                                                                                               |
+| `--conda-name`      | text    | no       |                 | Name to use in the Conda environment file, if desired. Will be automatically generated if not provided. Note that these should be unique since Conda environments are a system-wide collection. |
+| `--path`            | text    | no       | environment.yml | Environment YAML file path.                                                                                                                                                                     |
+| `--pip`             | text    | no       |                 | Packages to install with pip.                                                                                                                                                                   |
+| `--prefix`          | text    | no       |                 | Prefix for environment location.                                                                                                                                                                |
+| `--description`     | text    | no       |                 | Description.                                                                                                                                                                                    |
+| `--overwrite`, `-f` | boolean | no       | False           | Overwrite any existing environment with this name.                                                                                                                                              |
+| `--no-commit`       | boolean | no       | False           | Do not commit changes.                                                                                                                                                                          |
+| `--no-check`        | boolean | no       | False           | Do not check environment is up-to-date after creation.                                                                                                                                          |
+
+<a id="subcommand-new-create-uv-env"></a>
+
+#### `calkit new|create uv-env`
+
+Create a new uv project environment.
+
+Usage:
+
+```text
+calkit new|create uv-env [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | no       |         | Packages to include in the environment. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                            |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`   | text    | no       | main    | Environment name.                                      |
+| `--path`         | text    | no       |         | Environment file path. Must end with 'pyproject.toml'. |
+| `--python`, `-p` | text    | no       |         | Python version.                                        |
+| `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
+| `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
+
+<a id="subcommand-new-create-slurm-env"></a>
+
+#### `calkit new|create slurm-env`
+
+Create a new SLURM environment.
+
+Usage:
+
+```text
+calkit new|create slurm-env [OPTIONS]
+```
+
+Options:
+
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
+| `--default-option`      | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
+
+<a id="subcommand-new-create-pbs-env"></a>
+
+#### `calkit new|create pbs-env`
+
+Create a new PBS environment.
+
+Usage:
+
+```text
+calkit new|create pbs-env [OPTIONS]
+```
+
+Options:
+
+| Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | text    | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
+| `--default-option`      | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
+| `--default-setup`       | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
+| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
+| `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
+
+<a id="subcommand-new-create-uv-venv"></a>
+
+#### `calkit new|create uv-venv`
+
+Create a new uv virtual environment.
+
+Usage:
+
+```text
+calkit new|create uv-venv [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | no       |         | Packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default          | Description                                                                                                  |
+| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
+| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--python`, `-p`    | text    | no       |                  | Python version.                                                                                              |
+| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
+| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
+| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
+
+<a id="subcommand-new-create-venv"></a>
+
+#### `calkit new|create venv`
+
+Create a new Python virtual environment with venv.
+
+Usage:
+
+```text
+calkit new|create venv [OPTIONS] PACKAGES...
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | yes      |         | Packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default          | Description                                                                                                  |
+| ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
+| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
+| `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
+| `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
+
+<a id="subcommand-new-create-pixi-env"></a>
+
+#### `calkit new|create pixi-env`
+
+Create a new pixi virtual environment.
+
+Usage:
+
+```text
+calkit new|create pixi-env [OPTIONS] PACKAGES...
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | yes      |         | Packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |         | Environment name.                                      |
+| `--pip`             | text    | no       |         | Packages to install with pip.                          |
+| `--description`     | text    | no       |         | Description.                                           |
+| `--platform`, `-p`  | text    | no       |         | Platform.                                              |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
+
+<a id="subcommand-new-create-julia-env"></a>
+
+#### `calkit new|create julia-env`
+
+Create a new Julia environment or add an existing one to calkit.yaml.
+
+Usage:
+
+```text
+calkit new|create julia-env [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                      |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------ |
+| `packages` | text | no       |         | Optional packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
+| `--path`            | text    | no       |         | Path for Project.toml file.                            |
+| `--description`     | text    | no       |         | Description.                                           |
+| `--julia`, `-j`     | text    | no       |         | Julia version. Auto-detected if not supplied.          |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
+
+<a id="subcommand-new-create-renv"></a>
+
+#### `calkit new|create renv`
+
+Create a new R environment with renv.
+
+Usage:
+
+```text
+calkit new|create renv [OPTIONS] [PACKAGES...]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                             |
+| ---------- | ---- | -------- | ------- | --------------------------------------- |
+| `packages` | text | no       |         | Packages to include in the environment. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
+| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
+| `--path`            | text    | no       |         | Environment file path. Must end with 'DESCRIPTION'.    |
+| `--r-version`, `-r` | text    | no       |         | R version.                                             |
+| `--description`     | text    | no       |         | Description.                                           |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
+
+<a id="subcommand-new-create-nix-env"></a>
+
+#### `calkit new|create nix-env`
+
+Create a new Nix flake-based environment.
+
+Usage:
+
+```text
+calkit new|create nix-env [OPTIONS] PACKAGES...
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                            |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------ |
+| `packages` | text | yes      |         | Nixpkgs packages to include in the dev shell (e.g. R). |
+
+Options:
+
+| Option              | Type    | Required | Default                             | Description                                           |
+| ------------------- | ------- | -------- | ----------------------------------- | ----------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |                                     | Environment name.                                     |
+| `--path`            | text    | no       |                                     | Flake file path. Must end with 'flake.nix'.           |
+| `--nixpkgs-url`     | text    | no       | github:NixOS/nixpkgs/nixos-unstable | Flake input URL for nixpkgs.                          |
+| `--description`     | text    | no       |                                     | Description.                                          |
+| `--overwrite`, `-f` | boolean | no       | False                               | Overwrite any existing environment with this name.    |
+| `--no-check`        | boolean | no       | False                               | Do not run 'nix flake lock' after creating the flake. |
+| `--no-commit`       | boolean | no       | False                               | Do not commit changes.                                |
+
+<a id="subcommand-new-create-status"></a>
+
+#### `calkit new|create status`
+
+Add a new project status to the log.
+
+Usage:
+
+```text
+calkit new|create status [OPTIONS] STATUS
+```
+
+Arguments:
+
+| Argument | Type                                    | Required | Default | Description                    |
+| -------- | --------------------------------------- | -------- | ------- | ------------------------------ |
+| `status` | choice(in-progress, on-hold, completed) | yes      |         | Current status of the project. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                              |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------- |
+| `--message`, `-m` | text    | no       |         | Optional message describing the status.  |
+| `--no-commit`     | boolean | no       | False   | Do not commit changes to the status log. |
+
+<a id="subcommand-new-create-python-script-stage"></a>
+
+#### `calkit new|create python-script-stage`
+
+Add a stage to the pipeline that runs a Python script.
+
+Usage:
+
+```text
+calkit new|create python-script-stage [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type        | Required | Default | Description                                                                                                    |
+| ------------------------------ | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text        | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text        | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | text        | yes      |         | Path to script.                                                                                                |
+| `--arg`                        | text        | no       |         | Argument to pass to the script.                                                                                |
+| `--input`, `-i`                | text        | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | text        | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text        | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text        | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text        | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text        | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text        | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--iter`                       | <text text> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
+| `--overwrite`, `--force`, `-f` | boolean     | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean     | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean     | no       | False   | Do not commit changes to Git.                                                                                  |
+
+<a id="subcommand-new-create-julia-script-stage"></a>
+
+#### `calkit new|create julia-script-stage`
+
+Add a stage to the pipeline that runs a Julia script.
+
+Usage:
+
+```text
+calkit new|create julia-script-stage [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type        | Required | Default | Description                                                                                                    |
+| ------------------------------ | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text        | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text        | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | text        | yes      |         | Path to script.                                                                                                |
+| `--input`, `-i`                | text        | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | text        | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text        | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text        | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text        | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text        | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text        | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--iter`                       | <text text> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
+| `--overwrite`, `--force`, `-f` | boolean     | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean     | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean     | no       | False   | Do not commit changes to Git.                                                                                  |
+
+<a id="subcommand-new-create-matlab-script-stage"></a>
+
+#### `calkit new|create matlab-script-stage`
+
+Add a stage to the pipeline that runs a MATLAB script.
+
+Usage:
+
+```text
+calkit new|create matlab-script-stage [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type    | Required | Default | Description                                                                                                    |
+| ------------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text    | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text    | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | text    | yes      |         | Path to script.                                                                                                |
+| `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text    | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text    | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text    | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--overwrite`, `--force`, `-f` | boolean | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean | no       | False   | Do not commit changes to Git.                                                                                  |
+
+<a id="subcommand-new-create-latex-stage"></a>
+
+#### `calkit new|create latex-stage`
+
+Add a stage to the pipeline that compiles a LaTeX document.
+
+Usage:
+
+```text
+calkit new|create latex-stage [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type    | Required | Default | Description                                                                                                    |
+| ------------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text    | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text    | yes      |         | Environment to use to run the stage.                                                                           |
+| `--target`                     | text    | yes      |         | Target .tex file path.                                                                                         |
+| `--output-dir`                 | text    | no       |         | Directory for the compiled PDF (passed to latexmk as -outdir). Ignored when a latexmkrc is provided.           |
+| `--aux-dir`                    | text    | no       |         | Directory for auxiliary files (passed to latexmk as -auxdir). Ignored when a latexmkrc is provided.            |
+| `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
+| `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
+| `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
+| `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text    | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text    | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text    | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--overwrite`, `--force`, `-f` | boolean | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean | no       | False   | Do not commit changes to Git.                                                                                  |
+
+<a id="subcommand-new-create-jupyter-notebook-stage"></a>
+
+#### `calkit new|create jupyter-notebook-stage`
+
+Add a stage to the pipeline that runs a Jupyter notebook.
+
+Usage:
+
+```text
+calkit new|create jupyter-notebook-stage [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type                   | Required | Default             | Description                                                                                                    |
+| ------------------------------ | ---------------------- | -------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text                   | yes      |                     | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text                   | yes      |                     | Environment to use to run the stage.                                                                           |
+| `--notebook-path`              | text                   | yes      |                     | Path to notebook.                                                                                              |
+| `--input`, `-i`                | text                   | no       |                     | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | text                   | no       |                     | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text                   | no       |                     | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text                   | no       |                     | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text                   | no       |                     | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text                   | no       |                     | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text                   | no       |                     | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--html-storage`               | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the HTML output of the notebook.                                                       |
+| `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | NotebookStorage.git | In what system to store the cleaned ipynb output of the notebook.                                              |
+| `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the executed ipynb output of the notebook.                                             |
+| `--overwrite`, `--force`, `-f` | boolean                | no       | False               | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean                | no       | False               | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean                | no       | False               | Do not commit changes to Git.                                                                                  |
+
+<a id="subcommand-new-create-release"></a>
+
+#### `calkit new|create release`
+
+Create a new release.
+
+Usage:
+
+```text
+calkit new|create release [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------- |
+| `path`   | text | no       | .       | The path to release; '.' for a project release. |
+
+Options:
+
+| Option                    | Type    | Required | Default | Description                                                                                                                                                                               |
+| ------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`            | text    | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                |
+| `--kind`                  | text    | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
+| `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
+| `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                                                                                      |
+| `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
+| `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
+| `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
+| `--internal`              | boolean | no       | False   | Create an internal release that is not published to an archival service. Still creates a Git tag and release record in calkit.yaml, but does not upload files or create a GitHub release. |
+| `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                                                                                           |
+| `--to`                    | text    | no       | zenodo  | Archival service to use for external releases (zenodo or caltechdata); ignored for --internal releases.                                                                                   |
+| `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                 |
+| `--license`               | text    | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                  |
+| `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                     |
+
+<a id="command-group-delete-rm"></a>
+
+### `calkit delete|rm`
+
+Delete a Calkit object.
+
+| Command                                      | Description                             |
+| -------------------------------------------- | --------------------------------------- |
+| [`question`](#subcommand-delete-rm-question) | Remove a question by its 1-based index. |
+
+<a id="subcommand-delete-rm-question"></a>
+
+#### `calkit delete|rm question`
+
+Remove a question by its 1-based index.
+
+Usage:
+
+```text
+calkit delete|rm question INDEX
+```
+
+Arguments:
+
+| Argument | Type    | Required | Default | Description                                                            |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------- |
+| `index`  | integer | yes      |         | 1-based index of the question to remove (see `calkit list questions`). |
+
+<a id="command-group-notebooks-nb"></a>
+
+### `calkit notebooks|nb`
+
+Work with computational notebooks.
+
+| Command                                                             | Description                                                         |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [`clean`](#subcommand-notebooks-nb-clean)                           | Clean notebook and place a copy in the cleaned notebooks directory. |
+| [`clean-all`](#subcommand-notebooks-nb-clean-all)                   | Clean all notebooks in the pipeline.                                |
+| [`check-kernel`](#subcommand-notebooks-nb-check-kernel)             | Check that an environment has a registered Jupyter kernel.          |
+| [`execute`](#subcommand-notebooks-nb-execute)                       | Execute notebook and place a copy in the relevant directory.        |
+| [`export-marimo-wasm`](#subcommand-notebooks-nb-export-marimo-wasm) | Export a marimo notebook to a WebAssembly app.                      |
+
+<a id="subcommand-notebooks-nb-clean"></a>
+
+#### `calkit notebooks|nb clean`
+
+Clean notebook and place a copy in the cleaned notebooks directory.
+
+This can be useful to use as a preprocessing DVC stage to use a clean notebook as a dependency for a stage that caches and executed notebook.
+
+Usage:
+
+```text
+calkit notebooks|nb clean [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option          | Type    | Required | Default | Description          |
+| --------------- | ------- | -------- | ------- | -------------------- |
+| `--quiet`, `-q` | boolean | no       | False   | Do not print output. |
+
+<a id="subcommand-notebooks-nb-clean-all"></a>
+
+#### `calkit notebooks|nb clean-all`
+
+Clean all notebooks in the pipeline.
+
+Usage:
+
+```text
+calkit notebooks|nb clean-all [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description          |
+| --------------- | ------- | -------- | ------- | -------------------- |
+| `--quiet`, `-q` | boolean | no       | False   | Do not print output. |
+
+<a id="subcommand-notebooks-nb-check-kernel"></a>
+
+#### `calkit notebooks|nb check-kernel`
+
+Check that an environment has a registered Jupyter kernel.
+
+Usage:
+
+```text
+calkit notebooks|nb check-kernel [OPTIONS]
+```
+
+Options:
+
+| Option                         | Type    | Required | Default | Description                                                                              |
+| ------------------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------- |
+| `--environment`, `--env`, `-e` | text    | yes      |         | Environment name in which to run the notebook.                                           |
+| `--no-check`                   | boolean | no       | False   | Do not check environment before executing.                                               |
+| `--language`, `-l`             | text    | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment.          |
+| `--verbose`, `-v`              | boolean | no       | False   | Print verbose output.                                                                    |
+| `--json`                       | boolean | no       | False   | Output result as JSON.                                                                   |
+| `--auto-add-deps`              | boolean | no       | False   | Automatically install missing kernel dependencies (e.g., IJulia for Julia environments). |
+
+<a id="subcommand-notebooks-nb-execute"></a>
+
+#### `calkit notebooks|nb execute`
+
+Execute notebook and place a copy in the relevant directory.
+
+This can be useful to use as a preprocessing DVC stage to use a clean notebook as a dependency for a stage that caches and executed notebook.
+
+Usage:
+
+```text
+calkit notebooks|nb execute [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `path`   | text | yes      |         |             |
+
+Options:
+
+| Option                  | Type    | Required | Default  | Description                                                                     |
+| ----------------------- | ------- | -------- | -------- | ------------------------------------------------------------------------------- |
+| `--environment`, `-e`   | text    | no       |          | Name or path to the spec of the environment in which to run the notebook.       |
+| `--to`                  | text    | no       | notebook | Output format ('html' or 'notebook').                                           |
+| `--no-check`            | boolean | no       | False    | Do not check environment before executing.                                      |
+| `--param`, `-p`         | text    | no       |          | Parameter to pass to the notebook in key=value format.                          |
+| `--params-json`, `-j`   | text    | no       |          | JSON string to parse as parameters to pass to the notebook.                     |
+| `--params-base64`, `-b` | text    | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.      |
+| `--language`, `-l`      | text    | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
+| `--no-replace`          | boolean | no       | False    | Do not replace notebook outputs from executed version.                          |
+| `--verbose`, `-v`       | boolean | no       | False    | Print verbose output.                                                           |
+
+<a id="subcommand-notebooks-nb-export-marimo-wasm"></a>
+
+#### `calkit notebooks|nb export-marimo-wasm`
+
+Export a marimo notebook to a WebAssembly app.
+
+Usage:
+
+```text
+calkit notebooks|nb export-marimo-wasm [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description    |
+| -------- | ---- | -------- | ------- | -------------- |
+| `path`   | text | yes      |         | Notebook path. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                             |
+| --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `-o`, `--output`      | text    | yes      |         | Output path for the app.                                                                                                |
+| `--environment`, `-e` | text    | no       |         | Name or path to the spec of the environment in which to export the notebook; must include marimo.                       |
+| `--mode`              | text    | no       | run     | Whether the app is read-only ('run') or editable.                                                                       |
+| `--show-code`         | boolean | no       | False   | Show notebook code in the app.                                                                                          |
+| `--layout`            | text    | no       |         | Path to the layout file named in the notebook's marimo.App(layout_file=...) call.                                       |
+| `--include`           | text    | no       |         | Path to publish with the app, copied beneath 'public' at its project-relative path. May be a glob, and may be repeated. |
+| `--no-validate`       | boolean | no       | False   | Skip executing the notebook to check it works before exporting.                                                         |
+| `--no-check`          | boolean | no       | False   | Do not check environment before exporting.                                                                              |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                   |
+
+<a id="command-group-list-ls"></a>
+
+### `calkit list|ls`
+
+List Calkit objects.
+
+| Command                                                         | Description                                   |
+| --------------------------------------------------------------- | --------------------------------------------- |
+| [`notebooks\|nb`](#subcommand-list-ls-notebooks-nb)             | List notebooks in the project.                |
+| [`figures\|figs`](#subcommand-list-ls-figures-figs)             | List figures in the project.                  |
+| [`datasets`](#subcommand-list-ls-datasets)                      | List datasets in the project.                 |
+| [`results`](#subcommand-list-ls-results)                        | List results in the project.                  |
+| [`presentations\|pres`](#subcommand-list-ls-presentations-pres) | List presentations in the project.            |
+| [`questions`](#subcommand-list-ls-questions)                    | List the project's questions (1-indexed).     |
+| [`publications\|pubs`](#subcommand-list-ls-publications-pubs)   | List publications in the project.             |
+| [`references\|refs`](#subcommand-list-ls-references-refs)       | List reference collections in the project.    |
+| [`environments\|envs`](#subcommand-list-ls-environments-envs)   | List environments in the project.             |
+| [`templates`](#subcommand-list-ls-templates)                    | List all available Calkit templates.          |
+| [`installers`](#subcommand-list-ls-installers)                  | List apps with a registered native installer. |
+| [`procedures`](#subcommand-list-ls-procedures)                  | List procedures in the current project.       |
+| [`releases`](#subcommand-list-ls-releases)                      | List releases.                                |
+| [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                         |
+| [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                     |
+
+<a id="subcommand-list-ls-notebooks-nb"></a>
+
+#### `calkit list|ls notebooks|nb`
+
+List notebooks in the project.
+
+Usage:
+
+```text
+calkit list|ls notebooks|nb [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-figures-figs"></a>
+
+#### `calkit list|ls figures|figs`
+
+List figures in the project.
+
+Usage:
+
+```text
+calkit list|ls figures|figs [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                     |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                          |
+| `--declared-only` | boolean | no       | False   | Only list figures declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-datasets"></a>
+
+#### `calkit list|ls datasets`
+
+List datasets in the project.
+
+Usage:
+
+```text
+calkit list|ls datasets [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                      |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                           |
+| `--declared-only` | boolean | no       | False   | Only list datasets declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-results"></a>
+
+#### `calkit list|ls results`
+
+List results in the project.
+
+Usage:
+
+```text
+calkit list|ls results [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                     |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                          |
+| `--declared-only` | boolean | no       | False   | Only list results declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-presentations-pres"></a>
+
+#### `calkit list|ls presentations|pres`
+
+List presentations in the project.
+
+Usage:
+
+```text
+calkit list|ls presentations|pres [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                           |
+| ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------- |
+| `--json`          | boolean | no       | False   | Output result as JSON.                                                |
+| `--declared-only` | boolean | no       | False   | Only list presentations declared in calkit.yaml; skip auto-detection. |
+
+<a id="subcommand-list-ls-questions"></a>
+
+#### `calkit list|ls questions`
+
+List the project's questions (1-indexed).
+
+Usage:
+
+```text
+calkit list|ls questions [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-publications-pubs"></a>
+
+#### `calkit list|ls publications|pubs`
+
+List publications in the project.
+
+Usage:
+
+```text
+calkit list|ls publications|pubs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-references-refs"></a>
+
+#### `calkit list|ls references|refs`
+
+List reference collections in the project.
+
+Usage:
+
+```text
+calkit list|ls references|refs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-environments-envs"></a>
+
+#### `calkit list|ls environments|envs`
+
+List environments in the project.
+
+Usage:
+
+```text
+calkit list|ls environments|envs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-templates"></a>
+
+#### `calkit list|ls templates`
+
+List all available Calkit templates.
+
+Usage:
+
+```text
+calkit list|ls templates [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-installers"></a>
+
+#### `calkit list|ls installers`
+
+List apps with a registered native installer.
+
+These can be declared as `kind: app` dependencies in `calkit.yaml` and Calkit will offer to install them via `calkit install <name>` or automatically during `calkit run` on an interactive TTY.
+
+Usage:
+
+```text
+calkit list|ls installers [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-procedures"></a>
+
+#### `calkit list|ls procedures`
+
+List procedures in the current project.
+
+Usage:
+
+```text
+calkit list|ls procedures [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-releases"></a>
+
+#### `calkit list|ls releases`
+
+List releases.
+
+Usage:
+
+```text
+calkit list|ls releases [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-stages"></a>
+
+#### `calkit list|ls stages`
+
+List pipeline stages.
+
+Usage:
+
+```text
+calkit list|ls stages [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description             |
+| -------------- | ------- | -------- | ------- | ----------------------- |
+| `--kind`, `-k` | text    | no       |         | Filter stages by kind.  |
+| `--stale`      | boolean | no       | False   | Show only stale stages. |
+| `--json`       | boolean | no       | False   | Output result as JSON.  |
+
+<a id="subcommand-list-ls-remotes"></a>
+
+#### `calkit list|ls remotes`
+
+List Git and DVC remotes.
+
+Usage:
+
+```text
+calkit list|ls remotes [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="command-group-describe-desc"></a>
+
+### `calkit describe|desc`
+
+Describe things.
+
+| Command                                                             | Description                                                        |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+
+<a id="subcommand-describe-desc-system"></a>
+
+#### `calkit describe|desc system`
+
+Describe the system.
+
+Usage:
+
+```text
+calkit describe|desc system [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-environment-env"></a>
+
+#### `calkit describe|desc environment|env`
+
+Describe a single environment, including spec and lock file paths.
+
+Usage:
+
+```text
+calkit describe|desc environment|env [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description            |
+| -------------- | ------- | -------- | ------- | ---------------------- |
+| `--name`, `-n` | text    | yes      |         | Environment name.      |
+| `--json`       | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-environments-envs"></a>
+
+#### `calkit describe|desc environments|envs`
+
+Describe all environments, including spec and lock file paths.
+
+Usage:
+
+```text
+calkit describe|desc environments|envs [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-describe-desc-schema"></a>
+
+#### `calkit describe|desc schema`
+
+Print the JSON schema for calkit.yaml.
+
+Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+
+Usage:
+
+```text
+calkit describe|desc schema [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                                               |
+| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
+
+<a id="command-group-import"></a>
+
+### `calkit import`
+
+Import objects.
+
+| Command                                         | Description                                 |
+| ----------------------------------------------- | ------------------------------------------- |
+| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                           |
+| [`environment`](#subcommand-import-environment) | Import an environment from another project. |
+| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.          |
+
+<a id="subcommand-import-dataset"></a>
+
+#### `calkit import dataset`
+
+Import a dataset.
+
+Currently only supports datasets kept in DVC, not Git.
+
+Usage:
+
+```text
+calkit import dataset [OPTIONS] SRC-PATH [DEST-PATH]
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description                                                                                          |
+| ----------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `src_path`  | text | yes      |         | Location of dataset, including project owner and name, e.g., someone/some-project/data/some-data.csv |
+| `dest_path` | text | no       |         | Output path at which to save.                                                                        |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                     |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
+| `--filter-paths`    | text    | no       |         | Filter paths in target dataset if it's a folder.                                |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                  |
+| `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.                                          |
+| `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists.                             |
+| `--http`            | boolean | no       | False   | Use the legacy HTTP URL for the imported project's DVC remote instead of ck://. |
+
+<a id="subcommand-import-environment"></a>
+
+#### `calkit import environment`
+
+Import an environment from another project.
+
+Usage:
+
+```text
+calkit import environment [OPTIONS] SRC
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                         |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                         |
+| ------------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--path`            | text    | no       |         | Output path at which to save.                       |
+| `--name`, `-n`      | text    | no       |         | Name to use in the destination project.             |
+| `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists. |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                              |
+
+<a id="subcommand-import-zenodo"></a>
+
+#### `calkit import zenodo`
+
+Import files from a Zenodo record.
+
+Usage:
+
+```text
+calkit import zenodo [OPTIONS] SRC DEST-DIR
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                             |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------- |
+| `src`      | text | yes      |         | Source URL or DOI.                                      |
+| `dest_dir` | text | yes      |         | Destination folder. Will be created if it doesn't exist |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                          |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `--kind`, `-k`    | text    | no       |         | What kind of artifact is being imported, e.g., a figure, dataset, publication.       |
+| `--name-like`     | text    | no       |         | Filter for file names like this. Glob patterns accepted.                             |
+| `--name-not-like` | text    | no       |         | Exclude names matching pattern.                                                      |
+| `--storage`       | text    | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
+| `--no-commit`     | boolean | no       | False   | Do not commit changes to project.                                                    |
+
+<a id="command-group-office"></a>
+
+### `calkit office`
+
+Work with Microsoft Office.
+
+| Command                                                           | Description                                   |
+| ----------------------------------------------------------------- | --------------------------------------------- |
+| [`excel-chart-to-image`](#subcommand-office-excel-chart-to-image) | Extract a chart from Excel and save to image. |
+| [`word-to-pdf`](#subcommand-office-word-to-pdf)                   | Convert a Word document to PDF.               |
+
+<a id="subcommand-office-excel-chart-to-image"></a>
+
+#### `calkit office excel-chart-to-image`
+
+Extract a chart from Excel and save to image.
+
+Usage:
+
+```text
+calkit office excel-chart-to-image [OPTIONS] INPUT-FPATH OUTPUT-FPATH
+```
+
+Arguments:
+
+| Argument       | Type | Required | Default | Description             |
+| -------------- | ---- | -------- | ------- | ----------------------- |
+| `input_fpath`  | text | yes      |         | Input Excel file path.  |
+| `output_fpath` | text | yes      |         | Output image file path. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description        |
+| --------------- | ------- | -------- | ------- | ------------------ |
+| `--sheet`       | integer | no       | 1       | Sheet in workbook. |
+| `--chart-index` | integer | no       | 0       | Chart index.       |
+
+<a id="subcommand-office-word-to-pdf"></a>
+
+#### `calkit office word-to-pdf`
+
+Convert a Word document to PDF.
+
+Usage:
+
+```text
+calkit office word-to-pdf [OPTIONS] INPUT-FPATH
+```
+
+Arguments:
+
+| Argument      | Type | Required | Default | Description                    |
+| ------------- | ---- | -------- | ------- | ------------------------------ |
+| `input_fpath` | text | yes      |         | Input Word document file path. |
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                          |
+| ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `-o`, `--output` | text | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+
+<a id="command-group-update"></a>
+
+### `calkit update`
+
+Update objects.
+
+| Command                                               | Description                                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`devcontainer`](#subcommand-update-devcontainer)     | Update a project's devcontainer to match this version of Calkit's spec.              |
+| [`license`](#subcommand-update-license)               | Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).  |
+| [`release`](#subcommand-update-release)               | Update a release.                                                                    |
+| [`vscode-config`](#subcommand-update-vscode-config)   | Update a project's VS Code config to match this version of Calkit's recommendations. |
+| [`github-actions`](#subcommand-update-github-actions) | Update a project's GitHub Actions to match this version of Calkit's recommendations. |
+| [`notebook`](#subcommand-update-notebook)             | Update notebook information.                                                         |
+| [`agent-skills`](#subcommand-update-agent-skills)     | Copy packaged Calkit agent skills to `~/.agents/skills`.                             |
+| [`uv-env`](#subcommand-update-uv-env)                 | Update a uv environment.                                                             |
+| [`pixi-env`](#subcommand-update-pixi-env)             | Update a pixi environment.                                                           |
+| [`julia-env`](#subcommand-update-julia-env)           | Update a Julia environment.                                                          |
+| [`conda-env`](#subcommand-update-conda-env)           | Update a conda environment spec file.                                                |
+| [`docker-env`](#subcommand-update-docker-env)         | Update a docker environment.                                                         |
+| [`slurm-env`](#subcommand-update-slurm-env)           | Update a SLURM environment.                                                          |
+| [`env`](#subcommand-update-env)                       | Update an environment.                                                               |
+| [`environment`](#subcommand-update-environment)       | Update an environment.                                                               |
+| [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
+| [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
+| [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
+
+<a id="subcommand-update-devcontainer"></a>
+
+#### `calkit update devcontainer`
+
+Update a project's devcontainer to match this version of Calkit's spec.
+
+Usage:
+
+```text
+calkit update devcontainer [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                       |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
+| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated devcontainer.          |
+
+<a id="subcommand-update-license"></a>
+
+#### `calkit update license`
+
+Update license with a reasonable default (MIT for code, CC-BY-4.0 for other files).
+
+Usage:
+
+```text
+calkit update license [OPTIONS]
+```
+
+Options:
+
+| Option                     | Type    | Required | Default | Description                                         |
+| -------------------------- | ------- | -------- | ------- | --------------------------------------------------- |
+| `--copyright-holder`, `-c` | text    | yes      |         | Copyright holder, e.g., your full name.             |
+| `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license. |
+
+<a id="subcommand-update-release"></a>
+
+#### `calkit update release`
+
+Update a release.
+
+Usage:
+
+```text
+calkit update release [OPTIONS]
+```
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------ |
+| `--name`, `-n`   | text    | no       |         | Release name.                              |
+| `--latest`       | boolean | no       | False   | Update latest release.                     |
+| `--delete`       | boolean | no       | False   | Delete release.                            |
+| `--publish`      | boolean | no       | False   | Publish the release.                       |
+| `--reupload`     | boolean | no       | False   | Reupload files.                            |
+| `--no-github`    | boolean | no       | False   | Do not create a release on GitHub.         |
+| `--no-push-tags` | boolean | no       | False   | Do not push Git tags to remote repository. |
+
+<a id="subcommand-update-vscode-config"></a>
+
+#### `calkit update vscode-config`
+
+Update a project's VS Code config to match this version of Calkit's recommendations.
+
+Usage:
+
+```text
+calkit update vscode-config [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                       |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
+| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated VS Code config.        |
+
+<a id="subcommand-update-github-actions"></a>
+
+#### `calkit update github-actions`
+
+Update a project's GitHub Actions to match this version of Calkit's recommendations.
+
+An existing workflow that runs the Calkit action is updated in place, pinning the action to this version of Calkit, so this is safe to rerun after upgrading.
+
+Usage:
+
+```text
+calkit update github-actions [OPTIONS]
+```
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                       |
+| ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
+| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
+
+<a id="subcommand-update-notebook"></a>
+
+#### `calkit update notebook`
+
+Update notebook information.
+
+Updates the notebook's environment association in either the 'notebooks' section or the appropriate 'pipeline' stage, depending on whether the notebook has a corresponding pipeline stage.
+
+Usage:
+
+```text
+calkit update notebook [OPTIONS] NOTEBOOK-PATH
+```
+
+Arguments:
+
+| Argument        | Type | Required | Default | Description                                       |
+| --------------- | ---- | -------- | ------- | ------------------------------------------------- |
+| `notebook_path` | text | yes      |         | Path to the notebook file (relative to workspace) |
+
+Options:
+
+| Option      | Type    | Required | Default | Description                                     |
+| ----------- | ------- | -------- | ------- | ----------------------------------------------- |
+| `--set-env` | text    | no       |         | Environment name to associate with the notebook |
+| `--json`    | boolean | no       | False   | Output result as JSON.                          |
+
+<a id="subcommand-update-agent-skills"></a>
+
+#### `calkit update agent-skills`
+
+Copy packaged Calkit agent skills to `~/.agents/skills`.
+
+Usage:
+
+```text
+calkit update agent-skills [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                    |
+| --------------- | ------- | -------- | ------- | ------------------------------ |
+| `--quiet`, `-q` | boolean | no       | False   | Suppress non-essential output. |
+
+<a id="subcommand-update-uv-env"></a>
+
+#### `calkit update uv-env`
+
+Update a uv environment.
+
+Usage:
+
+```text
+calkit update uv-env [OPTIONS]
+```
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                             |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`     | text    | yes      |         | Environment name.                                       |
+| `--add`            | text    | no       |         | Add a package.                                          |
+| `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
+| `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-pixi-env"></a>
+
+#### `calkit update pixi-env`
+
+Update a pixi environment.
+
+Usage:
+
+```text
+calkit update pixi-env [OPTIONS]
+```
+
+Options:
+
+| Option                     | Type    | Required | Default | Description                                             |
+| -------------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`             | text    | yes      |         | Environment name.                                       |
+| `--add`                    | text    | no       |         | Add a conda package.                                    |
+| `--remove`, `--rm`         | text    | no       |         | Remove a conda package.                                 |
+| `--add-pip`                | text    | no       |         | Add a PyPI package.                                     |
+| `--remove-pip`, `--rm-pip` | text    | no       |         | Remove a PyPI package.                                  |
+| `--no-check`               | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-julia-env"></a>
+
+#### `calkit update julia-env`
+
+Update a Julia environment.
+
+Usage:
+
+```text
+calkit update julia-env [OPTIONS]
+```
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                             |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`     | text    | yes      |         | Environment name.                                       |
+| `--add`            | text    | no       |         | Add a package.                                          |
+| `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
+| `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-conda-env"></a>
+
+#### `calkit update conda-env`
+
+Update a conda environment spec file.
+
+Usage:
+
+```text
+calkit update conda-env [OPTIONS]
+```
+
+Options:
+
+| Option                     | Type    | Required | Default | Description                                             |
+| -------------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
+| `--name`, `-n`             | text    | yes      |         | Environment name.                                       |
+| `--add`                    | text    | no       |         | Add a conda package.                                    |
+| `--remove`, `--rm`         | text    | no       |         | Remove a conda package.                                 |
+| `--add-pip`                | text    | no       |         | Add a pip package.                                      |
+| `--remove-pip`, `--rm-pip` | text    | no       |         | Remove a pip package.                                   |
+| `--no-check`               | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
+
+<a id="subcommand-update-docker-env"></a>
+
+#### `calkit update docker-env`
+
+Update a docker environment.
+
+Usage:
+
+```text
+calkit update docker-env [OPTIONS]
+```
+
+Options:
+
+| Option         | Type | Required | Default | Description            |
+| -------------- | ---- | -------- | ------- | ---------------------- |
+| `--name`, `-n` | text | yes      |         | Environment name.      |
+| `--image`      | text | no       |         | Docker image name/tag. |
+
+<a id="subcommand-update-slurm-env"></a>
+
+#### `calkit update slurm-env`
+
+Update a SLURM environment.
+
+Usage:
+
+```text
+calkit update slurm-env [OPTIONS]
+```
+
+Options:
+
+| Option                  | Type    | Required | Default | Description                                                                                   |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Environment name.                                                                             |
+| `--host`                | text    | no       |         | SLURM host.                                                                                   |
+| `--add-default-option`  | text    | no       |         | Add a default sbatch option.                                                                  |
+| `--rm-default-option`   | text    | no       |         | Remove a default sbatch option.                                                               |
+| `--set-default-options` | text    | no       |         | Replace default options list.                                                                 |
+| `--add-default-setup`   | text    | no       |         | Add a default setup command.                                                                  |
+| `--rm-default-setup`    | text    | no       |         | Remove a default setup command.                                                               |
+| `--set-default-setup`   | text    | no       |         | Replace default setup list.                                                                   |
+| `--max-concurrent-jobs` | integer | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
+
+<a id="subcommand-update-env"></a>
+
+#### `calkit update env`
+
+Update an environment.
+
+Currently supports adding packages to Julia and Nix (flake) envs.
+
+Usage:
+
+```text
+calkit update env [OPTIONS]
+```
+
+Options:
+
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+
+<a id="subcommand-update-environment"></a>
+
+#### `calkit update environment`
+
+Update an environment.
+
+Currently supports adding packages to Julia and Nix (flake) envs.
+
+Usage:
+
+```text
+calkit update environment [OPTIONS]
+```
+
+Options:
+
+| Option                   | Type | Required | Default | Description                                                               |
+| ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
+| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+
+<a id="subcommand-update-stage"></a>
+
+#### `calkit update stage`
+
+Update a pipeline stage in calkit.yaml.
+
+Usage:
+
+```text
+calkit update stage [OPTIONS] NAME
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `name`   | text | yes      |         | Stage name. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                         |
+| --------------------- | ---- | -------- | ------- | --------------------------------------------------- |
+| `--environment`, `-e` | text | no       |         | Set environment.                                    |
+| `--add-input`         | text | no       |         | Add an input path.                                  |
+| `--rm-input`          | text | no       |         | Remove an input path.                               |
+| `--set-inputs`        | text | no       |         | Replace the inputs list.                            |
+| `--set-outputs`       | text | no       |         | Replace DVC outputs list (paths only, storage=dvc). |
+| `--set-outputs-git`   | text | no       |         | Replace Git-tracked outputs list.                   |
+| `--add-output`        | text | no       |         | Add a DVC-tracked output path.                      |
+| `--rm-output`         | text | no       |         | Remove an output path.                              |
+
+<a id="subcommand-update-figure"></a>
+
+#### `calkit update figure`
+
+Update a figure entry in calkit.yaml.
+
+Usage:
+
+```text
+calkit update figure [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `path`   | text | yes      |         | Path to the figure file. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                           |
+| --------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
+| `--imported-from-url` | text | no       |         | URL the figure was imported from.                     |
+| `--stage`             | text | no       |         | Name of the pipeline stage that produces this figure. |
+
+<a id="subcommand-update-dataset"></a>
+
+#### `calkit update dataset`
+
+Update a dataset entry in calkit.yaml.
+
+Usage:
+
+```text
+calkit update dataset [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description               |
+| -------- | ---- | -------- | ------- | ------------------------- |
+| `path`   | text | yes      |         | Path to the dataset file. |
+
+Options:
+
+| Option                | Type | Required | Default | Description                                            |
+| --------------------- | ---- | -------- | ------- | ------------------------------------------------------ |
+| `--imported-from-url` | text | no       |         | URL the dataset was imported from.                     |
+| `--stage`             | text | no       |         | Name of the pipeline stage that produces this dataset. |
+
+<a id="command-group-check"></a>
+
+### `calkit check`
+
+Check things.
+
+| Command                                                     | Description                                                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| [`repro`](#subcommand-check-repro)                          | Check the reproducibility of a project.                                                                      |
+| [`environment`](#subcommand-check-environment)              | Check that an environment is up-to-date.                                                                     |
+| [`julia-env`](#subcommand-check-julia-env)                  | Check a Julia environment and instantiate only when project, manifest, and package cache state have changed. |
+| [`environments`](#subcommand-check-environments)            |                                                                                                              |
+| [`envs`](#subcommand-check-envs)                            | Check that all environments are up-to-date.                                                                  |
+| [`renv`](#subcommand-check-renv)                            | Check an renv R environment, initializing if needed.                                                         |
+| [`docker-env`](#subcommand-check-docker-env)                | Check that Docker environment is up-to-date.                                                                 |
+| [`conda-env`](#subcommand-check-conda-env)                  | Check a conda environment and rebuild if necessary.                                                          |
+| [`venv`](#subcommand-check-venv)                            | Check a Python virtual environment (uv or virtualenv).                                                       |
+| [`matlab-env`](#subcommand-check-matlab-env)                | Check a MATLAB environment matches its spec and export a JSON lock file.                                     |
+| [`reqs\|requirements`](#subcommand-check-reqs-requirements) | Check that a project's system-level requirements are met.                                                    |
+| [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
+| [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
+| [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
+
+<a id="subcommand-check-repro"></a>
+
+#### `calkit check repro`
+
+Check the reproducibility of a project.
+
+Usage:
+
+```text
+calkit check repro [OPTIONS]
+```
+
+Options:
+
+| Option   | Type | Required | Default | Description                |
+| -------- | ---- | -------- | ------- | -------------------------- |
+| `--wdir` | text | no       | .       | Project working directory. |
+
+<a id="subcommand-check-environment"></a>
+
+#### `calkit check environment`
+
+Check that an environment is up-to-date.
+
+Usage:
+
+```text
+calkit check environment [OPTIONS]
+```
+
+Options:
+
+| Option         | Type    | Required | Default | Description                       |
+| -------------- | ------- | -------- | ------- | --------------------------------- |
+| `--name`, `-n` | text    | yes      |         | Name of the environment to check. |
+| `--verbose`    | boolean | no       | False   | Print verbose output.             |
+
+<a id="subcommand-check-julia-env"></a>
+
+#### `calkit check julia-env`
+
+Check a Julia environment and instantiate only when project, manifest, and package cache state have changed.
+
+Usage:
+
+```text
+calkit check julia-env [OPTIONS] [ENV-PATH]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default      | Description                      |
+| ---------- | ---- | -------- | ------------ | -------------------------------- |
+| `env_path` | text | no       | Project.toml | Path to Julia Project.toml file. |
+
+Options:
+
+| Option      | Type    | Required | Default | Description                            |
+| ----------- | ------- | -------- | ------- | -------------------------------------- |
+| `--julia`   | text    | no       |         | Julia version to enforce (e.g., 1.11). |
+| `--verbose` | boolean | no       | False   | Print verbose output.                  |
+
+<a id="subcommand-check-environments"></a>
+
+#### `calkit check environments`
+
+Usage:
+
+```text
+calkit check environments [OPTIONS]
+```
+
+Options:
+
+| Option      | Type    | Required | Default | Description           |
+| ----------- | ------- | -------- | ------- | --------------------- |
+| `--verbose` | boolean | no       | False   | Print verbose output. |
+
+<a id="subcommand-check-envs"></a>
+
+#### `calkit check envs`
+
+Check that all environments are up-to-date.
+
+Usage:
+
+```text
+calkit check envs [OPTIONS]
+```
+
+Options:
+
+| Option      | Type    | Required | Default | Description           |
+| ----------- | ------- | -------- | ------- | --------------------- |
+| `--verbose` | boolean | no       | False   | Print verbose output. |
+
+<a id="subcommand-check-renv"></a>
+
+#### `calkit check renv`
+
+Check an renv R environment, initializing if needed.
+
+Usage:
+
+```text
+calkit check renv [OPTIONS] ENV-PATH
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                             |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------- |
+| `env_path` | text | yes      |         | Path to DESCRIPTION file or renv environment directory. |
+
+Options:
+
+| Option      | Type    | Required | Default | Description           |
+| ----------- | ------- | -------- | ------- | --------------------- |
+| `--verbose` | boolean | no       | False   | Print verbose output. |
+
+<a id="subcommand-check-docker-env"></a>
+
+#### `calkit check docker-env`
+
+Check that Docker environment is up-to-date.
+
+Usage:
+
+```text
+calkit check docker-env [OPTIONS] TAG
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description |
+| -------- | ---- | -------- | ------- | ----------- |
+| `tag`    | text | yes      |         | Image tag.  |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                   |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i`, `--input`   | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                      |
+| `--output`, `-o`  | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`         | text    | no       |         | Alternative lock file input paths to read.                                                                                                                    |
+| `--input-delete`  | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                    |
+| `--platform`      | text    | no       |         | Which platform(s) to build for.                                                                                                                               |
+| `--user`          | text    | no       |         | Which user to run the container as.                                                                                                                           |
+| `--wdir`          | text    | no       |         | Working directory inside the container.                                                                                                                       |
+| `--dep`, `-d`     | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                         |
+| `--env-var`, `-e` | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                   |
+| `--port`, `-p`    | text    | no       |         | Declare an explicit port for the container.                                                                                                                   |
+| `--gpus`, `-g`    | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                        |
+| `--arg`, `-a`     | text    | no       |         | Declare an explicit run argument for the container.                                                                                                           |
+| `--quiet`, `-q`   | boolean | no       | False   | Be quiet.                                                                                                                                                     |
+
+<a id="subcommand-check-conda-env"></a>
+
+#### `calkit check conda-env`
+
+Check a conda environment and rebuild if necessary.
+
+Usage:
+
+```text
+calkit check conda-env [OPTIONS]
+```
+
+Options:
+
+| Option           | Type    | Required | Default         | Description                                                                                                                                                   |
+| ---------------- | ------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--file`, `-f`   | text    | no       | environment.yml | Path to conda environment YAML file.                                                                                                                          |
+| `--output`, `-o` | text    | no       |                 | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`        | text    | no       |                 | Alternative lock file input paths.                                                                                                                            |
+| `--input-delete` | text    | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
+| `--relaxed`      | boolean | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
+| `--quiet`, `-q`  | boolean | no       | False           | Be quiet.                                                                                                                                                     |
+
+<a id="subcommand-check-venv"></a>
+
+#### `calkit check venv`
+
+Check a Python virtual environment (uv or virtualenv).
+
+Usage:
+
+```text
+calkit check venv [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default          | Description                |
+| -------- | ---- | -------- | ---------------- | -------------------------- |
+| `path`   | text | no       | requirements.txt | Path to requirements file. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                                   |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--prefix`       | text    | no       | .venv   | Prefix.                                                                                                                                                       |
+| `--output`, `-o` | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`        | text    | no       |         | Alternative lock file input paths.                                                                                                                            |
+| `--input-delete` | text    | no       |         | Alternative lock file input paths to delete after use.                                                                                                        |
+| `--wdir`         | text    | no       |         | Working directory. Defaults to current working directory.                                                                                                     |
+| `--uv`           | boolean | no       | True    | Use uv.                                                                                                                                                       |
+| `--python`       | text    | no       |         | Python version to specify if using uv.                                                                                                                        |
+| `--quiet`        | boolean | no       | False   | Do not print any output                                                                                                                                       |
+| `--verbose`      | boolean | no       | False   | Print verbose output.                                                                                                                                         |
+
+<a id="subcommand-check-matlab-env"></a>
+
+#### `calkit check matlab-env`
+
+Check a MATLAB environment matches its spec and export a JSON lock file.
+
+Usage:
+
+```text
+calkit check matlab-env [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default | Description                      |
+| ---------------- | ---- | -------- | ------- | -------------------------------- |
+| `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
+| `--output`, `-o` | text | yes      |         |                                  |
+
+<a id="subcommand-check-reqs-requirements"></a>
+
+#### `calkit check reqs|requirements`
+
+Check that a project's system-level requirements are met.
+
+Usage:
+
+```text
+calkit check reqs|requirements [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                             |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                    |
+| `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite. |
+
+<a id="subcommand-check-env-vars"></a>
+
+#### `calkit check env-vars`
+
+Check that the project's required environmental variables exist.
+
+Usage:
+
+```text
+calkit check env-vars [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description          |
+| ----------------- | ------- | -------- | ------- | -------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output |
+
+<a id="subcommand-check-pipeline"></a>
+
+#### `calkit check pipeline`
+
+Check that the project pipeline is defined correctly.
+
+Usage:
+
+```text
+calkit check pipeline [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                 |
+| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------- |
+| `--compile`, `-c` | boolean | no       | False   | Compile the pipeline to DVC stages and merge into dvc.yaml. |
+
+<a id="subcommand-check-call"></a>
+
+#### `calkit check call`
+
+Check that a command succeeds and run an alternate if not.
+
+Usage:
+
+```text
+calkit check call [OPTIONS] CMD
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description       |
+| -------- | ---- | -------- | ------- | ----------------- |
+| `cmd`    | text | yes      |         | Command to check. |
+
+Options:
+
+| Option       | Type | Required | Default | Description                          |
+| ------------ | ---- | -------- | ------- | ------------------------------------ |
+| `--if-error` | text | yes      |         | Command to run if there is an error. |
+
+<a id="command-group-latex-tex"></a>
+
+### `calkit latex|tex`
+
+Work with LaTeX.
+
+| Command                                        | Description                                           |
+| ---------------------------------------------- | ----------------------------------------------------- |
+| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
+| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
+| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
+
+<a id="subcommand-latex-tex-from-json"></a>
+
+#### `calkit latex|tex from-json`
+
+Convert a JSON file to LaTeX.
+
+This is useful for referencing calculated values in LaTeX documents.
+
+Usage:
+
+```text
+calkit latex|tex from-json [OPTIONS] INPUT-FPATHS...
+```
+
+Arguments:
+
+| Argument       | Type | Required | Default | Description              |
+| -------------- | ---- | -------- | ------- | ------------------------ |
+| `input_fpaths` | text | yes      |         | Input JSON file path(s). |
+
+Options:
+
+| Option           | Type | Required | Default | Description                                                                                              |
+| ---------------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o` | text | yes      |         | Output LaTeX file path(s).                                                                               |
+| `--command`      | text | no       |         | Command name to use in LaTeX output.                                                                     |
+| `--format-json`  | text | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
+
+<a id="subcommand-latex-tex-build"></a>
+
+#### `calkit latex|tex build`
+
+Build a PDF of a LaTeX document with latexmk.
+
+If a Calkit environment is not specified, latexmk will be run in the system environment if available. If not available, a TeX Live Docker container will be used.
+
+Usage:
+
+```text
+calkit latex|tex build [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compile. |
+
+Options:
+
+| Option               | Type    | Required | Default | Description                                                                                      |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `--env`, `-e`        | text    | no       |         | Environment in which to run latexmk, if applicable.                                              |
+| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                     |
+| `--latexmk-rc`, `-r` | text    | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
+| `--output-dir`       | text    | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
+| `--aux-dir`          | text    | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
+| `--latexmk-arg`      | text    | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
+| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
+| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
+| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+
+<a id="subcommand-latex-tex-diff"></a>
+
+#### `calkit latex|tex diff`
+
+Build a PDF showing what changed in a LaTeX document.
+
+Two revisions that turn out to be the same is a result rather than an error: the marked-up document comes out unmarked, which is what "this branch hasn't changed the paper" looks like. A pipeline shouldn't fail depending on which branch it runs from.
+
+Marks up one revision of a document against another with latexdiff, so additions and deletions are visible where they happen rather than as a list of files that changed. A `.dvc` pointer in a pull request says a paper was rebuilt; this says what it now reads.
+
+With the default `--to`, the newer side is the working tree, so the marked-up document is built with the current figures and bibliography and what's marked is what changed in the text.
+
+Usage:
+
+```text
+calkit latex|tex diff [OPTIONS] TEX-FILE
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description               |
+| ---------- | ---- | -------- | ------- | ------------------------- |
+| `tex_file` | text | yes      |         | The .tex file to compare. |
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
+| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
+| `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
+| `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
+| `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                                                                                                                                                                            |
+
+<a id="command-group-overleaf-ol"></a>
+
+### `calkit overleaf|ol`
+
+Interact with Overleaf.
+
+| Command                                           | Description                                                    |
+| ------------------------------------------------- | -------------------------------------------------------------- |
+| [`import`](#subcommand-overleaf-ol-import)        | Import a publication from an Overleaf project.                 |
+| [`sync`](#subcommand-overleaf-ol-sync)            | Sync folders with Overleaf.                                    |
+| [`status\|st`](#subcommand-overleaf-ol-status-st) | Check the status of folders synced with Overleaf in a project. |
+| [`push`](#subcommand-overleaf-ol-push)            | Get the project's latest figures and text onto Overleaf.       |
+| [`pull`](#subcommand-overleaf-ol-pull)            | Bring collaborators' Overleaf writing back into the project.   |
+
+<a id="subcommand-overleaf-ol-import"></a>
+
+#### `calkit overleaf|ol import`
+
+Import a publication from an Overleaf project.
+
+Usage:
+
+```text
+calkit overleaf|ol import [OPTIONS] SRC-URL DEST-DIR
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                    |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
+| `src_url`  | text | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
+| `dest_dir` | text | yes      |         | Directory at which to save in the project, e.g., 'paper'.                      |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                |
+| --------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `--title`, `-t`       | text    | no       |         | Title of the publication.                                                                                                  |
+| `--target`, `-T`      | text    | no       |         | Target TeX file path inside Overleaf project.                                                                              |
+| `--description`, `-d` | text    | no       |         | Description of the publication.                                                                                            |
+| `--kind`              | text    | no       |         | What of the publication this is, e.g., 'journal-article'.                                                                  |
+| `--push-path`, `-p`   | text    | no       |         | Paths to push to the Overleaf project, e.g., 'figures'. Note that these are relative to the publication working directory. |
+| `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
+| `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
+| `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
+
+<a id="subcommand-overleaf-ol-sync"></a>
+
+#### `calkit overleaf|ol sync`
+
+Sync folders with Overleaf.
+
+Usage:
+
+```text
+calkit overleaf|ol sync [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                      |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |
+
+<a id="subcommand-overleaf-ol-status-st"></a>
+
+#### `calkit overleaf|ol status|st`
+
+Check the status of folders synced with Overleaf in a project.
+
+Usage:
+
+```text
+calkit overleaf|ol status|st [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                     |
+| -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
+
+<a id="subcommand-overleaf-ol-push"></a>
+
+#### `calkit overleaf|ol push`
+
+Get the project's latest figures and text onto Overleaf.
+
+Pulls the latest data, ensures the pipeline is up-to-date, then pushes to Overleaf without pulling anything back, so collaborators see current results before they write against them.
+
+Usage:
+
+```text
+calkit overleaf|ol push [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                          |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to push to Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pushed. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                      |
+| ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pushing.                                                                |
+| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                       |
+| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                         |
+| `--allow-stale`  | boolean | no       | False   | Push even if the pipeline is out-of-date.                                                                        |
+| `--any-branch`   | boolean | no       | False   | Push even if the current branch is missing commits from the default branch.                                      |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for. |
+| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                           |
+
+<a id="subcommand-overleaf-ol-pull"></a>
+
+#### `calkit overleaf|ol pull`
+
+Bring collaborators' Overleaf writing back into the project.
+
+Syncs in both directions, since Overleaf needs current figures to be worth writing against, then rebuilds the document from whatever came back and saves it.
+
+Usage:
+
+```text
+calkit overleaf|ol pull [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                            |
+| -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `paths`  | text | no       |         | Paths to pull from Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pulled. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                                                                                                                                 |
+| ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pulling. Useful when the default branch is protected, since pulling from Overleaf creates commits. |
+| `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                                                  |
+| `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                                                    |
+| `--no-run`       | boolean | no       | False   | Do not run the pipeline after pulling.                                                                                                      |
+| `--allow-stale`  | boolean | no       | False   | Pull even if the pipeline is out-of-date.                                                                                                   |
+| `--any-branch`   | boolean | no       | False   | Pull even if the current branch is missing commits from the default branch.                                                                 |
+| `--force`, `-f`  | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                            |
+| `--verbose`      | boolean | no       | False   | Enable verbose output.                                                                                                                      |
+
+<a id="command-group-hub-cloud"></a>
+
+### `calkit hub|cloud`
+
+Interact with a Calkit hub.
+
+| Command                                  | Description                             |
+| ---------------------------------------- | --------------------------------------- |
+| [`get`](#subcommand-hub-cloud-get)       | Get a resource from the hub API.        |
+| [`login`](#subcommand-hub-cloud-login)   | Log in to a Calkit hub.                 |
+| [`config`](#subcommand-hub-cloud-config) | Work with per-hub credentials (tokens). |
+
+<a id="subcommand-hub-cloud-get"></a>
+
+#### `calkit hub|cloud get`
+
+Get a resource from the hub API.
+
+Usage:
+
+```text
+calkit hub|cloud get [OPTIONS] ENDPOINT
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description  |
+| ---------- | ---- | -------- | ------- | ------------ |
+| `endpoint` | text | yes      |         | API endpoint |
+
+Options:
+
+| Option  | Type | Required | Default | Description                                                                                                                              |
+| ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+
+<a id="subcommand-hub-cloud-login"></a>
+
+#### `calkit hub|cloud login`
+
+Log in to a Calkit hub.
+
+First try a GET request to the /user endpoint to check if the user is already logged in. If not, perform OAuth device flow.
+
+Usage:
+
+```text
+calkit hub|cloud login [OPTIONS]
+```
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
+
+<a id="subcommand-hub-cloud-config"></a>
+
+#### `calkit hub|cloud config`
+
+Work with per-hub credentials (tokens).
+
+Usage:
+
+```text
+calkit hub|cloud config COMMAND [ARGS]...
+```
+
+<a id="command-group-scheduler-sch"></a>
+
+### `calkit scheduler|sch`
+
+Work with a job scheduler (SLURM or PBS).
+
+| Command                                         | Description                                                       |
+| ----------------------------------------------- | ----------------------------------------------------------------- |
+| [`batch`](#subcommand-scheduler-sch-batch)      | Submit a batch job through the scheduler associated with the env. |
+| [`queue\|q`](#subcommand-scheduler-sch-queue-q) | List scheduler jobs submitted via Calkit (across SLURM and PBS).  |
+| [`cancel`](#subcommand-scheduler-sch-cancel)    | Cancel scheduler jobs by their name in the project.               |
+| [`logs`](#subcommand-scheduler-sch-logs)        | Get the logs for scheduler jobs by their name in the project.     |
+
+<a id="subcommand-scheduler-sch-batch"></a>
+
+#### `calkit scheduler|sch batch`
+
+Submit a batch job through the scheduler associated with the env.
+
+Duplicates are not allowed, so if one is already running or queued with the same name, we'll wait for it to finish. The only exception is if the dependencies have changed, in which case any queued or running jobs will be canceled and a new one submitted.
+
+If the environment sets `max_concurrent_jobs`, submission waits until this project has fewer than that many jobs queued or running, so an iterated stage does not put all of its jobs into a shared cluster's queue at once.
+
+Usage:
+
+```text
+calkit scheduler|sch batch [OPTIONS] TARGET [ARGS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                  |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `target` | text | yes      |         | The target to run. This can be a shell script or an executable.              |
+| `args`   | text | no       |         | Arguments for the target command, passed to the job script after the target. |
+
+Options:
+
+| Option                  | Type    | Required | Default | Description                                                                                                                                                                                                                                                                             |
+| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
+| `--environment`, `-e`   | text    | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
+| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
+| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
+| `--option`, `-s`        | text    | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
+| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--log-path`            | text    | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
+| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
+| `--env-default-options` | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
+| `--env-default-setup`   | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
+
+<a id="subcommand-scheduler-sch-queue-q"></a>
+
+#### `calkit scheduler|sch queue|q`
+
+List scheduler jobs submitted via Calkit (across SLURM and PBS).
+
+Usage:
+
+```text
+calkit scheduler|sch queue|q
+```
+
+<a id="subcommand-scheduler-sch-cancel"></a>
+
+#### `calkit scheduler|sch cancel`
+
+Cancel scheduler jobs by their name in the project.
+
+Usage:
+
+```text
+calkit scheduler|sch cancel NAMES...
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description              |
+| -------- | ---- | -------- | ------- | ------------------------ |
+| `names`  | text | yes      |         | Names of jobs to cancel. |
+
+<a id="subcommand-scheduler-sch-logs"></a>
+
+#### `calkit scheduler|sch logs`
+
+Get the logs for scheduler jobs by their name in the project.
+
+If no names are given, every tracked job's log is shown.
+
+Usage:
+
+```text
+calkit scheduler|sch logs [OPTIONS] [NAMES...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                        |
+| -------- | ---- | -------- | ------- | ---------------------------------- |
+| `names`  | text | no       |         | Names of the jobs to get logs for. |
+
+Options:
+
+| Option           | Type    | Required | Default | Description                         |
+| ---------------- | ------- | -------- | ------- | ----------------------------------- |
+| `--follow`, `-f` | boolean | no       | False   | Follow the log output like tail -f. |
+
+<a id="command-group-dev"></a>
+
+### `calkit dev`
+
+Developer tools.
+
+| Command                              | Description                                     |
+| ------------------------------------ | ----------------------------------------------- |
+| [`python`](#subcommand-dev-python)   | Start an Python shell in Calkit's environment.  |
+| [`ipython`](#subcommand-dev-ipython) | Start an IPython shell in Calkit's environment. |
+
+<a id="subcommand-dev-python"></a>
+
+#### `calkit dev python`
+
+Start an Python shell in Calkit's environment.
+
+Usage:
+
+```text
+calkit dev python [OPTIONS]
+```
+
+<a id="subcommand-dev-ipython"></a>
+
+#### `calkit dev ipython`
+
+Start an IPython shell in Calkit's environment.
+
+Usage:
+
+```text
+calkit dev ipython [OPTIONS]
+```
+
+<a id="command-group-sync"></a>
+
+### `calkit sync`
+
+Sync with external systems.
+
+| Command                                 | Description                                          |
+| --------------------------------------- | ---------------------------------------------------- |
+| [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
+| [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
+| [`all`](#subcommand-sync-all)           | Sync all registered systems.                         |
+| [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
+
+<a id="subcommand-sync-git"></a>
+
+#### `calkit sync git`
+
+Sync the Git repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync git [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-dvc"></a>
+
+#### `calkit sync dvc`
+
+Sync the DVC repository by pulling and then pushing.
+
+Usage:
+
+```text
+calkit sync dvc [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description |
+| ----------------- | ------- | -------- | ------- | ----------- |
+| `--no-check-auth` | boolean | no       | False   |             |
+
+<a id="subcommand-sync-all"></a>
+
+#### `calkit sync all`
+
+Sync all registered systems.
+
+Usage:
+
+```text
+calkit sync all
+```
+
+<a id="subcommand-sync-overleaf"></a>
+
+#### `calkit sync overleaf`
+
+Sync folders with Overleaf.
+
+Usage:
+
+```text
+calkit sync overleaf [OPTIONS] [PATHS...]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                                      |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+
+Options:
+
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                              |
+| --------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-commit`         | boolean | no       | False   | Do not create a commit in the project repo for this sync. Changes pulled from Overleaf are still applied, but are left staged so you can review or commit them yourself. Changes are always committed and pushed to Overleaf regardless. |
+| `--auto-commit`, `-a` | boolean | no       | False   | Automatically commit changes to the project repo if a synced folder has changes.                                                                                                                                                         |
+| `--no-push`           | boolean | no       | False   | Do not push the changes to the main project remote. Changes will always be pushed to Overleaf.                                                                                                                                           |
+| `--verbose`           | boolean | no       | False   | Enable verbose output.                                                                                                                                                                                                                   |
+| `--resolve`, `-r`     | boolean | no       | False   | Mark merge conflicts as resolved before committing.                                                                                                                                                                                      |
+| `--push-only`, `-P`   | boolean | no       | False   | Only push local files to Overleaf without pulling from Overleaf. Useful when initializing a new Overleaf project from local files.                                                                                                       |
+| `--allow-stale`       | boolean | no       | False   | Sync even if the pipeline is out-of-date, which can send stale figures or results to Overleaf.                                                                                                                                           |
+| `--any-branch`        | boolean | no       | False   | Sync even if the current branch is missing commits from the default branch.                                                                                                                                                              |
+| `--force`, `-f`       | boolean | no       | False   | Overwrite changes made on Overleaf to push-only paths, which the project is meant to be the source of truth for.                                                                                                                         |

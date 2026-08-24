@@ -1,56 +1,61 @@
 # Home
 
-Calkit makes it easy to create
-["single button"](https://doi.org/10.1190/1.1822162)
-reproducible research projects.
+Typical research workflows are horizontally-siloed, i.e.,
+various stages--data collection, analysis, writing--are performed in
+disconnected systems,
+turning research into a slow, error-prone, and tedious
+[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
 
-Instead of a loosely related collection of files
-and manual instructions,
-turn your project into a version-controlled,
-self-contained "calculation kit,"
-tying together all phases or stages of the project:
-data collection, analysis, visualization, and writing,
-each of which can make use of the latest and greatest computational
-tools and languages.
-In other words, you, your collaborators, and readers will be able to go
-from raw data to research article with a single command,
-improving efficiency via faster iteration cycle time,
-reducing the likelihood of mistakes,
-and allowing others to more effectively build upon your work.
+Calkit helps you integrate code, data, figures, results, publications,
+and more into a cohesive, traceable, and portable _knowledge creation system_,
+so every output can be traced back to its source (provenance)
+and reproduced with a single command.
 
-Calkit makes this level of automation possible without extensive software
-engineering expertise by providing a project framework and toolset that unifies
-and simplifies the use of powerful enabling technologies like Git,
-DVC, Conda, Docker, and more,
-while guiding users away from common reproducibility pitfalls.
+With industry standard tools combined into a unified and simplified experience
+tailored for research,
+you can reap the rewards of reproducibility and automation
+without the cognitive overhead.
+
+<!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
+
+![pipeline](img/pipeline.png)
 
 ## Features
 
-- A declarative pipeline that forces users to define an environment
-  for every stage, so long lists of instructions in a README and
-  "but it works on my machine" are things of the past.
-- A CLI to run the project's pipeline to verify it's reproducible,
-  regenerating outputs as needed and
-  ensuring all
-  computational environments
-  (e.g., [Conda](https://docs.conda.io/en/latest/),
-  [Docker](https://docker.com), uv, Julia)
-  match their specification.
-- A schema to store structured metadata describing the
-  project's important outputs (in its `calkit.yaml` file)
-  and how they are created
-  (its computational environments and pipeline).
-- A command line interface (CLI) to simplify keeping code, text, and larger
-  data files backed up in the same project repo using both
-  [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
+- A simplified [version control](version-control.md)
+  interface that unifies Git and DVC (Data Version Control),
+  so everything can be kept in the same project repository.
+  This way, code doesn't need to be siloed away from other
+  important artifacts like datasets, models, figures, or article PDFs,
+  allowing you to work on all parts of a project without hopping around to
+  different tools.
+- [Computational environment management](environments.md) with support for many
+  languages and environment managers: Conda, Docker, uv, Julia, Renv, and more.
+  No need to create and update environments on your own. Calkit will handle
+  them as needed.
+- An environment-aware build system or [pipeline](pipeline/index.md) with
+  a simple declarative syntax and
+  output caching so you don't need to think about which steps or stages
+  need to be rerun after changing any part of the project.
+  Simply call `calkit run`.
+  Compose your pipeline from many different kinds of stages,
+  including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud system](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
-- [Overleaf integration](https://docs.calkit.org/overleaf/), so code,
-  data, and LaTeX documents can all live in the same repo and be part of a
-  single pipeline (no more manual uploads!)
-
-## Installation
-
-See [installation](installation.md).
+- [Overleaf integration](https://docs.calkit.org/overleaf/), so
+  analysis, visualization, and writing can all stay in sync
+  (no more manual uploads!)
+- Support for running on [high performance computing (HPC)](hpc.md) systems
+  that use PBS or SLURM schedulers.
+- Support for automated running with
+  [GitHub Actions](tutorials/github-actions.md).
+- Extensions for doing all of the above graphically in
+  [JupyterLab](jupyterlab.md) and
+  [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](browser-ext/index.md) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.

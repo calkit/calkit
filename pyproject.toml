@@ -30,7 +30,7 @@ dependencies = [
   "bibtexparser",
   "checksumdir",
   "docx2pdf",
-  "dvc==3.66.1",
+  "dvc[all]==3.67.1",
   "fastapi",
   "gitpython",
   "keyring",
@@ -43,7 +43,7 @@ dependencies = [
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.24.1",
+  "typer==0.25.1",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -52,8 +52,8 @@ dependencies = [
   "sqlitedict>=2.1.0",
   "json2latex>=0.0.3",
   "toml>=0.10.2",
-  "texsoup>=0.3.1",
-  "fsspec>=2026.2.0",
+  "texsoup>=0.3.3",
+  "fsspec>=2026.4.0",
 ]
 description = "Reproducibility simplified."
 dynamic = ["version"]
@@ -69,6 +69,8 @@ xet = ["xet>=0.0.1"]  # For fast large file transfers with XeT protocol
 dev = [
   "deptry>=0.22.0",
   "ipykernel",
+  "jsonschema",
+  "types-jsonschema",
   "kaleido==0.2.1",
   "numpy",
   "pandas>=2.2.3",
@@ -85,8 +87,11 @@ dev = [
   "mkdocs-material",
   "mkdocs-mermaid2-plugin",
   "pytest-env>=1.1.5",
+  "pytest-httpserver>=1.0.0",
   "pytest-xdist>=3.8.0",
-  "pypdf>=6.4.2",
+  # For the hub backend format hook, which runs ruff via uv from the
+  # default workspace environment
+  "ruff",
   "mkdocs-glightbox>=0.5.2",
   "scipy>=1.15.3",
 ]
@@ -102,9 +107,13 @@ ck = "calkit.fs:CalkitFileSystem"
 [project.scripts]
 calkit = "calkit.cli:run"
 calk9 = "calkit.cli:run"
+ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["calkit"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"agent-plugin/skills" = "calkit/agent_skills"
 
 [tool.hatch.build.targets.sdist]
 artifacts = ["calkit/labextension"]
@@ -112,8 +121,7 @@ exclude = [".github"]
 
 [tool.hatch.build.targets.wheel.shared-data]
 "calkit/labextension" = "share/jupyter/labextensions/calkit"
-"install.json" = "share/jupyter/labextensions/calkit/install.json"
-"jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
+"jupyterlab-ext/jupyter-config/server-config" = "etc/jupyter/jupyter_server_config.d"
 
 [tool.hatch.build.hooks.jupyter-builder]
 dependencies = ["hatch-jupyter-builder>=0.5"]
@@ -127,11 +135,13 @@ skip-if-exists = ["calkit/labextension/static/style.js"]
 [tool.hatch.build.hooks.jupyter-builder.build-kwargs]
 build_cmd = "build:prod"
 npm = ["jlpm"]
+path = "jupyterlab-ext"
 
 [tool.hatch.build.hooks.jupyter-builder.editable-build-kwargs]
 build_cmd = "install:extension"
 npm = ["jlpm"]
-source_dir = "src"
+path = "jupyterlab-ext"
+source_dir = "jupyterlab-ext/src"
 build_dir = "calkit/labextension"
 
 [tool.jupyter-releaser.options]
@@ -140,19 +150,26 @@ version_cmd = "hatch version"
 [tool.jupyter-releaser.hooks]
 before-build-npm = [
   "python -m pip install 'jupyterlab>=4.0.0,<5'",
-  "jlpm",
-  "jlpm build:prod",
+  "cd jupyterlab-ext && jlpm",
+  "cd jupyterlab-ext && jlpm build:prod",
 ]
-before-build-python = ["jlpm clean:all"]
+before-build-python = ["cd jupyterlab-ext && jlpm clean:all"]
 
 [tool.check-wheel-contents]
 ignore = ["W002"]
 
 [tool.hatch.version]
 source = "vcs"
+tag-pattern = "^v(?P<version>.+)$"
+
+[tool.hatch.version.raw-options]
+git_describe_command = [
+    "git", "describe", "--dirty", "--tags", "--long", "--match", "v[0-9]*",
+]
 
 [tool.mypy]
-files = ["calkit"]
+files = ["calkit", "hub/backend/app"]
+exclude = ["^hub/backend/app/alembic/"]
 disallow_untyped_defs = true
 disallow_any_unimported = true
 no_implicit_optional = true
@@ -161,14 +178,80 @@ warn_return_any = true
 warn_unused_ignores = true
 show_error_codes = true
 
+# Third-party modules that ship no type stubs.
+[[tool.mypy.overrides]]
+module = ["sqlitedict", "networkx", "yaml"]
+ignore_missing_imports = true
+
+# jsonschema's stubs come from the types-jsonschema dev dependency, which
+# mypy doesn't always resolve from the virtual environment.
+[[tool.mypy.overrides]]
+module = ["jsonschema"]
+ignore_missing_imports = true
+
+# The hub backend is checked strict; mypy can't set ``strict`` per-module,
+# so the remainder of its flag bundle is enumerated here (the rest are
+# already enabled globally above)
+[[tool.mypy.overrides]]
+module = ["app", "app.*"]
+disallow_any_generics = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+no_implicit_reexport = true
+strict_equality = true
+extra_checks = true
+# The backend's previous config didn't enable this
+disallow_any_unimported = false
+
 [tool.ruff]
 target-version = "py310"
 line-length = 79
 fix = true
+extend-exclude = ["hub/backend/app/alembic"]
+
+[tool.ruff.per-file-target-version]
+"hub/backend/**" = "py312"
 
 [tool.ruff.lint]
-extend-select = ["I"]  # Import sorting (isort compatibility)
+# Pin the rule set explicitly (the pre-0.9 defaults plus import sorting)
+# so it doesn't drift with ruff's own defaults across versions
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Defines a yaml-loader helper amid its imports
+"hub/backend/app/projects.py" = ["E402"]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve runtime typing for pydantic models even if UP rules are enabled
+keep-runtime-typing = true
+
+[tool.uv.workspace]
+members = ["hub/backend"]
+
+# Version is dynamic, derived from the Git tags by hatch-vcs; see the same
+# setting in hub/backend/pyproject.toml for why uv needs to be told that
+[tool.uv]
+cache-keys = [{ git = { commit = true, tags = true } }]
+# 'emails' and 'encutils' (via the hub backend and cssutils) ask for chardet
+# with no upper bound, so resolution picks up 7.x. requests asserts chardet
+# < 6 at import and warns on every single command when it doesn't hold, which
+# is noise on top of every pipeline run in this workspace. Nothing here needs
+# chardet 6+, so bound it rather than teach everyone to ignore a warning.
+constraint-dependencies = ["chardet<6"]
 
 [tool.pytest.ini_options]
-env = ["CALKIT_ENV=test", "CALKIT_TEST_OVERLEAF_TOKEN=none"]
-addopts = "-n auto"
+env = [
+  "CALKIT_ENV=test",
+  "CALKIT_TEST_OVERLEAF_TOKEN=none",
+  # Keep tests off the real system keyring. Without this, macOS prompts to
+  # unlock the 'calkit-test' Keychain item on every run (and again whenever
+  # the venv is recreated, since that changes the binary's code signature).
+  # The fail backend raises NoKeyringError, so supports_keyring() is False
+  # and the config falls back to its YAML file, which is what tests want.
+  "PYTHON_KEYRING_BACKEND=keyring.backends.fail.Keyring",
+]
+# The hub backend's tests need the compose stack and its own environment;
+# they run via test-hub.yml, not from the workspace root
+addopts = "-n auto -p pytest_jupyter.jupyter_server --ignore=hub"

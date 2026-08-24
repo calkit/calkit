@@ -10,9 +10,6 @@ import sys
 import traceback
 from pathlib import Path
 
-import dvc
-import dvc.repo
-import git
 import tornado
 from dvc.exceptions import NotDvcRepoError
 from jupyter_server.base.handlers import APIHandler as _APIHandler
@@ -31,7 +28,7 @@ from calkit.cli.new import (
     new_venv,
 )
 from calkit.cli.notebooks import check_env_kernel
-from calkit.dvc import run_dvc_command
+from calkit.dvc import get_dvc_repo, run_dvc_command
 from calkit.environments import DEFAULT_PYTHON_VERSION
 from calkit.git import ensure_path_is_ignored
 from calkit.models.pipeline import JupyterNotebookStage
@@ -97,7 +94,7 @@ class ProjectRouteHandler(APIHandler):
                 json.dumps({"error": "Request body must be valid JSON"})
             )
             return
-        ck_info = calkit.load_calkit_info(process_includes=False)
+        ck_info = calkit.load_calkit_info()
         # Update top-level fields from body
         for field in ["name", "title", "description", "git_repo_url", "owner"]:
             if field in body:
@@ -818,7 +815,7 @@ class GitStatusRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -897,14 +894,23 @@ class PipelineStatusRouteHandler(APIHandler):
             calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
             # Clean all notebooks in the pipeline
             calkit.notebooks.clean_all_in_pipeline(ck_info=ck_info)
-            dvc_repo = dvc.repo.Repo(os.getcwd())
+            dvc_repo = get_dvc_repo(os.getcwd())
             raw_status = dvc_repo.status()
+            # Frozen stages are intentionally pinned and hidden from status
+            frozen_stages = calkit.pipeline.frozen_stage_base_names(
+                ck_info=ck_info
+            )
             pipeline_status = {
                 k.split("dvc.yaml:")[-1]: v
                 for k, v in raw_status.items()
-                if v != ["always changed"] and not k.endswith(".dvc")
+                if not k.endswith(".dvc")
+                and k.split("dvc.yaml:")[-1].split("@")[0] not in frozen_stages
             }
-            is_outdated = len(pipeline_status) > 0
+            # Always-run-only stages are surfaced in pipeline_status but do
+            # not count toward is_outdated, matching the CLI's is_stale logic.
+            is_outdated = any(
+                v != ["always changed"] for v in pipeline_status.values()
+            )
             self.finish(
                 json.dumps(
                     {
@@ -952,7 +958,7 @@ class GitIgnoreRouteHandler(APIHandler):
             self.finish(json.dumps({"error": "paths must be a list"}))
             return
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -980,7 +986,7 @@ class GitCommitRouteHandler(APIHandler):
             self.finish(json.dumps({"error": "Commit 'message' is required"}))
             return
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -1037,7 +1043,7 @@ class GitHistoryRouteHandler(APIHandler):
     @tornado.web.authenticated
     def get(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))
@@ -1060,7 +1066,7 @@ class GitPushRouteHandler(APIHandler):
     @tornado.web.authenticated
     def post(self):
         try:
-            repo = git.Repo(os.getcwd())
+            repo = calkit.git.get_repo()
         except Exception as e:
             self.set_status(500)
             self.finish(json.dumps({"error": f"Not a git repo: {e}"}))

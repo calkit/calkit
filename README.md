@@ -17,56 +17,69 @@
   </a>
 </p>
 
-Calkit makes it easy to create
-["single button"](https://doi.org/10.1190/1.1822162)
-reproducible research projects.
+<!-- INCLUDE: docs/index.md -->
 
-Instead of a loosely related collection of files
-and manual instructions,
-turn your project into a version-controlled,
-self-contained "calculation kit,"
-tying together all phases or stages of the project:
-data collection, analysis, visualization, and writing,
-each of which can make use of the latest and greatest computational
-tools and languages.
-In other words, you, your collaborators, and readers will be able to go
-from raw data to research article with a single command,
-improving efficiency via faster iteration cycle time,
-reducing the likelihood of mistakes,
-and allowing others to more effectively build upon your work.
+Typical research workflows are horizontally-siloed, i.e.,
+various stages--data collection, analysis, writing--are performed in
+disconnected systems,
+turning research into a slow, error-prone, and tedious
+[waterfall](https://en.wikipedia.org/wiki/Waterfall_model) process.
 
-Calkit makes this level of automation possible without extensive software
-engineering expertise by providing a project framework and toolset that unifies
-and simplifies the use of powerful enabling technologies like Git,
-DVC, Conda, Docker, and more,
-while guiding users away from common reproducibility pitfalls.
+Calkit helps you integrate code, data, figures, results, publications,
+and more into a cohesive, traceable, and portable _knowledge creation system_,
+so every output can be traced back to its source (provenance)
+and reproduced with a single command.
+
+With industry standard tools combined into a unified and simplified experience
+tailored for research,
+you can reap the rewards of reproducibility and automation
+without the cognitive overhead.
+
+<!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
+
+![pipeline](https://docs.calkit.org/img/pipeline.png)
 
 ## Features
 
-- A declarative pipeline that guides users to define an environment
-  for every stage, so long lists of instructions in a README and
-  "but it works on my machine" are things of the past.
-- A CLI to run the project's pipeline to verify it's reproducible,
-  regenerating outputs as needed and
-  ensuring all
-  computational environments
-  (e.g., [Conda](https://docs.conda.io/en/latest/),
-  [Docker](https://docker.com), uv, Julia)
-  match their specification.
-- A schema to store structured metadata describing the
-  project's important outputs (in its `calkit.yaml` file)
-  and how they are created
-  (its computational environments and pipeline).
-- A command line interface (CLI) to simplify keeping code, text, and larger
-  data files backed up in the same project repo using both
-  [Git](https://git-scm.com/) and [DVC](https://dvc.org/).
+- A simplified [version control](https://docs.calkit.org/version-control)
+  interface that unifies Git and DVC (Data Version Control),
+  so everything can be kept in the same project repository.
+  This way, code doesn't need to be siloed away from other
+  important artifacts like datasets, models, figures, or article PDFs,
+  allowing you to work on all parts of a project without hopping around to
+  different tools.
+- [Computational environment management](https://docs.calkit.org/environments) with support for many
+  languages and environment managers: Conda, Docker, uv, Julia, Renv, and more.
+  No need to create and update environments on your own. Calkit will handle
+  them as needed.
+- An environment-aware build system or [pipeline](https://docs.calkit.org/pipeline) with
+  a simple declarative syntax and
+  output caching so you don't need to think about which steps or stages
+  need to be rerun after changing any part of the project.
+  Simply call `calkit run`.
+  Compose your pipeline from many different kinds of stages,
+  including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud system](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
-- [Overleaf integration](https://docs.calkit.org/overleaf/), so code,
-  data, and LaTeX documents can all live in the same repo and be part of a
-  single pipeline (no more manual uploads!)
+- [Overleaf integration](https://docs.calkit.org/overleaf/), so
+  analysis, visualization, and writing can all stay in sync
+  (no more manual uploads!)
+- Support for running on [high performance computing (HPC)](https://docs.calkit.org/hpc) systems
+  that use PBS or SLURM schedulers.
+- Support for automated running with
+  [GitHub Actions](https://docs.calkit.org/tutorials/github-actions).
+- Extensions for doing all of the above graphically in
+  [JupyterLab](https://docs.calkit.org/jupyterlab) and
+  [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](https://docs.calkit.org/browser-ext) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.
+
+<!-- END INCLUDE -->
 
 ## Installation
 
@@ -102,9 +115,17 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit.io)
+If you want to use a [Calkit hub](https://docs.calkit.org/hub)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](https://docs.calkit.org/cloud-integration).
+you can [connect to the hub](https://docs.calkit.org/hub) with:
+
+```sh
+calkit hub login
+```
+
+If you use AI agents like Claude, Copilot, or Codex,
+see [AI tools](https://docs.calkit.org/ai-tools)
+to learn how to install agent skills for working with Calkit.
 
 ### Use without installing
 
@@ -114,6 +135,74 @@ you can use uv's `uvx` command to run it directly:
 ```sh
 uvx calk9 --help
 ```
+
+### Nix
+
+Calkit ships a [flake](https://nixos.wiki/wiki/Flakes) at the root of
+its repo, so [Nix](https://nixos.org/) users can pull the CLI into their
+environments alongside their other tools.
+
+Run it ad hoc without installing:
+
+```sh
+nix run github:calkit/calkit -- --help
+```
+
+Drop into a shell that has `calkit`, `git`, and `uv` on `PATH`:
+
+```sh
+nix shell github:calkit/calkit
+```
+
+Add it to your own `flake.nix` as an input:
+
+```nix
+{
+  inputs.calkit.url = "github:calkit/calkit";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+  outputs = { self, nixpkgs, calkit }: {
+    devShells.x86_64-linux.default =
+      nixpkgs.legacyPackages.x86_64-linux.mkShell {
+        packages = [ calkit.packages.x86_64-linux.default ];
+      };
+  };
+}
+```
+
+Then `nix develop` will give you a shell with the Calkit CLI ready to
+use. To pin a specific Calkit release inside the shell, set the
+`CALKIT_VERSION` environment variable (e.g. `CALKIT_VERSION=0.41.0`)
+before invoking `calkit`.
+
+The flake is currently a thin wrapper around `uvx --from calkit-python
+calkit`. It depends on `uv` from `nixpkgs` and fetches the published
+wheel from PyPI on first use. This trades a fully Nix-native build for
+zero version-drift maintenance, and avoids the macOS `docx2pdf` /
+`appscript` and JupyterLab labextension build issues that block a pure
+nixpkgs derivation today. If you want a fully nixpkgs-native build,
+see the community [`calkit-nix`](https://github.com/dwinkler1/calkit-nix)
+flake.
+
+Nix isn't supported natively on Windows; run Calkit inside
+[WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and use
+the flake there.
+
+### Running against a specific version
+
+If a project requires a Calkit version other than the one you have
+installed, use the top-level `--use-version` flag to re-invoke the CLI
+under that release without changing your installation:
+
+```sh
+calkit --use-version 0.38 run
+```
+
+This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
+so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
+You can also declare a minimum version in `calkit.yaml`;
+see
+[Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
 
 ### Calkit Assistant
 
@@ -130,6 +219,11 @@ all scientific or analytical computing projects.
 ## Quickstart
 
 <!-- INCLUDE: docs/quickstart.md +1 -->
+
+<!-- prettier-ignore -->
+!!! note
+    `ck` is an abbreviated alias for the `calkit` executable.
+    All `calkit` commands can be run as `ck` instead, e.g., `ck save -am "..."`.
 
 ### From an existing project
 
@@ -185,13 +279,13 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+Note the `--hub` flag requires [a hub connection](https://docs.calkit.org/hub)
 to be set up, but can be omitted if the project doesn't need to be backed up to
-the cloud or shared with collaborators.
-Cloud integration can also be set up later.
+the hub or shared with collaborators.
+Hub integration can also be set up later.
 
 Next, move into the project folder and run the pipeline,
 which consists of several stages defined in `calkit.yaml`:
@@ -222,9 +316,37 @@ To back up or save the project, call:
 calkit save -am "Run pipeline"
 ```
 
+### With an AI coding agent
+
+Simply tell the [AI agent](https://docs.calkit.org/ai-tools):
+
+> Turn this folder into a Calkit project
+
+or
+
+> Create me a new Calkit project for investigating...
+
 <!-- END INCLUDE -->
 
 ## Get involved
 
 We welcome all kinds of contributions!
 See [CONTRIBUTING.md](CONTRIBUTING.md) to learn how to get involved.
+
+## Acknowledgements
+
+<!-- INCLUDE: docs/acknowledgements.md +1 -->
+
+Calkit is supported by the
+[Caltech Schmidt Academy of Software Engineering](https://sase.caltech.edu).
+
+<p align="center">
+  <a href="https://sase.caltech.edu" target="_blank">
+    <img width="40%" src="docs/img/caltech.png" alt="Caltech SASE">
+  </a>
+<a href="https://schmidtsciences.org/" target="_blank">
+    <img width="40%" src="docs/img/schmidt-sciences.png" alt="Schmidt Sciences">
+  </a>
+</p>
+
+<!-- END INCLUDE -->

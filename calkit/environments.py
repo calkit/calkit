@@ -1,10 +1,13 @@
 """Functionality related to environments."""
 
+import functools
 import glob
 import hashlib
 import json
 import os
 import platform
+import re
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
@@ -37,9 +40,295 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
-KINDS_NO_CHECK = ["_system", "slurm", "ssh"]
+# Scheduler environment keys that govern how a job is dispatched rather than
+# what it computes. They are excluded from the environment lock file, so
+# changing them does not invalidate cached results: pacing submissions to be
+# polite to a shared queue must not force every simulation to rerun.
+SCHEDULER_DISPATCH_ONLY_KEYS = {"max_concurrent_jobs"}
+# Environment kinds with nothing to build or verify. Note this matches on
+# ``kind``; the special ``_system`` environment is excluded by name instead,
+# since names starting with an underscore are filtered out of the pipeline's
+# environment list before we get here. ``system`` is not listed: checking one
+# means writing its lock file, so it has to go through ``check_environment``.
+# No kind is unconditionally uncheckable. A ``system`` env on another host
+# comes close, but that depends on the env's host rather than its kind, and
+# ``check_environment`` handles it: with nothing locked there is nothing to
+# check, and locking a machine we can't observe is an error.
+KINDS_NO_CHECK: list[str] = []
+
+# Kinds whose check must not be cached. Caching exists to skip rebuilding
+# something expensive, but checking a ``system`` env *is* reading the
+# machine -- there is nothing to skip. Caching it means a locked property
+# can change and be missed until the cache expires, which is precisely the
+# drift ``lock`` exists to catch.
+KINDS_NO_CACHE = ["system"]
+
+
+def cacheable(env: dict) -> bool:
+    """Whether an environment's check is worth remembering."""
+    return env.get("kind") not in KINDS_NO_CACHE
+
+
+# Maps the kebab-case properties a ``system`` environment can lock onto the
+# keys ``get_system_info`` returns. Not a mechanical transformation, hence
+# the explicit table: note ``Rscript_version``'s capital R.
+SYSTEM_LOCK_PROPERTIES = {
+    "os": "os",
+    "os-version": "os_version",
+    "platform": "platform",
+    "machine": "machine",
+    "processor": "processor",
+    "hostname": "hostname",
+    "machine-id": "machine_id",
+    "cpu-count": "cpu_count",
+    "memory-gb": "memory_gb",
+    "python-version": "python_version",
+    "python-implementation": "python_implementation",
+    "git-version": "git_version",
+    "docker-version": "docker_version",
+    "conda-version": "conda_version",
+    "mamba-version": "mamba_version",
+    "uv-version": "uv_version",
+    "pixi-version": "pixi_version",
+    "julia-version": "julia_version",
+    "juliaup-version": "juliaup_version",
+    "rscript-version": "Rscript_version",
+    "brew-version": "brew_version",
+}
+
+# What each lockable property means, for the published documentation. Kept
+# beside the table above so the two can be checked against each other; a
+# property nobody can describe is one nobody can decide whether to lock.
+SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
+    "os": "Operating system name, e.g. 'Linux' or 'Darwin'.",
+    "os-version": "Operating system release, e.g. a kernel version.",
+    "platform": "Full platform string, which folds in most of the above.",
+    "machine": "Machine architecture, e.g. 'x86_64' or 'arm64'.",
+    "processor": "Processor name, where the OS reports one.",
+    "hostname": "The machine's name. Pins results to one specific host, "
+    "but only by name: renaming the machine breaks the pin, and a machine "
+    "elsewhere with the same name satisfies it. Prefer 'machine-id'.",
+    "machine-id": "A stable identifier for the machine itself, read from "
+    "the platform. Pins results to one specific machine, and unlike "
+    "'hostname' survives renaming it. Declaring a 'machine_id' on the "
+    "environment says where to run, not that results depend on it, so "
+    "lock this to also rerun stages when the machine changes.",
+    "cpu-count": "Number of CPUs, which can change what a run produces "
+    "where results depend on how work was divided.",
+    "memory-gb": "Total memory in GB.",
+    "python-version": "Version of the Python running Calkit.",
+    "python-implementation": "Python implementation, e.g. 'CPython'.",
+    "git-version": "Installed Git version.",
+    "docker-version": "Installed Docker version.",
+    "conda-version": "Installed Conda version.",
+    "mamba-version": "Installed Mamba version.",
+    "uv-version": "Installed uv version.",
+    "pixi-version": "Installed Pixi version.",
+    "julia-version": "Installed Julia version.",
+    "juliaup-version": "Installed Juliaup version.",
+    "rscript-version": "Installed Rscript version.",
+    "brew-version": "Installed Homebrew version.",
+}
+
+# How precisely a property is worth recording. Total memory is reported as
+# a bare division of bytes by 1024**3, so a machine describes itself as
+# having 15.492069244384766 GB, and a firmware or kernel update that
+# reserves a little more or less moves that without changing anything a
+# result could depend on. Rounding it is the difference between pinning how
+# much memory the machine has and pinning what it happened to report.
+# Everything else is recorded as given: an OS version or a CPU count means
+# exactly what it says.
+SYSTEM_LOCK_PROPERTY_PRECISION = {"memory-gb": lambda v: round(float(v), 1)}
+
+# Properties only one platform can supply, since ``get_system_info`` collects
+# package manager versions per OS. Locking one from another platform raises
+# in ``get_system_lock_data`` rather than recording nothing, so this table is
+# documentation (and a test hook), not a second gate.
+SYSTEM_LOCK_PROPERTY_PLATFORMS = {"brew-version": "Darwin"}
+
+
+def _as_posix_path(path: str) -> str:
+    return Path(path).as_posix()
+
+
 COMPOSITE_ENV_SEP = ":"
-VALID_OUTER_ENV_KINDS = ["slurm"]
+# Kinds that say *where* a stage runs rather than what it runs in, so they
+# can wrap an inner runtime env as ``<outer>:<inner>``.
+VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
+
+
+def host_is_local(host: str | None) -> bool:
+    """Whether ``host`` names the machine we're running on.
+
+    Environments that name a host (``system``, ``slurm``, ``pbs``) are
+    declarations of where the work belongs, not instructions to connect:
+    when we're already on that machine there is nothing to reach out to.
+
+    A machine reports itself as a bare name or a fully qualified one
+    depending on how it's configured, and projects write it either way, so
+    the two are matched across that difference. A domain is only dropped
+    from one side at a time, so two different machines that share a short
+    name under different domains stay distinct.
+    """
+    if not host or host == "localhost":
+        return True
+    current_host = socket.gethostname()
+    current_fqdn = socket.getfqdn()
+    if host in (current_host, current_fqdn):
+        return True
+    if "." not in host:
+        # A bare env host matches this machine's short name, however this
+        # machine happens to report itself.
+        if host in (
+            current_host.split(".")[0],
+            current_fqdn.split(".")[0],
+        ):
+            return True
+    elif "." not in current_fqdn:
+        # A qualified env host can still name a machine that only knows its
+        # own short name; there is no domain here to contradict it.
+        if host.split(".")[0] in (current_host, current_fqdn):
+            return True
+    # Names are not the only way to write a machine down. A host given as
+    # an IP address never matches a hostname, and a machine reached at one
+    # address may call itself something else entirely -- so ask whether any
+    # address this host resolves to is one of ours.
+    return _resolves_to_this_machine(host)
+
+
+@functools.lru_cache(maxsize=128)
+def _host_addresses(host: str) -> tuple[tuple[int, str], ...]:
+    """The addresses ``host`` resolves to, as (family, address) pairs."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_DGRAM)
+    except (socket.gaierror, UnicodeError, OSError):
+        return ()
+    return tuple(
+        {(family, sockaddr[0]) for family, _, _, _, sockaddr in infos}
+    )
+
+
+def _address_is_local(family: int, address: str) -> bool:
+    """Whether an address belongs to an interface on this machine.
+
+    Binding is the question itself rather than a proxy for it: an address
+    can only be bound where it is actually configured, which is exactly
+    what "this is my address" means. Reading interfaces directly would need
+    a dependency and would still have to answer the same question.
+    """
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((address, 0))
+        return True
+    except OSError:
+        return False
+
+
+def _resolves_to_this_machine(host: str) -> bool:
+    if any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host)
+    ):
+        return True
+    # A bare name can be one only mDNS knows, which is not in the resolver's
+    # search list the way a DNS domain is -- so it resolves under '.local'
+    # and nowhere else. This is the name macOS shows the user as theirs (in
+    # Sharing, and from 'scutil --get LocalHostName'), so it is the name
+    # they are most likely to write down, and it would otherwise be the one
+    # name for this machine that fails to match it.
+    if "." in host:
+        return False
+    return any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host + ".local")
+    )
+
+
+def env_is_local(env: dict) -> bool:
+    """Whether an environment's machine is the one we're running on.
+
+    A declared ``machine_id`` is the answer when there is one: it is a
+    stronger claim than a name, so a host that resolves here while the ID
+    says otherwise is a machine that was rebuilt or a name that now points
+    somewhere else -- both cases where running here would be wrong.
+
+    That only holds while we can tell which machine this is. Where no ID
+    can be read, a declared one can never match, and taking that as "not
+    this machine" would send a user off to SSH into the box they are
+    sitting at; the name is what's left to go on, so it decides.
+    """
+    declared = env.get("machine_id")
+    if declared:
+        declared = os.path.expandvars(declared)
+    if declared:
+        current = calkit.get_machine_id()
+        if current is not None:
+            return calkit.machine_ids_match(declared, current)
+    return host_is_local(os.path.expandvars(env.get("host") or ""))
+
+
+def get_julia_packages_dir() -> str:
+    """Return the Julia packages directory for the current environment."""
+    depot_env = os.getenv("JULIA_DEPOT_PATH", "")
+    first_depot = depot_env.split(os.pathsep)[0].strip() if depot_env else ""
+    if not first_depot:
+        first_depot = os.path.join("~", ".julia")
+    return os.path.join(os.path.expanduser(first_depot), "packages")
+
+
+def _calc_dir_sig_shallow(path: str, max_depth: int = 1) -> str:
+    """Calculate a lightweight signature by scanning only a few levels.
+
+    This avoids deep recursive walks of large directories while still
+    detecting practical state changes like added/removed packages or
+    artifacts.
+    """
+    if not os.path.isdir(path):
+        return ""
+    try:
+        root_stat = os.stat(path)
+        latest_mtime = root_stat.st_mtime_ns
+    except OSError:
+        return ""
+    entry_count = 0
+    total_size = 0
+    stack: list[tuple[str, int]] = [(path, 0)]
+    while stack:
+        current, depth = stack.pop()
+        try:
+            with os.scandir(current) as it:
+                for entry in it:
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    entry_count += 1
+                    total_size += st.st_size
+                    if st.st_mtime_ns > latest_mtime:
+                        latest_mtime = st.st_mtime_ns
+                    if depth < max_depth and entry.is_dir(
+                        follow_symlinks=False
+                    ):
+                        stack.append((entry.path, depth + 1))
+        except OSError:
+            continue
+    return f"{entry_count}-{total_size}-{latest_mtime}"
+
+
+def calc_julia_depot_sig() -> str | None:
+    """Calculate a cheap machine-state signature for Julia depot changes."""
+    packages_dir = get_julia_packages_dir()
+    depot_root = os.path.dirname(packages_dir)
+    packages_sig = _calc_dir_sig_shallow(packages_dir, max_depth=1)
+    artifacts_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "artifacts"), max_depth=1
+    )
+    registries_sig = _calc_dir_sig_shallow(
+        os.path.join(depot_root, "registries"), max_depth=1
+    )
+    if not any([packages_sig, artifacts_sig, registries_sig]):
+        return None
+    return "|".join([packages_sig, artifacts_sig, registries_sig])
 
 
 def language_from_env(env: dict) -> str | None:
@@ -68,7 +357,7 @@ def _get_julia_version() -> str:
     """
     try:
         result = subprocess.run(
-            ["julia", "--version"],
+            [calkit.julia.get_julia_exe(), "--version"],
             capture_output=True,
             text=True,
             timeout=5,
@@ -197,6 +486,27 @@ def get_all_venv_lock_fpaths(
     return fpaths
 
 
+def _get_julia_manifest_fpath(
+    env_dir: str, julia_version: str | None, wdir: str | None = None
+) -> str:
+    """Return the Manifest path for a Julia env, preferring versioned names.
+
+    Julia 1.9+ writes ``Manifest-vMAJOR.MINOR.toml`` (e.g.
+    ``Manifest-v1.11.toml``) alongside the default ``Manifest.toml``.
+    We prefer the versioned file when it exists.
+    """
+    base_dir = env_dir or "."
+    full_dir = os.path.join(wdir, base_dir) if wdir else base_dir
+    if julia_version:
+        parts = julia_version.split(".")
+        if len(parts) >= 2:
+            major_minor = f"{parts[0]}.{parts[1]}"
+            versioned_name = f"Manifest-v{major_minor}.toml"
+            if os.path.isfile(os.path.join(full_dir, versioned_name)):
+                return os.path.join(base_dir, versioned_name)
+    return os.path.join(base_dir, "Manifest.toml")
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -229,6 +539,12 @@ def get_env_lock_fpath(
             lock_fpath = os.path.join(env_dir, "uv.lock")
         else:
             lock_fpath = "uv.lock"
+    elif env_kind == "pixi":
+        env_dir = os.path.dirname(env.get("path") or "")
+        if env_dir:
+            lock_fpath = os.path.join(env_dir, "pixi.lock")
+        else:
+            lock_fpath = "pixi.lock"
     elif env_kind in ["venv", "uv-venv"]:
         if legacy:
             lock_fpath += ".txt"
@@ -264,9 +580,10 @@ def get_env_lock_fpath(
             raise ValueError(
                 "Julia environments require a path pointing to Project.toml"
             )
-        # Simply replace Project.toml with Manifest.toml
         env_dir = os.path.dirname(env_path)
-        lock_fpath = os.path.join(env_dir, "Manifest.toml")
+        lock_fpath = _get_julia_manifest_fpath(
+            env_dir, env.get("julia"), wdir=wdir
+        )
     elif env_kind == "renv":
         env_path = env.get("path")
         if env_path is None:
@@ -281,12 +598,199 @@ def get_env_lock_fpath(
         # Replace DESCRIPTION with renv.lock
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "renv.lock")
-    elif env_kind == "current-system":
-        lock_fpath = os.path.join(env_lock_dir, env_name, "properties.json")
+    elif env_kind == "nix":
+        env_path = env.get("path")
+        if env_path is None:
+            raise ValueError(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        env_fname = os.path.basename(env_path)
+        if env_fname != "flake.nix":
+            raise ValueError(
+                "Nix environments require a path pointing to flake.nix"
+            )
+        # flake.lock is generated by ``nix flake lock`` next to flake.nix.
+        env_dir = os.path.dirname(env_path)
+        lock_fpath = os.path.join(env_dir, "flake.lock")
+    elif env_kind == "system":
+        # A system env's "lock" records the machine properties it declared it
+        # depends on. With nothing locked there is nothing to depend on, so
+        # no lock file and no DVC dep.
+        if not env.get("lock"):
+            return None
+        # Written by ``write_system_env_lock`` during environment checks, and
+        # referenced as a DVC dep by stage compilation. Note this is the file
+        # itself even when ``for_dvc``: there's exactly one of them, so
+        # there's no reason to make a stage depend on the whole directory.
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+    elif env_kind in ("slurm", "pbs"):
+        # Job-scheduler envs have no external dependency manifest, so the
+        # "lock" is just a JSON dump of the env config. The file is
+        # written by ``write_scheduler_env_lock`` during environment
+        # checks (e.g., ``calkit check env``) and stage compilation
+        # references it as a DVC dep so changes invalidate cached runs.
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
+        if for_dvc:
+            lock_fpath = os.path.dirname(lock_fpath)
     else:
         return
     if as_posix:
         lock_fpath = Path(lock_fpath).as_posix()
+    return lock_fpath
+
+
+def write_scheduler_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+) -> str | None:
+    """Write a JSON lock file for a SLURM or PBS environment.
+
+    The lock file simply contains a deterministic JSON dump of the env
+    config so DVC can use it as a stage dependency: when the env's
+    ``default_options``, ``default_setup``, ``host``, etc. change, the
+    lock file changes and any stage that depends on it is invalidated.
+    Keys in ``SCHEDULER_DISPATCH_ONLY_KEYS`` are left out, since they change
+    only when a job is submitted, not what it computes.
+
+    Parameters
+    ----------
+    env_name : str
+        Environment name as it appears in ``calkit.yaml``.
+    env : dict
+        Environment configuration dict.
+    wdir : str | None
+        Working directory; defaults to the current process cwd.
+
+    Returns
+    -------
+    str | None
+        The lock file path, already prefixed with ``wdir`` if provided, or
+        ``None`` if the env kind has no scheduler lock file.
+    """
+    if env.get("kind") not in ("slurm", "pbs"):
+        return None
+    # Already prefixed with wdir, so it must not be joined with it again
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None:
+        return None
+    parent = os.path.dirname(lock_fpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    lock_data = {
+        k: v for k, v in env.items() if k not in SCHEDULER_DISPATCH_ONLY_KEYS
+    }
+    # Record when the scheduler is mocked so switching between a mocked run
+    # (executed locally) and a real scheduler run changes the lock file and
+    # invalidates the cached result
+    from calkit.cli.scheduler import _mock_enabled
+
+    if _mock_enabled():
+        lock_data["mocked"] = True
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
+            existing = f.read()
+        if existing == content:
+            return lock_fpath
+    with open(lock_fpath, "w") as f:
+        f.write(content)
+    return lock_fpath
+
+
+def get_system_lock_data(
+    lock: list[str], system_info: dict | None = None
+) -> dict:
+    """Read the machine properties a ``system`` environment locks.
+
+    Raises if a locked property isn't available on the machine, e.g., a
+    tool that isn't installed. Recording it as null would quietly claim the
+    stage is pinned to something it isn't, which is worse than not pinning
+    it at all.
+
+    ``system_info`` describes a machine other than this one, for an
+    environment whose host is somewhere else: what the results depend on is
+    the machine the stage runs on, so that is what gets pinned.
+    """
+    if system_info is None:
+        system_info = calkit.get_system_info()
+    data = {}
+    for prop in lock:
+        key = SYSTEM_LOCK_PROPERTIES.get(prop)
+        if key is None:
+            raise ValueError(
+                f"Unknown system property to lock: '{prop}'; valid options "
+                f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}"
+            )
+        value = system_info.get(key)
+        if value is None:
+            hint = ""
+            if prop == "machine-id":
+                # The one lockable property that can be supplied by hand,
+                # and the one most likely to be locked implicitly -- so the
+                # way out is worth naming rather than leaving to the docs
+                hint = (
+                    "; no identifier could be read from the platform, so "
+                    "give it one with 'calkit config set machine_id <id>'"
+                )
+            raise ValueError(
+                f"System property '{prop}' is not available on this machine"
+                + hint
+            )
+        data[prop] = SYSTEM_LOCK_PROPERTY_PRECISION.get(prop, lambda v: v)(
+            value
+        )
+    return data
+
+
+def write_system_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    system_info: dict | None = None,
+) -> str | None:
+    """Write a JSON lock file for a ``system`` environment.
+
+    Unlike the other lock files, this one describes the machine rather than
+    a spec the project controls, so it changes when the project moves to a
+    different machine. That is the intent: a stage that declared it depends
+    on, say, the Julia version should not reuse a cached result from a box
+    with a different one.
+
+    Returns the lock file path, already prefixed with ``wdir`` if provided,
+    or None if the environment locks nothing.
+    """
+    lock = env.get("lock") or []
+    if not lock:
+        return None
+    # Already prefixed with wdir, so it must not be joined with it again
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None:
+        return None
+    # Read before anything is created: a misspelled property or a tool
+    # that isn't installed raises here, and an env that failed to lock
+    # shouldn't leave a directory behind suggesting it did
+    content = (
+        json.dumps(
+            get_system_lock_data(lock, system_info=system_info),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    parent = os.path.dirname(lock_fpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
+            if f.read() == content:
+                return lock_fpath
+    with open(lock_fpath, "w") as f:
+        f.write(content)
     return lock_fpath
 
 
@@ -325,21 +829,35 @@ def calc_data_for_env(
     """
 
     def get_cached_md5(path: str) -> str | None:
-        """Get a cached MD5 hash for a path, recalculating if mtime doesn't
-        match the cached mtime.
+        """Get a cached MD5 hash for a path.
+
+        For files, use mtime as a fast invalidation check. For directories,
+        use a lightweight directory signature, since directory mtimes can be
+        unreliable across filesystems and operations.
         """
         key = os.path.abspath(path)
         cached_data = {}
         with get_cache_db(name="md5s") as db:
             if key in db:
                 cached_data = db[key]
-                if os.path.exists(path):
-                    mtime = os.path.getmtime(path)
-                    if mtime == cached_data.get("mtime"):
-                        return cached_data.get("md5")
+        if not os.path.exists(path):
+            return None
+        if os.path.isdir(path):
+            # Avoid deep recursive walks on every cache check. A shallow
+            # signature is enough to decide whether to recompute full MD5.
+            shallow_sig = _calc_dir_sig_shallow(path, max_depth=2)
+            if shallow_sig == cached_data.get("shallow_sig"):
+                return cached_data.get("md5")
+            md5 = calkit.get_md5(path)
+            with get_cache_db(name="md5s") as db:
+                db[key] = {"md5": md5, "shallow_sig": shallow_sig}
+                db.commit()
+            return md5
+        mtime = os.path.getmtime(path)
+        if mtime == cached_data.get("mtime"):
+            return cached_data.get("md5")
         if os.path.exists(path):
             md5 = calkit.get_md5(path)
-            mtime = os.path.getmtime(path)
             with get_cache_db(name="md5s") as db:
                 db[key] = {"md5": md5, "mtime": mtime}
                 db.commit()
@@ -364,6 +882,9 @@ def calc_data_for_env(
             env_prefix_hash = get_cached_md5(env_prefix_full)
         else:
             env_prefix_hash = None
+    julia_packages_sig = None
+    if env.get("kind") == "julia":
+        julia_packages_sig = calc_julia_depot_sig()
     env_lock_hash = None
     env_lock_fpath = get_env_lock_fpath(env_name=env_name, env=env, wdir=wdir)
     if env_lock_fpath is not None:
@@ -375,13 +896,19 @@ def calc_data_for_env(
             "env_hash": env_hash,
             "env_path_hash": env_path_hash,
             "env_prefix_hash": env_prefix_hash,
+            "julia_packages_sig": julia_packages_sig,
             "env_lock_hash": env_lock_hash,
         },
         "checked_at": calkit.utcnow(),
     }
 
 
-def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
+def check_cache(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    respect_ttl: bool = True,
+) -> bool:
     """Check if the environment is up-to-date based on cached data."""
     if wdir is None:
         wdir = os.getcwd()
@@ -395,11 +922,15 @@ def check_cache(env_name: str, env: dict, wdir: str | None = None) -> bool:
     # If our last check failed, we're definitely not up-to-date
     if not cached_data.get("success", False):
         return False
+    if respect_ttl:
+        cached_checked_at = cached_data.get("checked_at")
+        if cached_checked_at is None:
+            return False
+        time_diff = calkit.utcnow() - cached_checked_at
+        if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+            return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
-    time_diff = current_data["checked_at"] - cached_data.get("checked_at")
-    if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
-        return False
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
         return False
     if env.get("prefix") and not current_data["hashes"]["env_prefix_hash"]:
@@ -448,11 +979,28 @@ def check_all_in_pipeline(
     # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    import calkit.markdown
+
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
-        stages = {k: v for k, v in stages.items() if k in targets}
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
+        prefixes = [
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
+            for t in targets
+            if t in md_stages
+        ]
+        stages = {
+            k: v
+            for k, v in stages.items()
+            if k in targets or any(k.startswith(p) for p in prefixes)
+        }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
@@ -473,7 +1021,9 @@ def check_all_in_pipeline(
         if env.get("kind") in KINDS_NO_CHECK:
             continue
         if not force:
-            up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
+            up_to_date = cacheable(env) and check_cache(
+                env_name=env_name, env=env, wdir=wdir
+            )
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}
                 continue
@@ -526,7 +1076,7 @@ def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
     str
         A unique environment name.
     """
-    dirname = os.path.basename(os.path.dirname(path))
+    dirname = Path(path).parent.name
     # If this is the first env in the project, call it main
     if not all_env_names:
         return dirname or "main"
@@ -545,6 +1095,55 @@ def make_env_name(path: str, all_env_names: list[str], kind: str) -> str:
         n += 1
         name = f"{kind}{n}"
     return name
+
+
+def get_default_venv_prefix(envs: dict, path: str, name: str) -> str:
+    """Return the default prefix for a venv or uv-venv environment.
+
+    The prefix defaults to ``.venv`` in the same directory as ``path``,
+    unless that location is already claimed by another environment, in which
+    case the virtualenv is nested under ``.calkit/envs/{name}/.venv``. This
+    is resolved on the fly so that the prefix need not be stored in
+    ``calkit.yaml``.
+
+    A location is considered claimed by another environment if it pins that
+    explicit ``prefix``, or if it is a ``uv``, ``venv``, or ``uv-venv``
+    environment whose ``.venv`` would live there (``uv`` always creates its
+    virtualenv at ``.venv`` in its project directory, so a flexible venv
+    yields to it). Sibling venvs that would otherwise collide all nest under
+    their own name-scoped location, which is collision-free.
+
+    Parameters
+    ----------
+    envs : dict
+        All environments, keyed by name.
+    path : str
+        Path to the spec file the environment lives alongside.
+    name : str
+        Name of the environment being resolved, used both to exclude it from
+        the claimed locations and for the nested fallback.
+
+    Returns
+    -------
+    str
+        A POSIX-style prefix that does not collide with another environment.
+    """
+    base = os.path.join(os.path.dirname(path), ".venv")
+    # Collect .venv locations claimed by the other environments
+    claimed = set()
+    for other_name, env in envs.items():
+        if other_name == name:
+            continue
+        prefix = env.get("prefix")
+        if prefix is not None:
+            claimed.add(os.path.normpath(prefix))
+        elif env.get("kind") in ("uv", "venv", "uv-venv"):
+            other_dir = os.path.dirname(env.get("path", ""))
+            claimed.add(os.path.normpath(os.path.join(other_dir, ".venv")))
+    # Nest under .calkit/envs/{name} if the default location is taken
+    if os.path.normpath(base) in claimed:
+        base = os.path.join(".calkit", "envs", name, ".venv")
+    return Path(base).as_posix()
 
 
 def env_from_name_or_path(
@@ -650,19 +1249,18 @@ def env_from_name_or_path(
             exists=True,
         )
     # Check if name_or_path is a file and detect environment type
-    env_path = name_or_path
+    env_path = _as_posix_path(name_or_path)
     if os.path.isfile(env_path):
         if env_path.endswith("requirements.txt"):
             # TODO: Detect if uv is installed, and use a plain venv if not
+            # The prefix is left unset and resolved on the fly at check/run
+            # time via get_default_venv_prefix
             return EnvDetectResult(
                 name=make_env_name(env_path, all_env_names, kind="uv-venv"),
                 env={
                     "kind": "uv-venv",
                     "path": env_path,
                     "python": DEFAULT_PYTHON_VERSION,
-                    "prefix": os.path.join(
-                        os.path.split(env_path)[0], ".venv"
-                    ),
                 },
                 exists=False,
             )
@@ -720,6 +1318,13 @@ def env_from_name_or_path(
                 env={"kind": "renv", "path": env_path},
                 exists=False,
             )
+        elif env_path.endswith("flake.nix"):
+            # This is a Nix flake environment
+            return EnvDetectResult(
+                name=make_env_name(env_path, all_env_names, kind="nix"),
+                env={"kind": "nix", "path": env_path},
+                exists=False,
+            )
         elif "dockerfile" in env_path.lower():
             # This is a Docker env
             project_name = calkit.detect_project_name(prepend_owner=False)
@@ -744,9 +1349,10 @@ def env_from_name_and_or_path(
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
+    path = _as_posix_path(path) if path else None
     if name and name in envs:
         env = envs[name]
-        if path and env.get("path") != path:
+        if path and _as_posix_path(env.get("path", "")) != path:
             raise ValueError(
                 f"Environment '{name}' exists but has a different path "
                 f"('{env.get('path')}') than provided ('{path}')"
@@ -760,7 +1366,7 @@ def env_from_name_and_or_path(
             # Look for a sub-environment with the given name and path
             for sub_name, sub_env in envs.items():
                 if (sub_name == sub_env_name) or (
-                    path and sub_env.get("path") == path
+                    path and _as_posix_path(sub_env.get("path", "")) == path
                 ):
                     return EnvDetectResult(
                         name=sub_name,
@@ -797,12 +1403,13 @@ def env_from_notebook_path(
     """
     if ck_info is None:
         ck_info = calkit.load_calkit_info()
+    notebook_path = _as_posix_path(notebook_path)
     stages = ck_info.get("pipeline", {}).get("stages", {})
     envs = ck_info.get("environments", {})
     for stage in stages.values():
         if (
             stage.get("kind") == "jupyter-notebook"
-            and stage.get("notebook_path") == notebook_path
+            and _as_posix_path(stage.get("notebook_path", "")) == notebook_path
         ):
             env_name = stage.get("environment")
             if env_name:
@@ -810,7 +1417,7 @@ def env_from_notebook_path(
                 if env:
                     return EnvDetectResult(name=env_name, env=env, exists=True)
     for nb in ck_info.get("notebooks", []):
-        if nb.get("path") == notebook_path:
+        if _as_posix_path(nb.get("path", "")) == notebook_path:
             env_name = nb.get("environment")
             if env_name:
                 env = envs.get(env_name)
@@ -889,6 +1496,7 @@ def detect_default_env(
             "Project.toml",
             "DESCRIPTION",
             "pixi.toml",
+            "flake.nix",
         ]
     present = os.listdir(".")
     present_env_specs = [p for p in env_spec_paths if p in present]
@@ -896,6 +1504,120 @@ def detect_default_env(
         return env_from_name_or_path(
             present_env_specs[0], ck_info=ck_info, path_only=True
         )
+
+
+def create_nix_flake_content(
+    packages: list[str],
+    description: str | None = None,
+    nixpkgs_url: str = "github:NixOS/nixpkgs/nixos-unstable",
+) -> str:
+    """Generate a minimal flake.nix exposing a default dev shell.
+
+    The flake builds a ``devShells.default`` containing the requested
+    packages from nixpkgs, available on the common Linux + macOS systems.
+    Reproducibility comes from ``flake.lock``, which pins the nixpkgs
+    revision and is generated by ``nix flake lock`` after writing this
+    file.
+    """
+    pkgs_block = "\n".join(f"            {p}" for p in packages)
+    desc = description or "Calkit-managed Nix dev environment"
+    desc_escaped = desc.replace('"', '\\"')
+    return f"""{{
+  description = "{desc_escaped}";
+
+  inputs.nixpkgs.url = "{nixpkgs_url}";
+
+  outputs = {{ self, nixpkgs }}:
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+        "x86_64-darwin"
+        "aarch64-darwin"
+      ];
+      forAllSystems = f:
+        nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${{system}});
+    in {{
+      devShells = forAllSystems (pkgs: {{
+        default = pkgs.mkShell {{
+          packages = with pkgs; [
+{pkgs_block}
+          ];
+        }};
+      }});
+    }};
+}}
+"""
+
+
+def add_packages_to_nix_flake(
+    flake_path: str, packages: list[str]
+) -> list[str]:
+    """Add ``packages`` to a flake.nix's ``packages = with pkgs; [ ... ]``
+    list, preserving formatting and skipping packages already present.
+
+    Designed for flakes produced by ``calkit new nix-env``. If the anchor
+    can't be found (e.g. the user hand-rolled a structurally different
+    flake), raises ``ValueError`` so the caller can tell the user to edit
+    manually rather than corrupting their file.
+
+    Returns the list of packages actually inserted.
+    """
+    import re
+
+    with open(flake_path) as f:
+        lines = f.readlines()
+    anchor_re = re.compile(r"packages\s*=\s*with\s+pkgs\s*;\s*\[")
+    close_re = re.compile(r"^\s*\]\s*;")
+    start = next(
+        (i for i, line in enumerate(lines) if anchor_re.search(line)), None
+    )
+    if start is None:
+        raise ValueError(
+            f"Could not find 'packages = with pkgs; [' in {flake_path}; "
+            "add packages manually."
+        )
+    end = next(
+        (j for j in range(start + 1, len(lines)) if close_re.match(lines[j])),
+        None,
+    )
+    if end is None:
+        raise ValueError(
+            f"Could not find closing ']' for packages list in {flake_path}."
+        )
+    # Collect existing entries (ignore blanks + comments) and pick up the
+    # indent from the first real entry so inserted lines match.
+    existing: set[str] = set()
+    inner_indent: str | None = None
+    for k in range(start + 1, end):
+        stripped = lines[k].strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        existing.add(stripped)
+        if inner_indent is None:
+            indent_match = re.match(r"^(\s*)", lines[k])
+            inner_indent = indent_match.group(1) if indent_match else ""
+    if inner_indent is None:
+        # Empty list -- derive indent from the closing bracket + 2 spaces.
+        close_indent_match = re.match(r"^(\s*)", lines[end])
+        close_indent = (
+            close_indent_match.group(1) if close_indent_match else ""
+        )
+        inner_indent = close_indent + "  "
+    added: list[str] = []
+    new_entries = []
+    for pkg in packages:
+        if pkg in existing:
+            continue
+        new_entries.append(f"{inner_indent}{pkg}\n")
+        existing.add(pkg)
+        added.append(pkg)
+    if not new_entries:
+        return added
+    lines[end:end] = new_entries
+    with open(flake_path, "w") as f:
+        f.writelines(lines)
+    return added
 
 
 def create_python_requirements_content(dependencies: list[str]) -> str:
@@ -981,13 +1703,19 @@ if isempty(registries)
 end
 
 for pkg in packages
-    entry = nothing
     for reg in registries
-        entry = Pkg.Registry.find(reg, pkg)
-        if entry !== nothing
-            println(pkg * "=" * string(entry.uuid))
-            break
+        found = false
+        # Scan the registry's own package table rather than calling a
+        # lookup helper; Pkg.Registry.find was removed in Julia 1.12, and
+        # calling it failed for every package, silently.
+        for (uuid, entry) in reg.pkgs
+            if entry.name == pkg
+                println(pkg * "=" * string(uuid))
+                found = true
+                break
+            end
         end
+        found && break
     end
 end
 """
@@ -1004,7 +1732,7 @@ end
         # Run Julia with the script
         result = subprocess.run(
             [
-                "julia",
+                calkit.julia.get_julia_exe(),
                 script_path,
                 ",".join(package_names),
             ],
@@ -1032,6 +1760,45 @@ end
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         # If Julia is not available or times out, return empty dict
         return {}
+
+
+def create_conda_environment_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal environment.yml for a conda environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the environment. If None, uses the detected project name.
+    python_version : str
+        Python version to request.
+
+    Returns
+    -------
+    str
+        The environment.yml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = f"name: {project_name}\n"
+    content += "channels:\n  - conda-forge\n"
+    content += "dependencies:\n"
+    content += f"  - python={python_version}\n"
+    for dep in sorted(dependencies):
+        if dep.lower().startswith("python") and dep[6:7] in (
+            "",
+            "=",
+            ">",
+            "<",
+        ):
+            continue
+        content += f"  - {dep}\n"
+    return content
 
 
 def create_julia_project_file_content(
@@ -1077,7 +1844,9 @@ def create_julia_project_file_content(
         return content
 
 
-def create_r_description_content(dependencies: list[str]) -> str:
+def create_r_description_content(
+    dependencies: list[str], project_name: str | None = None
+) -> str:
     """Generate R DESCRIPTION file content listing dependencies.
 
     This creates a minimal DESCRIPTION file that renv can work with.
@@ -1086,13 +1855,26 @@ def create_r_description_content(dependencies: list[str]) -> str:
     ----------
     dependencies : list[str]
         List of R package names.
+    project_name : str | None
+        Name for the DESCRIPTION's ``Package`` field. It is sanitized into a
+        valid R package name (letters, numbers and dots, starting with a
+        letter). Falls back to the detected project name, then to
+        ``CalkitProject``.
 
     Returns
     -------
     str
         The DESCRIPTION file content.
     """
-    content = """Package: CalkitProject
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    # Valid R package names may only contain letters, numbers and dots, and
+    # must start with a letter, so replace anything else (e.g. hyphens) with a
+    # dot and prefix a letter if needed
+    package_name = re.sub(r"[^A-Za-z0-9.]+", ".", project_name).strip(".")
+    if not package_name or not package_name[0].isalpha():
+        package_name = "Calkit." + package_name if package_name else "Calkit"
+    content = f"""Package: {package_name}
 Version: 0.0.1
 Title: Auto-generated R environment
 """
@@ -1360,6 +2142,16 @@ def detect_env_for_stage(
     # Get existing environment names
     envs = ck_info.get("environments", {})
     all_env_names = list(envs.keys())
+    # Generic shell commands should run on the host when no env is set.
+    if environment is None and stage.get("kind") == "shell-command":
+        return EnvForStageResult(
+            name="_system",
+            env={"kind": "system"},
+            exists=True,
+            spec_path=None,
+            dependencies=[],
+            created_from_dependencies=False,
+        )
     # 1) If stage has an environment, use that
     if environment is not None:
         res = env_from_name_or_path(

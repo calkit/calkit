@@ -1,5 +1,6 @@
-"""Functionality for detecting inputs and outputs from scripts,
-notebooks, and commands."""
+"""Functionality for detecting inputs, outputs, and dependencies from scripts,
+notebooks, and commands.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +8,13 @@ import ast
 import json
 import os
 import re
+import shlex
 import sys
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Literal
+
+import pathspec
 
 NotebookLanguage = Literal["python", "julia", "r"]
 
@@ -71,6 +77,7 @@ def detect_r_script_io(
         content,
         script_dir=script_dir,
         wdir=effective_wdir,
+        project_root=effective_wdir,
     )
 
 
@@ -112,7 +119,7 @@ def detect_julia_script_io(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                inputs.append(Path(os.path.relpath(full_path)).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
@@ -419,41 +426,75 @@ def detect_latex_io(tex_path: str) -> dict[str, list[str]]:
     for pattern, pattern_type in patterns:
         matches = re.findall(pattern, content)
         for match in matches:
+
+            def _resolve(name: str) -> str:
+                return Path(
+                    os.path.normpath(os.path.join(tex_dir, name))
+                ).as_posix()
+
             if pattern_type == "bib":
                 files = [f.strip() for f in match.split(",")]
                 for f in files:
                     if not f.endswith(".bib"):
                         f += ".bib"
                     # Resolve relative to the document directory
-                    resolved = os.path.normpath(os.path.join(tex_dir, f))
-                    inputs.append(resolved)
+                    inputs.append(_resolve(f))
             elif pattern_type == "tex":
                 filename = match
                 if not filename.endswith(".tex"):
                     filename += ".tex"
                 # Resolve relative to the document directory
-                resolved = os.path.normpath(os.path.join(tex_dir, filename))
-                inputs.append(resolved)
+                inputs.append(_resolve(filename))
             else:
                 # Include graphics or other files
                 # Resolve relative to the document directory
-                resolved = os.path.normpath(os.path.join(tex_dir, match))
-                inputs.append(resolved)
+                inputs.append(_resolve(match))
     # Filter and deduplicate inputs
     inputs = [p for p in inputs if _is_valid_project_path(p)]
+    # The patterns above miss everything LaTeX resolves by name rather than
+    # by path: the document class, local style files, the bibliography
+    # style, and figures written without an extension. Those come from
+    # calkit.latex, which resolves against the project and follows the
+    # files it finds, so a class that loads its own styles contributes
+    # them too.
+    import calkit.latex
+
+    inputs += calkit.latex.detect_inputs(tex_path)
     inputs = list(dict.fromkeys(inputs))
     return {"inputs": inputs, "outputs": outputs}
 
 
 def detect_shell_command_io(command: str) -> dict[str, list[str]]:
     """Detect inputs and outputs from a shell command string."""
+    from calkit.docker import extract_docker_run_inner_command
+
     inputs = []
     outputs = []
-    input_redirects = re.findall(r"<\s*(\S+)", command)
+    analyzed_command = command
+    inner_command = extract_docker_run_inner_command(command)
+    if inner_command is not None:
+        analyzed_command = " ".join(
+            shlex.quote(part) for part in inner_command
+        )
+    input_redirects = re.findall(r"<\s*(\S+)", analyzed_command)
     inputs.extend([f.strip("\"'") for f in input_redirects])
-    output_redirects = re.findall(r">>?\s*(\S+)", command)
+    output_redirects = re.findall(r">>?\s*(\S+)", analyzed_command)
     outputs.extend([f.strip("\"'") for f in output_redirects])
-    words = command.split()
+    try:
+        words = shlex.split(analyzed_command)
+    except ValueError:
+        words = analyzed_command.split()
+    if words and words[0] in ["cp", "mv"]:
+        operands = []
+        for word in words[1:]:
+            if word == "--":
+                continue
+            if word.startswith("-"):
+                continue
+            operands.append(word.strip("\"'"))
+        if len(operands) >= 2:
+            inputs.extend(operands[:-1])
+            outputs.append(operands[-1])
     for i, word in enumerate(words):
         if word.startswith("-"):
             continue
@@ -656,6 +697,35 @@ def _resolve_variable_in_call(
     return None
 
 
+def filter_covered_inputs(
+    detected: Iterable[str], existing: Iterable[str]
+) -> list[str]:
+    """Drop detected paths an existing input already covers.
+
+    A stage input can be a whole directory: with ``figures`` declared,
+    everything inside it is already a dependency, so listing those files
+    one by one adds noise without adding coverage -- and goes stale the
+    moment one is renamed. An exact repeat of an existing input is covered
+    by the same rule.
+
+    Order is preserved, and duplicates within ``detected`` are dropped.
+    """
+    covered = {
+        path.rstrip("/") for path in existing if isinstance(path, str) and path
+    }
+    out: list[str] = []
+    for path in detected:
+        if not isinstance(path, str) or not path:
+            continue
+        parts = path.rstrip("/").split("/")
+        ancestors = ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
+        if any(ancestor in covered for ancestor in ancestors):
+            continue
+        out.append(path)
+        covered.add(path.rstrip("/"))
+    return out
+
+
 def _is_valid_project_path(path: str) -> bool:
     """Check if a path is valid for a project dependency/output."""
     if not path:
@@ -750,6 +820,9 @@ def _detect_python_code_io(
         except ValueError:
             # If paths are on different drives (Windows), use normalized path
             rel_path = full_path
+        # Always emit posix separators so downstream comparisons are stable
+        # across platforms.
+        rel_path = Path(rel_path).as_posix()
         # Strip leading ../ for paths outside project root
         while rel_path.startswith("../"):
             rel_path = rel_path[3:]
@@ -914,7 +987,7 @@ def _detect_julia_code_io(
         if not os.path.isabs(match):
             full_path = os.path.join(script_dir, match)
             if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
+                inputs.append(Path(os.path.relpath(full_path)).as_posix())
             elif _is_valid_project_path(match):
                 inputs.append(match)
     read_patterns = [
@@ -954,17 +1027,21 @@ def _resolve_python_import(
     if os.path.exists(file_path) and _is_valid_project_path(
         os.path.relpath(file_path)
     ):
-        return os.path.relpath(file_path)
+        return Path(os.path.relpath(file_path)).as_posix()
     init_path = os.path.join(search_dir, module_path, "__init__.py")
     if os.path.exists(init_path) and _is_valid_project_path(
         os.path.relpath(init_path)
     ):
-        return os.path.relpath(init_path)
+        return Path(os.path.relpath(init_path)).as_posix()
     return None
 
 
 def _detect_r_code_io(
-    code: str, script_dir: str = ".", wdir: str = "."
+    code: str,
+    script_dir: str = ".",
+    wdir: str = ".",
+    project_root: str = ".",
+    _seen: set[str] | None = None,
 ) -> dict[str, list[str]]:
     """Detect I/O from R code string (used for scripts and notebook cells).
 
@@ -976,6 +1053,12 @@ def _detect_r_code_io(
         Directory containing the script (for resolving source() includes).
     wdir : str
         Working directory from which the script is executed (for data file paths).
+    project_root : str
+        Directory that ``here::here()`` resolves against, i.e. the project
+        root where the pipeline runs.
+    _seen : set[str] | None
+        Absolute paths of scripts already analyzed, used to guard against
+        cycles when recursing into ``source()``d scripts.
 
     Returns
     -------
@@ -984,78 +1067,154 @@ def _detect_r_code_io(
     """
     inputs = []
     outputs = []
+    if _seen is None:
+        _seen = set()
     code = re.sub(r"#.*$", "", code, flags=re.MULTILINE)
     r_vars = _extract_r_string_assignments(code)
     fig_dir = r_vars.get("fig_dir")
-    # Detect source() calls for R script includes
-    source_pattern = r'source\s*\(\s*["\']([^"\']+\.R)["\']'
-    source_matches = re.findall(source_pattern, code, flags=re.IGNORECASE)
-    for match in source_matches:
-        if not os.path.isabs(match):
-            full_path = os.path.join(script_dir, match)
-            if os.path.exists(full_path):
-                inputs.append(os.path.relpath(full_path))
-            elif _is_valid_project_path(match):
-                inputs.append(match)
-    # Read patterns that capture variables, file.path() expressions, or literals
-    read_patterns = [
-        r'read\.(?:csv|table|delim|tsv)\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'readRDS\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'load\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'read_csv\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'read_excel\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'fread\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
+    # A path argument may be a here::here()/file.path() call, a quoted literal,
+    # or a variable name that resolves to one of those
+    path_expr = (
+        r'(here::here\([^)]*\)|file\.path\([^)]*\)|"[^"]+"|\'[^\']+\'|'
+        r"[A-Za-z_][A-Za-z0-9_]*)"
+    )
+    # Detect source() calls for R script includes, add them as inputs, and
+    # recurse into them so their I/O is attributed to this stage
+    for raw in re.findall(r"source\s*\(\s*" + path_expr, code):
+        resolved = _resolve_r_path_expr(raw, r_vars)
+        if not resolved or not resolved.lower().endswith(".r"):
+            continue
+        if os.path.isabs(resolved):
+            continue
+        # here::here() paths are relative to the project root; everything else
+        # is resolved relative to the sourcing script's directory
+        if raw.strip().startswith("here::here"):
+            fs_path = os.path.join(project_root, resolved)
+        else:
+            fs_path = os.path.join(script_dir, resolved)
+        if os.path.exists(fs_path):
+            inputs.append(Path(os.path.relpath(fs_path)).as_posix())
+        elif _is_valid_project_path(resolved):
+            inputs.append(resolved)
+        # Recurse into the sourced script if we can read it
+        abs_path = os.path.abspath(fs_path)
+        if os.path.exists(fs_path) and abs_path not in _seen:
+            _seen.add(abs_path)
+            try:
+                with open(fs_path, "r", encoding="utf-8") as f:
+                    sub_code = f.read()
+            except (OSError, UnicodeDecodeError):
+                sub_code = None
+            if sub_code is not None:
+                sub_dir = (
+                    os.path.dirname(Path(os.path.relpath(fs_path)).as_posix())
+                    or "."
+                )
+                sub_io = _detect_r_code_io(
+                    sub_code,
+                    script_dir=sub_dir,
+                    wdir=wdir,
+                    project_root=project_root,
+                    _seen=_seen,
+                )
+                inputs.extend(sub_io["inputs"])
+                outputs.extend(sub_io["outputs"])
+    # Read patterns that capture variables, here::here()/file.path()
+    # expressions, or literals
+    read_funcs = [
+        r"read\.(?:csv|table|delim|tsv)",
+        r"readRDS",
+        r"readLines",
+        r"load",
+        r"read_csv",
+        r"read_tsv",
+        r"read_delim",
+        r"read_excel",
+        r"fread",
     ]
-    # Process read patterns with variable resolution
-    for pattern in read_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+    for func in read_funcs:
+        for match in re.findall(func + r"\s*\(\s*" + path_expr, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 inputs.append(resolved)
-    # Write patterns for simple cases (literal strings in 2nd argument)
-    simple_write_patterns = [
-        r'write\.(?:csv|table)\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'saveRDS\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'save\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'write_csv\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'write_excel\s*\(\s*[^,]+,\s*["\']([^"\']+)["\']',
-        r'pdf\s*\(\s*["\']([^"\']+)["\']',
-        r'png\s*\(\s*["\']([^"\']+)["\']',
-        r'pdf\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'png\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'svg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'svg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'jpeg\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'jpeg\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'tiff\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'tiff\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'bmp\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'bmp\s*\([^)]*filename\s*=\s*["\']([^"\']+)["\']',
-        r'CairoPNG\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'CairoPDF\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
-        r'svglite\s*\([^)]*file\s*=\s*["\']([^"\']+)["\']',
+    # Write functions where the path is the second positional argument
+    second_arg_write_funcs = [
+        r"write\.(?:csv|table)",
+        r"saveRDS",
+        r"write_csv",
+        r"write_tsv",
+        r"write_delim",
+        r"write_excel\w*",
+        r"writeLines",
+        r"fwrite",
     ]
-    for pattern in simple_write_patterns:
-        outputs.extend(re.findall(pattern, code))
-    # ggsave patterns that handle file.path(), variables, or literals
-    ggsave_patterns = [
-        r'ggsave\s*\(\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-        r'ggsave\s*\([^)]*filename\s*=\s*(file\.path\([^\)]*\)|"[^"]+"|\'[^\']+\'|[A-Za-z_][A-Za-z0-9_]*)',
-    ]
-    for pattern in ggsave_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+    for func in second_arg_write_funcs:
+        pattern = func + r"\s*\(\s*[^,]+,\s*" + path_expr
+        for match in re.findall(pattern, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 outputs.append(resolved)
+    # Write functions where the path is the (only) first positional argument
+    first_arg_write_funcs = [
+        r"ggsave",
+        r"sink",
+        r"pdf",
+        r"png",
+        r"svg",
+        r"svglite",
+        r"jpeg",
+        r"tiff",
+        r"bmp",
+        r"cairo_pdf",
+        r"CairoPNG",
+        r"CairoPDF",
+    ]
+    for func in first_arg_write_funcs:
+        pattern = func + r"\s*\(\s*" + path_expr
+        for match in re.findall(pattern, code):
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
+    # Write functions whose path is passed as a named argument, regardless of
+    # position (e.g. saveRDS(x, file = ...), pdf(file = ...), save(file = ...))
+    named_arg_write_funcs = [
+        r"write\.(?:csv|table)",
+        r"saveRDS",
+        r"save",
+        r"write_csv",
+        r"write_tsv",
+        r"write_delim",
+        r"write_excel\w*",
+        r"writeLines",
+        r"fwrite",
+        r"ggsave",
+        r"sink",
+        r"pdf",
+        r"png",
+        r"svg",
+        r"svglite",
+        r"jpeg",
+        r"tiff",
+        r"bmp",
+        r"cairo_pdf",
+        r"CairoPNG",
+        r"CairoPDF",
+    ]
+    for func in named_arg_write_funcs:
+        pattern = (
+            func + r"\s*\([^)]*\b(?:file|filename|path|con)\s*=\s*" + path_expr
+        )
+        for match in re.findall(pattern, code):
+            resolved = _resolve_r_path_expr(match, r_vars)
+            if resolved:
+                outputs.append(resolved)
+    # save_fig() writes into fig_dir when the path isn't already qualified
     save_fig_patterns = [
-        r"save_fig\s*\(\s*[^,]+,\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
-        r"save_fig\s*\([^\)]*filename\s*=\s*(file\.path\([^\)]*\)|\"[^\"]+\"|'[^']+'|[A-Za-z_][A-Za-z0-9_]*)",
+        r"save_fig\s*\(\s*[^,]+,\s*" + path_expr,
+        r"save_fig\s*\([^)]*filename\s*=\s*" + path_expr,
     ]
     for pattern in save_fig_patterns:
-        matches = re.findall(pattern, code)
-        for match in matches:
+        for match in re.findall(pattern, code):
             resolved = _resolve_r_path_expr(match, r_vars)
             if resolved:
                 if fig_dir and not os.path.isabs(resolved):
@@ -1070,13 +1229,27 @@ def _detect_r_code_io(
     # Resolve paths relative to working directory
     inputs = _resolve_paths_to_wdir(inputs, script_dir, wdir)
     outputs = _resolve_paths_to_wdir(outputs, script_dir, wdir)
+    # Normalize to POSIX separators for persistence/display, since paths built
+    # from here::here()/file.path() use the host OS separator
+    inputs = [Path(p).as_posix() for p in inputs]
+    outputs = [Path(p).as_posix() for p in outputs]
     inputs = list(dict.fromkeys(inputs))
     outputs = list(dict.fromkeys(outputs))
+    # A file produced within this stage is not an external input, even if it is
+    # also read back (e.g. an intermediate written by one sourced script and
+    # consumed by another)
+    output_set = set(outputs)
+    inputs = [p for p in inputs if p not in output_set]
     return {"inputs": inputs, "outputs": outputs}
 
 
 def _extract_r_string_assignments(code: str) -> dict[str, str]:
-    """Extract simple string assignments in R code."""
+    """Extract simple string assignments in R code.
+
+    Captures both string-literal assignments (``x <- "path"``) and
+    ``here::here()``/``file.path()`` assignments whose arguments are literals
+    or previously assigned variables (``x <- here::here("a", "b")``).
+    """
     assignments = {}
     pattern = re.compile(
         r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:<-|=)\s*[\"']([^\"']+)[\"']",
@@ -1084,7 +1257,60 @@ def _extract_r_string_assignments(code: str) -> dict[str, str]:
     )
     for name, value in pattern.findall(code):
         assignments[name] = value
+    # Resolve here::here()/file.path() assignments using the literals above
+    call_pattern = re.compile(
+        r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:<-|=)\s*"
+        r"(here::here\([^)]*\)|file\.path\([^)]*\))",
+        flags=re.MULTILINE,
+    )
+    for name, expr in call_pattern.findall(code):
+        resolved = _resolve_r_path_expr(expr, assignments)
+        if resolved:
+            assignments[name] = resolved
     return assignments
+
+
+def _extract_r_string_vector_assignments(code: str) -> dict[str, list[str]]:
+    """Extract character-vector assignments in R code.
+
+    Captures assignments of the form ``x <- c("a", "b")`` so that a later
+    ``pacman::p_load(char = x)`` can be resolved back to its package list.
+    """
+    assignments = {}
+    pattern = re.compile(
+        r"([A-Za-z_][A-Za-z0-9_.]*)\s*(?:<-|=)\s*c\(([^)]*)\)",
+        flags=re.DOTALL,
+    )
+    for name, body in pattern.findall(code):
+        strings = re.findall(r'["\']([a-zA-Z0-9._]+)["\']', body)
+        if strings:
+            assignments[name] = strings
+    return assignments
+
+
+def _resolve_r_package_args(
+    call_args: str, vector_assignments: dict[str, list[str]]
+) -> set[str]:
+    """Resolve package names from a ``pacman::p_load()`` argument list.
+
+    Handles quoted literals, inline ``c(...)`` vectors, bare (non-standard
+    evaluation) names like ``p_load(dplyr, tidyr)``, and ``char = x`` where
+    ``x`` is a character vector assigned earlier in the script.
+    """
+    packages = set()
+    # Quoted strings are package names, whether passed directly or inside c()
+    packages.update(re.findall(r'["\']([a-zA-Z0-9._]+)["\']', call_args))
+    # char = <var> referencing a character-vector assignment
+    for var in re.findall(r"char\s*=\s*([A-Za-z_][A-Za-z0-9_.]*)", call_args):
+        packages.update(vector_assignments.get(var, []))
+    # Bare names passed positionally; drop keyword arguments (install=, update=,
+    # character.only=, etc.) and their values before collecting identifiers
+    stripped = re.sub(r"[A-Za-z_][A-Za-z0-9_.]*\s*=\s*[^,]+", "", call_args)
+    for token in re.findall(r"[A-Za-z_][A-Za-z0-9_.]*", stripped):
+        # c() is the vector constructor, not a package; TRUE/FALSE are values
+        if token not in {"c", "TRUE", "FALSE", "T", "F"}:
+            packages.add(token)
+    return packages
 
 
 def _extract_julia_string_assignments(code: str) -> dict[str, str]:
@@ -1115,7 +1341,11 @@ def _resolve_julia_path_expr(
 
 
 def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
-    """Resolve simple R path expressions like "x", var, or file.path(...)."""
+    """Resolve simple R path expressions.
+
+    Handles quoted literals, variables, and ``file.path()``/``here::here()``
+    calls whose arguments are literals or known variables.
+    """
     expr = expr.strip()
     if not expr:
         return None
@@ -1123,22 +1353,23 @@ def _resolve_r_path_expr(expr: str, variables: dict[str, str]) -> str | None:
         return expr[1:-1]
     if expr in variables:
         return variables[expr]
-    if expr.startswith("file.path"):
-        match = re.match(r"file\.path\((.*)\)", expr)
-        if not match:
-            return None
-        args = [a.strip() for a in match.group(1).split(",") if a.strip()]
-        if not args:
-            return None
-        parts = []
-        for arg in args:
-            if arg[0] in ['"', "'"] and arg[-1] == arg[0]:
-                parts.append(arg[1:-1])
-            elif arg in variables:
-                parts.append(variables[arg])
-            else:
+    for prefix in ("file.path", "here::here"):
+        if expr.startswith(prefix):
+            match = re.match(re.escape(prefix) + r"\((.*)\)", expr)
+            if not match:
                 return None
-        return os.path.join(*parts)
+            args = [a.strip() for a in match.group(1).split(",") if a.strip()]
+            if not args:
+                return None
+            parts = []
+            for arg in args:
+                if arg[0] in ['"', "'"] and arg[-1] == arg[0]:
+                    parts.append(arg[1:-1])
+                elif arg in variables:
+                    parts.append(variables[arg])
+                else:
+                    return None
+            return os.path.join(*parts)
     return None
 
 
@@ -1359,6 +1590,20 @@ def _is_stdlib_module(module_name: str) -> bool:
     return base_module in common_stdlib
 
 
+_PYTHON_IMPORT_TO_DISTRIBUTION = {
+    "sklearn": "scikit-learn",
+    "skimage": "scikit-image",
+    "cv2": "opencv-python",
+    "PIL": "Pillow",
+    "bs4": "beautifulsoup4",
+    "yaml": "PyYAML",
+    "dateutil": "python-dateutil",
+    "dotenv": "python-dotenv",
+    "serial": "pyserial",
+    "git": "GitPython",
+}
+
+
 def detect_python_dependencies(
     script_path: str | None = None,
     code: str | None = None,
@@ -1424,13 +1669,21 @@ def detect_python_dependencies(
                 if not _is_stdlib_module(module_name):
                     # Get the top-level package name
                     top_level = module_name.split(".")[0]
-                    dependencies.add(top_level)
+                    dependencies.add(
+                        _PYTHON_IMPORT_TO_DISTRIBUTION.get(
+                            top_level, top_level
+                        )
+                    )
         elif isinstance(node, ast.ImportFrom):
             if node.module and node.level == 0:
                 module_name = node.module
                 if not _is_stdlib_module(module_name):
                     top_level = module_name.split(".")[0]
-                    dependencies.add(top_level)
+                    dependencies.add(
+                        _PYTHON_IMPORT_TO_DISTRIBUTION.get(
+                            top_level, top_level
+                        )
+                    )
     return sorted(list(dependencies))
 
 
@@ -1475,6 +1728,27 @@ def detect_r_dependencies(
     for pattern in patterns:
         matches = re.findall(pattern, code)
         dependencies.update(matches)
+    # requireNamespace()/loadNamespace() take the package as a string and are
+    # commonly used to guard optional installs (e.g. pacman/here bootstrapping)
+    dependencies.update(
+        re.findall(
+            r'(?:require|load)Namespace\s*\(\s*["\']([a-zA-Z0-9._]+)["\']',
+            code,
+        )
+    )
+    # Qualified calls like pkg::fn() or pkg:::fn() reference a package without
+    # ever attaching it, so the package itself is still a dependency
+    dependencies.update(re.findall(r"\b([a-zA-Z][a-zA-Z0-9._]*)\s*:::?", code))
+    # pacman::p_load() loads (and optionally installs) packages dynamically; its
+    # arguments may be bare names, quoted strings, or a character vector passed
+    # via char=, possibly referencing a variable assigned earlier in the script
+    vector_assignments = _extract_r_string_vector_assignments(code)
+    for call_args in re.findall(
+        r"p_load\s*\(((?:[^()]|\([^()]*\))*)\)", code, flags=re.DOTALL
+    ):
+        dependencies.update(
+            _resolve_r_package_args(call_args, vector_assignments)
+        )
     # Filter out base R packages
     base_packages = {
         "base",
@@ -1656,3 +1930,461 @@ def create_r_description_file(
         os.makedirs(output_dir, exist_ok=True)
     with open(output_path, "w") as f:
         f.write(create_r_description_content(dependencies))
+
+
+# Figure/dataset auto-detection
+# A file is only treated as an auto-detected figure or dataset when it lives in
+# a directory whose name signals its kind. These sets are intentionally narrow
+# (and kept in sync with the Calkit hub) so we don't flag arbitrary images or
+# data files scattered around a repository.
+FIGURE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".pdf",
+    ".eps",
+    ".tiff",
+    ".tif",
+}
+FIGURE_DIRS = {"figures", "figure", "figs", "fig", "plots", "plot", "images"}
+DATASET_EXTENSIONS = {
+    ".csv",
+    ".h5",
+    ".hdf5",
+    ".parquet",
+    ".nc",
+    ".zarr",
+    ".feather",
+    ".arrow",
+    ".avro",
+    ".json",
+    ".jsonl",
+    ".ndjson",
+}
+DATA_DIRS = {"data", "datasets", "dataset"}
+RESULT_DIRS = {"results", "result"}
+RESULT_EXTENSIONS = {
+    ".json",
+    ".csv",
+    ".tsv",
+    ".yaml",
+    ".yml",
+    ".parquet",
+    ".h5",
+    ".hdf5",
+    ".txt",
+    ".html",
+}
+PRESENTATION_DIRS = {"presentations", "presentation", "slides", "talks"}
+PRESENTATION_EXTENSIONS = {".pdf", ".pptx", ".key"}
+# Files that look like a presentation regardless of which directory they live in.
+PRESENTATION_NAMES = {
+    "slides.pdf",
+    "slides.pptx",
+    "slides.key",
+    "presentation.pdf",
+    "presentation.pptx",
+    "presentation.key",
+    "talk.pdf",
+}
+
+DETECTION_IGNORE_FPATH = os.path.join(".calkit", "ignore")
+
+
+def load_detection_ignore(wdir: str | None = None) -> pathspec.PathSpec | None:
+    """Load ``.calkit/ignore`` artifact detection exclusions."""
+    import pathspec
+
+    fpath = DETECTION_IGNORE_FPATH
+    if wdir is not None:
+        fpath = os.path.join(wdir, fpath)
+    if not os.path.isfile(fpath):
+        return None
+    with open(fpath, encoding="utf-8") as f:
+        return pathspec.PathSpec.from_lines("gitwildmatch", f)
+
+
+def _ancestor_dir_names(rel_path: str) -> set[str]:
+    """Lower-cased names of the ancestor directories of a "/"-separated path."""
+    return {p.lower() for p in rel_path.split("/")[:-1]}
+
+
+def _path_ext(rel_path: str) -> str:
+    name = rel_path.rsplit("/", 1)[-1]
+    return ("." + name.rsplit(".", 1)[-1].lower()) if "." in name else ""
+
+
+def is_figure_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable figure."""
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    ancestors = _ancestor_dir_names(rel_path)
+    ext = _path_ext(rel_path)
+    if ext in FIGURE_EXTENSIONS and ancestors & FIGURE_DIRS:
+        return True
+    # A Plotly figure is stored as JSON; treat .json under a figure-only
+    # directory (one that isn't also a data directory) as a figure.
+    if ext == ".json" and ancestors & (FIGURE_DIRS - DATA_DIRS):
+        return True
+    return False
+
+
+def is_dataset_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable dataset."""
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    return (
+        _path_ext(rel_path) in DATASET_EXTENSIONS
+        and bool(_ancestor_dir_names(rel_path) & DATA_DIRS)
+        and not is_figure_path(rel_path, ignore=ignore)
+    )
+
+
+def is_result_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable result.
+
+    A result is a data-like file (JSON, CSV, etc.) under a ``results``-style
+    directory. Anything already detected as a figure or dataset is excluded.
+    """
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    return (
+        _path_ext(rel_path) in RESULT_EXTENSIONS
+        and bool(_ancestor_dir_names(rel_path) & RESULT_DIRS)
+        and not is_figure_path(rel_path, ignore=ignore)
+        and not is_dataset_path(rel_path, ignore=ignore)
+    )
+
+
+def is_presentation_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable presentation.
+
+    Either a slide-deck file (PDF/PPTX/KEY) under a ``slides``/``presentations``
+    directory, or a file with a presentation-like name (e.g. ``slides.pdf``,
+    ``presentation.pdf``) anywhere. Figures are excluded.
+    """
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    if is_figure_path(rel_path, ignore=ignore):
+        return False
+    name = rel_path.rsplit("/", 1)[-1].lower()
+    if name in PRESENTATION_NAMES:
+        return True
+    return _path_ext(rel_path) in PRESENTATION_EXTENSIONS and bool(
+        _ancestor_dir_names(rel_path) & PRESENTATION_DIRS
+    )
+
+
+PUBLICATION_DIRS = {
+    "publication",
+    "publications",
+    "paper",
+    "papers",
+    "manuscript",
+    "manuscripts",
+    "thesis",
+    "report",
+    "reports",
+    "pub",
+    "pubs",
+}
+PUBLICATION_EXTENSIONS = {".pdf", ".tex", ".docx"}
+# Files that look like a publication regardless of which directory they live in.
+PUBLICATION_NAMES = {
+    "paper.pdf",
+    "manuscript.pdf",
+    "thesis.pdf",
+    "report.pdf",
+    "paper.tex",
+    "main.tex",
+    "manuscript.tex",
+    "thesis.tex",
+}
+
+
+def is_publication_path(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> bool:
+    """Whether a repo-relative path looks like an auto-detectable publication.
+
+    Either a document (PDF/TeX/DOCX) under a ``paper``/``publication``/
+    ``thesis``-style directory, or a file with a publication-like name (e.g.
+    ``manuscript.pdf``, ``main.tex``) anywhere. Figures and presentations are
+    excluded.
+    """
+    if ignore is not None and ignore.match_file(rel_path):
+        return False
+    if is_figure_path(rel_path, ignore=ignore) or is_presentation_path(
+        rel_path, ignore=ignore
+    ):
+        return False
+    name = rel_path.rsplit("/", 1)[-1].lower()
+    if name in PUBLICATION_NAMES:
+        return True
+    return _path_ext(rel_path) in PUBLICATION_EXTENSIONS and bool(
+        _ancestor_dir_names(rel_path) & PUBLICATION_DIRS
+    )
+
+
+def detect_artifact_kind(
+    rel_path: str, *, ignore: pathspec.PathSpec | None = None
+) -> str | None:
+    """Infer an artifact's release kind from its repo-relative path.
+
+    Returns one of ``"figure"``, ``"presentation"``, ``"publication"``, or
+    ``"dataset"``, or ``None`` if the path doesn't look like any of these.
+    """
+    if is_figure_path(rel_path, ignore=ignore):
+        return "figure"
+    if is_presentation_path(rel_path, ignore=ignore):
+        return "presentation"
+    if is_publication_path(rel_path, ignore=ignore):
+        return "publication"
+    if is_dataset_path(rel_path, ignore=ignore):
+        return "dataset"
+    return None
+
+
+def _is_hidden_path(rel_path: str) -> bool:
+    return any(part.startswith(".") for part in rel_path.split("/"))
+
+
+def _is_under_any_dir(rel_path: str, dirs: list[str]) -> bool:
+    """Whether ``rel_path`` equals or lives inside any of ``dirs``."""
+    return any(rel_path == d or rel_path.startswith(d + "/") for d in dirs)
+
+
+def _collapse_dataset_folders(paths: list[str]) -> list[str]:
+    """Collapse data files into their containing folder.
+
+    A folder holding two or more data files is reported as a single dataset
+    rather than file-by-file. Folders nested inside another collapsed folder
+    are dropped so only the outermost dataset folder remains.
+    """
+    by_dir: dict[str, list[str]] = {}
+    for p in paths:
+        directory = p.rsplit("/", 1)[0] if "/" in p else ""
+        by_dir.setdefault(directory, []).append(p)
+    collapsed: set[str] = set()
+    for directory, group in by_dir.items():
+        if directory and len(group) >= 2:
+            collapsed.add(directory)
+        else:
+            collapsed.update(group)
+    result = sorted(collapsed)
+    return [
+        p
+        for p in result
+        if not any(o != p and p.startswith(o + "/") for o in result)
+    ]
+
+
+def detect_figures(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
+) -> list[str]:
+    """Auto-detected figure paths among ``candidate_paths``.
+
+    Paths under a dot-directory or under one of ``reserved_paths`` (declared
+    artifacts and pipeline outputs) are skipped.
+    """
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_figure_path(p, ignore=ignore)
+        }
+    )
+
+
+def detect_datasets(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    figure_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
+) -> list[str]:
+    """Auto-detected dataset paths among ``candidate_paths``.
+
+    Anything already detected as a figure (``figure_paths``) is excluded, and a
+    folder full of data files collapses to a single dataset entry.
+    """
+    reserved = list(reserved_paths)
+    figset = set(figure_paths)
+    files = {
+        p
+        for p in candidate_paths
+        if not _is_hidden_path(p)
+        and not _is_under_any_dir(p, reserved)
+        and p not in figset
+        and is_dataset_path(p, ignore=ignore)
+    }
+    return _collapse_dataset_folders(sorted(files))
+
+
+def detect_results(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
+) -> list[str]:
+    """Auto-detected result paths among ``candidate_paths``.
+
+    Paths under a dot-directory or under one of ``reserved_paths`` (declared
+    artifacts) are skipped.
+    """
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_result_path(p, ignore=ignore)
+        }
+    )
+
+
+def detect_presentations(
+    candidate_paths: list[str],
+    reserved_paths: list[str] | tuple[str, ...] = (),
+    ignore: pathspec.PathSpec | None = None,
+) -> list[str]:
+    """Auto-detected presentation paths among ``candidate_paths``."""
+    reserved = list(reserved_paths)
+    return sorted(
+        {
+            p
+            for p in candidate_paths
+            if not _is_hidden_path(p)
+            and not _is_under_any_dir(p, reserved)
+            and is_presentation_path(p, ignore=ignore)
+        }
+    )
+
+
+def list_repo_files(wdir: str | None = None) -> list[str]:
+    """Repo-relative paths of files Git does not ignore.
+
+    Combines tracked and untracked files while honoring ``.gitignore``, so
+    detection skips virtualenvs, ``node_modules``, and other ignored content.
+    Paths are returned relative to ``wdir`` (or the current directory), using
+    POSIX separators; files outside ``wdir`` are omitted.
+    """
+    import calkit.git
+
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return []
+    files = calkit.git.ls_files(
+        repo, "--cached", "--others", "--exclude-standard"
+    )
+    repo_root = repo.working_dir
+    base = os.path.abspath(wdir if wdir is not None else ".")
+    rel_files = []
+    for f in files:
+        rel = os.path.relpath(os.path.join(repo_root, f), base)
+        if rel.startswith(".."):
+            continue
+        rel_files.append(Path(rel).as_posix())
+    return rel_files
+
+
+def list_dvc_tracked_files(wdir: str | None = None) -> list[str]:
+    """Repo-relative paths of files tracked by DVC.
+
+    DVC-tracked artifacts (added via ``dvc add`` or produced as pipeline
+    outputs) are Git-ignored, so they don't appear in :func:`list_repo_files`;
+    include them so figures and datasets stored with DVC are still detected.
+    Returns an empty list when DVC isn't available or the project isn't a DVC
+    repo.
+    """
+    from calkit.dvc.core import list_paths
+
+    try:
+        return [
+            p.replace("\\", "/")
+            for p in list_paths(wdir=wdir, recursive=True)
+            if p
+        ]
+    except Exception:
+        return []
+
+
+def _reserved_artifact_paths(
+    wdir: str | None = None, ck_info: dict | None = None
+) -> list[str]:
+    """Paths of artifacts declared in ``calkit.yaml``.
+
+    These are excluded from auto-detection so a declared figure/dataset isn't
+    reported twice and individual files inside a declared artifact folder aren't
+    listed separately. Pipeline/DVC stage outputs are intentionally *not*
+    reserved: a figure or dataset produced by the pipeline should still be
+    detected (and shown with its producing stage as provenance).
+    """
+    import calkit
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    paths: list[str] = []
+    for kind in ("figures", "datasets", "results", "presentations"):
+        for obj in ck_info.get(kind) or []:
+            if isinstance(obj, dict) and isinstance(obj.get("path"), str):
+                paths.append(obj["path"])
+    return [p.replace("\\", "/") for p in paths]
+
+
+def detect_project_artifacts(
+    wdir: str | None = None, ck_info: dict | None = None
+) -> dict[str, list[str]]:
+    """Auto-detect figure and dataset paths in the project at ``wdir``.
+
+    Candidates are the files Git does not ignore plus any files tracked by DVC
+    (which are Git-ignored); declared artifacts are reserved so they aren't
+    detected again.
+    """
+    import calkit
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir)
+    ignore = load_detection_ignore(wdir=wdir)
+    reserved = _reserved_artifact_paths(wdir=wdir, ck_info=ck_info)
+    candidates = list(
+        dict.fromkeys(
+            [*list_repo_files(wdir=wdir), *list_dvc_tracked_files(wdir=wdir)]
+        )
+    )
+    figures = detect_figures(
+        candidates, reserved_paths=reserved, ignore=ignore
+    )
+    datasets = detect_datasets(
+        candidates,
+        reserved_paths=reserved,
+        figure_paths=figures,
+        ignore=ignore,
+    )
+    results = detect_results(
+        candidates, reserved_paths=reserved, ignore=ignore
+    )
+    presentations = detect_presentations(
+        candidates, reserved_paths=reserved, ignore=ignore
+    )
+    return {
+        "figures": figures,
+        "datasets": datasets,
+        "results": results,
+        "presentations": presentations,
+    }

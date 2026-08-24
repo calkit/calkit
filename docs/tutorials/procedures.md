@@ -18,39 +18,29 @@ time, e.g., during an experiment, figuring out what step you're on.
 ## Defining
 
 The `Procedure` model in `calkit.models` shows the structure of a procedure.
+Procedures are defined in the `procedures` section of `calkit.yaml`,
+keyed by name.
 For example, we might define a procedure with 3 steps like:
-
-```yaml
-title: My important procedure
-description: This is a manual procedure for setting up the experiment.
-steps:
-  - summary: Turn on the machine
-    wait_after_s: 5
-  - summary: Record the temperature
-    details: >
-      In the upper right hand corner of the screen you will see a temperature
-      value. Record this.
-    inputs:
-      temperature:
-        units: Degrees C
-        dtype: float
-  - summary: Turn off the machine
-    details: Press the power button.
-```
-
-We can save this anywhere, but to follow convention we will save to
-`.calkit/procedures/my-important-procedure.yaml`.
-
-In `calkit.yaml`, we can add to the `procedures` like:
 
 ```yaml
 procedures:
   my-important-procedure:
-    _include: .calkit/procedures/my-important-procedure.yaml
+    title: My important procedure
+    description: This is a manual procedure for setting up the experiment.
+    steps:
+      - summary: Turn on the machine
+        wait_after_s: 5
+      - summary: Record the temperature
+        details: >
+          In the upper right hand corner of the screen you will see a
+          temperature value. Record this.
+        inputs:
+          temperature:
+            units: Degrees C
+            dtype: float
+      - summary: Turn off the machine
+        details: Press the power button.
 ```
-
-Here we use an `_include` key to reference the other file to help keep
-`calkit.yaml` easier to read.
 
 ## Executing
 

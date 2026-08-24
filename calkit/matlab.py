@@ -43,7 +43,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 # Run mpm to install MathWorks products into the existing MATLAB installation directory,
 # and delete the mpm installation afterwards.
 # Modify it by setting the ADDITIONAL_PRODUCTS defined above,
-# e.g. ADDITIONAL_PRODUCTS="Statistics_and_Machine_Learning_Toolbox Parallel_Computing_Toolbox MATLAB_Coder".
+# e.g., ADDITIONAL_PRODUCTS="Statistics_and_Machine_Learning_Toolbox Parallel_Computing_Toolbox MATLAB_Coder".
 # If mpm fails to install successfully then output the logfile to the terminal, otherwise cleanup.
 
 # Switch to user matlab, and pass in $HOME variable to mpm,

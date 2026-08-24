@@ -200,6 +200,13 @@ so editing the library reruns the examples that use it.
 `uv sync`, `uv add <this package>`, `Pkg.develop(path=".")`, and
 `renv::restore()` all say the same thing in their own languages.
 
+An install that names the project's package _alongside_ other packages,
+e.g., `Pkg.add(["ThisPackage", "SomethingElse"])`, gets a generated
+environment containing the other packages, with the project's own coming
+from the working tree (as a path dependency) rather than a registry.
+Either way, stages using the environment depend on the package's source,
+so editing the library reruns the examples that use it.
+
 ## Output blocks
 
 What a stage prints can be written back into the file,
@@ -300,3 +307,15 @@ annotated block, and lists the file's stages under it in the sidebar.
 
 Use `--dry-run` to see what would be annotated and created without
 changing anything.
+Nothing is committed by `xr`: initialization leaves its files staged, so
+a failed run can put everything back.
+
+### Checking a README without making a Calkit project
+
+`calkit xr README.md --no-record` runs the file's stages and then
+restores `calkit.yaml`, `dvc.yaml`, and `.dvc`, so the project doesn't
+become a Calkit project. What the run produced stays for inspection: the
+annotated fences, injected output and values, the stages' outputs, and
+the extracted scripts and environments under `.calkit/`. This is the
+mode for testing that a README is runnable in a repository that has no
+interest in a pipeline. Nothing is ever committed.

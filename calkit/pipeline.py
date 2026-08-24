@@ -1552,18 +1552,14 @@ def to_dvc(
             pv_full = os.path.join(wdir, pv_path) if wdir else pv_path
             if os.path.isfile(pv_full):
                 env_lock_fpaths[env_name].append(pv_path)
-        # An environment built by installing the project itself points at
-        # the project's own spec file. That install is a pointer to the
-        # working tree, so the lock says nothing about the code it
-        # resolves to---the source has to be a dependency in its own right
-        # or editing the package would leave its stages looking current.
-        language = calkit.markdown.ENV_KIND_LANGUAGES.get(env.get("kind", ""))
-        spec_entry = calkit.markdown.LOCAL_PACKAGE_SPECS.get(language or "")
-        if (
-            language is not None
-            and spec_entry is not None
-            and env.get("path") == spec_entry[0]
-        ):
+        # An environment that installs the project itself---by pointing at
+        # the project's own spec file, or by naming the project root as a
+        # path dependency---is a pointer to the working tree, so the lock
+        # says nothing about the code it resolves to: the source has to be
+        # a dependency in its own right or editing the package would leave
+        # its stages looking current.
+        language = calkit.markdown.env_local_source_language(env, wdir=wdir)
+        if language is not None:
             for source_path in calkit.markdown.local_package_source_paths(
                 language, wdir=wdir
             ):

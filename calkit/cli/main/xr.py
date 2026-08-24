@@ -23,6 +23,7 @@ def _xr_markdown(
     dry_run: bool,
     force: bool,
     verbose: bool,
+    no_record: bool = False,
 ) -> None:
     """Bootstrap a runnable Markdown file into the pipeline, then run it.
 
@@ -87,12 +88,23 @@ def _xr_markdown(
             f"{markdown_path} declares no stages; annotate a code block "
             "with 'calkit stage name=<name>' to define one"
         )
-    # A project has to exist before a stage can be recorded in it, and
-    # running xr on a Markdown file is a clear enough statement of intent
-    # to create one
+    # A project has to exist before the stages can run, and running xr on
+    # a Markdown file is a clear enough statement of intent to create one.
+    # Nothing is committed: a failed bootstrap has to be able to put
+    # everything back, and files can be restored where commits can't.
+    dvc_existed = os.path.isdir(".dvc")
+    # Keep the files themselves rather than reparsed copies, so a failed
+    # bootstrap (or --no-record) restores what was there byte for byte---
+    # including the case where there was no file at all. Taken before
+    # initializing, which is what creates calkit.yaml. Running compiles
+    # the pipeline and builds environments too, so everything that writes
+    # is covered, not just the files written here.
+    snapshot = _snapshot(
+        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", ".dvcignore"]
+    )
     if not dry_run and not project_is_initialized():
         typer.echo(f"Initializing project in {os.getcwd()}")
-        init()
+        init(no_commit=True)
         ck_info = calkit.load_calkit_info()
     envs = calkit.markdown.get_environments(
         doc,
@@ -125,16 +137,8 @@ def _xr_markdown(
             calkit.ryaml.dump({env_name: env}, env_out)
             typer.echo(env_out.getvalue().rstrip())
         return
-    # Keep the files themselves rather than reparsed copies, so a failed
-    # bootstrap restores what was there byte for byte---including the
-    # case where there was no file at all until a moment ago. Running
-    # compiles the pipeline and builds environments too, so everything
-    # that writes is covered, not just the two files written here.
     env_dirs = sorted(
         {os.path.dirname(env["path"]) for env in detected_envs.values()}
-    )
-    snapshot = _snapshot(
-        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", markdown_path]
     )
     new_env_dirs = [d for d in env_dirs if d and not os.path.isdir(d)]
     if envs.detected:
@@ -146,11 +150,15 @@ def _xr_markdown(
     stages[markdown_path] = stage
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    try:
-        run(targets=[markdown_path], force=force, verbose=verbose)
-    except Exception as e:
-        # Put back everything this touched, so a failed bootstrap leaves
-        # no half-recorded pipeline behind
+
+    def _restore_record() -> None:
+        """Put back the files that record the pipeline.
+
+        Derived files under .calkit are left alone: they are what there
+        is to inspect, and nothing tracks them.
+        """
+        import git
+
         for path, content in snapshot.items():
             if content is None:
                 if os.path.isfile(path):
@@ -158,9 +166,55 @@ def _xr_markdown(
             else:
                 with open(path, "wb") as fb:
                     fb.write(content)
+        if not dvc_existed:
+            shutil.rmtree(".dvc", ignore_errors=True)
+        # The bootstrap stages what it creates, so the index has to be
+        # put back too, or a deleted calkit.yaml lingers as a staged
+        # addition
+        paths = [os.path.abspath(p) for p in [*snapshot, ".dvc"]]
+        try:
+            repo = git.Repo(search_parent_directories=True)
+        except Exception:
+            return
+        if repo.head.is_valid():
+            # Path by path, since restore errors out on a pathspec that
+            # matches nothing---normal here, where some of these were
+            # never created
+            for unstage_path in paths:
+                try:
+                    repo.git.restore("--staged", "--", unstage_path)
+                except Exception:
+                    pass
+        else:
+            # A just-created repo has no HEAD to restore the index from,
+            # and also nothing tracked, so dropping the entries is right
+            try:
+                repo.git.rm("--cached", "-r", "--ignore-unmatch", "--", *paths)
+            except Exception:
+                pass
+
+    try:
+        run(targets=[markdown_path], force=force, verbose=verbose)
+    except Exception as e:
+        # Put back everything this touched, so a failed bootstrap leaves
+        # no half-recorded pipeline behind
+        _restore_record()
+        if text != original_text:
+            with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(original_text)
         for env_dir in new_env_dirs:
             shutil.rmtree(env_dir, ignore_errors=True)
         raise_error(f"Failed to execute stages in {markdown_path}: {e}")
+    if no_record:
+        # The stages ran; what the user asked to keep is the evidence,
+        # not the pipeline. Restore what records it and leave the derived
+        # files---extracted scripts, environments, injected output---for
+        # inspection.
+        _restore_record()
+        typer.echo(
+            "Executed without recording: calkit.yaml, dvc.yaml and .dvc "
+            "were restored; derived files remain under .calkit/"
+        )
 
 
 @app.command(name="xr")
@@ -226,6 +280,19 @@ def execute_and_record(
             help=(
                 "Print the environment and stage that would be created "
                 "without modifying calkit.yaml or executing the command."
+            ),
+        ),
+    ] = False,
+    no_record: Annotated[
+        bool,
+        typer.Option(
+            "--no-record",
+            help=(
+                "Execute without recording: run as usual, then restore "
+                "calkit.yaml, dvc.yaml and .dvc, keeping derived files "
+                "(extracted scripts, environments, outputs) for "
+                "inspection. Useful for checking that a Markdown file is "
+                "runnable in a project that isn't a Calkit project."
             ),
         ),
     ] = False,
@@ -333,6 +400,18 @@ def execute_and_record(
     # fails
     ck_info = calkit.load_calkit_info()
     ck_info_orig = deepcopy(ck_info)
+    # What records the pipeline, taken before anything below writes---the
+    # detected environment included---so --no-record can put it all back
+    # after running (environment spec files and outputs stay behind for
+    # inspection)
+    record_snapshot: dict[str, bytes | None] = {}
+    if no_record:
+        for record_path in ["calkit.yaml", "dvc.yaml", "dvc.lock"]:
+            if os.path.isfile(record_path):
+                with open(record_path, "rb") as fb:
+                    record_snapshot[record_path] = fb.read()
+            else:
+                record_snapshot[record_path] = None
     pipeline = ck_info.get("pipeline", {})
     stages = pipeline.get("stages", {})
     # Populated only when a `docker run ...` command is normalized into an
@@ -371,6 +450,7 @@ def execute_and_record(
             dry_run=dry_run,
             force=force,
             verbose=verbose,
+            no_record=no_record,
         )
         return
     stage: dict[str, Any] = {}
@@ -787,8 +867,12 @@ def execute_and_record(
                 for line in yaml_output.getvalue().rstrip().split("\n")
             )
             typer.echo(
-                f"Adding stage to pipeline and attempting to execute:"
-                f"\n{indented_yaml}"
+                (
+                    "Executing without recording:"
+                    if no_record
+                    else "Adding stage to pipeline and attempting to execute:"
+                )
+                + f"\n{indented_yaml}"
             )
             run(targets=[stage_name], force=force, verbose=verbose)
         else:
@@ -812,6 +896,18 @@ def execute_and_record(
                     ),
                     indent=2,
                 )
+            )
+        if no_record:
+            for record_path, content in record_snapshot.items():
+                if content is None:
+                    if os.path.isfile(record_path):
+                        os.remove(record_path)
+                else:
+                    with open(record_path, "wb") as fw:
+                        fw.write(content)
+            typer.echo(
+                "Executed without recording; the stage was not added to "
+                "the pipeline"
             )
     except Exception as e:
         # If the stage failed, write the old ck_info back to calkit.yaml to

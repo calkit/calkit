@@ -907,8 +907,18 @@ def get_env_spec_path(
     return p
 
 
+def _rel_root_from_spec(spec_path: str) -> str:
+    """Path of the project root, relative to a spec file's directory."""
+    return Path(os.path.relpath(".", os.path.dirname(spec_path))).as_posix()
+
+
 def render_env_spec(
-    kind: str, content: str, env_name: str, python: str | None = None
+    kind: str,
+    content: str,
+    env_name: str,
+    python: str | None = None,
+    local_package: tuple[str | None, str] | None = None,
+    wdir: str | None = None,
 ) -> str:
     """Render a Markdown environment block into its spec file's content.
 
@@ -917,29 +927,70 @@ def render_env_spec(
     package names, which each toolchain spells differently, so it's
     rendered through the same builders Calkit uses when it detects
     dependencies itself.
+
+    ``local_package`` is ``(name, relative path to the project root)``
+    when the environment installs the project's own package alongside
+    other things, in which case the package comes from the working tree
+    rather than a registry---read inside the repo, that is what the
+    install command means.
     """
     import calkit.environments
 
     if kind == "uv-venv":
-        return content
+        spec = content
+        if local_package is not None:
+            spec = spec.rstrip("\n") + f"\n-e {local_package[1]}\n"
+        return spec
     deps = [line.strip() for line in content.splitlines() if line.strip()]
     if kind == "uv":
         kwargs = {} if python is None else {"python_version": python}
-        return calkit.environments.create_uv_pyproject_content(
-            deps, project_name=env_name, **kwargs
+        all_deps = deps
+        if local_package is not None and local_package[0] is not None:
+            all_deps = deps + [local_package[0]]
+        spec = calkit.environments.create_uv_pyproject_content(
+            all_deps, project_name=env_name, **kwargs
         )
+        if local_package is not None and local_package[0] is not None:
+            spec += (
+                "\n[tool.uv.sources]\n"
+                f"{local_package[0]} = {{ path = "
+                f'"{local_package[1]}", editable = true }}\n'
+            )
+        return spec
     if kind == "conda":
-        return calkit.environments.create_conda_environment_content(
+        spec = calkit.environments.create_conda_environment_content(
             deps, project_name=env_name
         )
+        if local_package is not None:
+            spec += f'  - pip\n  - pip:\n      - "-e {local_package[1]}"\n'
+        return spec
     if kind == "renv":
-        return calkit.environments.create_r_description_content(
-            deps, project_name=env_name
+        all_deps = deps
+        if local_package is not None and local_package[0] is not None:
+            all_deps = deps + [local_package[0]]
+        spec = calkit.environments.create_r_description_content(
+            all_deps, project_name=env_name
         )
+        if local_package is not None:
+            spec += f"Remotes: local::{local_package[1]}\n"
+        return spec
     if kind == "julia":
-        return calkit.environments.create_julia_project_file_content(
+        spec = calkit.environments.create_julia_project_file_content(
             deps, project_name=env_name
         )
+        if local_package is not None and local_package[0] is not None:
+            uuid = local_package_uuid(wdir=wdir)
+            if "[deps]" not in spec:
+                spec += "\n[deps]\n"
+            if uuid is not None:
+                spec = spec.rstrip("\n") + (
+                    f'\n{local_package[0]} = "{uuid}"\n'
+                )
+            spec += (
+                f"\n[sources]\n{local_package[0]} = "
+                f'{{path = "{local_package[1]}"}}\n'
+            )
+        return spec
     raise ValueError(f"Unsupported environment kind: {kind}")
 
 
@@ -1108,13 +1159,57 @@ def resolve_environments(
                 )
             env["julia"] = julia
         install = env.pop("_install", None)
-        # A dev install says the environment is this project, which some
-        # spec file in the project directory already describes---so point
-        # at that file rather than generating a second description of it
+        # A dev install says the environment includes this project itself.
+        # Which other packages it names decides the shape: none, and the
+        # project's own spec file already describes the environment, so
+        # point at that; some, and a spec has to be generated for them,
+        # with the project's package coming from the working tree rather
+        # than a registry---read inside the repo, that is what the
+        # install command means.
+        local_pkg = (
+            local_package_name(install.language, wdir=wdir)
+            if install is not None
+            else None
+        )
+        local_key = None if local_pkg is None else _requirement_key(local_pkg)
+        others = [
+            p
+            for p in (install.packages if install is not None else [])
+            if _requirement_key(p) != local_key
+        ]
         is_dev = install is not None and (
-            install.dev or installs_local_package(install, wdir=wdir)
+            install.dev
+            or (local_key is not None and len(others) < len(install.packages))
         )
         dev_spec = resolve_dev_install(install, wdir=wdir) if is_dev else None
+        # The generated form needs the package's name to refer to it; a
+        # project without one (a bare requirements.txt, say) can still be
+        # named by path in a requirements file
+        local_dev = (
+            is_dev
+            and others
+            and dev_spec is not None
+            and (local_pkg is not None or kind == "uv-venv")
+        )
+        if local_dev:
+            env["path"] = get_env_spec_path(name, kind=kind)
+            env["_spec_content"] = render_env_spec(
+                kind,
+                "\n".join(others),
+                name,
+                python=python,
+                local_package=(local_pkg, _rel_root_from_spec(env["path"])),
+                wdir=wdir,
+            )
+            env["kind"] = kind
+            if python is not None and kind == "uv":
+                env["_python"] = python
+            env.setdefault(
+                "description",
+                f"Generated from {path}. "
+                "Changes made here will be overwritten.",
+            )
+            continue
         if dev_spec is not None:
             kind, env["kind"] = dev_spec[0], dev_spec[0]
             env["path"] = dev_spec[1]
@@ -1799,6 +1894,50 @@ def local_package_name(language: str, wdir: str | None = None) -> str | None:
     else:
         name = (data.get("project") or {}).get("name")
     return str(name) if name else None
+
+
+def local_package_uuid(wdir: str | None = None) -> str | None:
+    """Return the UUID of the Julia package the project itself defines."""
+    path = os.path.join(wdir, "Project.toml") if wdir else "Project.toml"
+    if not os.path.isfile(path):
+        return None
+    try:
+        import tomllib
+
+        with open(path, "rb") as f:
+            uuid = tomllib.load(f).get("uuid")
+    except Exception:
+        return None
+    return str(uuid) if uuid else None
+
+
+def env_local_source_language(
+    env: dict, wdir: str | None = None
+) -> str | None:
+    """Return the language of an env that installs the project's own package.
+
+    That is either an environment pointing straight at the project's own
+    spec file, or a generated one that names the project root as a path
+    dependency. Either way the install is a pointer to the working tree,
+    so the package's source has to be a dependency of the stages using
+    the environment.
+    """
+    language = ENV_KIND_LANGUAGES.get(str(env.get("kind", "")))
+    path = env.get("path")
+    if language is None or not path:
+        return None
+    spec_entry = LOCAL_PACKAGE_SPECS.get(language)
+    if spec_entry is not None and path == spec_entry[0]:
+        return language
+    full = os.path.join(wdir, path) if wdir else path
+    if not os.path.isfile(full):
+        return None
+    try:
+        with open(full, encoding="utf-8") as f:
+            content = f.read()
+    except OSError:
+        return None
+    return language if _rel_root_from_spec(path) in content else None
 
 
 def local_package_source_paths(

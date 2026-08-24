@@ -257,6 +257,13 @@ def init(
             help="Re-initialize even if the project is already initialized.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Stage the initial files rather than committing them.",
+        ),
+    ] = False,
 ):
     """Initialize the current working directory."""
     from git.exc import InvalidGitRepositoryError
@@ -291,13 +298,13 @@ def init(
     # directory when the project is a subdirectory of a larger repo.
     repo = calkit.git.get_repo()
     repo.git.add(os.path.abspath(".dvc"))
-    if calkit.git.get_staged_files(repo=repo):
+    if not no_commit and calkit.git.get_staged_files(repo=repo):
         repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         calkit.schema.ensure_modeline("calkit.yaml")
         repo.git.add(os.path.abspath("calkit.yaml"))
-        if calkit.git.get_staged_files(repo=repo):
+        if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file

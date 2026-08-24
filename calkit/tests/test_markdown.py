@@ -1046,6 +1046,76 @@ def test_installing_the_projects_own_package_is_a_dev_install(
     )
     assert envs["py"]["path"] == "pyproject.toml"
     assert envs["py"]["_spec_content"] is None
+    # Naming the project's package alongside other packages generates an
+    # environment for the others, with the project's own coming from the
+    # working tree rather than a registry
+    from calkit.markdown import env_local_source_language
+
+    text = (
+        "```sh calkit environment name=py python=3.13\n"
+        "uv add wave-tools numpy\n```\n\n"
+        "```python calkit stage name=py environment=py\nprint(1)\n```\n"
+    )
+    blocks = parse_markdown(text, path="README.md")
+    envs = resolve_environments(
+        extract_environments(blocks, "README.md"),
+        extract_stages(blocks, "README.md"),
+        "README.md",
+    )
+    env = envs["py"]
+    assert env["kind"] == "uv"
+    assert env["path"] == ".calkit/envs/py/pyproject.toml"
+    spec = env["_spec_content"]
+    assert '"numpy"' in spec and '"wave-tools"' in spec
+    assert (
+        "[tool.uv.sources]\n"
+        'wave-tools = { path = "../../..", editable = true }'
+    ) in spec
+    assert env["_python"] == "3.13"
+    # An env whose spec names the project root as a path dependency
+    # installs the local package, just as one pointing at the project's
+    # own spec file does
+    (tmp_path / ".calkit" / "envs" / "py").mkdir(parents=True)
+    (tmp_path / env["path"]).write_text(spec)
+    assert (
+        env_local_source_language({"kind": "uv", "path": env["path"]})
+        == "python"
+    )
+    assert (
+        env_local_source_language({"kind": "uv", "path": "pyproject.toml"})
+        == "python"
+    )
+    assert (
+        env_local_source_language({"kind": "uv-venv", "path": "reqs.txt"})
+        is None
+    )
+    # Same for Julia, where the path dependency is a [sources] entry and
+    # the package is named by the UUID its own Project.toml declares
+    from calkit.markdown import local_package_uuid
+
+    (tmp_path / "Project.toml").write_text(
+        'name = "WaveTools"\nuuid = "d9262b48-0000-0000-0000-8f5f0e1d6a54"\n'
+    )
+    assert local_package_uuid() == "d9262b48-0000-0000-0000-8f5f0e1d6a54"
+    text = (
+        "```julia calkit environment name=jl julia=1.12\n"
+        "using Pkg\n"
+        'Pkg.add(["WaveTools", "CSV"])\n```\n\n'
+        "```julia calkit stage name=jl environment=jl\nprintln(1)\n```\n"
+    )
+    blocks = parse_markdown(text, path="README.md")
+    envs = resolve_environments(
+        extract_environments(blocks, "README.md"),
+        extract_stages(blocks, "README.md"),
+        "README.md",
+    )
+    env = envs["jl"]
+    assert env["kind"] == "julia"
+    assert env["path"] == ".calkit/envs/jl/Project.toml"
+    spec = env["_spec_content"]
+    assert 'WaveTools = "d9262b48-0000-0000-0000-8f5f0e1d6a54"' in spec
+    assert '[sources]\nWaveTools = {path = "../../.."}' in spec
+    assert "CSV" in spec
 
 
 def test_parse_markdown_skips_commented_out_content():

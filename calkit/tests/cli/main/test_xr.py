@@ -797,3 +797,64 @@ def test_xr_markdown(tmp_dir):
     with open("BROKEN.md") as f:
         assert f.read() == broken_before
     assert not os.path.isdir(".calkit/envs/broken")
+
+
+def test_xr_markdown_no_record(tmp_dir):
+    import git
+
+    with open("README.md", "w") as f:
+        f.write(
+            "```python calkit stage name=demo\n"
+            'print("ran fine")\n'
+            "```\n\n"
+            "```text calkit output stage=demo\n"
+            "```\n"
+        )
+    result = subprocess.run(
+        ["calkit", "xr", "README.md", "--no-record"],
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout, result.stderr)
+    assert result.returncode == 0
+    # Nothing records a pipeline: no project files, no commits
+    assert not os.path.isfile("calkit.yaml")
+    assert not os.path.isfile("dvc.yaml")
+    assert not os.path.isfile("dvc.lock")
+    assert not os.path.isdir(".dvc")
+    assert not os.path.isfile(".dvcignore")
+    repo = git.Repo(".")
+    assert not repo.head.is_valid()
+    # Nothing the bootstrap staged lingers in the index either; only
+    # untracked files and worktree modifications remain
+    for line in repo.git.status("--porcelain").splitlines():
+        assert line[:1] in (" ", "?"), line
+    # ...but the evidence of the run stays for inspection
+    with open("README.md") as f:
+        readme = f.read()
+    assert "calkit stage name=demo environment=readme" in readme
+    assert "ran fine\n```" in readme
+    assert os.path.isfile(".calkit/markdown/README.md/demo.py")
+    assert os.path.isfile(".calkit/envs/readme/pyproject.toml")
+
+
+def test_xr_no_record_command(tmp_dir):
+    with open("hello.py", "w") as f:
+        f.write('print("hello")\n')
+    subprocess.check_call(["calkit", "init"])
+    with open("calkit.yaml") as f:
+        ck_yaml_before = f.read()
+    result = subprocess.run(
+        ["calkit", "xr", "hello.py", "--no-record"],
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout, result.stderr)
+    assert result.returncode == 0
+    assert "hello" in result.stdout
+    assert "without recording" in result.stdout
+    # The stage was not recorded, and the compiled pipeline was restored
+    with open("calkit.yaml") as f:
+        assert f.read() == ck_yaml_before
+    assert not os.path.isfile("dvc.yaml")
+    assert not os.path.isfile("dvc.lock")

@@ -148,6 +148,16 @@ def test_init(tmp_dir):
     # --force allows re-initialization without clobbering calkit.yaml
     subprocess.check_call(["calkit", "init", "--force"], cwd="sub")
     assert calkit.load_calkit_info(wdir="sub") == ck_info
+    # --no-commit stages the initial files without committing, so a
+    # bootstrap (as run by xr) can be rolled back by restoring files
+    os.makedirs("nocommit")
+    root_repo = git.Repo(".")
+    n_commits_before = root_repo.head.commit.count()
+    subprocess.check_call(["calkit", "init", "--no-commit"], cwd="nocommit")
+    staged = calkit.git.get_staged_files(repo=root_repo)
+    assert "nocommit/.dvc/config" in staged
+    assert "nocommit/calkit.yaml" in staged
+    assert root_repo.head.commit.count() == n_commits_before
 
 
 @skipif_windows_docker

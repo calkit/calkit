@@ -197,7 +197,7 @@ def _check_julia_env(
     cmd += [
         f"--project={env_dir}",
         "-e",
-        "using Pkg; Pkg.instantiate();",
+        "using Pkg; Pkg.resolve(); Pkg.instantiate();",
     ]
     if julia_version:
         try:

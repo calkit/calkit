@@ -70,6 +70,7 @@ Options:
 | Option          | Type    | Required | Default | Description                                               |
 | --------------- | ------- | -------- | ------- | --------------------------------------------------------- |
 | `--force`, `-f` | boolean | no       | False   | Re-initialize even if the project is already initialized. |
+| `--no-commit`   | boolean | no       | False   | Stage the initial files rather than committing them.      |
 
 <a id="top-command-clone"></a>
 
@@ -632,17 +633,18 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                   |
-| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e` | text    | no       |         | Name of or path the spec file for the environment to use.                                                     |
-| `--input`, `-i`       | text    | no       |         | Input paths to record.                                                                                        |
-| `--output`, `-o`      | text    | no       |         | Output paths to record.                                                                                       |
-| `--no-detect-io`      | boolean | no       | False   | Don't attempt to detect inputs and outputs from the command, script, or notebook.                             |
-| `--stage`             | text    | no       |         | Name of the DVC stage to create for this command. If not provided, a name will be generated automatically.    |
-| `--dry-run`, `-d`     | boolean | no       | False   | Print the environment and stage that would be created without modifying calkit.yaml or executing the command. |
-| `--json`              | boolean | no       | False   | Print xr results as JSON.                                                                                     |
-| `--force`, `-f`       | boolean | no       | False   | Force running stage even if it's up-to-date.                                                                  |
-| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                         |
+| Option                | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                                     |
+| --------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e` | text    | no       |         | Name of or path the spec file for the environment to use.                                                                                                                                                                                                                                                       |
+| `--input`, `-i`       | text    | no       |         | Input paths to record.                                                                                                                                                                                                                                                                                          |
+| `--output`, `-o`      | text    | no       |         | Output paths to record.                                                                                                                                                                                                                                                                                         |
+| `--no-detect-io`      | boolean | no       | False   | Don't attempt to detect inputs and outputs from the command, script, or notebook.                                                                                                                                                                                                                               |
+| `--stage`             | text    | no       |         | Name of the DVC stage to create for this command. If not provided, a name will be generated automatically.                                                                                                                                                                                                      |
+| `--dry-run`, `-d`     | boolean | no       | False   | Print the environment and stage that would be created without modifying calkit.yaml or executing the command.                                                                                                                                                                                                   |
+| `--no-record`         | boolean | no       | False   | Execute without recording: run as usual, then restore calkit.yaml, dvc.yaml and .dvc and remove derived files, keeping only what the run produced (annotations, injected output, stage outputs) and the run log. Useful for checking that a Markdown file is runnable in a project that isn't a Calkit project. |
+| `--json`              | boolean | no       | False   | Print xr results as JSON.                                                                                                                                                                                                                                                                                       |
+| `--force`, `-f`       | boolean | no       | False   | Force running stage even if it's up-to-date.                                                                                                                                                                                                                                                                    |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                                                                                                           |
 
 ## Command groups
 

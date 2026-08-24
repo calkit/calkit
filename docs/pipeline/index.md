@@ -166,6 +166,13 @@ For more details, see `calkit.models.pipeline`.
 
 - `command`
 
+### `markdown`
+
+- `target_path`
+
+A stage sourced from a Markdown file's annotated code blocks;
+see [Runnable Markdown](markdown.md).
+
 ## Iteration
 
 ### Over a list of values
@@ -468,6 +475,31 @@ than inferred from the dependency graph. They are dependencies too.
 | `output_dir`            | str                           | yes      |         | Directory into which the app is exported.                                                                    |
 | `output_storage`        | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store the exported app.                                                                             |
 | `validate_notebook`     | bool                          | no       | True    | Run the notebook before exporting, to catch one that would fail in the browser.                              |
+
+### `markdown`
+
+Model class: `MarkdownStage`
+
+A stage sourced from a Markdown file's annotated code blocks.
+
+This stands in for however many stages the file declares. It is
+replaced by them at compile time (see
+`calkit.markdown.expand_ck_info`), so nothing downstream needs to
+know Markdown was involved.
+
+`inputs`, `always_run`, `frozen`, and `scheduler` apply to
+every stage the file declares. A file can't iterate or declare
+outputs as a whole, since those belong to the individual stages in
+it, and its stages always run in the project root, where the scripts
+extracted from it are written.
+
+| Kind-specific parameter | Type | Required | Default    | Description                                                      |
+| ----------------------- | ---- | -------- | ---------- | ---------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Environment used by blocks that don't name one.                  |
+| `wdir`                  | None | no       | null       | Not supported; a Markdown file's stages run in the project root. |
+| `outputs`               | None | no       | null       | Not supported; declare outputs on the file's blocks.             |
+| `iterate_over`          | None | no       | null       | Not supported; markdown stages can't iterate.                    |
+| `target_path`           | str  | yes      |            | Path to the Markdown file.                                       |
 
 ### `matlab-command`
 

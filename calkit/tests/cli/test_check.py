@@ -177,6 +177,55 @@ def test_check_julia_env_caches_second_run(tmp_dir):
 
 
 @pytest.mark.skipif(
+    shutil.which("julia") is None, reason="Julia not installed"
+)
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Julia env init fails on Windows GHA runners (Pkg stdlib missing)",
+)
+def test_check_julia_env_repairs_stale_manifest(tmp_dir):
+    # A manifest that no longer matches its project---a dependency added
+    # after it was locked, say---installs as-is and then fails at
+    # precompile, so the check has to resolve it back into line. A
+    # current manifest must NOT be resolved: that consults the registry
+    # (which can fail spuriously) and can rewrite the lock.
+    with open("Project.toml", "w") as f:
+        f.write('[deps]\n\n[compat]\njulia = "1"\n')
+    depot = os.path.join(os.getcwd(), "julia-depot")
+    os.makedirs(depot, exist_ok=True)
+    env = os.environ.copy() | {
+        "JULIA_DEPOT_PATH": os.pathsep.join(
+            [depot, os.path.join(os.path.expanduser("~"), ".julia")]
+        )
+    }
+    subprocess.run(
+        ["calkit", "check", "julia-env", "Project.toml"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+    assert os.path.isfile("Manifest.toml")
+    # Now the project grows a dependency the manifest knows nothing about
+    with open("Project.toml", "w") as f:
+        f.write(
+            "[deps]\n"
+            'Example = "7876af07-990d-54b4-ab0e-23690620f79a"\n\n'
+            "[compat]\n"
+            'julia = "1"\n'
+        )
+    result = subprocess.run(
+        ["calkit", "check", "julia-env", "Project.toml"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.returncode == 0, result.stderr
+    with open("Manifest.toml") as f:
+        assert "Example" in f.read()
+
+
+@pytest.mark.skipif(
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )

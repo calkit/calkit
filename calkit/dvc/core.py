@@ -485,6 +485,80 @@ def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
     return {"pid": pid, "cmd": cmd}
 
 
+def dvc_init_needs_subdir(wdir: str | None = None) -> bool:
+    """Return whether ``dvc init`` here needs ``--subdir``.
+
+    DVC refuses to initialize anywhere but the root of a Git repository
+    unless told the project is a subdirectory of one. It doesn't assume
+    so itself because a DVC repo in a subdirectory is its own project,
+    with its own cache, remotes and pipeline, rather than part of the
+    enclosing repo's; initializing one by accident in the wrong directory
+    would be hard to notice, so DVC asks for the flag. A self-contained
+    example living inside a larger repo is exactly that case.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(wdir) if wdir else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        # No Git repo at all; the caller creates one here, so this becomes
+        # the root and no --subdir is needed.
+        return False
+    root = repo.working_tree_dir
+    if root is None:
+        return False
+    if os.path.realpath(root) == os.path.realpath(base):
+        return False
+    # A directory the enclosing repo ignores is not part of it, so it gets
+    # its own repo and is therefore its own root. DVC refuses to
+    # initialize into an ignored path anyway.
+    return not enclosing_repo_ignores(base)
+
+
+def enclosing_repo_ignores(path: str | None = None) -> bool:
+    """Return whether the Git repo above ``path`` ignores it.
+
+    Scratch and test directories are routinely ignored by the repo that
+    contains them, and such a directory is not part of that repo: it
+    needs its own, rather than being treated as a subdirectory project.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(path) if path else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        return False
+    root = repo.working_tree_dir
+    if root is None or os.path.realpath(root) == os.path.realpath(base):
+        return False
+    try:
+        return bool(repo.ignored(base))
+    except Exception:
+        return False
+
+
+def init(
+    wdir: str | None = None, force: bool = False, quiet: bool = False
+) -> int:
+    """Initialize a DVC repo in ``wdir``, returning the exit code.
+
+    Works out for itself whether DVC needs telling that the project is a
+    subdirectory of a larger Git repo.
+    """
+    args = ["init"]
+    if dvc_init_needs_subdir(wdir=wdir):
+        args.append("--subdir")
+    if force:
+        args.append("--force")
+    if quiet:
+        args.append("--quiet")
+    return run_dvc_command(args, cwd=wdir)
+
+
 def run_dvc_command(
     argv: list[str],
     cwd: str | None = None,

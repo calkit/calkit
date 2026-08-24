@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://docs.calkit.org/schemas/calkit.json
+pipeline:
+  stages:
+    README.md:
+      kind: markdown
+      target_path: README.md
+
+environments:
+  py:
+    kind: uv
+    path: pyproject.toml
+    description: Declared in README.md.

@@ -66,6 +66,15 @@ class PipelineStatus(BaseModel):
     cleaned_notebooks: list[str] = Field(default_factory=list)
     stale_stages: dict[str, "StaleStage"] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    # Git-ignored files inside directory inputs of stages that are not
+    # currently stale on that input: {stage_name: {input_path: [file, ...]}}.
+    # DVC hashes them along with the rest of the directory, but Git doesn't
+    # carry them to other machines, so the stage will look stale elsewhere,
+    # e.g., in CI. Inputs currently reported as modified are annotated on the
+    # StaleStage instead, so the two never overlap.
+    ignored_files_in_inputs: dict[str, dict[str, list[str]]] = Field(
+        default_factory=dict
+    )
 
     @field_validator("stale_stages", mode="before")
     @classmethod
@@ -153,6 +162,11 @@ class StaleStage(BaseModel):
     modified_outputs: list[str] = Field(default_factory=list)
     modified_command: bool = False
     always_run: bool = False
+    # Git-ignored files inside modified directory inputs, keyed by the entry
+    # in ``modified_inputs``. DVC hashes a directory as a whole, so an ignored
+    # file can change the hash without anything showing in Git status; these
+    # are the usual suspects when a stage looks stale for no visible reason.
+    ignored_files_in_inputs: dict[str, list[str]] = Field(default_factory=dict)
     # True for stages that originate from a subproject (either an individual
     # "{sp}:{stage}" stage or a kept "{sp} (subproject)" wrapper). Subproject
     # wrapper stages are marked always-changed purely as a delegation
@@ -857,13 +871,13 @@ def get_status(
                 pass
         # Build stage ordering from root dvc.yaml; subproject stages sort after.
         dvc_yaml_stages: list[str] = []
+        dvc_yaml_stage_defs: dict[str, dict] = {}
         if os.path.isfile("dvc.yaml"):
             try:
                 with open("dvc.yaml") as f:
                     dvc_yaml = calkit.ryaml.load(f)
-                dvc_yaml_stages = list(
-                    (dvc_yaml or {}).get("stages", {}).keys()
-                )
+                dvc_yaml_stage_defs = (dvc_yaml or {}).get("stages", {})
+                dvc_yaml_stages = list(dvc_yaml_stage_defs.keys())
             except Exception:
                 pass
         ordered_stale_stages = {}
@@ -962,6 +976,124 @@ def get_status(
                     for target in targets
                 )
             }
+        # Git-ignored files inside directory inputs. DVC hashes a directory
+        # input as a whole without consulting .gitignore, so a stray ignored
+        # file (scratch data, an editor backup) changes the hash yet shows up
+        # in neither Git status nor DVC's file-level status. The stage then
+        # looks stale for no visible reason, and since Git doesn't carry the
+        # file to other machines, a fresh checkout such as CI hashes the
+        # directory differently and the stage flips between stale and
+        # up-to-date depending on where it's run (calkit#1036). Scan the
+        # compiled dvc.yaml deps rather than calkit.yaml inputs: stage kinds
+        # add deps of their own (a notebook's include_paths, say) and dvc.yaml
+        # is exactly what DVC hashes. Only directories are inspected, so file
+        # deps like cleaned notebooks or environment lock files are never
+        # considered. Files DVC tracks (e.g., an upstream stage's outputs) are
+        # ignored by Git on purpose and are excluded, as is anything matched
+        # by .dvcignore, which DVC skips when hashing.
+        stale_by_base: dict[str, list[StaleStage]] = {}
+        for display_name, stale_stage in ordered_stale_stages.items():
+            bare_name, subproject, _ = raw_stale_stages[display_name]
+            # Only root stages are scanned; iterated stages are keyed
+            # "name@param" in DVC status, so match on the base name
+            if subproject is None:
+                stale_by_base.setdefault(bare_name.split("@")[0], []).append(
+                    stale_stage
+                )
+        ignored_files_in_inputs: dict[str, dict[str, list[str]]] = {}
+        # Directories are shared between stages, so list each one only once.
+        # The Git repo and DVC index are only resolved once a directory
+        # actually needs listing, so a pipeline without directory inputs
+        # never pays for them.
+        ignored_files_by_dir: dict[str, list[str]] = {}
+        git_repo = None
+        git_root = ""
+        dvc_out_paths: list[str] = []
+        for name, stage_def in dvc_yaml_stage_defs.items():
+            if not isinstance(stage_def, dict):
+                continue
+            for dep in stage_def.get("deps", []) or []:
+                if not isinstance(dep, str):
+                    continue
+                # Deps are relative to the stage's wdir, if it has one
+                dep_path = Path(
+                    os.path.normpath(
+                        os.path.join(stage_def.get("wdir", ""), dep)
+                    )
+                ).as_posix()
+                if not os.path.isdir(dep_path):
+                    continue
+                if targets and not any(
+                    target in {name, f"dvc.yaml:{name}"}
+                    or _paths_overlap(Path(target).as_posix(), dep_path)
+                    for target in targets
+                ):
+                    continue
+                if dep_path not in ignored_files_by_dir:
+                    if git_repo is None:
+                        git_repo = calkit.git.get_repo()
+                        git_root = str(git_repo.working_tree_dir)
+                        dvc_out_paths = [
+                            Path(os.path.relpath(out.fs_path)).as_posix()
+                            for out in dvc_repo.index.outs
+                        ]
+                    # Git prints paths relative to the repo root, which may be
+                    # above the project, so make them project-relative; -z
+                    # keeps unusual file names from being quoted
+                    listing = git_repo.git.ls_files(
+                        "-z",
+                        "--others",
+                        "--ignored",
+                        "--exclude-standard",
+                        "--",
+                        os.path.abspath(dep_path),
+                    )
+                    files: list[str] = []
+                    for ignored_path in listing.split("\0"):
+                        if not ignored_path:
+                            continue
+                        ignored_path = Path(
+                            os.path.relpath(
+                                os.path.join(git_root, ignored_path)
+                            )
+                        ).as_posix()
+                        if any(
+                            ignored_path == out
+                            or ignored_path.startswith(out + "/")
+                            for out in dvc_out_paths
+                        ):
+                            continue
+                        if dvc_repo.dvcignore.is_ignored_file(
+                            os.path.abspath(ignored_path)
+                        ):
+                            continue
+                        files.append(ignored_path)
+                    ignored_files_by_dir[dep_path] = files
+                files = ignored_files_by_dir[dep_path]
+                if not files:
+                    continue
+                # When DVC reports the directory (or, if the dep was expanded
+                # around a subproject, a path inside it) as modified, annotate
+                # that input on the stale stage; otherwise it goes in the
+                # status-wide list as something that will bite elsewhere
+                annotated = False
+                for stale_stage in stale_by_base.get(name, []):
+                    for modified_input in stale_stage.modified_inputs:
+                        inside = [
+                            p
+                            for p in files
+                            if p == modified_input
+                            or p.startswith(modified_input.rstrip("/") + "/")
+                        ]
+                        if inside:
+                            stale_stage.ignored_files_in_inputs[
+                                modified_input
+                            ] = inside
+                            annotated = True
+                if not annotated:
+                    ignored_files_in_inputs.setdefault(name, {})[dep_path] = (
+                        files
+                    )
         result["stale_stages"] = ordered_stale_stages
         return PipelineStatus(
             has_pipeline=result["has_pipeline"],
@@ -969,6 +1101,7 @@ def get_status(
             cleaned_notebooks=result["cleaned_notebooks"],
             stale_stages=result["stale_stages"],
             errors=result["errors"],
+            ignored_files_in_inputs=ignored_files_in_inputs,
         )
     finally:
         if wdir is not None:

@@ -2399,6 +2399,111 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
         assert "*.aux" in f.read()
 
 
+def test_get_status_ignored_files_in_inputs(tmp_dir):
+    # DVC hashes a directory input as a whole, .gitignore or not, so a stray
+    # ignored file makes a stage stale here and up to date in CI (or vice
+    # versa) with nothing showing in Git status (calkit#1036)
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("data")
+    with open("data/tracked.txt", "w") as f:
+        f.write("tracked")
+    with open("data/ignored.txt", "w") as f:
+        f.write("ignored")
+    # Ignored by Git but also by DVC, so it never affects the hash
+    with open("data/scratch.log", "w") as f:
+        f.write("scratch")
+    with open("data/.gitignore", "w") as f:
+        f.write("ignored.txt\n*.log\n")
+    with open(".dvcignore", "a") as f:
+        f.write("*.log\n")
+    # A directory input with nothing ignored inside
+    os.makedirs("clean")
+    with open("clean/a.txt", "w") as f:
+        f.write("a")
+    # DVC-tracked inputs are Git-ignored by design, as a whole directory or
+    # a single file inside one
+    os.makedirs("tracked_dir")
+    with open("tracked_dir/model.bin", "w") as f:
+        f.write("weights")
+    subprocess.check_call([sys.executable, "-m", "dvc", "add", "tracked_dir"])
+    os.makedirs("mixed_dir")
+    with open("mixed_dir/big.bin", "w") as f:
+        f.write("big")
+    subprocess.check_call(
+        [sys.executable, "-m", "dvc", "add", "mixed_dir/big.bin"]
+    )
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Add data"])
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "process-data": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo ok > out.txt",
+                    "inputs": ["data"],
+                    "outputs": ["out.txt"],
+                },
+                "process-clean": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo ok > out2.txt",
+                    "inputs": ["clean"],
+                    "outputs": ["out2.txt"],
+                },
+                "process-tracked": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo ok > out3.txt",
+                    "inputs": ["tracked_dir", "mixed_dir"],
+                    "outputs": ["out3.txt"],
+                },
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Nothing has run, so everything is stale and DVC reports each input as
+    # modified; the ignored file is called out on the input it lives in and
+    # nowhere else
+    status = calkit.pipeline.get_status()
+    assert set(status.stale_stages) == {
+        "process-data",
+        "process-clean",
+        "process-tracked",
+    }
+    stale = status.stale_stages["process-data"]
+    assert "data" in stale.modified_inputs
+    assert stale.ignored_files_in_inputs == {"data": ["data/ignored.txt"]}
+    assert not status.stale_stages["process-clean"].ignored_files_in_inputs
+    assert not status.stale_stages["process-tracked"].ignored_files_in_inputs
+    assert status.ignored_files_in_inputs == {}
+    # Once run, the pipeline is up to date, but the ignored file is still in
+    # the hash, so a fresh checkout would see process-data as stale
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Run pipeline"])
+    status = calkit.pipeline.get_status()
+    assert not status.stale_stages
+    assert status.ignored_files_in_inputs == {
+        "process-data": {"data": ["data/ignored.txt"]}
+    }
+    # Targets limit the report to the stages asked about
+    status = calkit.pipeline.get_status(targets=["process-clean"])
+    assert status.ignored_files_in_inputs == {}
+    status = calkit.pipeline.get_status(targets=["data"])
+    assert "process-data" in status.ignored_files_in_inputs
+    # Editing the ignored file changes the directory hash with nothing to
+    # show for it in Git status, which is exactly the case to explain
+    with open("data/ignored.txt", "a") as f:
+        f.write("more")
+    status = calkit.pipeline.get_status()
+    assert set(status.stale_stages) == {"process-data"}
+    stale = status.stale_stages["process-data"]
+    assert stale.ignored_files_in_inputs == {"data": ["data/ignored.txt"]}
+    assert status.ignored_files_in_inputs == {}
+
+
 def test_to_dvc_latex_diff_stages():
     ck_info = {
         "environments": {"tex": {"kind": "docker", "image": "texlive"}},

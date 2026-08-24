@@ -799,6 +799,46 @@ def test_xr_markdown(tmp_dir):
     assert not os.path.isdir(".calkit/envs/broken")
 
 
+def test_xr_markdown_no_record_failure(tmp_dir):
+    import git
+
+    # A failed run leaves nothing behind at all: no record of a pipeline,
+    # and none of the derived files a successful run would keep around
+    with open("README.md", "w") as f:
+        f.write(
+            "```sh calkit environment name=broken-env python=3.13\n"
+            "pip install six\n"
+            "```\n\n"
+            "```python calkit stage name=boom environment=broken-env\n"
+            "raise SystemExit(1)\n"
+            "```\n"
+        )
+    with open("README.md") as f:
+        readme_before = f.read()
+    result = subprocess.run(
+        ["calkit", "xr", "README.md", "--no-record"],
+        capture_output=True,
+        text=True,
+    )
+    print(result.stdout, result.stderr)
+    assert result.returncode != 0
+    for leftover in [
+        "calkit.yaml",
+        "dvc.yaml",
+        "dvc.lock",
+        ".dvcignore",
+        ".dvc",
+        ".calkit/markdown",
+        ".calkit/envs",
+    ]:
+        assert not os.path.exists(leftover), leftover
+    with open("README.md") as f:
+        assert f.read() == readme_before
+    repo = git.Repo(".")
+    for line in repo.git.status("--porcelain").splitlines():
+        assert line[:1] in (" ", "?"), line
+
+
 def test_xr_markdown_no_record(tmp_dir):
     import git
 

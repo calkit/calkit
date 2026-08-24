@@ -88,24 +88,6 @@ def _xr_markdown(
             f"{markdown_path} declares no stages; annotate a code block "
             "with 'calkit stage name=<name>' to define one"
         )
-    # A project has to exist before the stages can run, and running xr on
-    # a Markdown file is a clear enough statement of intent to create one.
-    # Nothing is committed: a failed bootstrap has to be able to put
-    # everything back, and files can be restored where commits can't.
-    dvc_existed = os.path.isdir(".dvc")
-    # Keep the files themselves rather than reparsed copies, so a failed
-    # bootstrap (or --no-record) restores what was there byte for byte---
-    # including the case where there was no file at all. Taken before
-    # initializing, which is what creates calkit.yaml. Running compiles
-    # the pipeline and builds environments too, so everything that writes
-    # is covered, not just the files written here.
-    snapshot = _snapshot(
-        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", ".dvcignore"]
-    )
-    if not dry_run and not project_is_initialized():
-        typer.echo(f"Initializing project in {os.getcwd()}")
-        init(no_commit=True)
-        ck_info = calkit.load_calkit_info()
     envs = calkit.markdown.get_environments(
         doc,
         existing_env_names=list(ck_info.get("environments", {}) or {}),
@@ -123,6 +105,25 @@ def _xr_markdown(
                 f"Could not record environment '{env_name}' on stage "
                 f"'{stage_name}' in {markdown_path}"
             )
+    # A project has to exist before the stages can run, and running xr on
+    # a Markdown file is a clear enough statement of intent to create one.
+    # Nothing is committed: a failed bootstrap has to be able to put
+    # everything back, and files can be restored where commits can't.
+    dvc_existed = os.path.isdir(".dvc")
+    md_derived_existed = os.path.isdir(".calkit/markdown")
+    # Keep the files themselves rather than reparsed copies, so a failed
+    # bootstrap (or --no-record) restores what was there byte for byte---
+    # including the case where there was no file at all. Taken before
+    # initializing, which is what creates calkit.yaml. Running compiles
+    # the pipeline and builds environments too, so everything that writes
+    # is covered, not just the files written here.
+    snapshot = _snapshot(
+        ["calkit.yaml", "dvc.yaml", "dvc.lock", ".gitignore", ".dvcignore"]
+    )
+    if not dry_run and not project_is_initialized():
+        typer.echo(f"Initializing project in {os.getcwd()}")
+        init(no_commit=True)
+        ck_info = calkit.load_calkit_info()
     stages = ck_info.setdefault("pipeline", {}).setdefault("stages", {})
     stage: dict[str, Any] = {"kind": "markdown", "target_path": markdown_path}
     if environment is not None:
@@ -141,6 +142,13 @@ def _xr_markdown(
         {os.path.dirname(env["path"]) for env in detected_envs.values()}
     )
     new_env_dirs = [d for d in env_dirs if d and not os.path.isdir(d)]
+    # Environments declared in the file are built during the run, so what
+    # was under .calkit/envs beforehand is recorded now, to tell a failed
+    # run's environments from ones that were already there
+    envs_root = os.path.join(".calkit", "envs")
+    pre_env_dirs = (
+        set(os.listdir(envs_root)) if os.path.isdir(envs_root) else None
+    )
     if envs.detected:
         calkit.markdown.write_env_specs(envs.detected)
         ck_info.setdefault("environments", {}).update(detected_envs)
@@ -195,15 +203,29 @@ def _xr_markdown(
 
     try:
         run(targets=[markdown_path], force=force, verbose=verbose)
-    except Exception as e:
-        # Put back everything this touched, so a failed bootstrap leaves
-        # no half-recorded pipeline behind
+    except BaseException as e:
+        # Put back everything this touched---on an interrupt too, which
+        # would otherwise leave a compiled dvc.yaml pointing at a stage
+        # no calkit.yaml declares---so a failed bootstrap leaves no
+        # half-recorded pipeline behind. What a failed run created is
+        # removed as well; the log under .calkit/local has the details.
         _restore_record()
         if text != original_text:
             with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(original_text)
         for env_dir in new_env_dirs:
             shutil.rmtree(env_dir, ignore_errors=True)
+        if pre_env_dirs is None:
+            shutil.rmtree(envs_root, ignore_errors=True)
+        elif os.path.isdir(envs_root):
+            for env_dir_name in set(os.listdir(envs_root)) - pre_env_dirs:
+                shutil.rmtree(
+                    os.path.join(envs_root, env_dir_name), ignore_errors=True
+                )
+        if not md_derived_existed:
+            shutil.rmtree(".calkit/markdown", ignore_errors=True)
+        if not isinstance(e, Exception):
+            raise
         raise_error(f"Failed to execute stages in {markdown_path}: {e}")
     if no_record:
         # The stages ran; what the user asked to keep is the evidence,

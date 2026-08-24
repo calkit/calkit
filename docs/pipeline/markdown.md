@@ -319,3 +319,8 @@ annotated fences, injected output and values, the stages' outputs, and
 the extracted scripts and environments under `.calkit/`. This is the
 mode for testing that a README is runnable in a repository that has no
 interest in a pipeline. Nothing is ever committed.
+
+A run that fails---in either mode, interrupts included---cleans up after
+itself entirely: the record files, the Markdown file, and the derived
+files it created are all put back, leaving only the run log under
+`.calkit/local/logs/`.

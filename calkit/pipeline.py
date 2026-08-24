@@ -1334,6 +1334,43 @@ def _write_managed_gitignore_block(
     return True
 
 
+def _ref_resolver(
+    wdir: str | None, paths: list[str] | None = None
+) -> Callable[[str], str] | None:
+    """Return something that turns a Git revision into its commit hash.
+
+    Stages whose inputs are revisions rather than files put the resolved
+    hash in their command, so DVC can see when a branch has moved. None
+    when there's no repo to ask, in which case those stages fall back to
+    running every time.
+    """
+    try:
+        repo = calkit.git.get_repo(wdir)
+    except Exception:
+        return None
+
+    def resolve(ref: str) -> str:
+        sha = calkit.git.resolve_ref(repo, ref)
+        if sha is None:
+            # A revision that isn't there at all compiles as written; the
+            # command reports it properly when the stage runs
+            return ref
+        # The commit this revision last changed the document in describes
+        # the same document as the tip does, and doesn't move when
+        # something else is committed
+        return calkit.git.last_change(repo, sha, paths or []) or sha
+
+    return resolve
+
+
+def _stage_ref_resolver(
+    wdir: str | None, stage
+) -> Callable[[str], str] | None:
+    """A resolver that pins revisions by what this stage reads."""
+    paths = [p for p in stage.dvc_deps if not p.startswith(".calkit/")]
+    return _ref_resolver(wdir, paths)
+
+
 def to_dvc(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -1422,8 +1459,9 @@ def to_dvc(
             existing.setdefault("stages", {}).update(wrapper_stages)
             _dump_yaml_if_changed(existing, dvc_yaml_fpath)
         return wrapper_stages
-    # Detect stages with the old ``slurm:`` field before model validation
-    # because model_validate pops it in place.
+    # Detect stages with the old ``slurm:`` field from the raw data, since
+    # validation renames it to ``scheduler`` and the validated stages no
+    # longer say which spelling they were written with.
     raw_stages = ck_info.get("pipeline", {}).get("stages", {})
     _pre_validate_slurm_stages = [
         sname for sname, sdata in raw_stages.items() if "slurm" in sdata
@@ -1613,6 +1651,27 @@ def to_dvc(
         )
         dvc_stage["desc"] = desc
         dvc_stages[stage_name] = dvc_stage
+        # A Calkit stage can compile into more than one DVC stage when the
+        # work has genuinely different inputs
+        # Per stage, since which commits count depends on what the stage
+        # reads. Never cached across calls: a resolver is bound to one
+        # repo, and a process can compile pipelines in several.
+        for extra_name, extra_stage in stage.extra_dvc_stages(
+            resolve_ref=_stage_ref_resolver(wdir, stage)
+        ).items():
+            # Raised rather than worked around with a suffix: a generated
+            # name is addressable (calkit run <name>) and is the stage's
+            # identity in dvc.lock, so a name that shifted when the
+            # pipeline changed would cause spurious re-runs and orphaned
+            # lock entries. Renaming the conflicting stage is a one-word
+            # fix; an unpredictable name isn't.
+            if extra_name in pipeline.stages or extra_name in dvc_stages:
+                raise ValueError(
+                    f"Stage '{stage_name}' generates a stage named "
+                    f"'{extra_name}', which already exists; rename the "
+                    "conflicting stage"
+                )
+            dvc_stages[extra_name] = extra_stage
         # Check for any outputs that should be ignored/unignored.
         # Skipped when manage_gitignore=False (e.g., status checks) to avoid
         # spawning a git subprocess per output (~100 ms each).
@@ -1622,6 +1681,8 @@ def to_dvc(
             outputs = stage.outputs.copy()
             if stage.kind == "jupyter-notebook":
                 outputs += stage.notebook_outputs
+            elif stage.kind == "marimo-html-wasm":
+                outputs += stage.app_outputs
             sched_log = stage.scheduler_log_output
             if sched_log is not None:
                 outputs.append(sched_log)
@@ -1642,6 +1703,16 @@ def to_dvc(
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
                 elif isinstance(out, PathOutput) and out.storage == "git":
                     calkit.git.ensure_path_is_not_ignored(repo, path=out.path)
+                    if out.path.endswith(".ipynb"):
+                        # A notebook stage's storage is declared here, in the
+                        # pipeline, so a clean filter installed in the clone
+                        # (nbstripout) must not overrule it by stripping the
+                        # outputs back out on the way into Git. That would
+                        # commit bytes that don't match what DVC hashed, with
+                        # nothing showing as modified locally.
+                        calkit.git.ensure_path_is_not_filtered(
+                            repo, path=out.path
+                        )
                 elif isinstance(out, PathOutput) and out.storage == "dvc-zip":
                     calkit.git.ensure_path_is_ignored(repo, path=out.path)
                     calkit.dvc.zip.add(out.path, is_stage_output=True)

@@ -324,10 +324,11 @@ def check_environment(
         get_default_venv_prefix,
         get_env_lock_fpath,
         write_scheduler_env_lock,
+        write_system_env_lock,
     )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         raise_error("No environments defined in calkit.yaml")
@@ -434,12 +435,6 @@ def check_environment(
             alt_lock_fpaths=alt_lock_fpaths,
             verbose=verbose,
         )
-    elif env["kind"] == "ssh":
-        # TODO: How to check SSH environments?
-        # Maybe just check that we can connect
-        raise_error(
-            "Environment checking not implemented for SSH environments"
-        )
     elif env["kind"] == "renv":
         env_path = env.get("path")
         if env_path is None:
@@ -473,6 +468,104 @@ def check_environment(
         # env config so DVC stages that depend on the env get invalidated
         # when the config changes.
         write_scheduler_env_lock(env_name=env_name, env=env)
+    elif env["kind"] == "system":
+        # Nothing is installed or built for a system env; checking it means
+        # making sure the machine is as the project requires, then reading
+        # the properties it declared it depends on and recording them, so
+        # stages depending on the env see them change.
+        if calkit.environments.env_is_local(env):
+            try:
+                calkit.check_requirements(
+                    requirements=env.get("requirements", [])
+                )
+                write_system_env_lock(env_name=env_name, env=env)
+            except ValueError as e:
+                # A requirement that isn't met, or a property that can't be
+                # locked -- a misspelled one, or a tool that isn't
+                # installed. Both are the user's to fix. The remote branch
+                # below already reports these; this one used to let them
+                # out as a traceback.
+                raise_error(f"Environment '{env_name}': {e}")
+        else:
+            # For a host that isn't this one, checking means getting to the
+            # point where we can actually reach it -- better sorted out here
+            # than partway through a pipeline -- and reading the properties
+            # from that machine, since those are the ones the results
+            # depend on.
+            import calkit.workspace as workspace
+            from calkit.dependencies import _is_interactive
+
+            interactive = _is_interactive()
+            ck_info = calkit.load_calkit_info()
+            try:
+                # Anything written as ${CK_SSH_HOST} is the first thing to
+                # be missing for anyone but the project's author, since a
+                # project shares its calkit.yaml but not its .env
+                env = dict(env)
+                for key in workspace.CONNECTION_FIELDS:
+                    if isinstance(env.get(key), str):
+                        env[key] = workspace.expand_with_prompts(
+                            env[key],
+                            interactive=interactive,
+                            described_as=(
+                                f"environment '{env_name}' "
+                                f"{key.replace('_', ' ')}"
+                            ),
+                        )
+                ws = workspace.Workspace.from_env(
+                    env=env,
+                    env_name=env_name,
+                    ck_info=ck_info,
+                )
+                # Reassigned: a key created during setup belongs to the
+                # workspace we go on to use
+                ws = workspace.ensure_reachable(
+                    ws, interactive=interactive, verbose=verbose
+                )
+                # Calkit is needed there to read the machine's properties,
+                # and to activate an inner env, but an environment that
+                # only dispatches a command never calls it. A declared
+                # machine ID needs it for the same reason a lock does: the
+                # far end is what reports its own ID, so it has to be asked.
+                # Requirements only need it when one of them asks about the
+                # machine itself rather than about what's installed on it.
+                locks = bool(env.get("lock"))
+                requirements = env.get("requirements", []) or []
+                needs_system_info = (
+                    locks
+                    or bool(ws.machine_id)
+                    or workspace.requirements_need_system_info(requirements)
+                )
+                workspace.ensure_calkit_installed(
+                    ws,
+                    interactive=interactive,
+                    required=needs_system_info,
+                    verbose=verbose,
+                )
+                system_info = None
+                if needs_system_info:
+                    system_info = workspace.remote_system_info(ws)
+                    # Before anything else is decided from it, so a
+                    # mismatched machine is reported rather than measured
+                    # and recorded as what results depend on
+                    workspace.verify_machine_id(ws, system_info)
+                # Before the lock: a machine that doesn't meet the project's
+                # requirements shouldn't have its properties written down as
+                # though stages had run there.
+                workspace.check_requirements(
+                    ws,
+                    requirements,
+                    system_info=system_info,
+                    verbose=verbose,
+                )
+                if locks:
+                    write_system_env_lock(
+                        env_name=env_name,
+                        env=env,
+                        system_info=system_info,
+                    )
+            except ValueError as e:
+                raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":
         check_nix_env(env=env, verbose=verbose)
     else:
@@ -520,7 +613,7 @@ def check_environments(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> None:
-    ck_info = calkit.load_calkit_info(process_includes="environments")
+    ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
     if not envs:
         typer.echo("No environments defined in calkit.yaml")
@@ -540,6 +633,12 @@ def check_environments(
         typer.echo(f"Checking environment: '{env_name}'")
         try:
             check_environment(env_name=env_name, verbose=verbose)
+        except typer.Exit:
+            # The check reported its own reason through raise_error, which
+            # has already printed it. Repeating it here would replace a
+            # real message ("Unknown system property to lock: ...") with
+            # the exit code, since that is all this exception carries.
+            failures.append(env_name)
         except Exception as e:
             warn(f"Error checking environment '{env_name}': {e}")
             failures.append(env_name)
@@ -1114,6 +1213,9 @@ def check_venv(
         pip_install_args += f" --python {python}"
     # Ensure prefix is natively formatted for the OS
     prefix = os.path.normpath(prefix)
+    prefix_full_path = (
+        prefix if os.path.isabs(prefix) else os.path.join(wdir or ".", prefix)
+    )
 
     def create_venv() -> None:
         if verbose:
@@ -1123,13 +1225,47 @@ def check_venv(
         except subprocess.CalledProcessError:
             raise_error(f"Failed to create {kind} at {prefix}")
         # Put a gitignore file in the env dir if one doesn't exist
-        gitignore_fpath = os.path.join(wdir or ".", prefix, ".gitignore")
+        gitignore_fpath = os.path.join(prefix_full_path, ".gitignore")
         if not os.path.isfile(gitignore_fpath):
             with open(gitignore_fpath, "w") as f:
                 f.write("*\n")
 
-    if not os.path.isdir(prefix):
+    def venv_was_moved() -> bool:
+        """Check if the venv's activate script points somewhere else.
+
+        Renaming or moving a project leaves the absolute path baked into the
+        activate script pointing at the old location, so activating prepends a
+        nonexistent directory to PATH and commands silently resolve to whatever
+        is outside the environment.
+        """
+        if _platform.system() == "Windows":
+            activate_fpath = os.path.join(
+                prefix_full_path, "Scripts", "activate.bat"
+            )
+        else:
+            activate_fpath = os.path.join(prefix_full_path, "bin", "activate")
+        if not os.path.isfile(activate_fpath):
+            return True
+        with open(activate_fpath) as f:
+            content = f.read()
+        this_prefix = os.path.abspath(prefix_full_path)
+        return os.path.normcase(this_prefix) not in os.path.normcase(content)
+
+    if not os.path.isdir(prefix_full_path):
         create_venv()
+    elif venv_was_moved():
+        if not quiet:
+            typer.echo(f"Recreating {kind} at {prefix} since it was moved")
+        # uv refuses to create over an existing env, and packages are
+        # reinstalled from the lock file below
+        try:
+            shutil.rmtree(prefix_full_path)
+            create_venv()
+        except OSError as e:
+            # Removal can fail if the environment is in use, e.g., on Windows,
+            # where files can't be removed while open, in which case we keep
+            # it and let the install below attempt a rebuild
+            warn(f"Failed to remove {kind} at {prefix}: {e}")
     if lock_fpath is None:
         fname, ext = os.path.splitext(path)
         lock_fpath = fname + "-lock" + ext
@@ -1197,16 +1333,14 @@ def check_venv(
                 typer.echo(
                     f"Removing existing {kind} at {prefix} and rebuilding"
                 )
-            prefix_full_path = (
-                prefix
-                if os.path.isabs(prefix)
-                else os.path.join(wdir or ".", prefix)
-            )
             if os.path.isdir(prefix_full_path):
+                # This can fail if the environment is in use, e.g., on
+                # Windows, where files can't be removed while open, in which
+                # case we keep it and fall back to rebuilding from the spec
                 shutil.rmtree(prefix_full_path)
             create_venv()
             pip_install_and_freeze(dep_file_txt)
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, OSError):
             warn(
                 f"Failed to create environment from lock file ({reqs_to_use}); "
                 f"attempting rebuild from input file {path}"
@@ -1262,8 +1396,16 @@ def check_matlab_env(
     )
 
 
-@check_app.command(name="deps|dependencies")
-def check_dependencies(
+@check_app.command(
+    name="deps|dependencies",
+    hidden=True,
+    help=(
+        "Check that a project's system-level requirements are met "
+        "(alias for 'reqs')."
+    ),
+)
+@check_app.command(name="reqs|requirements")
+def check_project_requirements(
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output")
     ] = False,
@@ -1272,21 +1414,19 @@ def check_dependencies(
         typer.Option(
             "--no-cache",
             help=(
-                "Re-probe every setup dependency, ignoring (and clearing) "
+                "Re-probe every setup requirement, ignoring (and clearing) "
                 "the cache at .calkit/local/dep-checks.sqlite."
             ),
         ),
     ] = False,
 ) -> None:
-    """Check that a project's system-level dependencies are set up
-    correctly.
-    """
-    typer.echo("Checking project dependencies")
+    """Check that a project's system-level requirements are met."""
+    typer.echo("Checking project requirements")
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     if no_cache:
         calkit.dependencies.cache_clear()
     try:
-        calkit.check_system_deps(use_cache=not no_cache)
+        calkit.check_requirements(use_cache=not no_cache)
     except Exception as e:
         raise_error(str(e))
     message = "✅ All set!"
@@ -1303,7 +1443,7 @@ def check_env_vars(
     typer.echo("Checking project environmental variables")
     dotenv.load_dotenv(dotenv_path=".env")
     ck_info = calkit.load_calkit_info()
-    deps = ck_info.get("dependencies", [])
+    deps = calkit.get_requirements(ck_info)
     env_var_dep_names = calkit.get_env_var_dep_names(ck_info)
     for name in env_var_dep_names:
         if verbose:

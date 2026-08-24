@@ -1,17 +1,32 @@
 name: Check format
 
+# The default token needs no write access; jobs elevate as needed
+permissions:
+  contents: read
+
 on: pull_request
 
 jobs:
   all:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # The tests build many uv environments; a cold
+          # cache re-downloads every wheel each run
+          enable-cache: true
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
+      # The hub frontend format hook runs its pinned Biome via npx
+      - name: Install hub frontend dependencies
+        run: npm ci
+        working-directory: hub/frontend
       - name: Check format
         run: make format
+      - name: Fail if any files were reformatted
+        if: always()
+        run: git diff --exit-code

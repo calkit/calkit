@@ -13,19 +13,19 @@ files in order to reproduce or reuse the results.
 Calkit can archive whole projects or individual artifacts to
 [Zenodo](https://zenodo.org).
 To enable this functionality,
-you will either need to connect your Zenodo account with the Calkit Cloud or
+you will either need to connect your Zenodo account with the hub or
 create a Zenodo personal access token (PAT) and set it
 in your machine's Calkit config or as an environmental variable.
 
-### Option 1: Connecting to the Calkit Cloud
+### Option 1: Connecting to the hub
 
-Visit the [Calkit Cloud user settings page](https://calkit.io/settings)
+Visit the [hub user settings page](https://calkit.io/settings)
 and click the connect button to authorize the Calkit app to upload to
 Zenodo on your behalf.
 
 ![Connect to Zenodo](img/connect-zenodo.png){ width="500px" }
 /// caption
-The Calkit Cloud user settings page.
+The hub user settings page.
 ///
 
 ### Option 2: Using a Zenodo PAT

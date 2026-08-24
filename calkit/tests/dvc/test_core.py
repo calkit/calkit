@@ -276,9 +276,9 @@ def test_add_external_remote(monkeypatch):
         "set_remote_auth",
         lambda name: auth_calls.append(name),
     )
-    # HTTP case: builds URL from cloud base, sets custom auth
+    # HTTP case: builds URL from hub base, sets custom auth
     monkeypatch.setattr(
-        calkit.cloud, "get_base_url", lambda: "https://example.com"
+        calkit.hub, "get_base_url", lambda: "https://example.com"
     )
     out = calkit.dvc.add_external_remote("o", "p", use_ck=False)
     http_name = f"{calkit.dvc.make_remote_name(use_ck=False)}:o/p"

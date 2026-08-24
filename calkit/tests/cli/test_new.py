@@ -9,6 +9,7 @@ import git
 import pytest
 
 import calkit
+import calkit.schema
 from calkit.environments import get_env_lock_fpath
 
 
@@ -147,7 +148,12 @@ def test_new_result(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert "results/metrics.json" in [r["path"] for r in ck_info["results"]]
+    # Calkit init writes the schema modeline into an otherwise empty file,
+    # and declaring something must not wipe it out
+    with open("calkit.yaml") as f:
+        assert f.read().startswith(calkit.schema.MODELINE)
+    assert ck_info["results"][0]["path"] == "results/metrics.json"
+    assert ck_info["results"][0]["title"] == "Key metrics"
     # Won't overwrite without -f
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(
@@ -160,6 +166,37 @@ def test_new_result(tmp_dir):
                 "Key metrics",
             ]
         )
+    # Several results can share a file, each naming a value inside it, since
+    # a result is identified by its path and key together
+    for key in ["mean", "std"]:
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", key]
+        )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["mean"]["path"] == "results/metrics.json"
+    assert by_key["std"]["path"] == "results/metrics.json"
+    # Re-declaring the same path and key is what counts as a duplicate
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", "std"]
+        )
+    # A name can be attached for referring to the result later
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--key",
+            "metrics.rmse",
+            "--name",
+            "error",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["metrics.rmse"]["name"] == "error"
 
 
 def test_new_presentation(tmp_dir):
@@ -217,6 +254,84 @@ def test_new_publication(tmp_dir):
     assert stage["environment"] == "my-latex-env"
     assert stage["target_path"] == "my-paper/paper.tex"
     assert stage["outputs"] == ["my-paper/paper.pdf"]
+    # A duplicate path fails cleanly rather than partially applying
+    result = subprocess.run(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "Again",
+            "--stage",
+            "build-latex-article",
+            "--environment",
+            "my-latex-env",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    # The description is optional and stays out of calkit.yaml when absent
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "my-paper-2",
+            "--template",
+            "latex/article",
+            "--kind",
+            "journal-article",
+            "--title",
+            "No description",
+            "--stage",
+            "build-latex-article-2",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    pub2 = ck_info["publications"][1]
+    assert pub2["path"] == "my-paper-2/paper.pdf"
+    assert "description" not in pub2
+    # A template that brings its own class and style files declares them as
+    # stage inputs, else editing them wouldn't rebuild the paper and the
+    # in-browser preview couldn't compile it at all
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "jfm-paper",
+            "--template",
+            "latex/jfm",
+            "--kind",
+            "journal-article",
+            "--title",
+            "A JFM paper",
+            "--stage",
+            "build-jfm-paper",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-jfm-paper"]
+    assert stage["inputs"] == [
+        "jfm-paper/jfm.bst",
+        "jfm-paper/jfm.cls",
+        "jfm-paper/lineno-FLM.sty",
+        "jfm-paper/upmath.sty",
+    ]
+    # The article template needs nothing beyond its own .tex
+    article_stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert article_stage.get("inputs", []) == []
 
 
 def test_new_uv_env(tmp_dir):
@@ -383,11 +498,11 @@ def test_new_project_existing_files(tmp_dir):
 
 def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     # Respond to unexpected requests with a 404 instead of the default 500,
-    # since the cloud client retries 5xx responses with exponential backoff,
+    # since the hub client retries 5xx responses with exponential backoff,
     # which would make a missing expectation take minutes to fail
     httpserver.no_handler_status_code = 404
     monkeypatch.setenv(
-        "CALKIT_CLOUD_BASE_URL", httpserver.url_for("").rstrip("/")
+        "CALKIT_HUB_API_BASE_URL", httpserver.url_for("").rstrip("/")
     )
     monkeypatch.setenv("CALKIT_TEST_TOKEN", "test-token")
     project_resp = {
@@ -444,7 +559,7 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     repo = git.Repo()
     assert repo.remotes.origin.url == "https://github.com/test-user/my-project"
     assert not repo.is_dirty(untracked_files=True)
-    # Test 403: remote owner is an org not in Calkit Cloud; error should
+    # Test 403: remote owner is an org not in Calkit hub; error should
     # surface the detected org name and a helpful hint
     httpserver.expect_ordered_request(
         "/projects", method="POST"
@@ -475,12 +590,12 @@ def test_new_project_cloud(tmp_dir, monkeypatch, httpserver):
     )
     assert result.returncode != 0
     assert "some-org" in result.stderr
-    assert "organization exists in Calkit Cloud" in result.stderr
+    assert "organization exists on the hub" in result.stderr
     # Test that a non-'origin' remote name is handled correctly
     httpserver.expect_ordered_request(
         "/projects", method="POST"
     ).respond_with_json(project_resp)
-    # Configuring the DVC remote looks up the project in the cloud, since
+    # Configuring the DVC remote looks up the project on the hub, since
     # there's no remote named 'origin' from which to detect the Git repo URL
     httpserver.expect_ordered_request(
         "/projects/test-user/my-project", method="GET"
@@ -626,6 +741,77 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # A document's class, bibliography, and figures become deps automatically,
+    # since LaTeX resolves those itself and the pipeline can't see them
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.png", "wb") as f:
+        f.write(b"not really a PNG")
+    # A DVC-tracked figure is only a pointer file until it's pulled, but it's
+    # still an input
+    with open("figures/dvc-fig.png.dvc", "w") as f:
+        f.write("outs:\n  - path: dvc-fig.png\n")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("myclass.cls", "w") as f:
+        f.write("\\usepackage{mystyle}\n")
+    with open("mystyle.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("paper2.tex", "w") as f:
+        f.write(
+            "\\documentclass{myclass}\n"
+            "\\usepackage{graphicx}\n"
+            "% \\includegraphics{figures/commented}\n"
+            "\\bibliography{refs}\n"
+            "\\includegraphics[width=0.5\\textwidth]{figures/fig}\n"
+            "\\includegraphics{figures/dvc-fig.png}\n"
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-2",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper2.pdf",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    # graphicx lives in TeX Live, not the project, so it isn't an input
+    assert ck_info["pipeline"]["stages"]["build-paper-2"]["inputs"] == [
+        "figures/dvc-fig.png",
+        "figures/fig.png",
+        "myclass.cls",
+        "mystyle.sty",
+        "refs.bib",
+    ]
+    # Detection can be turned off, and explicit inputs are always kept
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-3",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper3.pdf",
+            "--input",
+            "refs.bib",
+            "--no-detect-inputs",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["pipeline"]["stages"]["build-paper-3"]["inputs"] == [
+        "refs.bib"
+    ]
     # output_dir / aux_dir / extra latexmk args flow through to the command
     subprocess.check_call(
         [

@@ -37,7 +37,7 @@ without the cognitive overhead.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
-![pipeline](docs/img/pipeline.png)
+![pipeline](https://docs.calkit.org/img/pipeline.png)
 
 ## Features
 
@@ -60,7 +60,7 @@ without the cognitive overhead.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud platform](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
@@ -73,6 +73,11 @@ without the cognitive overhead.
 - Extensions for doing all of the above graphically in
   [JupyterLab](https://docs.calkit.org/jupyterlab) and
   [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](https://docs.calkit.org/browser-ext) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.
 
 <!-- END INCLUDE -->
 
@@ -110,12 +115,12 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit.io)
+If you want to use a [Calkit hub](https://docs.calkit.org/hub)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](https://docs.calkit.org/cloud-integration) with:
+you can [connect to the hub](https://docs.calkit.org/hub) with:
 
 ```sh
-calkit cloud login
+calkit hub login
 ```
 
 If you use AI agents like Claude, Copilot, or Codex,
@@ -197,7 +202,7 @@ This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
 so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
 You can also declare a minimum version in `calkit.yaml`;
 see
-[Pinning the Calkit CLI version](https://docs.calkit.org/dependencies.md#pinning-the-calkit-cli-version).
+[Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
 
 ### Calkit Assistant
 
@@ -274,13 +279,13 @@ template with:
 calkit new project my-research \
     --title "My research" \
     --template calkit/example-basic \
-    --cloud
+    --hub
 ```
 
-Note the `--cloud` flag requires [cloud integration](https://docs.calkit.org/cloud-integration)
+Note the `--hub` flag requires [a hub connection](https://docs.calkit.org/hub)
 to be set up, but can be omitted if the project doesn't need to be backed up to
-the cloud or shared with collaborators.
-Cloud integration can also be set up later.
+the hub or shared with collaborators.
+Hub integration can also be set up later.
 
 Next, move into the project folder and run the pipeline,
 which consists of several stages defined in `calkit.yaml`:

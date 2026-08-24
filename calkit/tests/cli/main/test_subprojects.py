@@ -288,9 +288,9 @@ def test_isolated_subproject(tmp_dir):
             continue
         for path in stage_info.stale_outputs + stage_info.modified_inputs:
             # All paths must be parent-relative (start with "sub2/")
-            assert path.startswith("sub2/") or path.startswith(
-                "sub2"
-            ), f"Path '{path}' in stage '{stage_name}' is not parent-relative"
+            assert path.startswith("sub2/") or path.startswith("sub2"), (
+                f"Path '{path}' in stage '{stage_name}' is not parent-relative"
+            )
     # --- target shorthand: ck run sub2 → wrapper stage ---
     # out.txt was removed above; re-run via shorthand.
     subprocess.check_call(["calkit", "run", "sub2"])

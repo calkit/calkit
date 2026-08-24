@@ -330,7 +330,7 @@ def register_ck_scheme() -> None:
     from dvc.config_schema import REMOTE_COMMON, REMOTE_SCHEMAS, SCHEMA, ByUrl
     from dvc_objects.fs import known_implementations
 
-    # Include endpointurl for multi-cloud support
+    # Include endpointurl for multi-backend support
     ck_schema = {**REMOTE_COMMON, "endpointurl": str}
     REMOTE_SCHEMAS.setdefault("ck", ck_schema)
     SCHEMA["remote"] = {str: ByUrl(REMOTE_SCHEMAS)}
@@ -552,10 +552,10 @@ def configure_remote(
     try:
         repo.remote()
     except ValueError:
-        warn("No Git remote defined; querying Calkit Cloud")
-        # Try to fetch Git repo URL from Calkit cloud
+        warn("No Git remote defined; querying the hub")
+        # Try to fetch Git repo URL from the hub
         try:
-            project = calkit.cloud.get(f"/projects/{project_name}")
+            project = calkit.hub.get(f"/projects/{project_name}")
             url = project["git_repo_url"]
         except Exception as e:
             raise ValueError(f"Could not fetch project info: {e}")
@@ -567,7 +567,7 @@ def configure_remote(
         clear_remote_local_http_auth(remote_name=remote_name, wdir=wdir)
         remote_url = f"ck://{project_name}"
     else:
-        base_url = calkit.cloud.get_base_url()
+        base_url = calkit.hub.get_base_url()
         remote_url = f"{base_url}/projects/{project_name}/dvc"
     result = run_dvc_command(
         ["remote", "add", "-d", "-f", remote_name, remote_url],
@@ -622,7 +622,7 @@ def set_remote_auth(
     wdir: str | None = None,
 ):
     """Get a token and set it in the local DVC config so we can interact with
-    the cloud as an HTTP remote.
+    the hub as an HTTP remote.
 
     Note: This only applies to HTTP remotes. The ck:// scheme doesn't need
     HTTP auth configuration.
@@ -641,7 +641,7 @@ def set_remote_auth(
     settings = calkit.config.read()
     if settings.dvc_token is None or always_auth:
         logger.info("Creating token for DVC scope")
-        token = calkit.cloud.post(
+        token = calkit.hub.post(
             "/user/tokens", json=dict(expires_days=365, scope="dvc")
         )["access_token"]
         settings.dvc_token = token
@@ -682,7 +682,7 @@ def add_external_remote(
     if use_ck:
         remote_url = f"ck://{owner_name}/{project_name}"
     else:
-        base_url = calkit.cloud.get_base_url()
+        base_url = calkit.hub.get_base_url()
         remote_url = f"{base_url}/projects/{owner_name}/{project_name}/dvc"
     remote_name = (
         f"{make_remote_name(use_ck=use_ck)}:{owner_name}/{project_name}"

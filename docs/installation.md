@@ -30,12 +30,12 @@ To effectively use Calkit, you'll want to ensure [Git](https://git-scm.com)
 is installed and properly configured.
 You may also want to install [Docker](https://docker.com),
 since that is the default method by which LaTeX environments are created.
-If you want to use the [Calkit Cloud](https://calkit.io)
+If you want to use a [Calkit hub](hub/index.md)
 for collaboration and backup as a DVC remote,
-you can [set up cloud integration](cloud-integration.md) with:
+you can [connect to the hub](hub/index.md) with:
 
 ```sh
-calkit cloud login
+calkit hub login
 ```
 
 If you use AI agents like Claude, Copilot, or Codex,
@@ -117,7 +117,7 @@ This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
 so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
 You can also declare a minimum version in `calkit.yaml`;
 see
-[Pinning the Calkit CLI version](dependencies.md#pinning-the-calkit-cli-version).
+[Pinning the Calkit CLI version](requirements.md#pinning-the-calkit-cli-version).
 
 ## Calkit Assistant
 

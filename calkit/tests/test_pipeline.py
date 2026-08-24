@@ -2,12 +2,16 @@
 
 import os
 import subprocess
+import sys
 import warnings
+from pathlib import Path
 
 import git
 import pytest
 
 import calkit
+import calkit.git
+import calkit.notebooks
 import calkit.pipeline
 from calkit.environments import get_env_lock_fpath
 from calkit.models.pipeline import LatexStage
@@ -2052,9 +2056,9 @@ def test_wrapper_stage_no_dep_out_overlap(tmp_dir):
 
     for dep in wrapper2_deps:
         for out in wrapper2_out_paths:
-            assert not _paths_overlap(
-                dep, out
-            ), f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            assert not _paths_overlap(dep, out), (
+                f"wrapper dep '{dep}' tree-overlaps out '{out}'"
+            )
 
 
 def test_expand_dep_excluding_subprojects(tmp_dir):
@@ -2203,7 +2207,6 @@ def test_get_concurrent_scheduler_stages():
 
 
 def test_get_matrix_item_targets(tmp_dir):
-    import sys
 
     subprocess.check_call(["git", "init"])
     subprocess.check_call([sys.executable, "-m", "dvc", "init"])
@@ -2494,3 +2497,126 @@ def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
             "tracked_data"
             not in status.stale_stages["process-tracked"].ignored_stale_deps
         )
+
+
+def test_to_dvc_latex_diff_stages():
+    ck_info = {
+        "environments": {"tex": {"kind": "docker", "image": "texlive"}},
+        "pipeline": {
+            "stages": {
+                "paper": {
+                    "kind": "latex",
+                    "environment": "tex",
+                    "target_path": "pubs/paper-1/main.tex",
+                    "diffs": [["v1", "v2"], "main"],
+                }
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    # Building the document and comparing revisions of it are separate
+    # stages, so adding a comparison doesn't rebuild the paper
+    assert set(stages) == {
+        "paper",
+        "paper-diff-v1-v2",
+        "paper-diff-main",
+    }
+    assert stages["paper"]["outs"] == ["pubs/paper-1/main.pdf"]
+    assert stages["paper-diff-v1-v2"]["outs"] == [
+        ".calkit/latex-diffs/v1..v2/pubs/paper-1/main.pdf"
+    ]
+    # A generated name that collides with one the user wrote is an error,
+    # not something to work around: the name is addressable and is the
+    # stage's identity in dvc.lock, so it can't be allowed to shift
+    ck_info["pipeline"]["stages"]["paper-diff-v1-v2"] = {
+        "kind": "shell-command",
+        "environment": "_system",
+        "command": "echo hi",
+    }
+    with pytest.raises(ValueError, match="already exists"):
+        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+
+
+def test_ref_resolver_is_not_shared_between_projects(tmp_dir):
+    # A resolver is bound to one repo. Caching it on wdir looked harmless
+    # until you notice wdir is usually None, which made every project in a
+    # process share whichever repo was compiled first.
+    import calkit.pipeline
+
+    shas = {}
+    for name in ["one", "two"]:
+        path = os.path.join(tmp_dir, name)
+        os.makedirs(path)
+        subprocess.check_call(["git", "init", "-q", "-b", "main", path])
+        with open(os.path.join(path, "f.txt"), "w") as f:
+            f.write(name)
+        subprocess.check_call(["git", "-C", path, "add", "-A"])
+        subprocess.check_call(
+            [
+                "git",
+                "-C",
+                path,
+                "-c",
+                "user.email=t@e.com",
+                "-c",
+                "user.name=T",
+                "commit",
+                "-qm",
+                name,
+            ]
+        )
+        cwd = os.getcwd()
+        os.chdir(path)
+        try:
+            resolve = calkit.pipeline._ref_resolver(None)
+            assert resolve is not None
+            shas[name] = resolve("HEAD")
+        finally:
+            os.chdir(cwd)
+    assert shas["one"] != shas["two"]
+
+
+def test_to_dvc_unfilters_notebook_outputs(tmp_dir):
+    # Notebook output storage is declared in the pipeline, so a filter
+    # installed in the clone (nbstripout) must not overrule it by stripping
+    # the outputs back out on the way into Git---that commits bytes that
+    # disagree with what DVC hashed, with nothing showing as modified locally.
+    repo = git.Repo.init()
+    # Spelled with no quotes, spaces, or backslashes in any token: Git runs
+    # filter commands through a shell---its bundled sh on Windows---which eats
+    # the backslashes in a Windows interpreter path, leaving a command that
+    # never runs. Marked required so that failure is a loud error instead of a
+    # silent pass-through that looks like the content was never filtered.
+    repo.git.config("filter.stripper.clean", "sed -e s/.*/stripped/")
+    repo.git.config("filter.stripper.required", "true")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text("*.ipynb filter=stripper\n")
+    nb_path = "notebooks/my-notebook.ipynb"
+    os.makedirs("notebooks")
+    with open(nb_path, "w") as f:
+        f.write("{}")
+    ck_info = {
+        "environments": {
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "pipeline": {
+            "stages": {
+                "notebook-1": {
+                    "kind": "jupyter-notebook",
+                    "environment": "py",
+                    "notebook_path": nb_path,
+                    "html_storage": "git",
+                    "executed_ipynb_storage": "git",
+                },
+            }
+        },
+    }
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    executed_path = calkit.notebooks.get_executed_notebook_path(
+        notebook_path=nb_path, to="notebook", as_posix=True
+    )
+    assert calkit.git.get_filter_driver(repo, executed_path) is None
+    # Scoped to what the pipeline declares: the source notebook a user cleans
+    # on purpose keeps its filter.
+    assert calkit.git.get_filter_driver(repo, nb_path) == "stripper"

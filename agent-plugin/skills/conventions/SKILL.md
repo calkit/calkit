@@ -18,13 +18,17 @@ is `calkit.yaml`, the project's metadata database.
 
 `calkit.yaml` lives at the repo root and contains:
 
+- `requirements`—what must be true of the machine before anything runs
+  (apps on `PATH`, environmental variables, setup steps, machine
+  properties like CPU count); formerly called `dependencies`, which
+  still works
 - `environments`—computational environments (Python venvs, Conda, Docker,
   R, Julia, MATLAB, etc.)
 - `pipeline.stages`—the reproducible pipeline
 - `notebooks`—registered Jupyter notebooks
 - `datasets`, `figures`, `publications`—versioned project outputs
 - `procedures`, `calculations`, `references`—supporting metadata
-- `showcase`—elements shown on the project's Calkit Cloud homepage
+- `showcase`—elements shown on the project's Calkit homepage
 
 A minimal example:
 

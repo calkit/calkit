@@ -18,7 +18,7 @@ without the cognitive overhead.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
-![pipeline](/img/pipeline.png)
+![pipeline](img/pipeline.png)
 
 ## Features
 
@@ -41,7 +41,7 @@ without the cognitive overhead.
   Compose your pipeline from many different kinds of stages,
   including simple scripts, commands, Jupyter Notebooks, LaTeX, and more.
 - A complementary self-hostable and GitHub-integrated
-  [cloud platform](https://github.com/calkit/calkit-cloud)
+  [hub](https://github.com/calkit/calkit/tree/main/hub)
   to facilitate backup, collaboration,
   and sharing throughout the entire research lifecycle.
 - [Overleaf integration](https://docs.calkit.org/overleaf/), so
@@ -54,3 +54,8 @@ without the cognitive overhead.
 - Extensions for doing all of the above graphically in
   [JupyterLab](jupyterlab.md) and
   [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](browser-ext/index.md) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.

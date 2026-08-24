@@ -27,7 +27,7 @@ def _get_df_lib(engine: str):
 
 def list_datasets() -> list[dict]:
     """Read the Calkit metadata file and list out our datasets."""
-    ck_info = calkit.load_calkit_info(process_includes=True)
+    ck_info = calkit.load_calkit_info()
     return ck_info.get("datasets", [])
 
 
@@ -56,7 +56,7 @@ def read_dataset(
     if project is not None:
         if len(project.split("/")) != 2:
             raise ValueError("Invalid project identifier (too many slashes)")
-        resp = calkit.cloud.get(f"/projects/{project}/contents/{path}")
+        resp = calkit.hub.get(f"/projects/{project}/contents/{path}")
         # If the response has a content key, that is a base64 encoded string
         if (content := resp.get("content")) is not None:
             # Load the content appropriately

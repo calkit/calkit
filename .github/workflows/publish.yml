@@ -110,7 +110,7 @@ jobs:
           echo "calkit-python ${{ steps.version.outputs.version }} never appeared on PyPI"
           exit 1
       - name: Log in to the container registry
-        uses: docker/login-action@af63523ba5f55733d817da0fdb813e660152c72c
+        uses: docker/login-action@0a596b2e7a325f0cedf8e9bd21ab002cbd3c9241
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

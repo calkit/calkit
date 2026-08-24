@@ -1,0 +1,4 @@
+Package: r
+Version: 0.0.1
+Title: Auto-generated R environment
+Imports: ggplot2

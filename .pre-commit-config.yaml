@@ -3,6 +3,9 @@
 # between packages. The hub frontend is formatted by its own pinned Biome
 # to match hub/frontend/biome.json exactly.
 repos:
+  # renv generates renv/activate.R and rewrites it whenever it activates,
+  # trailing whitespace and all. Trimming it here would only make the
+  # committed copy differ from what renv writes, so it is left alone.
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: "v4.4.0"
     hooks:
@@ -11,10 +14,13 @@ repos:
       - id: check-merge-conflict
         exclude: ^docs/overleaf\.md$
       - id: check-toml
+      # The example projects' results files are stage outputs: a stage
+      # writes them, and a formatted copy is a changed output that makes
+      # the stage stale, so they are left exactly as written.
       - id: end-of-file-fixer
-        exclude: ^hub/frontend/src/client/
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
       - id: trailing-whitespace
-        exclude: ^hub/frontend/src/client/
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json
@@ -40,7 +46,14 @@ repos:
     rev: "v3.0.3"
     hooks:
       - id: prettier
-        exclude: calkit|^hub/
+        # dvc.yaml and dvc.lock are generated---by calkit and DVC
+        # respectively---and are rewritten wholesale whenever the pipeline
+        # changes. Prettier and ruamel disagree about where a long 'desc:'
+        # value goes, so formatting them here just means the two take turns
+        # reformatting the same file.
+        # Likewise the example projects' results files, which are stage
+        # outputs and have to match what the stage wrote byte for byte.
+        exclude: calkit|^hub/|(^|/)dvc\.(yaml|lock)$|^examples/.*/results/
 
   - repo: local
     hooks:

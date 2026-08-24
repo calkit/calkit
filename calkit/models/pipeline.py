@@ -249,6 +249,7 @@ class Stage(BaseModel):
         "word-to-pdf",
         "map-paths",
         "marimo-html-wasm",
+        "markdown",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1752,6 +1753,70 @@ class MarimoHtmlWasmStage(Stage):
         return cmd
 
 
+class MarkdownStage(Stage):
+    """A stage sourced from a Markdown file's annotated code blocks.
+
+    This stands in for however many stages the file declares. It is
+    replaced by them at compile time (see
+    ``calkit.markdown.expand_ck_info``), so nothing downstream needs to
+    know Markdown was involved.
+
+    ``inputs``, ``always_run``, ``frozen``, and ``scheduler`` apply to
+    every stage the file declares. A file can't iterate or declare
+    outputs as a whole, since those belong to the individual stages in
+    it, and its stages always run in the project root, where the scripts
+    extracted from it are written.
+    """
+
+    kind: Literal["markdown"] = "markdown"
+    # Named to match the other stages that compile a document, e.g. latex
+    target_path: RelativeChildPathString = Field(
+        description="Path to the Markdown file.",
+    )
+    # A Markdown stage never runs as itself, so it needs no environment of
+    # its own; this is the fallback for blocks that don't name one.
+    environment: str = Field(
+        default="_system",
+        description="Environment used by blocks that don't name one.",
+    )
+    inputs: list[str | PathInput | InputsFromStageOutputs] = Field(
+        default=[],
+        description="Paths every stage declared in the file depends on, in "
+        "addition to any a block declares for itself.",
+        json_schema_extra=_allow_null,
+    )
+    # Two stages can't produce the same path, so outputs are declared on
+    # the blocks rather than the file; likewise iteration, which would
+    # otherwise have to be defined for a file that runs as several stages.
+    outputs: None = Field(  # type: ignore[assignment]
+        default=None,
+        description="Not supported; declare outputs on the file's blocks.",
+    )
+    iterate_over: None = Field(
+        default=None,
+        description="Not supported; markdown stages can't iterate.",
+    )
+    wdir: None = Field(
+        default=None,
+        description="Not supported; a Markdown file's stages run in the "
+        "project root.",
+    )
+
+    @field_validator("target_path")
+    @classmethod
+    def check_target_path_is_markdown(cls, v: str) -> str:
+        if not str(v).lower().endswith((".md", ".markdown")):
+            raise ValueError(
+                "Markdown stage 'target_path' must be a Markdown file "
+                f"(.md or .markdown), got: {v}"
+            )
+        return v
+
+    @property
+    def markdown_path(self) -> str:
+        return Path(self.target_path).as_posix()
+
+
 class Pipeline(BaseModel):
     """The project's reproducible pipeline."""
 
@@ -1777,6 +1842,7 @@ class Pipeline(BaseModel):
                 | SBatchStage
                 | MapPathsStage
                 | MarimoHtmlWasmStage
+                | MarkdownStage
             ),
             Discriminator("kind"),
         ],
@@ -1978,20 +2044,25 @@ class Pipeline(BaseModel):
         return converted
 
     def ensure_env_lock_paths_are_inputs(
-        self, env_lock_fpaths: dict[str, str]
+        self, env_lock_fpaths: dict[str, list[str]]
     ) -> None:
-        """Ensure that all environment lock file paths are included as inputs
-        to each stage.
+        """Ensure each environment's lock file paths are inputs to its stages.
+
+        An environment can have more than one: a ``uv`` environment's
+        ``.python-version`` counts as part of its lock, since it is what
+        pins the interpreter (``uv.lock`` records only a
+        ``requires-python`` floor), and an environment that installs the
+        project itself is locked to the project's own source.
 
         Both the stage's inner and outer environments are considered, so a
         SLURM/PBS env used as the outer half of a composite environment
-        contributes its lock file as a stage dependency.
+        contributes its files as stage dependencies.
         """
         for _, stage in self.stages.items():
             for env_name in (
                 stage.inner_environment,
                 stage.outer_environment,
             ):
-                lock_fpath = env_lock_fpaths.get(env_name)
-                if lock_fpath is not None and lock_fpath not in stage.inputs:
-                    stage.inputs.append(lock_fpath)
+                for fpath in env_lock_fpaths.get(env_name, []):
+                    if fpath not in stage.inputs:
+                        stage.inputs.append(fpath)

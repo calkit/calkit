@@ -979,11 +979,28 @@ def check_all_in_pipeline(
     # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    import calkit.markdown
+
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
-        stages = {k: v for k, v in stages.items() if k in targets}
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
+        prefixes = [
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
+            for t in targets
+            if t in md_stages
+        ]
+        stages = {
+            k: v
+            for k, v in stages.items()
+            if k in targets or any(k.startswith(p) for p in prefixes)
+        }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
@@ -1686,13 +1703,19 @@ if isempty(registries)
 end
 
 for pkg in packages
-    entry = nothing
     for reg in registries
-        entry = Pkg.Registry.find(reg, pkg)
-        if entry !== nothing
-            println(pkg * "=" * string(entry.uuid))
-            break
+        found = false
+        # Scan the registry's own package table rather than calling a
+        # lookup helper; Pkg.Registry.find was removed in Julia 1.12, and
+        # calling it failed for every package, silently.
+        for (uuid, entry) in reg.pkgs
+            if entry.name == pkg
+                println(pkg * "=" * string(uuid))
+                found = true
+                break
+            end
         end
+        found && break
     end
 end
 """
@@ -1737,6 +1760,45 @@ end
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         # If Julia is not available or times out, return empty dict
         return {}
+
+
+def create_conda_environment_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal environment.yml for a conda environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the environment. If None, uses the detected project name.
+    python_version : str
+        Python version to request.
+
+    Returns
+    -------
+    str
+        The environment.yml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = f"name: {project_name}\n"
+    content += "channels:\n  - conda-forge\n"
+    content += "dependencies:\n"
+    content += f"  - python={python_version}\n"
+    for dep in sorted(dependencies):
+        if dep.lower().startswith("python") and dep[6:7] in (
+            "",
+            "=",
+            ">",
+            "<",
+        ):
+            continue
+        content += f"  - {dep}\n"
+    return content
 
 
 def create_julia_project_file_content(

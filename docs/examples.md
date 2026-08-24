@@ -31,6 +31,21 @@ Features:
 - A dev container spec to enable editing and collaboration with GitHub
   Codespaces
 
+## Runnable README
+
+[GitHub repo](https://github.com/calkit/calkit/tree/main/examples/markdown)
+
+Features:
+
+- A pipeline declared entirely in the README's code blocks,
+  with Python, Julia, and R stages
+- Environments declared by the install commands the README shows
+- Output printed by each stage written back into the README
+
+Create a copy with
+`calkit new project my-readme --template calkit/calkit/examples/markdown`.
+See [Runnable Markdown](pipeline/markdown.md) for how it works.
+
 ## MATLAB
 
 [Project page](https://calkit.io/calkit/example-matlab) |

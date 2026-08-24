@@ -80,6 +80,40 @@ class _ThreadLocalYAMLProxy:
     def __setattr__(self, name: str, value: Any) -> None:
         setattr(_yaml_local.yaml, name, value)
 
+    def dump(self, data: Any, stream: Any = None, **kwargs: Any) -> Any:
+        """Dump YAML, dropping the space ruamel leaves before a fold.
+
+        When wrapping a long value, ruamel writes the space that separates
+        two words and then breaks the line, leaving it at the end. The
+        space is redundant---a line break in a plain scalar already reads
+        as one---but every whitespace-trimming tool strips it and Calkit
+        writes it back, so the two take turns rewriting the same file.
+
+        It is not redundant in a block scalar, where trailing spaces are
+        content. Rather than trying to tell the cases apart while
+        emitting, the cleaned text is parsed back and only used if it
+        still means the same thing.
+        """
+        import io
+
+        yaml = _yaml_local.yaml
+        if stream is None:
+            return yaml.dump(data, stream, **kwargs)
+        buf = io.StringIO()
+        yaml.dump(data, buf, **kwargs)
+        text = buf.getvalue()
+        if " \n" in text:
+            cleaned = "".join(
+                line.rstrip() + "\n" for line in text.splitlines()
+            )
+            try:
+                if yaml.load(cleaned) == yaml.load(text):
+                    text = cleaned
+            except Exception:
+                pass
+        stream.write(text)
+        return None
+
 
 ryaml = _ThreadLocalYAMLProxy()
 
@@ -382,6 +416,31 @@ def make_readme_content(
     if project_description is not None:
         txt += f"\n{project_description}\n"
     return txt
+
+
+def update_readme_content(
+    text: str, project_title: str, project_description: str | None
+) -> str:
+    """Retitle an existing README and add a description, keeping the rest.
+
+    A template's README is often the project: its instructions, and in a
+    runnable README the pipeline itself. So the first heading is replaced
+    with the new title and the description goes just below it, and
+    everything else is left as it was. A README with no heading gets one
+    put in front of it.
+    """
+    lines = text.splitlines(keepends=True)
+    heading = f"# {project_title}\n"
+    intro = f"\n{project_description}\n" if project_description else ""
+    for i, line in enumerate(lines):
+        if re.match(r"^#(?!#)\s*\S", line):
+            lines[i] = heading
+            rest = "".join(lines[i + 1 :])
+            if intro and not rest.startswith("\n"):
+                intro += "\n"
+            return "".join(lines[: i + 1]) + intro + rest
+    body = text.lstrip("\n")
+    return heading + intro + ("\n" + body if body else "")
 
 
 def check_dep_exists(

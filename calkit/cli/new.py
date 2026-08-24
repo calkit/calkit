@@ -32,6 +32,24 @@ def _check_path_dir(path: str):
         os.makedirs(dirname, exist_ok=True)
 
 
+def _split_template_subdir(
+    template: str, git_url: str
+) -> tuple[str, str | None]:
+    """Split a directory out of an 'owner/repo/path' template.
+
+    One repo can hold several self-contained example projects, so a
+    template may name a directory within it. Only the shorthand form is
+    split; a full URL is left alone, since its path is the repo's.
+    """
+    if "://" in template or "github.com" in template:
+        return git_url, None
+    parts = template.strip("/").split("/")
+    if len(parts) <= 2:
+        return git_url, None
+    subdir = "/".join(parts[2:])
+    return git_url.rsplit("/" + subdir, 1)[0], subdir
+
+
 @new_app.command(name="project", cls=_NewProjectCommand)
 def new_project(
     path: Annotated[str, typer.Argument(help="Where to create the project.")],
@@ -373,14 +391,45 @@ def new_project(
         else:
             template_name = template
             template_git_url = f"https://github.com/{template}"
-        # Now clone it
-        subprocess.run(["git", "clone", template_git_url, abs_path])
-        # Templates should always have DVC initialized, so no need to do that
-        repo = calkit.git.get_repo(abs_path)
-        git_rev = repo.git.rev_parse("HEAD")
-        # Rename origin remote as upstream
-        typer.echo("Renaming template remote as upstream")
-        repo.git.remote(["rename", "origin", "upstream"])
+        # A template can name a directory inside a repo, e.g.
+        # 'calkit/calkit/examples/markdown', so one repo can hold several
+        # self-contained examples.
+        template_git_url, template_subdir = _split_template_subdir(
+            template, template_git_url
+        )
+        if template_subdir is None:
+            # Now clone it
+            subprocess.run(["git", "clone", template_git_url, abs_path])
+            # Templates should always have DVC initialized, so no need to do
+            # that
+            repo = calkit.git.get_repo(abs_path)
+            git_rev = repo.git.rev_parse("HEAD")
+            # Rename origin remote as upstream
+            typer.echo("Renaming template remote as upstream")
+            repo.git.remote(["rename", "origin", "upstream"])
+        else:
+            # Only part of the repo is the template, so clone it somewhere
+            # else and copy that directory out
+            import tempfile
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                clone_path = os.path.join(tmpdir, "template")
+                subprocess.run(
+                    ["git", "clone", template_git_url, clone_path],
+                    check=True,
+                )
+                git_rev = calkit.git.get_repo(clone_path).git.rev_parse("HEAD")
+                src_path = os.path.join(clone_path, template_subdir)
+                if not os.path.isdir(src_path):
+                    raise_error(
+                        f"Template '{template_name}' has no directory "
+                        f"'{template_subdir}'"
+                    )
+                shutil.copytree(src_path, abs_path, dirs_exist_ok=True)
+            typer.echo("Initializing Git repository")
+            subprocess.run(["git", "init", "-q"], cwd=abs_path)
+            repo = calkit.git.get_repo(abs_path)
+            repo.git.remote(["add", "upstream", template_git_url])
         # Set git repo URL if provided
         if git_repo_url:
             typer.echo("Setting origin remote URL")
@@ -405,15 +454,26 @@ def new_project(
         with open(os.path.join(abs_path, "calkit.yaml"), "w") as f:
             ryaml.dump(ck_info, f)
         calkit.schema.ensure_modeline(os.path.join(abs_path, "calkit.yaml"))
-        # Update README
+        # Update the README rather than replacing it: a template's README
+        # is its instructions, and in a runnable README it is the pipeline
+        # itself, so only the title and description are this project's
         readme_fpath = os.path.join(abs_path, "README.md")
-        typer.echo("Generating README.md")
-        readme_txt = calkit.make_readme_content(
-            project_name=name,
-            project_title=title,  # type: ignore
-            project_description=description,
-        )
-        with open(readme_fpath, "w") as f:
+        if os.path.isfile(readme_fpath):
+            typer.echo("Updating README.md title and description")
+            with open(readme_fpath, encoding="utf-8") as f:
+                readme_txt = calkit.update_readme_content(
+                    f.read(),
+                    project_title=title,
+                    project_description=description,
+                )
+        else:
+            typer.echo("Generating README.md")
+            readme_txt = calkit.make_readme_content(
+                project_name=name,
+                project_title=title,
+                project_description=description,
+            )
+        with open(readme_fpath, "w", encoding="utf-8", newline="\n") as f:
             f.write(readme_txt)
         # Update DVC remote
         # TODO: This will fail because we don't know this user's account name

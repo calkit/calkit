@@ -125,6 +125,17 @@ def main(
         bool,
         typer.Option("--version", help="Show version and exit."),
     ] = False,
+    directory: Annotated[
+        Optional[str],
+        typer.Option(
+            "-C",
+            "--directory",
+            help=(
+                "Change to this directory before doing anything else, so a "
+                "project can be worked with from outside it."
+            ),
+        ),
+    ] = None,
     use_version: Annotated[
         Optional[str],
         typer.Option(
@@ -139,6 +150,13 @@ def main(
     if version:
         typer.echo(f"Calkit {calkit.__version__}")
         raise typer.Exit()
+    # Change directory first, so everything below---the project's .env, the
+    # config it reads, and whatever command runs next---sees the project
+    # rather than wherever the user happened to be standing.
+    if directory is not None:
+        if not os.path.isdir(directory):
+            raise_error(f"Directory does not exist: {directory}")
+        os.chdir(directory)
     if use_version:
         _exec_with_version(use_version)
     # Load the project's .env here rather than in the handful of commands
@@ -214,6 +232,21 @@ def _exec_with_version(version_spec: str) -> None:
     os.execvp(cmd[0], cmd)
 
 
+def project_is_initialized() -> bool:
+    """Determine whether the working directory is a Calkit project."""
+    import git
+    from git.exc import InvalidGitRepositoryError
+
+    # Parent directories count, since a project can be a self-contained
+    # directory inside a larger repo and so has no .git of its own. What
+    # makes it initialized is its own DVC repo and calkit.yaml.
+    try:
+        git.Repo(".", search_parent_directories=True)
+    except InvalidGitRepositoryError:
+        return False
+    return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
+
+
 @app.command(name="init")
 def init(
     force: Annotated[
@@ -224,43 +257,54 @@ def init(
             help="Re-initialize even if the project is already initialized.",
         ),
     ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option(
+            "--no-commit",
+            help="Stage the initial files rather than committing them.",
+        ),
+    ] = False,
 ):
     """Initialize the current working directory."""
-    import git
     from git.exc import InvalidGitRepositoryError
 
-    def _project_is_initialized() -> bool:
-        try:
-            git.Repo(".", search_parent_directories=False)
-        except InvalidGitRepositoryError:
-            return False
-        return os.path.isfile(".dvc/config") and os.path.isfile("calkit.yaml")
-
-    if _project_is_initialized() and not force:
+    if project_is_initialized() and not force:
         raise_error(
             "This project is already initialized. "
             "Use --force to re-initialize."
         )
-    subprocess.run(["git", "init"])
-    result = calkit.dvc.run_dvc_command(
-        ["init"] + (["--force"] if force else [])
-    )
+    # Only create a Git repo if we're not already inside one; a project
+    # can be a self-contained directory within a larger repo, and nesting
+    # a second repo there hides its contents from the outer one.
+    try:
+        calkit.git.get_repo()
+        # A directory the enclosing repo ignores is not part of it, so it
+        # gets its own repo rather than being treated as a subdirectory of
+        # one that will never track it.
+        needs_own_repo = calkit.dvc.enclosing_repo_ignores()
+    except InvalidGitRepositoryError:
+        needs_own_repo = True
+    if needs_own_repo:
+        subprocess.run(["git", "init"])
+    result = calkit.dvc.init(force=force)
     if result != 0:
         raise_error("Failed to initialize DVC")
     # Ensure autostage is enabled for DVC
     result = calkit.dvc.run_dvc_command(["config", "core.autostage", "true"])
     if result != 0:
         raise_error("Failed to configure DVC autostage")
-    # Commit the newly created .dvc directory
+    # Commit the newly created .dvc directory. Paths are made absolute
+    # because Git resolves them against the repo root, which is not this
+    # directory when the project is a subdirectory of a larger repo.
     repo = calkit.git.get_repo()
-    repo.git.add(".dvc")
-    if calkit.git.get_staged_files(repo=repo):
+    repo.git.add(os.path.abspath(".dvc"))
+    if not no_commit and calkit.git.get_staged_files(repo=repo):
         repo.git.commit("-m", "Initialize DVC")
     # Create an empty calkit.yaml if one doesn't already exist
     if not os.path.isfile("calkit.yaml"):
         calkit.schema.ensure_modeline("calkit.yaml")
-        repo.git.add("calkit.yaml")
-        if calkit.git.get_staged_files(repo=repo):
+        repo.git.add(os.path.abspath("calkit.yaml"))
+        if not no_commit and calkit.git.get_staged_files(repo=repo):
             repo.git.commit("-m", "Initialize Calkit")
     # TODO: Initialize `dvc.yaml`
     # TODO: Add a sane .gitignore file
@@ -485,7 +529,7 @@ def get_status(
         if not os.path.isfile(os.path.join(".dvc", "config")):
             typer.echo("Initializing DVC repository")
             try:
-                result = calkit.dvc.run_dvc_command(["init", "-q"])
+                result = calkit.dvc.init(quiet=True)
                 if result != 0:
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
@@ -840,9 +884,26 @@ def add(
             typer.echo(
                 "This is not a DVC repository; would initialize DVC here"
             )
+        elif (
+            calkit.dvc.dvc_init_needs_subdir()
+            and not os.path.isfile("calkit.yaml")
+            and not os.path.isfile("dvc.yaml")
+        ):
+            # Bootstrapping a project from nothing is fine, and is what
+            # this does at the root of a new repo. What isn't fine is doing
+            # it in some subdirectory of an existing repo, which would put
+            # a .dvc directory wherever the user happened to be standing.
+            raise_error(
+                f"No calkit.yaml or dvc.yaml in {os.getcwd()}, which is a "
+                "subdirectory of an existing Git repository, so this is "
+                "not a project. Run 'calkit init' first, or change to the "
+                "project directory."
+            )
         else:
             warn("DVC not initialized yet; initializing")
-            dvc_repo = dvc.repo.Repo.init()
+            dvc_repo = dvc.repo.Repo.init(
+                subdir=calkit.dvc.dvc_init_needs_subdir()
+            )
     if not dry_run:
         # Ensure autostage is enabled for DVC
         calkit.dvc.run_dvc_command(
@@ -1453,6 +1514,136 @@ STAGE_OUTPUT_START = "--- calkit stage output ---"
 STAGE_OUTPUT_END = "--- end calkit stage output ---"
 
 
+def _inject_markdown_stage_output(log_content: str) -> list[str]:
+    """Write each stage's output into its Markdown file's output blocks.
+
+    This is post-processing rather than a stage output: two stages in one
+    file would both claim the Markdown, and DVC forbids two stages
+    producing the same path. Output blocks are never read back when
+    extracting scripts, so writing one can't make its stage stale.
+
+    Returns the names of the DVC stages whose cached output changed. Each
+    of those depends on its cache, which was hashed before the stage ran,
+    so the caller has to record the new hash or the stage reads as stale.
+    """
+    import calkit.markdown
+
+    stdout_by_stage = _stage_stdout_from_log_content(log_content)
+    if not stdout_by_stage:
+        return []
+    ck_info = calkit.load_calkit_info()
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    if not md_stages:
+        return []
+    sep = calkit.markdown.STAGE_NAME_SEPARATOR
+    # Group by Markdown stage so each file is read and written once
+    by_stage: dict[str, dict[str, str]] = {}
+    for dvc_stage_name, output in stdout_by_stage.items():
+        if sep not in dvc_stage_name:
+            continue
+        md_stage_name, block_name = dvc_stage_name.rsplit(sep, 1)
+        if md_stage_name not in md_stages:
+            continue
+        by_stage.setdefault(md_stage_name, {})[block_name] = output
+    changed_stages = []
+    for md_stage_name, outputs in by_stage.items():
+        md_path = md_stages[md_stage_name]
+        if not os.path.isfile(md_path):
+            continue
+        with open(md_path, encoding="utf-8") as f:
+            text = f.read()
+        new_text, changed = calkit.markdown.set_output_blocks(text, outputs)
+        if changed:
+            with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(new_text)
+        # Keep each block's cache in step with the block itself. Read back
+        # from the written text rather than from what was injected, so the
+        # cache can only ever hold exactly what the file says.
+        cached = calkit.markdown.extract_outputs(
+            calkit.markdown.parse_markdown(new_text, path=md_path),
+            md_path,
+        )
+        before = {}
+        for block_name in cached:
+            cache_path = calkit.markdown.get_output_cache_path(
+                md_path, block_name
+            )
+            if os.path.isfile(cache_path):
+                with open(cache_path, encoding="utf-8") as f:
+                    before[block_name] = f.read()
+        cache_paths = calkit.markdown.write_output_caches(cached, md_path)
+        for block_name, cache_path in cache_paths.items():
+            with open(cache_path, encoding="utf-8") as f:
+                if f.read() != before.get(block_name):
+                    changed_stages.append(md_stage_name + sep + block_name)
+    return changed_stages
+
+
+def _inject_markdown_values() -> list[str]:
+    """Bring each Markdown file's value markers into line with its results.
+
+    Done after every run rather than only for stages that ran: the
+    results files are tracked outputs, so whatever they hold is what the
+    prose should say. Returns the paths of the files that changed.
+    """
+    import calkit.markdown
+
+    ck_info = calkit.load_calkit_info()
+    changed_paths = []
+    for md_path in set(calkit.markdown.get_markdown_stages(ck_info).values()):
+        if not os.path.isfile(md_path):
+            continue
+        with open(md_path, encoding="utf-8") as f:
+            text = f.read()
+        new_text, changed = calkit.markdown.set_values(text, md_path)
+        if changed:
+            with open(md_path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(new_text)
+            changed_paths.append(md_path)
+    return changed_paths
+
+
+def _stage_stdout_from_log_content(log_content: str) -> dict[str, str]:
+    """Collect each stage's captured standard output from a run log.
+
+    The run log already brackets stage output with the markers above, so
+    this reads what a stage printed without capturing it a second time.
+    Stages that ran but printed nothing map to an empty string, which is
+    what lets a stale output block be emptied rather than left wrong.
+    """
+    res: dict[str, list[str]] = {}
+    current_stage_name: str | None = None
+    in_stage_output = False
+    for line in log_content.splitlines():
+        if line == STAGE_OUTPUT_START:
+            in_stage_output = True
+            continue
+        if line.endswith(STAGE_OUTPUT_END):
+            # The marker shares its line with output that lacked a final
+            # newline, so keep whatever came before it
+            remainder = line.removesuffix(STAGE_OUTPUT_END)
+            if remainder and current_stage_name is not None:
+                res.setdefault(current_stage_name, []).append(remainder)
+            in_stage_output = False
+            continue
+        if in_stage_output:
+            if current_stage_name is not None:
+                res.setdefault(current_stage_name, []).append(line)
+            continue
+        ls = line.split(" -", maxsplit=2)
+        if len(ls) < 3:
+            continue
+        message = ls[2].strip()
+        if message.startswith("Running stage "):
+            current_stage_name = (
+                message.removeprefix("Running stage ").rstrip(":").strip("'")
+            )
+            # Recorded now so a stage that printed nothing is still known
+            # to have run
+            res.setdefault(current_stage_name, [])
+    return {name: "\n".join(lines) for name, lines in res.items()}
+
+
 def _stage_run_info_from_log_content(
     log_content: str, run_finished: bool = False
 ) -> dict:
@@ -2051,6 +2242,17 @@ def run(
     if mock_scheduler:
         os.environ[calkit.cli.scheduler.MOCK_ENV_VAR] = "1"
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
+    # Refuse to run anywhere that isn't a project. Everything below
+    # initializes Git and DVC as needed, so without this check a mistyped
+    # path or a wrong working directory would silently scatter a .dvc
+    # directory into an unrelated folder.
+    if not os.path.isfile("calkit.yaml") and not os.path.isfile("dvc.yaml"):
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(
+            f"No calkit.yaml or dvc.yaml in {os.getcwd()}, so there is no "
+            "pipeline to run here. Run 'calkit init' to make this a "
+            "project, or change to the project directory."
+        )
     ck_info = calkit.load_calkit_info()
     # Ensure Git is initialized so DVC can be used.
     # Use search_parent_directories so running from a subproject folder
@@ -2095,6 +2297,14 @@ def run(
     except Exception as e:
         os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
         raise_error(str(e))
+    # Extract anything the project's Markdown files declare before the
+    # environments are checked, since an environment declared there must be
+    # in calkit.yaml before it can be created or entered.
+    try:
+        calkit.pipeline.sync_markdown(ck_info=ck_info)
+    except Exception as e:
+        os.environ.pop("CALKIT_PIPELINE_RUNNING", None)
+        raise_error(f"Failed to read markdown stages: {e}")
     # Check all environments in the pipeline (with caching)
     # If any failed, warn the user that we might have problems running
     calkit.echo("📦 Checking environments")
@@ -2189,7 +2399,7 @@ def run(
     except Exception:
         if not quiet:
             typer.echo("Initializing DVC repo")
-        result = calkit.dvc.run_dvc_command(["init"])
+        result = calkit.dvc.init()
         if result != 0:
             raise_error("Failed to initialize DVC repo")
     # Convert deps into target stage names
@@ -2469,6 +2679,29 @@ def run(
         )
     else:
         failed = failed or res != 0
+    # Write what each stage printed back into any 'calkit output' blocks
+    # in the Markdown that declared it
+    try:
+        md_changed_stages = _inject_markdown_stage_output(log_content)
+    except Exception as e:
+        warn(f"Failed to write stage output into markdown: {e}")
+        md_changed_stages = []
+    if md_changed_stages:
+        # A stage depends on its output cache, which DVC hashed before the
+        # stage ran. Now that the cache holds what the stage just printed,
+        # record it in the lock, or the stage would read as stale and run
+        # again just to arrive at the same place.
+        res_commit = calkit.dvc.run_dvc_command(
+            ["commit", "--force", "--quiet"] + md_changed_stages
+        )
+        if res_commit != 0:
+            warn("Failed to record markdown output in dvc.lock")
+    # ...and bring any values the Markdown shows into line with the
+    # results files the stages produced
+    try:
+        _inject_markdown_values()
+    except Exception as e:
+        warn(f"Failed to write values into markdown: {e}")
     # Zip dvc-zip outputs for stages that actually ran
     if stage_run_info:
         from calkit.models.io import PathOutput

@@ -1000,15 +1000,15 @@ def get_status(
                 stale_by_base.setdefault(bare_name.split("@")[0], []).append(
                     stale_stage
                 )
-        git_repo = calkit.git.get_repo()
-        git_root = str(git_repo.working_tree_dir)
-        dvc_out_paths = [
-            Path(os.path.relpath(out.fs_path)).as_posix()
-            for out in dvc_repo.index.outs
-        ]
         ignored_files_in_inputs: dict[str, dict[str, list[str]]] = {}
-        # Directories are shared between stages, so list each one only once
+        # Directories are shared between stages, so list each one only once.
+        # The Git repo and DVC index are only resolved once a directory
+        # actually needs listing, so a pipeline without directory inputs
+        # never pays for them.
         ignored_files_by_dir: dict[str, list[str]] = {}
+        git_repo = None
+        git_root = ""
+        dvc_out_paths: list[str] = []
         for name, stage_def in dvc_yaml_stage_defs.items():
             if not isinstance(stage_def, dict):
                 continue
@@ -1030,6 +1030,13 @@ def get_status(
                 ):
                     continue
                 if dep_path not in ignored_files_by_dir:
+                    if git_repo is None:
+                        git_repo = calkit.git.get_repo()
+                        git_root = str(git_repo.working_tree_dir)
+                        dvc_out_paths = [
+                            Path(os.path.relpath(out.fs_path)).as_posix()
+                            for out in dvc_repo.index.outs
+                        ]
                     # Git prints paths relative to the repo root, which may be
                     # above the project, so make them project-relative; -z
                     # keeps unusual file names from being quoted

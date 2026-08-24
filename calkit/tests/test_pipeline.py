@@ -2399,104 +2399,109 @@ def test_ensure_latex_aux_gitignore(tmp_dir):
         assert "*.aux" in f.read()
 
 
-def test_get_status_warns_gitignored_directory_dependency(tmp_dir):
+def test_get_status_ignored_files_in_inputs(tmp_dir):
+    # DVC hashes a directory input as a whole, .gitignore or not, so a stray
+    # ignored file makes a stage stale here and up to date in CI (or vice
+    # versa) with nothing showing in Git status (calkit#1036)
     subprocess.check_call(["calkit", "init"])
     os.makedirs("data")
+    with open("data/tracked.txt", "w") as f:
+        f.write("tracked")
     with open("data/ignored.txt", "w") as f:
         f.write("ignored")
+    # Ignored by Git but also by DVC, so it never affects the hash
+    with open("data/scratch.log", "w") as f:
+        f.write("scratch")
     with open("data/.gitignore", "w") as f:
-        f.write("ignored.txt\n")
-    # Git add the .gitignore
-    subprocess.check_call(["git", "add", "data/.gitignore"])
-    subprocess.check_call(["git", "commit", "-m", "init"])
+        f.write("ignored.txt\n*.log\n")
+    with open(".dvcignore", "a") as f:
+        f.write("*.log\n")
+    # A directory input with nothing ignored inside
+    os.makedirs("clean")
+    with open("clean/a.txt", "w") as f:
+        f.write("a")
+    # DVC-tracked inputs are Git-ignored by design, as a whole directory or
+    # a single file inside one
+    os.makedirs("tracked_dir")
+    with open("tracked_dir/model.bin", "w") as f:
+        f.write("weights")
+    subprocess.check_call([sys.executable, "-m", "dvc", "add", "tracked_dir"])
+    os.makedirs("mixed_dir")
+    with open("mixed_dir/big.bin", "w") as f:
+        f.write("big")
+    subprocess.check_call(
+        [sys.executable, "-m", "dvc", "add", "mixed_dir/big.bin"]
+    )
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Add data"])
     ck_info = {
-        "environments": {
-            "py": {
-                "kind": "uv-venv",
-                "path": "requirements.txt",
-            }
-        },
         "pipeline": {
             "stages": {
                 "process-data": {
                     "kind": "command",
+                    "environment": "_system",
                     "command": "echo ok > out.txt",
-                    "environment": "py",
                     "inputs": ["data"],
                     "outputs": ["out.txt"],
-                }
+                },
+                "process-clean": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo ok > out2.txt",
+                    "inputs": ["clean"],
+                    "outputs": ["out2.txt"],
+                },
+                "process-tracked": {
+                    "kind": "command",
+                    "environment": "_system",
+                    "command": "echo ok > out3.txt",
+                    "inputs": ["tracked_dir", "mixed_dir"],
+                    "outputs": ["out3.txt"],
+                },
             }
         },
     }
-    with open("requirements.txt", "w") as f:
-        f.write("requests\n")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-
-    # Initially, the stage has never been run, so it's stale. DVC considers the input modified.
-    # Since there are no other git-tracked changes in `data/`, the ignored file is attributed as the cause.
+    # Nothing has run, so everything is stale and DVC reports each input as
+    # modified; the ignored file is called out on the input it lives in and
+    # nowhere else
     status = calkit.pipeline.get_status()
-    assert "process-data" in status.stale_stages
-    stale_stage = status.stale_stages["process-data"]
-    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
-
-    # Run the stage to commit it to DVC cache
-    subprocess.check_call(["calkit", "run", "process-data"])
-    subprocess.check_call(
-        ["git", "add", "calkit.yaml", "dvc.yaml", "dvc.lock"]
-    )
-    subprocess.check_call(["git", "commit", "-m", "run stage"])
-
-    # Now it is up-to-date. Hazard should now be populated instead.
+    assert set(status.stale_stages) == {
+        "process-data",
+        "process-clean",
+        "process-tracked",
+    }
+    stale = status.stale_stages["process-data"]
+    assert "data" in stale.modified_inputs
+    assert stale.ignored_files_in_inputs == {"data": ["data/ignored.txt"]}
+    assert not status.stale_stages["process-clean"].ignored_files_in_inputs
+    assert not status.stale_stages["process-tracked"].ignored_files_in_inputs
+    assert status.ignored_files_in_inputs == {}
+    # Once run, the pipeline is up to date, but the ignored file is still in
+    # the hash, so a fresh checkout would see process-data as stale
+    subprocess.check_call(["calkit", "run"])
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-m", "Run pipeline"])
     status = calkit.pipeline.get_status()
-    assert "process-data" not in status.stale_stages
-    hazards = status.ignored_dep_hazards.get("process-data", {})
-    assert "data/ignored.txt" in hazards.get("data", [])
-
-    # Modify the ignored file (silently invalidates DVC hash).
-    # Since nothing else changed, it is attributed as the cause.
+    assert not status.stale_stages
+    assert status.ignored_files_in_inputs == {
+        "process-data": {"data": ["data/ignored.txt"]}
+    }
+    # Targets limit the report to the stages asked about
+    status = calkit.pipeline.get_status(targets=["process-clean"])
+    assert status.ignored_files_in_inputs == {}
+    status = calkit.pipeline.get_status(targets=["data"])
+    assert "process-data" in status.ignored_files_in_inputs
+    # Editing the ignored file changes the directory hash with nothing to
+    # show for it in Git status, which is exactly the case to explain
     with open("data/ignored.txt", "a") as f:
         f.write("more")
     status = calkit.pipeline.get_status()
-    assert "process-data" in status.stale_stages
-    stale_stage = status.stale_stages["process-data"]
-    assert "data/ignored.txt" in stale_stage.ignored_stale_deps.get("data", [])
-    assert "data" not in status.ignored_dep_hazards.get("process-data", {})
-
-    # False-positive guard: change a tracked file too.
-    # Now `git status` shows a tracked change, so we don't pin it *only* on the ignored file.
-    with open("data/tracked.txt", "w") as f:
-        f.write("tracked")
-    subprocess.check_call(["git", "add", "data/tracked.txt"])
-    status = calkit.pipeline.get_status()
-    # Pinning should be removed; it falls back to hazard
-    stale_stage = status.stale_stages["process-data"]
-    assert "data" not in stale_stage.ignored_stale_deps
-    hazards = status.ignored_dep_hazards.get("process-data", {})
-    assert "data/ignored.txt" in hazards.get("data", [])
-
-    # A DVC-tracked file that is git-ignored should NOT trigger the warning,
-    # since DVC already accounts for it and it won't cause phantom staleness.
-    os.makedirs("tracked_data")
-    with open("tracked_data/model.bin", "w") as f:
-        f.write("weights")
-    subprocess.check_call(["dvc", "add", "tracked_data/model.bin"])
-    ck_info["pipeline"]["stages"]["process-tracked"] = {
-        "kind": "command",
-        "command": "echo ok",
-        "environment": "py",
-        "inputs": ["tracked_data"],
-    }
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump(ck_info, f)
-    status = calkit.pipeline.get_status()
-    # It shouldn't appear in hazards or stale deps
-    assert "process-tracked" not in status.ignored_dep_hazards
-    if "process-tracked" in status.stale_stages:
-        assert (
-            "tracked_data"
-            not in status.stale_stages["process-tracked"].ignored_stale_deps
-        )
+    assert set(status.stale_stages) == {"process-data"}
+    stale = status.stale_stages["process-data"]
+    assert stale.ignored_files_in_inputs == {"data": ["data/ignored.txt"]}
+    assert status.ignored_files_in_inputs == {}
 
 
 def test_to_dvc_latex_diff_stages():

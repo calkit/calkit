@@ -691,13 +691,13 @@ def get_status(
                 if stale_stage.modified_inputs:
                     typer.echo("          modified inputs:")
                     for input_path in stale_stage.modified_inputs:
-                        ignored = stale_stage.ignored_stale_deps.get(
+                        ignored = stale_stage.ignored_files_in_inputs.get(
                             input_path
                         )
                         if ignored:
-                            ignored_str = ", ".join(ignored)
                             warn(
-                                f"            {input_path} (ignored files causing staleness: {ignored_str})",
+                                f"            {input_path} (contains "
+                                f"Git-ignored files: {', '.join(ignored)})",
                                 prefix="",
                             )
                         else:
@@ -712,15 +712,22 @@ def get_status(
                 typer.echo("Always-run stages:")
                 for stage_name in pipeline_status.always_run_stage_names:
                     typer.echo(f"        {typer.style(stage_name, fg='cyan')}")
-        if pipeline_status and pipeline_status.ignored_dep_hazards:
+        # Ignored files aren't carried to other machines by Git, so the stage
+        # hashes its input differently there and looks stale, e.g., in CI
+        if pipeline_status and pipeline_status.ignored_files_in_inputs:
             warn(
-                "Ignored files in stage deps (not stale now, may cause staleness on CI):",
-                prefix="",
+                "Stage inputs contain Git-ignored files, which can make "
+                "stages stale on other machines, e.g., in CI:"
             )
-            for sname, dep_map in pipeline_status.ignored_dep_hazards.items():
-                for dpath, files in dep_map.items():
-                    warn(f"        {sname} / {dpath}:", prefix="")
-                    warn(f"            {', '.join(files)}", prefix="")
+            for (
+                stage_name,
+                inputs,
+            ) in pipeline_status.ignored_files_in_inputs.items():
+                warn(f"        {stage_name}:", prefix="")
+                for input_path, files in inputs.items():
+                    warn(f"          {input_path}:", prefix="")
+                    for path in files:
+                        warn(f"            {path}", prefix="")
 
 
 @app.command(name="diff")

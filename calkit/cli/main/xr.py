@@ -201,6 +201,24 @@ def _xr_markdown(
             except Exception:
                 pass
 
+    def _cleanup_derived() -> None:
+        """Remove the derived files this run created.
+
+        The run log under .calkit/local stays---it is self-ignored and is
+        where the detail of what happened lives.
+        """
+        for env_dir in new_env_dirs:
+            shutil.rmtree(env_dir, ignore_errors=True)
+        if pre_env_dirs is None:
+            shutil.rmtree(envs_root, ignore_errors=True)
+        elif os.path.isdir(envs_root):
+            for env_dir_name in set(os.listdir(envs_root)) - pre_env_dirs:
+                shutil.rmtree(
+                    os.path.join(envs_root, env_dir_name), ignore_errors=True
+                )
+        if not md_derived_existed:
+            shutil.rmtree(".calkit/markdown", ignore_errors=True)
+
     try:
         run(targets=[markdown_path], force=force, verbose=verbose)
     except BaseException as e:
@@ -213,29 +231,22 @@ def _xr_markdown(
         if text != original_text:
             with open(markdown_path, "w", encoding="utf-8", newline="\n") as f:
                 f.write(original_text)
-        for env_dir in new_env_dirs:
-            shutil.rmtree(env_dir, ignore_errors=True)
-        if pre_env_dirs is None:
-            shutil.rmtree(envs_root, ignore_errors=True)
-        elif os.path.isdir(envs_root):
-            for env_dir_name in set(os.listdir(envs_root)) - pre_env_dirs:
-                shutil.rmtree(
-                    os.path.join(envs_root, env_dir_name), ignore_errors=True
-                )
-        if not md_derived_existed:
-            shutil.rmtree(".calkit/markdown", ignore_errors=True)
+        _cleanup_derived()
         if not isinstance(e, Exception):
             raise
         raise_error(f"Failed to execute stages in {markdown_path}: {e}")
     if no_record:
-        # The stages ran; what the user asked to keep is the evidence,
-        # not the pipeline. Restore what records it and leave the derived
-        # files---extracted scripts, environments, injected output---for
-        # inspection.
+        # The stages ran; what remains is their evidence---the annotated
+        # file, injected output, and whatever the stages wrote---not the
+        # machinery: the record files are restored and the derived
+        # scripts and environments removed, leaving only the run log
+        # under .calkit/local.
         _restore_record()
+        _cleanup_derived()
         typer.echo(
             "Executed without recording: calkit.yaml, dvc.yaml and .dvc "
-            "were restored; derived files remain under .calkit/"
+            "were restored and derived files removed; the run log is "
+            "under .calkit/local/logs/"
         )
 
 
@@ -311,10 +322,11 @@ def execute_and_record(
             "--no-record",
             help=(
                 "Execute without recording: run as usual, then restore "
-                "calkit.yaml, dvc.yaml and .dvc, keeping derived files "
-                "(extracted scripts, environments, outputs) for "
-                "inspection. Useful for checking that a Markdown file is "
-                "runnable in a project that isn't a Calkit project."
+                "calkit.yaml, dvc.yaml and .dvc and remove derived "
+                "files, keeping only what the run produced (annotations, "
+                "injected output, stage outputs) and the run log. Useful "
+                "for checking that a Markdown file is runnable in a "
+                "project that isn't a Calkit project."
             ),
         ),
     ] = False,

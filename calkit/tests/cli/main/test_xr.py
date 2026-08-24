@@ -869,13 +869,16 @@ def test_xr_markdown_no_record(tmp_dir):
     # untracked files and worktree modifications remain
     for line in repo.git.status("--porcelain").splitlines():
         assert line[:1] in (" ", "?"), line
-    # ...but the evidence of the run stays for inspection
+    # ...but the evidence of the run stays: the annotated file and its
+    # injected output. The derived machinery (extracted scripts and
+    # environments) is removed; only the run log remains under .calkit
     with open("README.md") as f:
         readme = f.read()
     assert "calkit stage name=demo environment=readme" in readme
     assert "ran fine\n```" in readme
-    assert os.path.isfile(".calkit/markdown/README.md/demo.py")
-    assert os.path.isfile(".calkit/envs/readme/pyproject.toml")
+    assert not os.path.exists(".calkit/markdown")
+    assert not os.path.exists(".calkit/envs")
+    assert os.path.isdir(".calkit/local/logs")
 
 
 def test_xr_no_record_command(tmp_dir):

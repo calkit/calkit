@@ -312,15 +312,20 @@ a failed run can put everything back.
 
 ### Checking a README without making a Calkit project
 
-`calkit xr README.md --no-record` runs the file's stages and then
-restores `calkit.yaml`, `dvc.yaml`, and `.dvc`, so the project doesn't
-become a Calkit project. What the run produced stays for inspection: the
-annotated fences, injected output and values, the stages' outputs, and
-the extracted scripts and environments under `.calkit/`. This is the
-mode for testing that a README is runnable in a repository that has no
-interest in a pipeline. Nothing is ever committed.
+`calkit xr README.md --no-record` runs the file's stages and then puts
+the machinery back, so the project doesn't become a Calkit project:
+`calkit.yaml`, `dvc.yaml`, and `.dvc` are restored, and the extracted
+scripts and environments are removed. What the run _produced_ stays: the
+annotated fences, injected output and values, whatever the stages wrote,
+and the run log under `.calkit/local/logs/`. This is the mode for
+testing that a README is runnable in a repository that has no interest
+in a pipeline. Nothing is ever committed.
 
-A run that fails---in either mode, interrupts included---cleans up after
-itself entirely: the record files, the Markdown file, and the derived
-files it created are all put back, leaving only the run log under
-`.calkit/local/logs/`.
+A run that fails---in either mode, interrupts included---cleans up the
+same way, and additionally restores the Markdown file itself.
+
+The cleanup restores what the run found, so run one calkit process in
+the project at a time: another one running concurrently (a `calkit
+status` poller, say) can write `dvc.yaml` in the window where the
+pipeline briefly exists, and a file that was there when the run started
+is preserved, not cleaned.

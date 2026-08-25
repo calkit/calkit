@@ -200,13 +200,12 @@ function EmptyState() {
   return (
     <>
       <Heading size="lg" mt={12} mb={2}>
-        Let's get your research in one place
+        Let's connect all the pieces of your research project
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
         Reading, collecting data, analyzing it, and writing it up, in one
-        project instead of four tools. It stays a plain Git repo the whole time,
-        anyone can clone and re-run it, and every part of it works with this
-        page closed.
+        project instead of multiple. Stored as a plain Git/DVC repo, anyone can
+        clone and re-run it, and every part can run offline.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />
@@ -221,15 +220,15 @@ function EmptyState() {
 const LOOP = [
   {
     title: "Read",
-    body: "Your Zotero collection becomes the project's bibliography, and is able to sync bidirectionally as you add references.",
+    body: "Start with a fresh BibTeX file or import your Zotero collection as the project's bibliography and sync it bidirectionally.",
   },
   {
     title: "Collect",
-    body: "Type data in, upload it, or import it by DOI, URL, or Git repo. Every dataset records where it came from.",
+    body: "Type data in, upload it, import it by DOI, URL, or Git repo, or create it as part of the pipeline. Every dataset keeps track of where it came from.",
   },
   {
     title: "Analyze",
-    body: "Plot in the browser, then save as a pipeline stage with a precisely defined environment. Figures trace back to code and data.",
+    body: "Plot offline or in the browser, then save as a pipeline stage with a precisely defined environment. Figures trace back to code and data.",
   },
   {
     title: "Write",
@@ -247,11 +246,11 @@ function LandingPage() {
           Take control of your research project
         </Heading>
         <Text fontSize="lg" color="ui.dim" maxW="700px" mb={6}>
-          Scripts on a laptop, data on a shared drive, a paper in Overleaf, a
-          library in Zotero, and no one sure which figure came from which run.
-          Calkit puts the whole loop, reading, collecting, analyzing, and
-          writing, in one reproducible project, without asking you to leave any
-          of those tools behind.
+          Scripts on a cluster, notebooks on a laptop, data on a shared drive, a
+          paper in Overleaf, a library in Zotero, and no one sure which figure
+          came from where. Calkit connects it all: lit review, data collection,
+          analysis, and writing, in one reproducible project, without asking you
+          to leave any of those tools behind.
         </Text>
         <HStack spacing={4} justify={{ base: "center", md: "flex-start" }}>
           <Button as={RouterLink} to="/new" variant="primary" size="lg">
@@ -321,7 +320,7 @@ function LandingPage() {
           Where are you starting?
         </Heading>
         <Text color="ui.dim" fontSize="sm" mb={4}>
-          Pick the one that best describes your current situation.
+          Pick the one that best describes your goal:
         </Text>
         <StartPaths source="landing" />
       </Box>

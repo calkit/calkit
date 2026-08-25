@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import type { Dataset, Figure } from "../client"
 import {
   classifyPublicationDeps,
-  findFeederStages,
   getStageDeps,
   getStageOuts,
   isPathUnder,
@@ -145,53 +144,6 @@ describe("classifyPublicationDeps", () => {
     expect(classifyPublicationDeps(["logo.png"], []).other).toEqual([
       "logo.png",
     ])
-  })
-})
-
-describe("findFeederStages", () => {
-  const dvcStages = {
-    plot: { cmd: "python plot.py", outs: ["figures/plot.png"] },
-    "figs-to-paper": {
-      cmd: "calkit map-paths",
-      deps: ["figures/plot.png"],
-      outs: [{ "paper/figures/plot.png": { cache: false } }],
-    },
-    "data-to-paper": {
-      cmd: "calkit map-paths",
-      deps: ["results/table.csv"],
-      outs: ["shared/table.csv"],
-    },
-    "copy-refs": { cmd: "cp", outs: ["paper/refs.bib"] },
-    "build-paper": {
-      cmd: "latexmk",
-      deps: [
-        "paper/paper.tex",
-        "paper/figures/plot.png",
-        "shared/table.csv",
-        "paper/refs.bib",
-        "figures/plot.png",
-      ],
-      outs: ["paper/paper.pdf"],
-    },
-  }
-
-  it("names stages that copy inputs into the publication", () => {
-    // figs-to-paper by name and by outs under paper/; copy-refs by outs
-    // under paper/; data-to-paper by name only; plot feeds the build
-    // directly but is neither named nor copying, so it isn't a feeder
-    expect(
-      findFeederStages("build-paper", dvcStages, "paper/paper.pdf"),
-    ).toEqual(["copy-refs", "data-to-paper", "figs-to-paper"])
-    // A publication at the repo root only matches by name
-    expect(findFeederStages("build-paper", dvcStages, "paper.pdf")).toEqual([
-      "data-to-paper",
-      "figs-to-paper",
-    ])
-    // A stage without deps, or an unknown stage, has no feeders
-    expect(findFeederStages("plot", dvcStages, "paper/paper.pdf")).toEqual([])
-    expect(findFeederStages("missing", dvcStages, "paper/paper.pdf")).toEqual(
-      [],
-    )
   })
 })
 

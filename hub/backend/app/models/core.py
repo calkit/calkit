@@ -1431,6 +1431,44 @@ class Publication(BaseModel):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
 
 
+class PublicationComponent(BaseModel):
+    """One file a publication is made of and where it comes from."""
+
+    # Repo-relative
+    path: str
+    kind: Literal["produced", "authored", "attested", "imported", "unknown"]
+    # In the publication's folder, or read by its build stage from
+    # elsewhere in the project
+    via: Literal["folder", "input"] = "folder"
+    # For "produced": the stage that makes it, and that stage's kind, so a
+    # map-paths copy can be told from something computed
+    stage: str | None = None
+    stage_kind: str | None = None
+    # For "authored": where the source is edited
+    source: Literal["overleaf", "git"] | None = None
+    # For "unknown": a project figure with identical bytes, if any
+    matching_figure: str | None = None
+    size: int | None = None
+
+
+class PublicationComponents(BaseModel):
+    folder: str
+    items: list[PublicationComponent]
+    n_unknown: int
+
+
+class MiscArtifact(BaseModel):
+    """A calkit.yaml ``misc`` entry: a path attributed to someone or to
+    somewhere, without being a figure, dataset, or publication.
+    """
+
+    path: str
+    title: str | None = None
+    description: str | None = None
+    created_by: list[dict[str, Any]] | None = None
+    imported_from: dict[str, Any] | None = None
+
+
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):

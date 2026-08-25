@@ -184,6 +184,10 @@ export type BodyProjectsPostProjectOverleafPublication = {
    */
   auto_build?: boolean | null
   /**
+   * Replace Existing
+   */
+  replace_existing?: boolean | null
+  /**
    * File
    */
   file?: Blob | File | null
@@ -469,6 +473,10 @@ export type CreatorPost = {
    * Orcid
    */
   orcid?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: string | Array<string> | null
 }
 
 /**
@@ -2227,6 +2235,74 @@ export type Message = {
 }
 
 /**
+ * MiscArtifact
+ *
+ * A calkit.yaml ``misc`` entry: a path attributed to someone or to
+ * somewhere, without being a figure, dataset, or publication.
+ */
+export type MiscArtifact = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Created By
+   */
+  created_by?: Array<{
+    [key: string]: unknown
+  }> | null
+  /**
+   * Imported From
+   */
+  imported_from?: {
+    [key: string]: unknown
+  } | null
+}
+
+/**
+ * MiscArtifactPost
+ *
+ * A path to attribute, either to whoever made it here or to where it
+ * came from, for a file that isn't a figure, dataset, or publication.
+ */
+export type MiscArtifactPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Created By
+   */
+  created_by?: Array<CreatorPost> | null
+  /**
+   * Imported From
+   */
+  imported_from?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
  * NativeCollaboratorPost
  */
 export type NativeCollaboratorPost = {
@@ -3701,6 +3777,64 @@ export type Publication = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+}
+
+/**
+ * PublicationComponent
+ *
+ * One file a publication is made of and where it comes from.
+ */
+export type PublicationComponent = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind: "produced" | "authored" | "attested" | "imported" | "unknown"
+  /**
+   * Via
+   */
+  via?: "folder" | "input"
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Source
+   */
+  source?: "overleaf" | "git" | null
+  /**
+   * Matching Figure
+   */
+  matching_figure?: string | null
+  /**
+   * Size
+   */
+  size?: number | null
+}
+
+/**
+ * PublicationComponents
+ */
+export type PublicationComponents = {
+  /**
+   * Folder
+   */
+  folder: string
+  /**
+   * Items
+   */
+  items: Array<PublicationComponent>
+  /**
+   * N Unknown
+   */
+  n_unknown: number
 }
 
 /**
@@ -9814,6 +9948,87 @@ export type PostProjectPublicationResponses = {
 
 export type PostProjectPublicationResponse =
   PostProjectPublicationResponses[keyof PostProjectPublicationResponses]
+
+export type GetProjectPublicationComponentsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/publications/components"
+}
+
+export type GetProjectPublicationComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPublicationComponentsError =
+  GetProjectPublicationComponentsErrors[keyof GetProjectPublicationComponentsErrors]
+
+export type GetProjectPublicationComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PublicationComponents
+}
+
+export type GetProjectPublicationComponentsResponse =
+  GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type PostProjectMiscData = {
+  body: MiscArtifactPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/misc"
+}
+
+export type PostProjectMiscErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectMiscError =
+  PostProjectMiscErrors[keyof PostProjectMiscErrors]
+
+export type PostProjectMiscResponses = {
+  /**
+   * Successful Response
+   */
+  200: MiscArtifact
+}
+
+export type PostProjectMiscResponse =
+  PostProjectMiscResponses[keyof PostProjectMiscResponses]
 
 export type GetProjectPresentationsData = {
   body?: never

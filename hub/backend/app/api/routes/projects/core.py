@@ -2,6 +2,7 @@
 
 import base64
 import concurrent.futures
+import hashlib
 import io
 import json
 import logging
@@ -117,6 +118,7 @@ from app.models import (
     FileLock,
     GitRef,
     Message,
+    MiscArtifact,
     Notebook,
     Notification,
     Org,
@@ -141,6 +143,8 @@ from app.models import (
     ProjectPublic,
     ProjectsPublic,
     Publication,
+    PublicationComponent,
+    PublicationComponents,
     Question,
     QuestionEvidence,
     QuestionPublic,
@@ -186,6 +190,8 @@ from calkit.models import ProjectStatus
 from calkit.models.core import Dataset as CkDataset
 from calkit.models.core import Figure as CkFigure
 from calkit.models.core import ImportedDataset as CkImportedDataset
+from calkit.models.core import MiscArtifact as CkMiscArtifact
+from calkit.models.io import InputsFromStageOutputs
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
@@ -4420,6 +4426,9 @@ class CreatorPost(BaseModel):
     email: str | None = None
     name: str | None = None
     orcid: str | None = None
+    # Generative AI tools this person used, disclosed per person; the same
+    # shape the calkit model takes
+    with_ai: str | list[str] | None = None
 
 
 class ImportedFromPost(BaseModel):
@@ -5070,6 +5079,425 @@ def get_project_publications(
     return resp
 
 
+# Files a publication's author writes by hand rather than the pipeline
+# producing: LaTeX and plain-text sources
+PUBLICATION_SOURCE_EXTS = {
+    ".tex",
+    ".bib",
+    ".sty",
+    ".cls",
+    ".bst",
+    ".bbx",
+    ".cbx",
+    ".md",
+    ".txt",
+}
+# What a LaTeX build leaves behind, which says nothing about provenance
+LATEX_BUILD_EXTS = {
+    ".aux",
+    ".log",
+    ".bbl",
+    ".blg",
+    ".fls",
+    ".fdb_latexmk",
+    ".synctex.gz",
+    ".out",
+    ".toc",
+    ".nav",
+    ".snm",
+}
+# Files that could be a copy of one of the project's figures
+PUBLICATION_FIGURE_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pdf",
+    ".svg",
+    ".eps",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+# Bigger than this and a component isn't compared byte-for-byte against
+# the project's figures
+PUBLICATION_COMPONENT_MATCH_MAX_BYTES = 20_000_000
+
+
+@router.get("/projects/{owner_name}/{project_name}/publications/components")
+def get_project_publication_components(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str,
+    ref: str | None = None,
+) -> PublicationComponents:
+    """List the files a publication is made of, each with its provenance.
+
+    A component is any file in the publication's folder, i.e., the
+    directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
+    than dotfiles, the publication's own output, and LaTeX build leftovers
+    (``via`` is ``folder``), plus anything its build stage reads from
+    outside that folder, with ``from_stage_outputs`` inputs expanded and
+    directories walked (``via`` is ``input``). Each is one of:
+
+    - ``produced``: an output of a pipeline stage, whether declared in its
+      ``outputs`` or as the destination of a map-paths mapping (a file, or
+      anything under a directory destination). ``stage`` names it, and
+      ``stage_kind`` says whether that's a copy (``map-paths``) or
+      something computed.
+    - ``attested``: declared in calkit.yaml as a figure, dataset, or misc
+      artifact with ``created_by``.
+    - ``imported``: declared likewise with ``imported_from``.
+    - ``authored``: a LaTeX or text source, edited in Overleaf when the
+      folder is synced with one (``source``), otherwise in Git.
+    - ``unknown``: anything else. A figure-like file at or under 20 MB is
+      compared byte-for-byte against the project's declared figures, and
+      ``matching_figure`` names one with identical content, which is what
+      a copy made without a map-paths stage looks like.
+
+    ``n_unknown`` counts the ``unknown`` items.
+    """
+
+    def walk(tree: RepoTree, dirname: str, found: list[str]) -> None:
+        for name in sorted(tree.listdir(dirname or None)):
+            if name.startswith("."):
+                continue
+            p = posixpath.join(dirname, name) if dirname else name
+            if tree.is_dir(p):
+                walk(tree, p, found)
+            elif tree.is_file(p):
+                found.append(p)
+
+    def md5_of(p: str) -> str | None:
+        # A DVC out's recorded md5 is the md5 of its bytes, so it stands
+        # in for reading them
+        out = dvc_outs.get(p)
+        if out and out.get("md5") and not str(out["md5"]).endswith(".dir"):
+            return str(out["md5"])
+        try:
+            data = app.projects.read_project_file(
+                project=project,
+                tree=tree,
+                path=p,
+                max_bytes=PUBLICATION_COMPONENT_MATCH_MAX_BYTES,
+                session=session,
+                current_user=current_user,
+            )
+        except HTTPException:
+            return None
+        return hashlib.md5(data).hexdigest()
+
+    pub_path = _normalize_artifact_file_path(path)
+    folder = posixpath.dirname(pub_path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref, read_only=True
+    )
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    # Every file in the folder, from Git and from DVC
+    file_paths: list[str] = []
+    if not folder or tree.is_dir(folder):
+        walk(tree, folder, file_paths)
+    for out_path, out in dvc_outs.items():
+        if str(out.get("md5") or "").endswith(".dir"):
+            continue
+        if out_path not in file_paths and (
+            not folder or PurePosixPath(out_path).is_relative_to(folder)
+        ):
+            file_paths.append(out_path)
+    file_paths = [
+        p
+        for p in sorted(file_paths)
+        if p != pub_path
+        and not any(part.startswith(".") for part in p.split("/"))
+        and not any(p.endswith(ext) for ext in LATEX_BUILD_EXTS)
+    ]
+    # What the pipeline produces, by output path. calkit.yaml stages come
+    # first; dvc.yaml covers a pipeline written without them.
+    produced_by: dict[str, str] = {}
+    stage_kinds: dict[str, str] = {}
+    valid_ck_stages: dict[str, Any] = {}
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage_map in ck_stages.items():
+        try:
+            ck_stage = _validate_ck_stage(stage_map, name)
+        except HTTPException:
+            continue
+        valid_ck_stages[name] = ck_stage
+        stage_kinds[name] = str(ck_stage.kind)
+        for out in ck_stage.dvc_out_paths:
+            produced_by.setdefault(normalize_artifact_path(out), name)
+    dvc_pipeline = app.projects.get_dvc_pipeline_for_ref(repo, ref)
+    for name, dvc_stage in (dvc_pipeline.get("stages") or {}).items():
+        for out in (dvc_stage or {}).get("outs") or []:
+            out_path = out if isinstance(out, str) else next(iter(out))
+            produced_by.setdefault(
+                normalize_artifact_path(str(out_path)), name
+            )
+    # What the build stage reads from outside the folder: the publication's
+    # stage's inputs, with other stages' outputs expanded and directories
+    # walked, since "other inputs" are components too
+    pub_stage_name = next(
+        (
+            str(pub.get("stage"))
+            for pub in ck_info.get("publications") or []
+            if isinstance(pub, dict)
+            and pub.get("path")
+            and pub.get("stage")
+            and normalize_artifact_path(str(pub["path"])) == pub_path
+        ),
+        None,
+    )
+    input_paths: list[str] = []
+    pub_stage = valid_ck_stages.get(pub_stage_name or "")
+    for inp in pub_stage.inputs if pub_stage is not None else []:
+        if isinstance(inp, InputsFromStageOutputs):
+            src_stage = valid_ck_stages.get(inp.from_stage_outputs)
+            raw_paths = src_stage.dvc_out_paths if src_stage else []
+        else:
+            raw_paths = [inp if isinstance(inp, str) else inp.path]
+        for raw in raw_paths:
+            p = normalize_artifact_path(str(raw))
+            if p == pub_path or (
+                folder and PurePosixPath(p).is_relative_to(folder)
+            ):
+                continue
+            if tree.is_dir(p):
+                walk(tree, p, input_paths)
+            elif p not in input_paths:
+                input_paths.append(p)
+    input_paths = [
+        p
+        for p in sorted(set(input_paths))
+        if p not in file_paths
+        and not any(part.startswith(".") for part in p.split("/"))
+    ]
+    # What calkit.yaml attributes, by path
+    declared: dict[str, Literal["attested", "imported"]] = {}
+    for section in ["figures", "datasets", "misc"]:
+        for entry in ck_info.get(section) or []:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            entry_path = normalize_artifact_path(str(entry["path"]))
+            if entry.get("created_by"):
+                declared.setdefault(entry_path, "attested")
+            elif entry.get("imported_from"):
+                declared.setdefault(entry_path, "imported")
+    overleaf_info = calkit.overleaf.get_sync_info(
+        wdir=repo.working_dir, ck_info=ck_info, fix_legacy=False
+    )
+    authored_source: Literal["overleaf", "git"] = (
+        "overleaf" if folder in overleaf_info else "git"
+    )
+    figure_paths = [
+        normalize_artifact_path(str(fig["path"]))
+        for fig in ck_info.get("figures") or []
+        if isinstance(fig, dict) and fig.get("path")
+    ]
+    # Figure hashes are computed once, and only if something needs them
+    figure_md5s: dict[str, str | None] = {}
+    items: list[PublicationComponent] = []
+    for p, via in [(p, "folder") for p in file_paths] + [
+        (p, "input") for p in input_paths
+    ]:
+        size: int | None = None
+        if tree.is_file(p):
+            size = tree.size(p)
+        elif p in dvc_outs and dvc_outs[p].get("size") is not None:
+            size = int(dvc_outs[p]["size"])
+        stage = produced_by.get(p)
+        if stage is None:
+            for out_path, out_stage in produced_by.items():
+                if out_path and PurePosixPath(p).is_relative_to(out_path):
+                    stage = out_stage
+                    break
+        if stage is not None:
+            items.append(
+                PublicationComponent(
+                    path=p,
+                    kind="produced",
+                    via=via,
+                    stage=stage,
+                    stage_kind=stage_kinds.get(stage),
+                    size=size,
+                )
+            )
+            continue
+        if p in declared:
+            items.append(
+                PublicationComponent(
+                    path=p, kind=declared[p], via=via, size=size
+                )
+            )
+            continue
+        ext = posixpath.splitext(p)[1].lower()
+        if ext in PUBLICATION_SOURCE_EXTS:
+            items.append(
+                PublicationComponent(
+                    path=p,
+                    kind="authored",
+                    via=via,
+                    source=authored_source,
+                    size=size,
+                )
+            )
+            continue
+        matching_figure = None
+        if (
+            ext in PUBLICATION_FIGURE_EXTS
+            and size is not None
+            and size <= PUBLICATION_COMPONENT_MATCH_MAX_BYTES
+        ):
+            p_md5 = md5_of(p)
+            for fig_path in figure_paths:
+                if p_md5 is None or fig_path == p:
+                    continue
+                if fig_path not in figure_md5s:
+                    figure_md5s[fig_path] = md5_of(fig_path)
+                if figure_md5s[fig_path] == p_md5:
+                    matching_figure = fig_path
+                    break
+        items.append(
+            PublicationComponent(
+                path=p,
+                kind="unknown",
+                via=via,
+                matching_figure=matching_figure,
+                size=size,
+            )
+        )
+    return PublicationComponents(
+        folder=folder,
+        items=items,
+        n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+class MiscArtifactPost(BaseModel):
+    """A path to attribute, either to whoever made it here or to where it
+    came from, for a file that isn't a figure, dataset, or publication.
+    """
+
+    path: str
+    title: str | None = None
+    description: str | None = None
+    created_by: list[CreatorPost] | None = None
+    # One of calkit's ``imported_from`` forms, e.g., ``{"url": ...}``,
+    # ``{"doi": ...}``, ``{"project": "owner/name", "path": ...}``, or
+    # ``{"git": {"repo_url": ..., "rev": ..., "path": ...}}``; validated
+    # through the calkit model rather than restated here
+    imported_from: dict[str, Any] | None = None
+    # Commit message, in place of the default
+    message: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/misc")
+def post_project_misc(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    req: MiscArtifactPost,
+) -> MiscArtifact:
+    """Declare a misc artifact: attest to who made a file, or record where
+    it was imported from.
+
+    The path has to exist in the project and not already be declared as a
+    figure, dataset, publication, or misc artifact, since those carry the
+    same attribution and are edited as what they are.
+    """
+    path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    if req.created_by is None and req.imported_from is None:
+        raise HTTPException(
+            422,
+            "A misc artifact must say who created it or where it was "
+            "imported from",
+        )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo)
+    for section, label in [
+        ("figures", "figure"),
+        ("datasets", "dataset"),
+        ("publications", "publication"),
+        ("misc", "misc artifact"),
+    ]:
+        for existing in ck_info.get(section) or []:
+            if isinstance(existing, dict) and (
+                normalize_artifact_path(str(existing.get("path") or ""))
+                == path
+            ):
+                raise HTTPException(
+                    400,
+                    f"'{path}' is already declared as a {label}; edit that "
+                    "entry instead",
+                )
+    # Whether tracked by Git or DVC, the path has to be here to attribute
+    wdir = str(repo.working_dir)
+    if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
+        os.path.join(wdir, path + ".dvc")
+    ):
+        tree = get_repo_tree_for_ref(repo, None)
+        if path not in app.projects.dvc_outputs_from_tree(
+            project=project, tree=tree
+        ):
+            raise HTTPException(404, f"'{path}' does not exist in the project")
+    entry: dict[str, Any] = {"path": path}
+    if req.title:
+        entry["title"] = req.title
+    if req.description:
+        entry["description"] = req.description
+    if req.created_by is not None:
+        entry["created_by"] = [
+            person.model_dump(exclude_none=True) for person in req.created_by
+        ]
+    if req.imported_from is not None:
+        entry["imported_from"] = req.imported_from
+    # Validated against the model that owns calkit.yaml, which is where
+    # the rules live, e.g., made here or imported but not both, and at
+    # least one person named
+    try:
+        entry = CkMiscArtifact.model_validate(entry).model_dump(
+            exclude_none=True, mode="json"
+        )
+    except ValidationError as e:
+        raise HTTPException(422, f"Invalid misc artifact: {e}")
+    misc = ck_info.get("misc", [])
+    misc.append(entry)
+    ck_info["misc"] = misc
+    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
+    repo.git.push(["origin", repo.active_branch.name])
+    record_project_update(project, repo, session)
+    return MiscArtifact.model_validate(entry)
+
+
 @router.get("/projects/{owner_name}/{project_name}/presentations")
 def get_project_presentations(
     owner_name: str,
@@ -5484,6 +5912,9 @@ async def post_project_overleaf_publication(
     environment_name: Optional[Annotated[str, Form()]] = Form(None),
     overleaf_token: Optional[Annotated[str, Form()]] = Form(None),
     auto_build: Optional[Annotated[bool, Form()]] = Form(False),
+    # Replace a folder that already exists at ``path``, e.g., a template's
+    # placeholder paper, rather than refusing to import over it.
+    replace_existing: Optional[Annotated[bool, Form()]] = Form(False),
     file: Optional[Annotated[UploadFile, File()]] = File(None),
 ) -> Publication:
     """Import a publication from Overleaf into a project.
@@ -5496,6 +5927,15 @@ async def post_project_overleaf_publication(
 
     Accepts multipart/form-data with an optional 'file' field
     (for the ZIP archive).
+
+    With ``replace_existing``, a folder already at ``path`` is emptied
+    first. The publications declared in it and the stages that built them
+    are dropped, but "feeder" stages, i.e., ones whose outputs land in the
+    folder like a template's figure and results copies, are kept and wired
+    into the new build stage as ``from_stage_outputs`` inputs. Showcase
+    entries pointing at a dropped publication are retargeted to the new
+    one, and reference files in the folder stay declared only when the
+    Overleaf project carries the same file.
     """
     # Validate input: require either an Overleaf URL or a ZIP file
     if (
@@ -5521,20 +5961,69 @@ async def post_project_overleaf_publication(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    if os.path.exists(os.path.join(repo.working_dir, path)):
-        raise HTTPException(400, f"Path '{path}' already exists in the repo")
     # Make sure path is a posix path
     path = Path(path).as_posix()
+    path_exists = os.path.exists(os.path.join(repo.working_dir, path))
+    if path_exists and not replace_existing:
+        raise HTTPException(
+            400,
+            (
+                f"Folder '{path}' already exists in the repo; replace it "
+                "or import to a different path"
+            ),
+        )
+    replacing = path_exists and bool(replace_existing)
     # Handle projects that aren't yet Calkit projects
     ck_info = get_ck_info_from_repo(repo)
     publications = ck_info.get("publications", [])
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    # When replacing, the publications declared in the folder go, along
+    # with the stages that built them, while the feeder stages whose
+    # outputs land in the folder stay so the imported paper is fed by them
+    removed_pubs: list[dict[str, Any]] = []
+    removed_stage_names: list[str] = []
+    feeder_stage_names: list[str] = []
+    feeder_out_paths: list[str] = []
+    if replacing:
+        for pub in publications:
+            pub_path = normalize_artifact_path(pub.get("path") or "")
+            if pub_path and PurePosixPath(pub_path).is_relative_to(path):
+                removed_pubs.append(pub)
+                pub_stage = pub.get("stage")
+                if pub_stage and pub_stage not in removed_stage_names:
+                    removed_stage_names.append(pub_stage)
+        publications = [pub for pub in publications if pub not in removed_pubs]
+        for name, stage_map in stages.items():
+            if name in removed_stage_names:
+                continue
+            try:
+                ck_stage = _validate_ck_stage(stage_map, name)
+            except HTTPException as exc:
+                logger.warning(f"Skipping stage '{name}': {exc.detail}")
+                continue
+            outs = [
+                normalize_artifact_path(out)
+                for out in ck_stage.dvc_out_paths
+                if PurePosixPath(normalize_artifact_path(out)).is_relative_to(
+                    path
+                )
+            ]
+            if outs:
+                feeder_stage_names.append(name)
+                feeder_out_paths += outs
+        for name in removed_stage_names:
+            stages.pop(name, None)
+        logger.info(
+            f"Replacing '{path}': dropping publications "
+            f"{[pub.get('path') for pub in removed_pubs]} and stages "
+            f"{removed_stage_names}; keeping feeders {feeder_stage_names}"
+        )
     # Make sure a publication with this path doesn't already exist
     pubpaths = [pub.get("path") for pub in publications]
     if path in pubpaths:
         raise HTTPException(400, "A publication already exists at this path")
     # Make sure we don't already have a stage with the same name
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
     if not stage_name:
         stage_name = f"build-{path.replace('/', '-')}"
     if stage_name and stage_name in stages:
@@ -5574,23 +6063,26 @@ async def post_project_overleaf_publication(
     # Determine mode: link vs zip
     import_zip_mode = file is not None
     overleaf_repo = None
-    if import_zip_mode:
+    zf: zipfile.ZipFile | None = None
+    # Files the Overleaf project carries, relative to its root, so what's
+    # being replaced can be compared against what's coming in
+    incoming_files: list[str] = []
+    if file is not None:
         overleaf_abs_path = os.path.join(repo.working_dir, path)
         logger.info("Importing Overleaf ZIP archive; skipping linkage")
-        # Unzip the whole archive into the requested path
-        os.makedirs(overleaf_abs_path, exist_ok=True)
+        # Check the archive before touching the repo; it's extracted into
+        # the requested path once that's been emptied, if replacing
         resolved_dest = os.path.realpath(overleaf_abs_path)
-        with zipfile.ZipFile(io.BytesIO(await file.read()), "r") as zf:
-            for member in zf.namelist():
-                member_dest = os.path.realpath(
-                    os.path.join(resolved_dest, member)
+        zf = zipfile.ZipFile(io.BytesIO(await file.read()), "r")
+        for member in zf.namelist():
+            member_dest = os.path.realpath(os.path.join(resolved_dest, member))
+            if not member_dest.startswith(resolved_dest + os.sep):
+                raise HTTPException(
+                    400,
+                    f"ZIP entry '{member}' would escape target directory",
                 )
-                if not member_dest.startswith(resolved_dest + os.sep):
-                    raise HTTPException(
-                        400,
-                        f"ZIP entry '{member}' would escape target directory",
-                    )
-            zf.extractall(overleaf_abs_path)
+            if not member.endswith("/"):
+                incoming_files.append(Path(member).as_posix())
     elif overleaf_project_url is not None:
         overleaf_project_id = overleaf_project_url.split("/")[-1]
         # Handle token saving and validation for link mode
@@ -5621,7 +6113,49 @@ async def post_project_overleaf_publication(
                     "and that Git integration is enabled on Overleaf"
                 ),
             )
-        overleaf_abs_path = overleaf_repo.working_dir
+        overleaf_abs_path = str(overleaf_repo.working_dir)
+        for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for fname in filenames:
+                incoming_files.append(
+                    Path(
+                        os.path.relpath(
+                            os.path.join(dirpath, fname), overleaf_abs_path
+                        )
+                    ).as_posix()
+                )
+    if replacing:
+        # A reference file the Overleaf project also carries stays
+        # declared; the rest go with the folder
+        references = ck_info.get("references", [])
+        kept_references = []
+        for reference in references:
+            ref_path = normalize_artifact_path(reference.get("path") or "")
+            if ref_path and PurePosixPath(ref_path).is_relative_to(path):
+                rel_ref_path = (
+                    PurePosixPath(ref_path).relative_to(path).as_posix()
+                )
+                if rel_ref_path not in incoming_files:
+                    continue
+            kept_references.append(reference)
+        if references:
+            ck_info["references"] = kept_references
+        # Remove everything in the folder, tracked or not; the feeder
+        # stages regenerate their outputs on the next run
+        try:
+            repo.git.rm(["-r", "-f", "--quiet", path])
+        except GitCommandError:
+            logger.info(f"No tracked files to remove under '{path}'")
+        replaced_abs_path = os.path.join(repo.working_dir, path)
+        if os.path.isdir(replaced_abs_path):
+            shutil.rmtree(replaced_abs_path)
+        elif os.path.exists(replaced_abs_path):
+            os.remove(replaced_abs_path)
+    if zf is not None:
+        # Unzip the whole archive into the requested path
+        os.makedirs(overleaf_abs_path, exist_ok=True)
+        zf.extractall(overleaf_abs_path)
+        zf.close()
     # Detect target path
     if not target_path:
         overleaf_files = os.listdir(overleaf_abs_path)
@@ -5661,13 +6195,22 @@ async def post_project_overleaf_publication(
         ):
             continue
         project_rel_path = os.path.join(path, p)
+        # A path a feeder stage produces is an input through that stage
+        if any(
+            PurePosixPath(project_rel_path).is_relative_to(out)
+            for out in feeder_out_paths
+        ):
+            continue
         if project_rel_path not in input_paths:
             input_paths.append(project_rel_path)
+    stage_inputs: list[str | dict[str, str]] = list(input_paths)
+    for feeder_stage_name in feeder_stage_names:
+        stage_inputs.append({"from_stage_outputs": feeder_stage_name})
     stage = {
         "kind": "latex",
         "target_path": os.path.join(path, target_path),
         "environment": env_name,
-        "inputs": input_paths,
+        "inputs": stage_inputs,
     }
     stages[stage_name] = stage
     pipeline["stages"] = stages
@@ -5684,6 +6227,20 @@ async def post_project_overleaf_publication(
     }
     publications.append(publication)
     ck_info["publications"] = publications
+    if replacing:
+        # A showcase entry for a dropped publication now shows the new one
+        removed_pub_paths = [
+            normalize_artifact_path(pub.get("path") or "")
+            for pub in removed_pubs
+        ]
+        for showcase_item in ck_info.get("showcase") or []:
+            if isinstance(showcase_item, dict) and (
+                normalize_artifact_path(
+                    str(showcase_item.get("publication") or "")
+                )
+                in removed_pub_paths
+            ):
+                showcase_item["publication"] = pdf_output_path
     if not import_zip_mode and overleaf_repo is not None:
         overleaf_sync_in_ck_info = ck_info.get("overleaf_sync", {})
         overleaf_sync_in_ck_info[path] = {"url": overleaf_project_url}
@@ -5747,10 +6304,12 @@ async def post_project_overleaf_publication(
     repo.git.add("calkit.yaml")
     if not import_zip_mode:
         repo.git.add(calkit.overleaf.get_sync_info_fpath())
-    repo.git.add(path)
     subprocess.run(
         ["calkit", "check", "pipeline", "--compile"], cwd=repo.working_dir
     )
+    # Added after compiling, which manages the folder's .gitignore, so the
+    # commit holds what's on disk
+    repo.git.add(path)
     repo.git.add("dvc.yaml")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")

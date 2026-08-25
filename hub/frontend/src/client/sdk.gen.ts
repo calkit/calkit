@@ -178,6 +178,8 @@ import type {
   GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
   GetProjectPresentationsResponses,
+  GetProjectPublicationComponentsErrors,
+  GetProjectPublicationComponentsResponses,
   GetProjectPublicationsErrors,
   GetProjectPublicationsResponses,
   GetProjectQuestionsErrors,
@@ -262,6 +264,7 @@ import type {
   MarkNotificationReadErrors,
   MarkNotificationReadResponses,
   MetricsResponses,
+  MiscArtifactPost,
   NativeCollaboratorPost,
   NewPassword,
   OAuthCodeExchange,
@@ -337,6 +340,8 @@ import type {
   PostProjectIssueResponses,
   PostProjectMapPathsErrors,
   PostProjectMapPathsResponses,
+  PostProjectMiscErrors,
+  PostProjectMiscResponses,
   PostProjectOverleafPublicationErrors,
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
@@ -4363,6 +4368,128 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Publication Components
+   *
+   * List the files a publication is made of, each with its provenance.
+   *
+   * A component is any file in the publication's folder, i.e., the
+   * directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
+   * than dotfiles, the publication's own output, and LaTeX build leftovers
+   * (``via`` is ``folder``), plus anything its build stage reads from
+   * outside that folder, with ``from_stage_outputs`` inputs expanded and
+   * directories walked (``via`` is ``input``). Each is one of:
+   *
+   * - ``produced``: an output of a pipeline stage, whether declared in its
+   * ``outputs`` or as the destination of a map-paths mapping (a file, or
+   * anything under a directory destination). ``stage`` names it, and
+   * ``stage_kind`` says whether that's a copy (``map-paths``) or
+   * something computed.
+   * - ``attested``: declared in calkit.yaml as a figure, dataset, or misc
+   * artifact with ``created_by``.
+   * - ``imported``: declared likewise with ``imported_from``.
+   * - ``authored``: a LaTeX or text source, edited in Overleaf when the
+   * folder is synced with one (``source``), otherwise in Git.
+   * - ``unknown``: anything else. A figure-like file at or under 20 MB is
+   * compared byte-for-byte against the project's declared figures, and
+   * ``matching_figure`` names one with identical content, which is what
+   * a copy made without a map-paths stage looks like.
+   *
+   * ``n_unknown`` counts the ``unknown`` items.
+   */
+  public static getProjectPublicationComponents<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPublicationComponentsResponses,
+    GetProjectPublicationComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPublicationComponentsResponses,
+      GetProjectPublicationComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/publications/components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Misc
+   *
+   * Declare a misc artifact: attest to who made a file, or record where
+   * it was imported from.
+   *
+   * The path has to exist in the project and not already be declared as a
+   * figure, dataset, publication, or misc artifact, since those carry the
+   * same attribution and are edited as what they are.
+   */
+  public static postProjectMisc<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      miscArtifactPost: MiscArtifactPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectMiscResponses,
+    PostProjectMiscErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "miscArtifactPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectMiscResponses,
+      PostProjectMiscErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/misc",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Get Project Presentations
    */
   public static getProjectPresentations<ThrowOnError extends boolean = true>(
@@ -4415,6 +4542,15 @@ export class ProjectsService {
    *
    * Accepts multipart/form-data with an optional 'file' field
    * (for the ZIP archive).
+   *
+   * With ``replace_existing``, a folder already at ``path`` is emptied
+   * first. The publications declared in it and the stages that built them
+   * are dropped, but "feeder" stages, i.e., ones whose outputs land in the
+   * folder like a template's figure and results copies, are kept and wired
+   * into the new build stage as ``from_stage_outputs`` inputs. Showcase
+   * entries pointing at a dropped publication are retargeted to the new
+   * one, and reference files in the folder stay declared only when the
+   * Overleaf project carries the same file.
    */
   public static postProjectOverleafPublication<
     ThrowOnError extends boolean = true,

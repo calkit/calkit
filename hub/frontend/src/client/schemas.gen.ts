@@ -344,6 +344,18 @@ export const Body_projects_post_project_overleaf_publicationSchema = {
       title: "Auto Build",
       default: false,
     },
+    replace_existing: {
+      anyOf: [
+        {
+          type: "boolean",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Replace Existing",
+      default: false,
+    },
     file: {
       anyOf: [
         {
@@ -840,6 +852,23 @@ export const CreatorPostSchema = {
         },
       ],
       title: "Orcid",
+    },
+    with_ai: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "With Ai",
     },
   },
   type: "object",
@@ -3791,6 +3820,142 @@ export const MessageSchema = {
   title: "Message",
 } as const
 
+export const MiscArtifactSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    created_by: {
+      anyOf: [
+        {
+          items: {
+            additionalProperties: true,
+            type: "object",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "MiscArtifact",
+  description:
+    "A calkit.yaml ``misc`` entry: a path attributed to someone or to\nsomewhere, without being a figure, dataset, or publication.",
+} as const
+
+export const MiscArtifactPostSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    title: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+    created_by: {
+      anyOf: [
+        {
+          items: {
+            $ref: "#/components/schemas/CreatorPost",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Created By",
+    },
+    imported_from: {
+      anyOf: [
+        {
+          additionalProperties: true,
+          type: "object",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Imported From",
+    },
+    message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Message",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "MiscArtifactPost",
+  description:
+    "A path to attribute, either to whoever made it here or to where it\ncame from, for a file that isn't a figure, dataset, or publication.",
+} as const
+
 export const NativeCollaboratorPostSchema = {
   properties: {
     email: {
@@ -6458,6 +6623,109 @@ export const PublicationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Publication",
+} as const
+
+export const PublicationComponentSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    kind: {
+      type: "string",
+      enum: ["produced", "authored", "attested", "imported", "unknown"],
+      title: "Kind",
+    },
+    via: {
+      type: "string",
+      enum: ["folder", "input"],
+      title: "Via",
+      default: "folder",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_kind: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage Kind",
+    },
+    source: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["overleaf", "git"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Source",
+    },
+    matching_figure: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Matching Figure",
+    },
+    size: {
+      anyOf: [
+        {
+          type: "integer",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Size",
+    },
+  },
+  type: "object",
+  required: ["path", "kind"],
+  title: "PublicationComponent",
+  description: "One file a publication is made of and where it comes from.",
+} as const
+
+export const PublicationComponentsSchema = {
+  properties: {
+    folder: {
+      type: "string",
+      title: "Folder",
+    },
+    items: {
+      items: {
+        $ref: "#/components/schemas/PublicationComponent",
+      },
+      type: "array",
+      title: "Items",
+    },
+    n_unknown: {
+      type: "integer",
+      title: "N Unknown",
+    },
+  },
+  type: "object",
+  required: ["folder", "items", "n_unknown"],
+  title: "PublicationComponents",
 } as const
 
 export const PublicationOverleafSchema = {

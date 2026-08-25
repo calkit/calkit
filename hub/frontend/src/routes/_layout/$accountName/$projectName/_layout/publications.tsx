@@ -5,21 +5,19 @@ import {
   Button,
   Code,
   Flex,
-  Heading,
   HStack,
+  Heading,
   Icon,
   Link,
-  ListItem,
   Menu,
   MenuButton,
   MenuItem,
   MenuList,
   Portal,
   Text,
-  UnorderedList,
+  VStack,
   useColorModeValue,
   useDisclosure,
-  VStack,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -49,6 +47,7 @@ import InputsRow, {
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
+import TipBubble from "../../../../../components/Onboarding/TipBubble"
 import ImportOverleaf from "../../../../../components/Publications/ImportOverleaf"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewPublication from "../../../../../components/Publications/NewPublication"
@@ -56,6 +55,7 @@ import PdfAnnotator, {
   commentToHighlight,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
+import PublicationComponents from "../../../../../components/Publications/PublicationComponents"
 import PublicationView from "../../../../../components/Publications/PublicationView"
 import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
 import useAuth from "../../../../../hooks/useAuth"
@@ -68,9 +68,7 @@ import { getLatexSourcePath } from "../../../../../lib/latexProject"
 import {
   classifyPublicationDeps,
   declaredInputs,
-  findFeederStages,
 } from "../../../../../lib/provenance"
-import TipBubble from "../../../../../components/Onboarding/TipBubble"
 
 const pubSearchSchema = z.object({
   path: z.string().optional(),
@@ -78,6 +76,10 @@ const pubSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   editor_open: z.boolean().optional(),
+  components_open: z.boolean().optional(),
+  // Which file of unknown origin is being resolved, and how
+  resolve_path: z.string().optional(),
+  resolve_as: z.enum(["figure", "attest", "import"]).optional(),
 })
 
 export const Route = createFileRoute(
@@ -91,6 +93,7 @@ interface PubInfoProps {
   publication: Publication
   ownerName: string
   projectName: string
+  gitRef?: string
   userHasWriteAccess: boolean
   onOpenCompare: () => void
 }
@@ -99,6 +102,7 @@ function PubInfo({
   publication,
   ownerName,
   projectName,
+  gitRef,
   userHasWriteAccess,
   onOpenCompare,
 }: PubInfoProps) {
@@ -150,10 +154,10 @@ function PubInfo({
     enabled: Boolean(publication.stage),
     retry: false,
   })
+  // Figures and references get rows of their own; everything else the
+  // stage reads, and what other stages copy in, is in the components list
   const figureLinks: InputLink[] = []
   const referenceLinks: InputLink[] = []
-  const otherLinks: InputLink[] = []
-  let feederStages: string[] = []
   if (publication.stage) {
     const dvcStages = pipelineQuery.data?.dvc_stages ?? {}
     const calkitYaml = pipelineQuery.data?.calkit_yaml
@@ -189,19 +193,6 @@ function PubInfo({
         label: path,
         code: true,
       })
-    for (const path of inputs.other)
-      otherLinks.push({
-        key: path,
-        to: "../files",
-        search: { path },
-        label: path,
-        code: true,
-      })
-    feederStages = findFeederStages(
-      publication.stage,
-      dvcStages,
-      publication.path,
-    )
   }
 
   const overleafSyncMutation = useMutation({
@@ -309,29 +300,13 @@ function PubInfo({
       </Text>
       <InputsRow label="Figures" items={figureLinks} />
       <InputsRow label="References" items={referenceLinks} />
-      <InputsRow label="Other inputs" items={otherLinks} />
-      {feederStages.length > 0 && (
-        <Box fontSize="sm" mb={1}>
-          <Text as="span" fontWeight="semibold">
-            Copied in by stages:
-          </Text>
-          <UnorderedList mt={0.5} mb={0} pl={1}>
-            {feederStages.map((name) => (
-              <ListItem key={name}>
-                <Link
-                  as={RouterLink}
-                  to="../pipeline"
-                  search={{ stage: name } as any}
-                >
-                  <Code fontSize="xs" cursor="pointer">
-                    {name}
-                  </Code>
-                </Link>
-              </ListItem>
-            ))}
-          </UnorderedList>
-        </Box>
-      )}
+      <PublicationComponents
+        ownerName={ownerName}
+        projectName={projectName}
+        publication={publication}
+        gitRef={gitRef}
+        userHasWriteAccess={userHasWriteAccess}
+      />
       {publication.overleaf?.project_id && (
         <Box mt={2}>
           <Flex align="center" gap={1}>
@@ -686,6 +661,7 @@ function Publications() {
                   publication={selectedPub}
                   ownerName={accountName}
                   projectName={projectName}
+                  gitRef={ref}
                   userHasWriteAccess={userHasWriteAccess}
                   onOpenCompare={() => openCompare(selectedPub.path)}
                 />

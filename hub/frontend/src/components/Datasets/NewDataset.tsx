@@ -23,13 +23,21 @@ import { useParams } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import mixpanel from "mixpanel-browser"
 import { useState } from "react"
-import { Controller, type SubmitHandler, useForm } from "react-hook-form"
+import {
+  Controller,
+  type FieldErrors,
+  type Path,
+  type SubmitHandler,
+  type UseFormRegister,
+  useForm,
+} from "react-hook-form"
 
 import { type Table as TableData, toCsv } from "../../lib/csv"
 import DataEntryGrid from "./DataEntryGrid"
 
 import {
   type DatasetPost,
+  type ImportedFromPost,
   ProjectsService,
   type UserPublic,
 } from "../../client"
@@ -37,7 +45,162 @@ import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 import FilterableSelect from "../Common/FilterableSelect"
 
-type Source = "primary" | "enter" | "url" | "doi" | "git_repo"
+// Where something brought into the project came from: a URL, a DOI, or a
+// Git repo at a revision, plus when it was retrieved. Also used when
+// resolving a file of unknown origin in a publication folder.
+export type ImportSource = "url" | "doi" | "git_repo"
+
+export interface ImportedFromForm {
+  url: string
+  doi: string
+  repo_url: string
+  repo_rev: string
+  repo_path: string
+  date_retrieved: string
+}
+
+export const IMPORTED_FROM_DEFAULTS: ImportedFromForm = {
+  url: "",
+  doi: "",
+  repo_url: "",
+  repo_rev: "",
+  repo_path: "",
+  date_retrieved: "",
+}
+
+/** The `imported_from` entry the form describes, as the API takes it. */
+export function buildImportedFrom(
+  source: ImportSource,
+  data: ImportedFromForm,
+): ImportedFromPost {
+  const date = data.date_retrieved || null
+  if (source === "url") return { url: data.url, date }
+  if (source === "doi") return { doi: data.doi, date }
+  return {
+    git: {
+      repo_url: data.repo_url,
+      // Blank means the default branch's head, which the hub resolves and
+      // records
+      rev: data.repo_rev || null,
+      path: data.repo_path || null,
+    },
+    date,
+  }
+}
+
+export function ImportedFromFields<T extends ImportedFromForm>({
+  source,
+  register,
+  errors: formErrors,
+}: {
+  source: ImportSource
+  register: UseFormRegister<T>
+  errors: FieldErrors<T>
+}) {
+  const errors = formErrors as FieldErrors<ImportedFromForm>
+  const field = (name: keyof ImportedFromForm) => name as Path<T>
+  return (
+    <>
+      {source === "url" ? (
+        <FormControl isRequired isInvalid={!!errors.url} mb={4}>
+          <FormLabel htmlFor="url">URL</FormLabel>
+          <Input
+            id="url"
+            {...register(field("url"), { required: "A URL is required." })}
+            placeholder="https://example.org/data/measurements.csv"
+            autoComplete="off"
+          />
+          {errors.url ? (
+            <FormErrorMessage>{errors.url.message}</FormErrorMessage>
+          ) : null}
+        </FormControl>
+      ) : null}
+      {source === "doi" ? (
+        <FormControl isRequired isInvalid={!!errors.doi} mb={4}>
+          <FormLabel htmlFor="doi">DOI</FormLabel>
+          <Input
+            id="doi"
+            {...register(field("doi"), { required: "A DOI is required." })}
+            placeholder="10.5281/zenodo.1234567"
+            autoComplete="off"
+          />
+          {errors.doi ? (
+            <FormErrorMessage>{errors.doi.message}</FormErrorMessage>
+          ) : null}
+        </FormControl>
+      ) : null}
+      {source === "git_repo" ? (
+        <>
+          <FormControl isRequired isInvalid={!!errors.repo_url} mb={4}>
+            <FormLabel htmlFor="repo_url">Repo URL</FormLabel>
+            <Input
+              id="repo_url"
+              {...register(field("repo_url"), {
+                required: "A repo URL is required.",
+              })}
+              placeholder="https://github.com/owner/repo"
+              autoComplete="off"
+            />
+            {errors.repo_url ? (
+              <FormErrorMessage>{errors.repo_url.message}</FormErrorMessage>
+            ) : null}
+          </FormControl>
+          <FormControl isInvalid={!!errors.repo_rev} mb={4}>
+            <FormLabel htmlFor="repo_rev">Revision</FormLabel>
+            <Input
+              id="repo_rev"
+              {...register(field("repo_rev"), {
+                pattern: {
+                  value: /^[0-9a-fA-F]{7,40}$/,
+                  message:
+                    "Must be a commit hash, or blank for the default " +
+                    "branch's current head. A branch or tag can move, " +
+                    "which would change the data under you.",
+                },
+              })}
+              placeholder="Blank for the latest commit on the default branch"
+              autoComplete="off"
+            />
+            {errors.repo_rev ? (
+              <FormErrorMessage>{errors.repo_rev.message}</FormErrorMessage>
+            ) : (
+              <FormHelperText>
+                Optional. Left blank, the head of the default branch is fetched
+                and its commit recorded, so the data stays pinned.
+              </FormHelperText>
+            )}
+          </FormControl>
+          <FormControl mb={4}>
+            <FormLabel htmlFor="repo_path">Path within the repo</FormLabel>
+            <Input
+              id="repo_path"
+              {...register(field("repo_path"))}
+              placeholder="Leave blank for the whole repo"
+              autoComplete="off"
+            />
+          </FormControl>
+        </>
+      ) : null}
+      <FormControl mb={4}>
+        <FormLabel htmlFor="date_retrieved">Date retrieved</FormLabel>
+        <Input
+          id="date_retrieved"
+          type="date"
+          {...register(field("date_retrieved"))}
+          autoComplete="off"
+          data-form-type="other"
+          data-lpignore="true"
+          data-1p-ignore="true"
+        />
+        <FormHelperText>
+          Optional. Without it, the commit that adds this entry says when.
+        </FormHelperText>
+      </FormControl>
+    </>
+  )
+}
+
+type Source = "primary" | "enter" | ImportSource
 
 const EMPTY_TABLE: TableData = {
   columns: ["x", "y"],
@@ -99,16 +262,10 @@ const SOURCES: { value: Source; label: string; help: string }[] = [
   },
 ]
 
-interface DatasetForm {
+interface DatasetForm extends ImportedFromForm {
   path: string
   title: string
   description: string
-  url: string
-  doi: string
-  repo_url: string
-  repo_rev: string
-  repo_path: string
-  date_retrieved: string
   created_by: string
 }
 
@@ -166,12 +323,7 @@ const NewDataset = ({
       path: "",
       title: "",
       description: "",
-      url: "",
-      doi: "",
-      repo_url: "",
-      repo_rev: "",
-      repo_path: "",
-      date_retrieved: "",
+      ...IMPORTED_FROM_DEFAULTS,
       created_by: "",
     },
   })
@@ -238,23 +390,7 @@ const NewDataset = ({
           { email: data.created_by || currentUser?.email || "" },
         ]
       } else {
-        const retrieved = data.date_retrieved || null
-        if (source === "url") {
-          post.imported_from = { url: data.url, date: retrieved }
-        } else if (source === "doi") {
-          post.imported_from = { doi: data.doi, date: retrieved }
-        } else {
-          post.imported_from = {
-            git: {
-              repo_url: data.repo_url,
-              // Blank means the default branch's head, which the hub
-              // resolves and records
-              rev: data.repo_rev || null,
-              path: data.repo_path || null,
-            },
-            date: retrieved,
-          }
-        }
+        post.imported_from = buildImportedFrom(source, data)
       }
       return ProjectsService.postProjectDataset({
         owner_name: accountName,
@@ -319,102 +455,12 @@ const NewDataset = ({
             </RadioGroup>
             {selected ? <FormHelperText>{selected.help}</FormHelperText> : null}
           </FormControl>
-          {source === "url" ? (
-            <FormControl isRequired isInvalid={!!errors.url} mb={4}>
-              <FormLabel htmlFor="url">URL</FormLabel>
-              <Input
-                id="url"
-                {...register("url", { required: "A URL is required." })}
-                placeholder="https://example.org/data/measurements.csv"
-                autoComplete="off"
-              />
-              {errors.url ? (
-                <FormErrorMessage>{errors.url.message}</FormErrorMessage>
-              ) : null}
-            </FormControl>
-          ) : null}
-          {source === "doi" ? (
-            <FormControl isRequired isInvalid={!!errors.doi} mb={4}>
-              <FormLabel htmlFor="doi">DOI</FormLabel>
-              <Input
-                id="doi"
-                {...register("doi", { required: "A DOI is required." })}
-                placeholder="10.5281/zenodo.1234567"
-                autoComplete="off"
-              />
-              {errors.doi ? (
-                <FormErrorMessage>{errors.doi.message}</FormErrorMessage>
-              ) : null}
-            </FormControl>
-          ) : null}
-          {source === "git_repo" ? (
-            <>
-              <FormControl isRequired isInvalid={!!errors.repo_url} mb={4}>
-                <FormLabel htmlFor="repo_url">Repo URL</FormLabel>
-                <Input
-                  id="repo_url"
-                  {...register("repo_url", {
-                    required: "A repo URL is required.",
-                  })}
-                  placeholder="https://github.com/owner/repo"
-                  autoComplete="off"
-                />
-                {errors.repo_url ? (
-                  <FormErrorMessage>{errors.repo_url.message}</FormErrorMessage>
-                ) : null}
-              </FormControl>
-              <FormControl isInvalid={!!errors.repo_rev} mb={4}>
-                <FormLabel htmlFor="repo_rev">Revision</FormLabel>
-                <Input
-                  id="repo_rev"
-                  {...register("repo_rev", {
-                    pattern: {
-                      value: /^[0-9a-fA-F]{7,40}$/,
-                      message:
-                        "Must be a commit hash, or blank for the default " +
-                        "branch's current head. A branch or tag can move, " +
-                        "which would change the data under you.",
-                    },
-                  })}
-                  placeholder="Blank for the latest commit on the default branch"
-                  autoComplete="off"
-                />
-                {errors.repo_rev ? (
-                  <FormErrorMessage>{errors.repo_rev.message}</FormErrorMessage>
-                ) : (
-                  <FormHelperText>
-                    Optional. Left blank, the head of the default branch is
-                    fetched and its commit recorded, so the data stays pinned.
-                  </FormHelperText>
-                )}
-              </FormControl>
-              <FormControl mb={4}>
-                <FormLabel htmlFor="repo_path">Path within the repo</FormLabel>
-                <Input
-                  id="repo_path"
-                  {...register("repo_path")}
-                  placeholder="Leave blank for the whole repo"
-                  autoComplete="off"
-                />
-              </FormControl>
-            </>
-          ) : null}
-          {source !== "primary" ? (
-            <FormControl mb={4}>
-              <FormLabel htmlFor="date_retrieved">Date retrieved</FormLabel>
-              <Input
-                id="date_retrieved"
-                type="date"
-                {...register("date_retrieved")}
-                autoComplete="off"
-                data-form-type="other"
-                data-lpignore="true"
-                data-1p-ignore="true"
-              />
-              <FormHelperText>
-                Optional. Without it, the commit that adds this entry says when.
-              </FormHelperText>
-            </FormControl>
+          {source === "url" || source === "doi" || source === "git_repo" ? (
+            <ImportedFromFields
+              source={source}
+              register={register}
+              errors={errors}
+            />
           ) : null}
           {source === "enter" ? (
             <FormControl mb={4}>

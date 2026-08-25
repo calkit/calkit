@@ -184,39 +184,6 @@ export function classifyPublicationDeps(
 }
 
 /**
- * Names the stages that copy inputs into a publication's folder, e.g., a
- * `map-paths` stage like `figs-to-paper`. A stage counts when one of its
- * outs is a dep of the publication's stage and either its name contains
- * "to-paper" or its outs land under the publication's folder.
- */
-export function findFeederStages(
-  stageName: string,
-  dvcStages: { [name: string]: DvcStage },
-  publicationPath: string,
-): string[] {
-  const deps = getStageDeps(dvcStages[stageName])
-  if (deps.length === 0) return []
-  const pubFolder = normalizePath(publicationPath)
-    .split("/")
-    .slice(0, -1)
-    .join("/")
-  const feeders: string[] = []
-  for (const [name, stage] of Object.entries(dvcStages)) {
-    if (name === stageName) continue
-    const outs = getStageOuts(stage)
-    const feeds = outs.some((out) =>
-      deps.some((dep) => isPathUnder(dep, out) || isPathUnder(out, dep)),
-    )
-    if (!feeds) continue
-    const looksLikeCopy =
-      name.includes("to-paper") ||
-      (pubFolder !== "" && outs.some((out) => isPathUnder(out, pubFolder)))
-    if (looksLikeCopy) feeders.push(name)
-  }
-  return feeders.sort()
-}
-
-/**
  * A stage's inputs as its author declared them in calkit.yaml, with
  * another stage's outputs expanded to the paths they are.
  *

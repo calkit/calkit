@@ -233,14 +233,11 @@ function ChoosePathStep({
   return (
     <>
       <Heading size="lg" mb={2}>
-        What are we starting with?
+        Where are you starting from?
       </Heading>
       <Text color="ui.dim" mb={6}>
-        A research project switches between lit review, data collection,
-        analysis, and writing, and the pieces usually live in four different
-        places. Calkit keeps them all together in one project repository, so you
-        can move between them without context switching. Nothing you set up here
-        is trapped or hidden, and all of it works offline.
+        Unify an existing project, start fresh, or fill in the analysis behind
+        something you've been writing on Overleaf.
       </Text>
       <StartPaths onSelect={onSelect} selected={path} source="wizard" />
     </>
@@ -478,7 +475,7 @@ function NameItStep({
               "figures start coming from the pipeline instead of your " +
               "downloads folder."
             : "You get a repo with an environment, a pipeline, and a paper " +
-              "skeleton already wired together, so the first thing you do " +
+              "skeleton connected together, so the first thing you do " +
               "is research rather than setup."}
       </Text>
       {isExisting ? (

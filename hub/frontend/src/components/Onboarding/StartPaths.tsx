@@ -33,17 +33,16 @@ export const START_PATHS: PathOption[] = [
     icon: FaBroom,
     title: "Take control of a project in progress",
     description:
-      "Scripts on your laptop, data on a shared drive, figures pasted into " +
-      "Overleaf. Bring it under one roof and find out what it would take " +
-      "to reproduce.",
+      "Notebooks on your laptop, data on a shared drive, figures pasted into " +
+      "Overleaf. Bring it all under one roof and reduce context switching.",
   },
   {
     path: "fresh",
     icon: FaSeedling,
     title: "Start clean and stay that way",
     description:
-      "Environment, pipeline, and paper wired together from the first " +
-      "commit, so you spend your attention on the question instead of the " +
+      "Environment, pipeline, and paper tied together from the first " +
+      "commit, so you spend your attention on the research questions instead of the " +
       "plumbing.",
   },
   {
@@ -52,7 +51,7 @@ export const START_PATHS: PathOption[] = [
     title: "Start from the paper you're writing",
     description:
       "Link the Overleaf project you already have, then grow the analysis " +
-      "behind it so its figures and numbers stop drifting out of date.",
+      "behind it so its figures and results stop drifting out of date.",
   },
 ]
 

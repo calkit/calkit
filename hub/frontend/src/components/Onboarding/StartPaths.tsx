@@ -1,0 +1,145 @@
+import {
+  Box,
+  Flex,
+  Heading,
+  Icon,
+  SimpleGrid,
+  Text,
+  useColorModeValue,
+} from "@chakra-ui/react"
+import { Link as RouterLink } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
+import type { IconType } from "react-icons"
+import { FaBroom, FaLeaf, FaSeedling } from "react-icons/fa"
+
+export type StartPath = "existing" | "fresh" | "overleaf"
+
+interface PathOption {
+  path: StartPath
+  icon: IconType
+  title: string
+  description: string
+}
+
+/**
+ * Nobody arrives wanting "a project." They arrive with scripts scattered
+ * across a laptop, a shared drive, and an Overleaf tab, or with an idea and
+ * a wish not to end up there again. Naming those situations lets someone
+ * recognize themselves rather than guess which button is for them.
+ */
+export const START_PATHS: PathOption[] = [
+  {
+    path: "existing",
+    icon: FaBroom,
+    title: "Take control of a project in progress",
+    description:
+      "Notebooks on your laptop, data on a shared drive, figures pasted into " +
+      "Overleaf. Bring it all under one roof and reduce context switching.",
+  },
+  {
+    path: "fresh",
+    icon: FaSeedling,
+    title: "Start clean and stay that way",
+    description:
+      "Environment, pipeline, and paper tied together from the first " +
+      "commit, so you spend your attention on the research questions instead of the " +
+      "plumbing.",
+  },
+  {
+    path: "overleaf",
+    icon: FaLeaf,
+    title: "Start from the paper you're writing",
+    description:
+      "Link the Overleaf project you already have, then grow the analysis " +
+      "behind it so its figures and results stop drifting out of date.",
+  },
+]
+
+interface StartPathsProps {
+  /** Where a card sends the user; the chosen path rides along in search. */
+  to?: string
+  /** Rendered instead of the link target, e.g. inside the wizard itself. */
+  onSelect?: (path: StartPath) => void
+  selected?: StartPath
+  columns?: number
+  /** Where these cards are shown, so the funnel can be split by entry point. */
+  source?: string
+}
+
+const StartPaths = ({
+  to = "/new",
+  onSelect,
+  selected,
+  columns = 3,
+  source = "unknown",
+}: StartPathsProps) => {
+  const cardBg = useColorModeValue("white", "ui.darkSlate")
+  const borderColor = useColorModeValue("gray.200", "gray.600")
+  const hoverBorder = "ui.main"
+  return (
+    <SimpleGrid columns={{ base: 1, md: columns }} spacing={4}>
+      {START_PATHS.map((option) => {
+        const isSelected = selected === option.path
+        const select = () => {
+          mixpanel.track("Chose project start path", {
+            path: option.path,
+            source,
+          })
+          onSelect?.(option.path)
+        }
+        const cardProps = onSelect
+          ? {
+              // A div that acts as a button has to say so, and take the
+              // keyboard, or the wizard's first step can't be tabbed through.
+              role: "button",
+              tabIndex: 0,
+              "aria-pressed": isSelected,
+              onClick: select,
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault()
+                  select()
+                }
+              },
+              cursor: "pointer",
+            }
+          : {
+              as: RouterLink,
+              to,
+              onClick: () =>
+                mixpanel.track("Chose project start path", {
+                  path: option.path,
+                  source,
+                }),
+              // Step 1 is the form; the choice this card just made is what
+              // step 0 exists to ask, so don't ask it twice.
+              search: { path: option.path, step: 1 },
+            }
+        return (
+          <Box
+            key={option.path}
+            {...(cardProps as any)}
+            borderWidth={isSelected ? 2 : 1}
+            borderColor={isSelected ? hoverBorder : borderColor}
+            borderRadius="lg"
+            bg={cardBg}
+            p={5}
+            textAlign="left"
+            transition="all 0.15s"
+            _hover={{ borderColor: hoverBorder, shadow: "md" }}
+          >
+            <Flex align="center" mb={2} gap={2}>
+              <Icon as={option.icon} color="ui.main" boxSize={5} />
+              <Heading size="sm">{option.title}</Heading>
+            </Flex>
+            <Text fontSize="sm" color="ui.dim">
+              {option.description}
+            </Text>
+          </Box>
+        )
+      })}
+    </SimpleGrid>
+  )
+}
+
+export default StartPaths

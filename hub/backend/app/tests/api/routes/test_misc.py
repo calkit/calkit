@@ -84,3 +84,33 @@ def test_get_version_needs_no_auth(client: TestClient) -> None:
     resp = client.get(f"{settings.API_V1_STR}/version")
     assert resp.status_code == 200
     assert resp.json()["version"]
+
+
+def test_get_templates(client: TestClient) -> None:
+    from calkit.templates.core import TEMPLATES
+
+    # Every kind, no login needed
+    r = client.get(f"{settings.API_V1_STR}/templates")
+    assert r.status_code == 200, r.text
+    names = {t["name"] for t in r.json()}
+    assert names == {
+        f"{kind}/{name}" for kind, ts in TEMPLATES.items() for name in ts
+    }
+    # One kind, with what a picker shows
+    r = client.get(
+        f"{settings.API_V1_STR}/templates", params={"kind": "latex"}
+    )
+    assert r.status_code == 200
+    latex = r.json()
+    assert len(latex) == len(TEMPLATES["latex"])
+    article = next(t for t in latex if t["name"] == "latex/article")
+    assert article == {
+        "name": "latex/article",
+        "kind": "latex",
+        "title": "Article (generic)",
+        "description": TEMPLATES["latex"]["article"].description,
+    }
+    assert all(t["kind"] == "latex" and t["title"] for t in latex)
+    # A kind the registry doesn't have
+    r = client.get(f"{settings.API_V1_STR}/templates", params={"kind": "nope"})
+    assert r.status_code == 404

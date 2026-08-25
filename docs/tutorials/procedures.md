@@ -42,6 +42,36 @@ procedures:
         details: Press the power button.
 ```
 
+### Keeping a procedure in its own file
+
+A long procedure can crowd out the rest of `calkit.yaml`, so instead of
+writing it inline, an entry can point at a YAML or JSON file that holds
+it:
+
+```yaml
+procedures:
+  my-important-procedure:
+    path: procedures/my-important-procedure.yaml
+```
+
+The file contains exactly what would have gone inline, i.e., the `title`,
+`description`, and `steps`:
+
+```yaml
+# procedures/my-important-procedure.yaml
+title: My important procedure
+description: This is a manual procedure for setting up the experiment.
+steps:
+  - summary: Turn on the machine
+    wait_after_s: 5
+  - summary: Turn off the machine
+```
+
+An entry is one or the other: `path` can't be combined with `title`,
+`description`, or `steps`, so a procedure is defined in one place rather
+than split between the two. Everything that reads procedures, e.g.,
+`calkit xproc`, resolves the file, so the two forms behave the same.
+
 ## Executing
 
 If we run `calkit xproc my-important-procedure` from the command line,

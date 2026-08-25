@@ -25,7 +25,7 @@ Features:
 
 Features:
 
-- An automatically-managed Conda environment for data processing and
+- An automatically-managed uv virtual environment for data processing and
   visualization
 - A LaTeX publication built with a Docker container
 - A dev container spec to enable editing and collaboration with GitHub

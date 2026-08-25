@@ -1,19 +1,12 @@
-import {
-  Alert,
-  AlertIcon,
-  Box,
-  Code,
-  Flex,
-  Heading,
-  Link,
-  Text,
-} from "@chakra-ui/react"
+import { Box, Code, Flex, Heading, Text } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useSearch } from "@tanstack/react-router"
 
 import { ProjectsService } from "../../../../../client"
 import type { SoftwareItem } from "../../../../../client"
+import { FiHardDrive } from "react-icons/fi"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/software",
@@ -63,14 +56,12 @@ function ProjectSoftware() {
       {softwareQuery.isPending ? (
         <LoadingSpinner />
       ) : items.length === 0 ? (
-        <Alert mt={2} status="warning" borderRadius="xl">
-          <AlertIcon />
-          No software has been declared as part of this project. See the
-          <Link mx={1} isExternal variant="blue" href="https://docs.calkit.org">
-            documentation
-          </Link>
-          for more information.
-        </Alert>
+        <NoArtifactFound
+          icon={FiHardDrive}
+          title="No software found"
+          hint="Declare the code this project publishes—a package, a script, a library—so it can be cited and reused on its own."
+          docsUrl="https://docs.calkit.org/calkit-yaml/"
+        />
       ) : (
         <Box>
           <Heading size="md" mb={4}>

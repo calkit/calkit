@@ -133,6 +133,140 @@ def test_new_figure(tmp_dir):
     )
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
+    # A figure drawn by hand names who drew it, and what they used
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "schematic.png",
+            "--title",
+            "Schematic",
+            "--description",
+            "Drawn by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-with-ai",
+            "Claude Opus 5",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    fig = [f for f in ck_info["figures"] if f["path"] == "schematic.png"][0]
+    assert fig["created_by"] == {
+        "email": "me@x.edu",
+        "with_ai": "Claude Opus 5",
+    }
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "figure",
+                "bad.png",
+                "--title",
+                "Bad",
+                "--description",
+                "Bad.",
+                "--created-by-orcid",
+                "0000-0002-1825-0098",
+            ]
+        )
+
+
+def test_new_dataset(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A dataset someone collected names them, and the ORCID is normalized
+    # and checked on the way in rather than at the next validation
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/raw.csv",
+            "--title",
+            "Raw data",
+            "--description",
+            "Measured by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-0097",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    ds = ck_info["datasets"][0]
+    assert ds["path"] == "data/raw.csv"
+    assert ds["created_by"] == {
+        "email": "me@x.edu",
+        "orcid": "https://orcid.org/0000-0002-1825-0097",
+    }
+    assert "with_ai" not in ds["created_by"]
+    # The disclosure goes on the person, as a list when there are several
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/transcribed.csv",
+            "--title",
+            "Transcribed",
+            "--description",
+            "Transcribed from sheets.",
+            "--created-by-orcid",
+            "0000-0002-1694-233X",
+            "--created-with-ai",
+            "Claude Opus 5",
+            "--created-with-ai",
+            "Copilot",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["created_by"] == {
+        "orcid": "https://orcid.org/0000-0002-1694-233X",
+        "with_ai": ["Claude Opus 5", "Copilot"],
+    }
+    # A mistyped ORCID, or a tool with nobody to answer for it, is refused
+    for bad_opts in [
+        [
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-009X",
+        ],
+        ["--created-with-ai", "Claude Opus 5"],
+        ["--created-by-email", "not-an-email"],
+    ]:
+        with pytest.raises(subprocess.CalledProcessError):
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "new",
+                    "dataset",
+                    "data/bad.csv",
+                    "--title",
+                    "Bad",
+                    "--description",
+                    "Bad.",
+                ]
+                + bad_opts
+            )
+    ck_info = calkit.load_calkit_info()
+    assert "data/bad.csv" not in [d["path"] for d in ck_info["datasets"]]
+    # Without any of the flags nothing is written, as before
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/plain.csv",
+            "--title",
+            "Plain",
+            "--description",
+            "Plain.",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "created_by" not in ck_info["datasets"][2]
 
 
 def test_new_result(tmp_dir):

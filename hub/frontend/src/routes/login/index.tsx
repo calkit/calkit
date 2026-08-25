@@ -1,10 +1,8 @@
 import {
   Button,
   Container,
-  Divider,
   FormControl,
   FormErrorMessage,
-  HStack,
   Image,
   Input,
   Link,
@@ -16,10 +14,8 @@ import {
   redirect,
 } from "@tanstack/react-router"
 
-import mixpanel from "mixpanel-browser"
 import { useEffect, useRef } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
-import { FaGithub, FaGoogle } from "react-icons/fa"
 import { z } from "zod"
 
 import { useMutation, useQueryClient } from "@tanstack/react-query"
@@ -28,6 +24,7 @@ import { useNavigate } from "@tanstack/react-router"
 import type { AxiosError } from "axios"
 import Logo from "/assets/images/calkit-no-bg.svg"
 import { UsersService } from "../../client"
+import OAuthButtons from "../../components/Common/OAuthButtons"
 import useAuth, { isLoggedIn } from "../../hooks/useAuth"
 import useCustomToast from "../../hooks/useCustomToast"
 import { popPostLoginRedirect } from "../../lib/auth"
@@ -35,14 +32,8 @@ import { handleError } from "../../lib/errors"
 import {
   consumeGitHubOAuthState,
   consumeGitHubReturnTo,
-  createGitHubOAuthState,
   getGitHubRedirectUri,
 } from "../../lib/github"
-import {
-  createGoogleOAuthState,
-  getGoogleAuthUrl,
-  getGoogleRedirectUri,
-} from "../../lib/google"
 
 const githubAuthParamsSchema = z.object({
   code: z.string().optional(),
@@ -121,8 +112,6 @@ function Login() {
     },
   })
 
-  const clientId = import.meta.env.VITE_GH_CLIENT_ID
-
   useEffect(() => {
     if (!isMounted.current) {
       isMounted.current = true
@@ -148,26 +137,6 @@ function Login() {
     }
   }, [])
 
-  const handleLoginClicked = () => {
-    mixpanel.track("Clicked login")
-    const state = createGitHubOAuthState()
-    location.href = `https://github.com/login/oauth/authorize?client_id=${clientId}&state=${state}`
-  }
-
-  const handleGoogleLoginClicked = () => {
-    mixpanel.track("Clicked Google login")
-    const params = new URLSearchParams({
-      client_id: String(import.meta.env.VITE_GOOGLE_CLIENT_ID),
-      redirect_uri: getGoogleRedirectUri(),
-      response_type: "code",
-      scope: "openid email profile",
-      state: createGoogleOAuthState(),
-      access_type: "offline",
-      prompt: "consent",
-    })
-    location.href = `${getGoogleAuthUrl()}?${params.toString()}`
-  }
-
   return (
     <>
       <Container
@@ -184,30 +153,12 @@ function Login() {
           alignSelf="center"
           mb={-9}
         />
-        <Button
-          width="full"
-          variant="primary"
-          isLoading={loginGitHubMutation.isPending}
-          onClick={handleLoginClicked}
-          rightIcon={<FaGithub />}
-        >
-          Sign in with GitHub
-        </Button>
-        <Button
-          width="full"
-          isLoading={loginGoogleMutation.isPending}
-          onClick={handleGoogleLoginClicked}
-          rightIcon={<FaGoogle />}
-        >
-          Sign in with Google
-        </Button>
-        <HStack width="full">
-          <Divider />
-          <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
-            or
-          </Text>
-          <Divider />
-        </HStack>
+        <OAuthButtons
+          verb="Sign in"
+          page="login"
+          githubLoading={loginGitHubMutation.isPending}
+          googleLoading={loginGoogleMutation.isPending}
+        />
         <form onSubmit={handleSubmit(onEmailLogin)} style={{ width: "100%" }}>
           <FormControl isInvalid={Boolean(error)} mb={3}>
             <Input

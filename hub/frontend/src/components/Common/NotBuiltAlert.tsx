@@ -68,7 +68,7 @@ function NotBuiltAlert({ kind, stage, path, action }: NotBuiltAlertProps) {
   return (
     <Alert mt={2} status="warning" borderRadius="xl">
       <AlertIcon />
-      <Box flex={1} minW={0}>
+      <Box flex={1} minW={0} mr={2}>
         <Text mb={2}>
           No content found. Perhaps the {kind} hasn't been built and pushed yet?
           To build, commit, and push it, execute this in the project folder:

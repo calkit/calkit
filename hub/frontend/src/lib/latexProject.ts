@@ -35,7 +35,7 @@ export function getLatexSourcePath(publication: Publication): string | null {
   return publication.path ? publication.path.replace(/\.[^/.]+$/, ".tex") : null
 }
 
-const TEXT_EXT = new Set([
+export const TEXT_EXT = new Set([
   "tex",
   "bib",
   "cls",
@@ -73,7 +73,7 @@ export interface MapPathsRule {
   isDir: boolean
 }
 
-function ext(p: string): string {
+export function ext(p: string): string {
   const i = p.lastIndexOf(".")
   return i < 0 ? "" : p.slice(i + 1).toLowerCase()
 }
@@ -356,4 +356,47 @@ export async function loadLatexProject(
   // engine's kpathsea hook into an in-memory dir, so it never appears in the
   // editor's working folder. See texmf-proxy/ and VITE_TEXMF_PROXY.
   return files.filter((f): f is ProjectFile => f !== null)
+}
+
+/** A path a map-paths stage maps into a paper's directory. */
+export interface MappedPath {
+  stage: string
+  src: string
+  dest: string
+}
+
+/**
+ * The copies map-paths stages make under a paper's directory, from the
+ * project's calkit.yaml text. An empty paper directory (a root-level
+ * paper) means every copy counts.
+ */
+export function mappedPaths(
+  calkitYaml: string | null | undefined,
+  paperDir: string,
+): MappedPath[] {
+  if (!calkitYaml) return []
+  let stages: Record<string, { kind?: string; paths?: unknown }> = {}
+  try {
+    const doc = jsYaml.load(calkitYaml) as {
+      pipeline?: { stages?: typeof stages }
+    } | null
+    stages = doc?.pipeline?.stages ?? {}
+  } catch {
+    return []
+  }
+  const out: MappedPath[] = []
+  for (const [name, stage] of Object.entries(stages)) {
+    if (stage?.kind !== "map-paths" || !Array.isArray(stage.paths)) continue
+    for (const p of stage.paths as { src?: string; dest?: string }[]) {
+      if (!p?.src || !p?.dest) continue
+      if (
+        !paperDir ||
+        p.dest === paperDir ||
+        p.dest.startsWith(`${paperDir}/`)
+      ) {
+        out.push({ stage: name, src: p.src, dest: p.dest })
+      }
+    }
+  }
+  return out
 }

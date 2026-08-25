@@ -88,6 +88,7 @@ const EditProject = ({ project, isOpen, onClose }: EditProjectProps) => {
             <FormControl isInvalid={!!errors.title}>
               <FormLabel htmlFor="title">Title</FormLabel>
               <Input
+                autoComplete="off"
                 id="title"
                 {...register("title", {
                   required: "Title is required",
@@ -101,6 +102,7 @@ const EditProject = ({ project, isOpen, onClose }: EditProjectProps) => {
             <FormControl mt={4}>
               <FormLabel htmlFor="description">Description</FormLabel>
               <Input
+                autoComplete="off"
                 id="description"
                 {...register("description")}
                 placeholder="Description"

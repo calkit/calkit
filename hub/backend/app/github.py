@@ -140,3 +140,32 @@ def token_resp_text_to_dict(resp_text: str) -> dict:
         key, value = item.split("=")
         out[key] = value
     return out
+
+
+def resolve_email(access_token: str) -> tuple[str, bool]:
+    """Pick the email to identify a GitHub user by, and say if it's verified.
+
+    Returns the primary address when there is one, since that's the address
+    the user thinks of as theirs, falling back to the first verified one and
+    then to the first listed. The verified flag comes back with it rather
+    than being enforced here: creating a brand new account from an
+    unverified address is harmless, but attaching a GitHub identity to an
+    account that already exists is not, and only the caller knows which of
+    those it's doing.
+    """
+    resp = requests.get(
+        "https://api.github.com/user/emails",
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+    emails = resp.json() if resp.status_code == 200 else None
+    if not isinstance(emails, list):
+        raise HTTPException(400, "Could not fetch your GitHub email addresses")
+    if not emails:
+        raise HTTPException(400, "Your GitHub account has no email address")
+    primary = [e for e in emails if e.get("primary")]
+    verified = [e for e in emails if e.get("verified")]
+    chosen = (primary or verified or emails)[0]
+    email = chosen.get("email")
+    if not email:
+        raise HTTPException(400, "Your GitHub account has no email address")
+    return email, bool(chosen.get("verified"))

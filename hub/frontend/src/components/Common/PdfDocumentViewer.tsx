@@ -990,6 +990,7 @@ function PdfViewerInner({
             isDisabled={pageNav.current <= 1}
           />
           <Input
+            autoComplete="off"
             size="xs"
             width="44px"
             textAlign="center"
@@ -1055,6 +1056,7 @@ function PdfViewerInner({
         {searchOpen && (
           <Flex align="center" gap={0.5} ml={2}>
             <Input
+              autoComplete="off"
               size="xs"
               width="150px"
               placeholder="Search document…"

@@ -203,6 +203,7 @@ const CreateInviteModal = ({
           <FormControl mt={4} isInvalid={!!errors.expires_days}>
             <FormLabel htmlFor="expires_days">Expires in (days)</FormLabel>
             <Input
+              autoComplete="off"
               id="expires_days"
               type="number"
               placeholder="Never"
@@ -215,6 +216,7 @@ const CreateInviteModal = ({
           <FormControl mt={4} isInvalid={!!errors.max_uses}>
             <FormLabel htmlFor="max_uses">Max uses</FormLabel>
             <Input
+              autoComplete="off"
               id="max_uses"
               type="number"
               placeholder="Unlimited"

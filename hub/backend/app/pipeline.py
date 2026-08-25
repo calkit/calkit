@@ -28,6 +28,7 @@ from typing import Literal
 import ruamel.yaml
 from pydantic import BaseModel, Field
 
+import calkit.notebooks
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
 from app.storage import get_data_prefix_for_owner
@@ -343,7 +344,37 @@ def _resolve_current_dep_md5(
         return _hash_tree_file(tree, path)
     if path in outs_index:
         return outs_index[path]
+    cleaned = _cleaned_notebook_md5(path, tree)
+    if cleaned is not None:
+        return cleaned
     return None
+
+
+CLEANED_NOTEBOOKS_DIR = ".calkit/notebooks/cleaned/"
+
+
+def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
+    """The md5 a cleaned-notebook dep would have, from the source notebook.
+
+    Cleaned notebooks are generated on the fly by ``calkit run`` and never
+    committed, so the dep can't be read; but its content is a function of
+    the committed notebook, so its hash can be computed. Without this an
+    edit to a notebook in the app never showed its stage as stale.
+    """
+    if not path.startswith(CLEANED_NOTEBOOKS_DIR):
+        return None
+    source = path[len(CLEANED_NOTEBOOKS_DIR) :]
+    if not tree.is_file(source):
+        return None
+    try:
+        nb = json.loads(tree.read_bytes(source))
+    except Exception as e:
+        logger.warning(f"Could not parse notebook {source}: {e}")
+        return None
+    # The same cleaning and the same ``json.dump(indent=2)`` as ``calkit
+    # run`` uses, which is what makes this hash match the lock's
+    text = json.dumps(calkit.notebooks.clean_notebook(nb), indent=2)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
 def _get_nested(data: dict | None, dotted_key: str):

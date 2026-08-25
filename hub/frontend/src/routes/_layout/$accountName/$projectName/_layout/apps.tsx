@@ -1,14 +1,4 @@
-import {
-  Alert,
-  AlertIcon,
-  Box,
-  Flex,
-  HStack,
-  Heading,
-  Icon,
-  Link,
-  Text,
-} from "@chakra-ui/react"
+import { Box, Flex, HStack, Heading, Icon, Text } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import {
   Outlet,
@@ -21,6 +11,7 @@ import { z } from "zod"
 
 import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import Tooltip from "../../../../../components/Common/Tooltip"
 import { dataOrNull } from "../../../../../lib/api"
@@ -59,20 +50,12 @@ function ProjectApps() {
   const apps = appsQuery.data ?? []
   if (apps.length === 0) {
     return (
-      <Alert mt={2} status="warning" borderRadius="xl">
-        <AlertIcon />
-        An app has not yet been defined for this project. To add one, see the
-        relevant{" "}
-        <Link
-          ml={1}
-          isExternal
-          variant="blue"
-          href="https://docs.calkit.org/apps/"
-        >
-          documentation
-        </Link>
-        .
-      </Alert>
+      <NoArtifactFound
+        icon={MdOutlineDashboard}
+        title="No apps found"
+        hint="An app lets others explore your findings interactively, e.g., to make predictions from a model the project produced."
+        docsUrl="https://docs.calkit.org/apps/"
+      />
     )
   }
   const selectedName = childParams.appName ?? apps[0]?.name

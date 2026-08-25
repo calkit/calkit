@@ -32,6 +32,10 @@ class Template(BaseModel):
         Files to copy. If not specified, will copy all in the directory.
     gitignore : string
         Content to put into the ``.gitignore`` file.
+    title : string
+        Human-readable name, for picking the template from a list.
+    description : string
+        What the template is for, a sentence at most.
     """
 
     kind: Literal["latex"]
@@ -39,6 +43,8 @@ class Template(BaseModel):
     loc: str | None = None  # Can be local (auto-detected by path) or URL
     files: list[str] | None = None  # Which filenames should be copied
     gitignore: str | None = None
+    title: str | None = None
+    description: str | None = None
 
 
 class LatexTemplate(Template):
@@ -49,10 +55,28 @@ class LatexTemplate(Template):
 
 # A registry of available templates, keyed by their kind and subkeyed by their
 # name
-TEMPLATES = {
+TEMPLATES: dict[str, dict[str, Template]] = {
     "latex": {
-        "article": LatexTemplate(name="article"),
-        "jfm": LatexTemplate(name="jfm"),
+        "article": LatexTemplate(
+            name="article",
+            title="Article (generic)",
+            description="A plain article, for a journal without its own class.",
+        ),
+        "ieee-conference": LatexTemplate(
+            name="ieee-conference",
+            title="IEEE conference paper",
+            description="Two-column paper in the IEEEtran conference format.",
+        ),
+        "jfm": LatexTemplate(
+            name="jfm",
+            title="Journal of Fluid Mechanics",
+            description="Article in the JFM class.",
+        ),
+        "report": LatexTemplate(
+            name="report",
+            title="Report or thesis (chapters)",
+            description="A longer document organized into chapters.",
+        ),
     },
     "project": {},
 }

@@ -84,6 +84,28 @@ def get_cleaned_notebook_path(path: str, as_posix: bool = True) -> str:
     return p
 
 
+def clean_notebook(nb: dict) -> dict:
+    """Strip a notebook's outputs, execution counts, and metadata in place.
+
+    Cell tags survive, since they drive parameterization; everything else
+    that isn't source is execution residue. The result is what a notebook
+    stage depends on, so that re-running a notebook doesn't make its stage
+    stale while editing a cell does.
+    """
+    for cell in nb.get("cells", []):
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
+        # Clean metadata but keep tags
+        if "tags" in cell.get("metadata", {}):
+            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
+        else:
+            cell["metadata"] = {}
+    # Clean out notebook-level metadata
+    nb["metadata"] = {}
+    return nb
+
+
 def clean_notebook_outputs(path: str):
     """Clean the outputs of a notebook and put it in the cleaned notebooks
     dir.
@@ -99,19 +121,8 @@ def clean_notebook_outputs(path: str):
             nb = json.load(f)
         except json.JSONDecodeError as e:
             raise ValueError(f"Error decoding JSON from notebook: {e}")
-    for cell in nb.get("cells", []):
-        if cell.get("cell_type") == "code":
-            cell["outputs"] = []
-            cell["execution_count"] = None
-        # Clean metadata but keep tags
-        if "tags" in cell.get("metadata", {}):
-            cell["metadata"] = {"tags": cell["metadata"]["tags"]}
-        else:
-            cell["metadata"] = {}
-    # Clean out notebook-level metadata
-    nb["metadata"] = {}
     with open(fpath_out, "w", encoding="utf-8") as f:
-        json.dump(nb, f, indent=2)
+        json.dump(clean_notebook(nb), f, indent=2)
 
 
 def clean_all_in_pipeline(ck_info: dict | None = None) -> list[str]:

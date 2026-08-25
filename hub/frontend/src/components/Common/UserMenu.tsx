@@ -5,19 +5,23 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  useDisclosure,
 } from "@chakra-ui/react"
 import { Link } from "@tanstack/react-router"
 import { GiFox } from "react-icons/gi"
-import { FiLogOut, FiUser, FiUsers } from "react-icons/fi"
+import { FiHelpCircle, FiLogOut, FiUser, FiUsers } from "react-icons/fi"
 import { useQueryClient } from "@tanstack/react-query"
+import mixpanel from "mixpanel-browser"
 
 import { type UserPublic } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import HelpFeedback from "./HelpFeedback"
 
 const UserMenu = () => {
   const { logout } = useAuth()
   const queryClient = useQueryClient()
   const currentUser = queryClient.getQueryData<UserPublic>(["currentUser"])
+  const helpModal = useDisclosure()
 
   const handleLogout = async () => {
     logout()
@@ -58,6 +62,17 @@ const UserMenu = () => {
               Settings
             </MenuItem>
             <MenuItem
+              icon={<FiHelpCircle fontSize="18px" />}
+              onClick={() => {
+                mixpanel.track("Opened help and feedback", {
+                  source: "user-menu",
+                })
+                helpModal.onOpen()
+              }}
+            >
+              Help and feedback
+            </MenuItem>
+            <MenuItem
               icon={<FiLogOut fontSize="18px" />}
               onClick={handleLogout}
               color="ui.danger"
@@ -68,6 +83,7 @@ const UserMenu = () => {
           </MenuList>
         </Menu>
       </Box>
+      <HelpFeedback isOpen={helpModal.isOpen} onClose={helpModal.onClose} />
     </>
   )
 }

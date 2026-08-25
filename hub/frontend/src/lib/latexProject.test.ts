@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { getLatexSourcePath, parseMapPathsRules } from "./latexProject"
+import {
+  getLatexSourcePath,
+  mappedPaths,
+  parseMapPathsRules,
+} from "./latexProject"
 
 const CALKIT_YAML = `pipeline:
   stages:
@@ -90,4 +94,32 @@ describe("getLatexSourcePath", () => {
       } as any),
     ).toBe("paper/paper.tex")
   })
+})
+
+it("lists the map-paths copies landing in a paper's directory", () => {
+  const ck = `
+pipeline:
+  stages:
+    map-paths-paper:
+      kind: map-paths
+      paths:
+        - {kind: file-to-file, src: figures/a.png, dest: paper/figures/a.png}
+        - {kind: dir-to-dir-merge, src: tables, dest: paper/tables}
+        - {kind: file-to-file, src: x.txt, dest: slides/x.txt}
+    build-paper:
+      kind: latex
+      target_path: paper/paper.tex
+`
+  expect(mappedPaths(ck, "paper")).toEqual([
+    {
+      stage: "map-paths-paper",
+      src: "figures/a.png",
+      dest: "paper/figures/a.png",
+    },
+    { stage: "map-paths-paper", src: "tables", dest: "paper/tables" },
+  ])
+  expect(mappedPaths(ck, "")).toHaveLength(3)
+  expect(mappedPaths(ck, "other")).toEqual([])
+  expect(mappedPaths(null, "paper")).toEqual([])
+  expect(mappedPaths("pipeline: [", "paper")).toEqual([])
 })

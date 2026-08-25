@@ -1,11 +1,15 @@
 # The `calkit.yaml` file
 
 The `calkit.yaml` file serves as a small "database"
-for the project's important metadata, which includes its:
+for the project's important metadata, where certain files came from,
+and the relationships between various component.
+It include the project's:
 
+- Owner, name, title, description, Calkit Hub URL
 - Global or system-level [requirements](requirements.md)
   (applications, environmental variables, or other configuration steps)
-- [Questions](questions.md) the project seeks to answer
+- [Questions](questions.md) the project seeks to answer, along with associated
+  hypotheses, answers, and evidence
 - [Environments](environments.md)
 - [The pipeline](pipeline/index.md)
 - [Datasets](datasets.md)
@@ -22,25 +26,6 @@ for the project's important metadata, which includes its:
 Objects can be imported from other projects,
 which produces a chain of reference to allow tracking reuse
 and reduce redundant storage.
-
-## Showcase
-
-The project showcase is a list of elements that best represent the project,
-shown on the project homepage on the hub.
-For example:
-
-```yaml
-showcase:
-  - text: Here is some text.
-  - figure: figures/my-figure.png
-  - text: There is a figure above.
-  - markdown: "### This is a Markdown heading"
-  - publication: paper/paper.pdf
-```
-
-[This project](https://calkit.io/petebachant/strava-analysis)
-has a showcase that includes Plotly figures saved as JSON,
-which render interactively.
 
 ## Declaring artifacts
 
@@ -116,13 +101,15 @@ calkit new result results/summary.json --key metrics.mean --name mean-drag
 
 ## Tables
 
-A table can be cited as evidence inline, just like a result:
+A table can be cited as evidence for a question inline, just like a result:
 
 ```yaml
-evidence:
-  - kind: table
-    path: results/top-kernels.csv
-    explanation: Top 20 GPU kernels by baseline cost.
+questions:
+  - question: What are the top 20 most expensive kernels?
+    evidence:
+      - kind: table
+        path: results/top-kernels.csv
+        explanation: Top 20 GPU kernels by baseline cost.
 ```
 
 Nothing has to be declared for that to work.
@@ -163,6 +150,25 @@ per-column types and units belong.
     maps. Nothing names a figure, dataset, publication, presentation, result,
     table, or question; they're referred to by path, or not at all, so those
     are lists.
+
+## Showcase
+
+The project showcase is a list of elements that best represent the project,
+shown on the project's homepage.
+For example:
+
+```yaml
+showcase:
+  - text: Here is some text.
+  - figure: figures/my-figure.png
+  - text: There is a figure above.
+  - markdown: "### This is a Markdown heading"
+  - publication: paper/paper.pdf
+```
+
+[This project](https://calkit.io/petebachant/strava-analysis)
+has a showcase that includes Plotly figures saved as JSON,
+which render interactively.
 
 ## Schema, validation, and autocompletion
 
@@ -243,9 +249,10 @@ the properties that go inside pipeline stages are covered under
 | `tables`                                | list[Table]                                                                                                                                                    | no       | The project's tables. Only needed for tables worth a title of their own; evidence can point at one inline.                                                                                                                                                                                                                                                                 |
 | [`references`](references.md)           | list[ReferenceCollection]                                                                                                                                      | no       | The project's bibliographies.                                                                                                                                                                                                                                                                                                                                              |
 | [`environments`](environments.md)       | dict[str, Environment]                                                                                                                                         | no       | Environments in which pipeline stages are run, keyed by name.                                                                                                                                                                                                                                                                                                              |
+| `misc`                                  | list[MiscArtifact]                                                                                                                                             | no       | Paths worth attributing that aren't one of the typed artifacts, e.g. an image someone sent over or a file produced with help from a generative AI tool.                                                                                                                                                                                                                    |
 | `software`                              | list[Software]                                                                                                                                                 | no       | Software created as part of the project.                                                                                                                                                                                                                                                                                                                                   |
 | `notebooks`                             | list[Notebook]                                                                                                                                                 | no       | The project's Jupyter notebooks.                                                                                                                                                                                                                                                                                                                                           |
-| [`procedures`](tutorials/procedures.md) | dict[str, Procedure]                                                                                                                                           | no       | Procedures, typically executed by a human, keyed by name.                                                                                                                                                                                                                                                                                                                  |
+| [`procedures`](tutorials/procedures.md) | dict[str, ProcedureFile \| Procedure]                                                                                                                          | no       | Procedures, typically executed by a human, keyed by name. Each is written inline or points at the file holding it.                                                                                                                                                                                                                                                         |
 | [`releases`](releases.md)               | dict[str, Release]                                                                                                                                             | no       | Published or archived snapshots, keyed by name.                                                                                                                                                                                                                                                                                                                            |
 | `apps`                                  | dict[str, StaticHtmlApp]                                                                                                                                       | no       | The project's apps, keyed by name.                                                                                                                                                                                                                                                                                                                                         |
 | `showcase`                              | list[ShowcaseFigure \| ShowcaseText \| ShowcaseMarkdown \| ShowcaseMarkdownFile \| ShowcaseYamlFile \| ShowcaseNotebook \| ShowcasePublication \| ShowcaseApp] | no       | Elements that best represent the project, shown on its project homepage on Calkit.                                                                                                                                                                                                                                                                                         |
@@ -274,12 +281,21 @@ Keys above whose type is a named object, like `Figure`, hold the properties desc
 
 #### `Figure`
 
-| Parameter     | Type        | Required | Default | Description                                     |
-| ------------- | ----------- | -------- | ------- | ----------------------------------------------- |
-| `path`        | str         | yes      |         | Path to the file, relative to the project root. |
-| `title`       | str \| None | no       | null    | A human-readable title.                         |
-| `description` | str \| None | no       | null    | A longer description.                           |
-| `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+A figure, usually produced by a pipeline stage.
+
+Carries attribution for the ones that aren't: a schematic drawn by hand
+or laid out with a generative AI tool has no stage to point at, and is
+exactly the kind of thing a reader wants told. One obtained from
+elsewhere records `imported_from` instead, like a dataset does.
+
+| Parameter       | Type                                                                                     | Required | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`          | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `title`         | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `description`   | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `stage`         | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `created_by`    | _Person \| list[_Person] \| None                                                         | no       | null    | Who created this primary artifact here, e.g., collected or measured the data, drew the figure, or took the photo, rather than it being produced by the pipeline or obtained from elsewhere. A primary artifact has no upstream source to point at, so naming who produced it is the only way to tell it apart from one whose provenance was never recorded. Each person discloses the generative AI tools they used via ``with_ai``. |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 #### `Result`
 
@@ -303,15 +319,21 @@ addressing can be added without reshaping what a result is.
 
 #### `Publication`
 
-| Parameter      | Type                                                                                                                 | Required | Default | Description                                     |
-| -------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | ----------------------------------------------- |
-| `path`         | str                                                                                                                  | yes      |         | Path to the file, relative to the project root. |
-| `title`        | str \| None                                                                                                          | no       | null    | A human-readable title.                         |
-| `description`  | str \| None                                                                                                          | no       | null    | A longer description.                           |
-| `stage`        | str \| None                                                                                                          | no       | null    | Name of the pipeline stage that produces this.  |
-| `kind`         | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                 |
-| `is_published` | bool                                                                                                                 | no       | False   |                                                 |
-| `doi`          | str \| None                                                                                                          | no       | null    |                                                 |
+A publication the project produced, or one it builds upon.
+
+Whether it has been published is not written down but derived: a
+publication of record has a DOI, so `is_published` is true exactly
+when `doi` is set, and reads the same on the hub and in the CLI.
+
+| Parameter       | Type                                                                                                                 | Required | Default | Description                                                                                         |
+| --------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------- |
+| `path`          | str                                                                                                                  | yes      |         | Path to the file, relative to the project root.                                                     |
+| `title`         | str \| None                                                                                                          | no       | null    | A human-readable title.                                                                             |
+| `description`   | str \| None                                                                                                          | no       | null    | A longer description.                                                                               |
+| `stage`         | str \| None                                                                                                          | no       | null    | Name of the pipeline stage that produces this.                                                      |
+| `kind`          | Literal['journal-article', 'conference-paper', 'proposal', 'report', 'blog', 'book', 'thesis', 'phd-thesis'] \| None | no       | null    |                                                                                                     |
+| `doi`           | str \| None                                                                                                          | no       | null    | This publication's own DOI, once it has one. Setting it is what marks the publication as published. |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None                             | no       | null    | Where this came from, if imported.                                                                  |
 
 #### `Presentation`
 
@@ -346,6 +368,24 @@ shipped early is not free to remove.
 | `title`       | str \| None | no       | null    | A human-readable title.                         |
 | `description` | str \| None | no       | null    | A longer description.                           |
 | `stage`       | str \| None | no       | null    | Name of the pipeline stage that produces this.  |
+
+#### `MiscArtifact`
+
+A path worth attributing that isn't one of the typed artifacts.
+
+Most files in a project are neither a dataset nor a figure nor a paper:
+a photograph, a slide someone drew, a config a colleague sent over. They
+still have an origin, and without somewhere to record it the honest
+answer is missing rather than merely absent.
+
+| Parameter       | Type                                                                                     | Required | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------------- | ---------------------------------------------------------------------------------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `path`          | str                                                                                      | yes      |         | Path to the file, relative to the project root.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `title`         | str \| None                                                                              | no       | null    | A human-readable title.                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `description`   | str \| None                                                                              | no       | null    | A longer description.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `stage`         | str \| None                                                                              | no       | null    | Name of the pipeline stage that produces this.                                                                                                                                                                                                                                                                                                                                                                                       |
+| `created_by`    | _Person \| list[_Person] \| None                                                         | no       | null    | Who created this primary artifact here, e.g., collected or measured the data, drew the figure, or took the photo, rather than it being produced by the pipeline or obtained from elsewhere. A primary artifact has no upstream source to point at, so naming who produced it is the only way to tell it apart from one whose provenance was never recorded. Each person discloses the generative AI tools they used via ``with_ai``. |
+| `imported_from` | _ImportedFromProject \| _ImportedFromUrl \| _ImportedFromDoi \| _ImportedFromGit \| None | no       | null    | Where this came from, if imported.                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 #### `Software`
 
@@ -507,6 +547,58 @@ Configuration for syncing a directory with an Overleaf project.
 | `stop`    | int \| float | yes      |         | Value at which to stop, which is not included. |
 | `step`    | int \| float | no       | 1       | Amount by which to increment each value.       |
 
+#### `_Person`
+
+A person credited with producing something in the project.
+
+Extra keys are refused rather than ignored: a mistyped `oricd`, or a
+`with_ai` on something that doesn't take one, should say so instead of
+vanishing and leaving the author thinking they recorded it.
+
+| Parameter | Type                     | Required | Default | Description                                                                                                                                                                 |
+| --------- | ------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `email`   | str \| None              | no       | null    | Email address of the person.                                                                                                                                                |
+| `name`    | str \| None              | no       | null    | Their name, if worth recording here.                                                                                                                                        |
+| `with_ai` | str \| list[str] \| None | no       | null    | Generative AI tools this person used, e.g. 'Claude Opus 5'. Recorded against the person rather than the file, so a disclosure can't exist without someone answering for it. |
+| `orcid`   | str \| None              | no       | null    | Their ORCID, which identifies them globally rather than only within this project. Accepted bare or as a full URL.                                                           |
+
+#### `_ImportedFromProject`
+
+| Parameter      | Type              | Required | Default | Description |
+| -------------- | ----------------- | -------- | ------- | ----------- |
+| `project`      | str               | yes      |         |             |
+| `path`         | str \| None       | no       | null    |             |
+| `git_rev`      | str \| None       | no       | null    |             |
+| `filter_paths` | list[str] \| None | no       | null    |             |
+
+#### `_ImportedFromUrl`
+
+| Parameter | Type         | Required | Default | Description                                                                                                         |
+| --------- | ------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `url`     | str          | yes      |         |                                                                                                                     |
+| `date`    | date \| None | no       | null    | When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit. |
+
+#### `_ImportedFromDoi`
+
+Data published under a DOI, which is a citation, not just a link.
+
+Kept apart from a URL so it can be cited and resolved as a DOI rather
+than being one more address that happens to start with https.
+
+| Parameter | Type         | Required | Default | Description                                                                                       |
+| --------- | ------------ | -------- | ------- | ------------------------------------------------------------------------------------------------- |
+| `doi`     | str          | yes      |         | The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or doi: prefix is accepted and stripped. |
+| `date`    | date \| None | no       | null    | When the data was downloaded.                                                                     |
+
+#### `_ImportedFromGit`
+
+Data from a Git repo that isn't a Calkit project.
+
+| Parameter | Type         | Required | Default | Description                   |
+| --------- | ------------ | -------- | ------- | ----------------------------- |
+| `git`     | _GitSource   | yes      |         |                               |
+| `date`    | date \| None | no       | null    | When the data was downloaded. |
+
 #### `FormulaParams`
 
 | Parameter | Type | Required | Default | Description |
@@ -546,5 +638,13 @@ Configuration for syncing a directory with an Overleaf project.
 | `x_values` | list[float]                                      | yes      |               |             |
 | `y_values` | list[float]                                      | yes      |               |             |
 | `method`   | Literal['floor', 'ceil', 'round', 'interpolate'] | no       | 'interpolate' |             |
+
+#### `_GitSource`
+
+| Parameter  | Type        | Required | Default | Description                                                                                                                                                                           |
+| ---------- | ----------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo_url` | str         | yes      |         | Clone URL of the repo the data came from.                                                                                                                                             |
+| `rev`      | str         | yes      |         | The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent. |
+| `path`     | str \| None | no       | null    | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
 
 <!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->

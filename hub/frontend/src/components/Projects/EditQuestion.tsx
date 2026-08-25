@@ -341,6 +341,7 @@ const EditQuestion = ({
                         Key (optional)
                       </FormLabel>
                       <Input
+                        autoComplete="off"
                         {...register(`evidence.${index}.key`)}
                         placeholder="e.g. mean"
                         size="sm"
@@ -352,6 +353,7 @@ const EditQuestion = ({
                       Explanation (optional)
                     </FormLabel>
                     <Input
+                      autoComplete="off"
                       {...register(`evidence.${index}.explanation`)}
                       placeholder="How this supports the answer"
                       size="sm"

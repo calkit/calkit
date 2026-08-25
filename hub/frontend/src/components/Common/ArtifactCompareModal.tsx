@@ -54,11 +54,14 @@ import {
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
 import { httpStatus } from "../../lib/api"
+import { declaredInputs, matchDepsToDatasets } from "../../lib/provenance"
+import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
 } from "./CommentsPanel"
+import InputsRow, { type InputLink } from "./InputsRow"
 import Markdown from "./Markdown"
 import PdfCanvas from "./PdfCanvas"
 import PdfDocumentViewer from "./PdfDocumentViewer"
@@ -97,6 +100,9 @@ interface ArtifactCompareModalProps {
   onRefsChange?: (ref1: string | undefined, ref2: string | undefined) => void
   onPrev?: () => void
   onNext?: () => void
+  /** Whether the figure editor is open, when the page keeps it in the URL. */
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }
 
 /** Render the artifact content for a given kind/data. */
@@ -297,16 +303,85 @@ function FigureInfo({
   ownerName,
   projectName,
   gitRef,
+  editOpen,
+  onEditOpenChange,
 }: {
   figure: Figure
   ownerName: string
   projectName: string
   gitRef?: string
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }) {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   // Typed as plain string so the router's typed `to` prop accepts them.
   const filesTo: string = `/${ownerName}/${projectName}/files`
   const pipelineTo: string = `/${ownerName}/${projectName}/pipeline`
+  const datasetsTo: string = `/${ownerName}/${projectName}/datasets`
+  // What the figure was made from: its stage's concrete inputs in dvc.yaml,
+  // matched against the project's declared datasets.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  const datasetsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "datasets"],
+    queryFn: () =>
+      ProjectsService.getProjectDatasets({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  // The stage as declared in calkit.yaml: its inputs are the data the
+  // author named, whereas dvc.yaml's deps also carry environment locks
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", figure.stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: figure.stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  const dataLinks: InputLink[] = []
+  if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
+    const deps = declaredInputs(
+      stageQuery.data?.yaml,
+      pipelineQuery.data.dvc_stages,
+      pipelineQuery.data.calkit_yaml,
+    )
+    if (figure.dataset && !deps.includes(figure.dataset))
+      deps.push(figure.dataset)
+    const inputs = matchDepsToDatasets(deps, datasetsQuery.data)
+    for (const { dataset } of inputs.declared) {
+      dataLinks.push({
+        key: dataset.path,
+        to: datasetsTo,
+        label: dataset.title || dataset.path,
+        tooltipPath: dataset.title ? dataset.path : undefined,
+        code: !dataset.title,
+      })
+    }
+    for (const path of inputs.other) {
+      dataLinks.push({
+        key: path,
+        to: filesTo,
+        search: { path, ref: gitRef },
+        label: path,
+        code: true,
+      })
+    }
+  }
   return (
     <Box bg={secBgColor} borderRadius="lg" p={3} mb={3} h="fit-content">
       <Heading size="sm" mb={2}>
@@ -369,6 +444,16 @@ function FigureInfo({
           </Text>
         )}
       </Text>
+      <InputsRow label="Data" items={dataLinks} />
+      {/* Back into the code that made it, when there is some: last, after
+          the facts, and set off from them */}
+      <FigureEditLauncher
+        ownerName={ownerName}
+        projectName={projectName}
+        figure={figure}
+        isOpen={editOpen}
+        onOpenChange={onEditOpenChange}
+      />
     </Box>
   )
 }
@@ -498,6 +583,8 @@ export function ArtifactCompareModal({
   onRefsChange,
   onPrev,
   onNext,
+  editOpen,
+  onEditOpenChange,
 }: ArtifactCompareModalProps) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.50", "gray.700")
@@ -1040,6 +1127,8 @@ export function ArtifactCompareModal({
                     ownerName={ownerName}
                     projectName={projectName}
                     gitRef={ref1}
+                    editOpen={editOpen}
+                    onEditOpenChange={onEditOpenChange}
                   />
                 )}
                 <FigureComments

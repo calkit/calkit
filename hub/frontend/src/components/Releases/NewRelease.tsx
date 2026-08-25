@@ -38,7 +38,7 @@ import Tooltip from "../Common/Tooltip"
 
 import type { AxiosError } from "axios"
 import {
-  FeatureVotesService,
+  FeedbackService,
   type ReleasePublic,
   ReleasesService,
 } from "../../client"
@@ -180,7 +180,7 @@ const NewRelease = ({
   const { data: voteStatus } = useQuery({
     queryKey: ["feature-votes", EXTERNAL_RELEASE_FEATURE],
     queryFn: () =>
-      FeatureVotesService.getFeatureVoteStatus({
+      FeedbackService.getFeatureVoteStatus({
         feature: EXTERNAL_RELEASE_FEATURE,
       }).then((response) => response.data),
     enabled: isOpen,
@@ -188,10 +188,10 @@ const NewRelease = ({
   const voteMutation = useMutation({
     mutationFn: (voted: boolean) =>
       voted
-        ? FeatureVotesService.deleteFeatureVote({
+        ? FeedbackService.deleteFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
           }).then((response) => response.data)
-        : FeatureVotesService.postFeatureVote({
+        : FeedbackService.postFeatureVote({
             feature: EXTERNAL_RELEASE_FEATURE,
           }).then((response) => response.data),
     onSuccess: (data) =>
@@ -348,7 +348,7 @@ const NewRelease = ({
               <Code>{created.git_ref ?? created.git_rev_abbrev}</Code>:
             </Text>
             <InputGroup>
-              <Input value={link} isReadOnly pr="4.5rem" />
+              <Input autoComplete="off" value={link} isReadOnly pr="4.5rem" />
               <InputRightElement width="4.5rem">
                 <Button h="1.75rem" size="sm" onClick={onCopy}>
                   {hasCopied ? "Copied" : "Copy"}
@@ -565,7 +565,12 @@ const NewRelease = ({
                     </FormControl>
                     <FormControl mt={4}>
                       <FormLabel htmlFor="date">Date</FormLabel>
-                      <Input id="date" type="date" {...register("date")} />
+                      <Input
+                        autoComplete="off"
+                        id="date"
+                        type="date"
+                        {...register("date")}
+                      />
                     </FormControl>
                   </>
                 )}

@@ -3517,15 +3517,14 @@ def run_procedure(
             return bool(value)
         return value
 
-    from calkit.models import Procedure
-
     ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
-    procs = ck_info.get("procedures", {})
-    if name not in procs:
+    if name not in ck_info.get("procedures", {}):
         raise_error(f"'{name}' is not defined as a procedure")
+    # Read from its own file if that's where it's kept, so the rest of this
+    # sees the same thing either way
     try:
-        proc = Procedure.model_validate(procs[name])
+        proc = calkit.procedures.load(name, ck_info=ck_info)
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
     git_repo = calkit.git.get_repo()

@@ -2,6 +2,7 @@ import {
   Button,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   Input,
   Modal,
@@ -14,24 +15,15 @@ import {
   Select,
   Textarea,
 } from "@chakra-ui/react"
-import { useMutation, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRouteApi } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
 
 import type { AxiosError } from "axios"
-import { ProjectsService } from "../../client"
+import { MiscService, ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
-
-// Mirrors calkit.templates.TEMPLATES["latex"]; the backend validates against
-// that registry, so an entry here without one there is rejected on submit.
-const LATEX_TEMPLATES = [
-  { value: "latex/article", label: "Article (generic)" },
-  { value: "latex/ieee-conference", label: "IEEE conference paper" },
-  { value: "latex/jfm", label: "Journal of Fluid Mechanics" },
-  { value: "latex/report", label: "Report or thesis (chapters)" },
-] as const
 
 interface NewPublicationProps {
   isOpen: boolean
@@ -50,7 +42,7 @@ interface PublicationPostWithFile {
     | "poster"
     | "report"
     | "book"
-  template?: (typeof LATEX_TEMPLATES)[number]["value"]
+  template?: string
   stage?: string
   environment?: string
   file?: FileList
@@ -79,6 +71,19 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
       environment: variant === "template" ? "tex" : undefined,
     },
   })
+  // The template registry lives in the calkit package, so the list comes
+  // from the API rather than being repeated here.
+  const templatesQuery = useQuery({
+    queryKey: ["templates", "latex"],
+    queryFn: () =>
+      MiscService.getTemplates({ kind: "latex" }).then(
+        (response) => response.data,
+      ),
+    enabled: variant === "template",
+    staleTime: Number.POSITIVE_INFINITY,
+  })
+  const templates = templatesQuery.data ?? []
+  const selectedTemplate = templates.find((t) => t.name === watch("template"))
   // Prefill the stage name from the path until the user edits it directly
   const path = watch("path")
   useEffect(() => {
@@ -173,22 +178,35 @@ const NewPublication = ({ isOpen, onClose, variant }: NewPublicationProps) => {
 
                 <Select
                   id="template"
-                  placeholder="Select template"
+                  placeholder={
+                    templatesQuery.isPending
+                      ? "Loading templates..."
+                      : templates.length === 0
+                        ? "No templates available"
+                        : "Select template"
+                  }
+                  isDisabled={
+                    templatesQuery.isPending || templates.length === 0
+                  }
                   {...register("template", {
                     required: "Template is required",
                   })}
                 >
-                  {LATEX_TEMPLATES.map((t) => (
-                    <option key={t.value} value={t.value}>
-                      {t.label}
+                  {templates.map((t) => (
+                    <option key={t.name} value={t.name}>
+                      {t.title}
                     </option>
                   ))}
                 </Select>
-                {errors.template && (
+                {errors.template ? (
                   <FormErrorMessage>
                     {errors.template?.message}
                   </FormErrorMessage>
-                )}
+                ) : selectedTemplate?.description ? (
+                  <FormHelperText>
+                    {selectedTemplate.description}
+                  </FormHelperText>
+                ) : null}
               </FormControl>
             ) : (
               ""

@@ -275,7 +275,12 @@ function Notebooks() {
                 icon={SiJupyter}
                 iconColor="orange.300"
                 title="No notebooks found"
-                hint="Add a .ipynb to the repo, or declare one in calkit.yaml to show it here."
+                hint={
+                  <>
+                    Add an <Code>.ipynb</Code> file to the repo, or declare one
+                    in <Code>calkit.yaml</Code> to show it here.
+                  </>
+                }
                 docsUrl="https://docs.calkit.org/notebooks/"
               />
             )}

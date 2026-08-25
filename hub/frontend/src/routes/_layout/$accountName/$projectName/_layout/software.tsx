@@ -59,7 +59,7 @@ function ProjectSoftware() {
         <NoArtifactFound
           icon={FiHardDrive}
           title="No software found"
-          hint="Declare the code this project publishes -- a package, a script, a library -- so it can be cited and reused on its own."
+          hint="Declare the code this project publishes—a package, a script, a library—so it can be cited and reused on its own."
           docsUrl="https://docs.calkit.org/calkit-yaml/"
         />
       ) : (

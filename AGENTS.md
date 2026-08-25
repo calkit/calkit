@@ -50,6 +50,8 @@ kept inside functions to keep CLI startup fast.
 
 For prose, only use one space after punctuation.
 
+Always put a comma after "i.e." and "e.g.".
+
 Don't overzealously split up functions just because they're long.
 Functions should usually be used ~3 times before abstracting.
 Otherwise, split up long ones into logical sections with comments.

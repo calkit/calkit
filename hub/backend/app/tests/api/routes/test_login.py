@@ -413,6 +413,8 @@ def test_login_with_google_creates_github_less_user(
     assert user is not None
     # Signed up via Google -> no linked GitHub account.
     assert user.account.github_name is None
+    # Google only reports verified addresses, so the email is verified
+    assert user.email_verified is True
 
 
 def test_login_with_google_requires_verified_email(client: TestClient) -> None:
@@ -500,6 +502,7 @@ def test_login_with_github_links_to_existing_account(
         verified_email=email,
     )
     assert existing.account.github_name is None
+    original_name = existing.account.name
     username = f"ghuser{uuid.uuid4().hex[:6]}"
     # An unverified address proves nothing about who owns it, so it can't be
     # what attaches a GitHub identity to an account that already exists.
@@ -519,9 +522,11 @@ def test_login_with_github_links_to_existing_account(
     assert r.json()["access_token"]
     db.refresh(existing)
     assert existing.account.github_name == username
-    # The account had no projects, so it takes the GitHub name too and
-    # `calkit clone owner/project` matches the GitHub URL.
-    assert existing.account.name == username.lower()
+    # Account names are immutable (storage paths and URLs hang off them),
+    # so the GitHub name is recorded alongside rather than adopted.
+    assert existing.account.name == original_name
+    # GitHub vouched for the address, so it counts as verified now
+    assert existing.email_verified_at is not None
     # Exactly one user still holds that email -- the duplicate insert this
     # guards against used to surface as a 500.
     assert len(db.exec(select(User).where(User.email == email)).all()) == 1

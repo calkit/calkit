@@ -109,7 +109,7 @@ interface DatasetForm {
   repo_rev: string
   repo_path: string
   date_retrieved: string
-  collected_by: string
+  created_by: string
 }
 
 /**
@@ -172,7 +172,7 @@ const NewDataset = ({
       repo_rev: "",
       repo_path: "",
       date_retrieved: "",
-      collected_by: "",
+      created_by: "",
     },
   })
   const mutation = useMutation({
@@ -198,8 +198,8 @@ const NewDataset = ({
             file,
             // Typed-in data is attested by the person typing it: the
             // signed-in user, not a free-text field.
-            collected_by: currentUser?.email ?? null,
-            collected_by_name: currentUser?.full_name ?? null,
+            created_by: currentUser?.email ?? null,
+            created_by_name: currentUser?.full_name ?? null,
           },
         }).then((response) => response.data)
       }
@@ -207,7 +207,7 @@ const NewDataset = ({
         if (!uploadFile) {
           return Promise.reject(new Error("Choose a file to upload."))
         }
-        // The collector is whoever is named, defaulting to the uploader;
+        // The creator is whoever is named, defaulting to the uploader;
         // the hub decides Git or DVC from the size, as `calkit add` would
         return ProjectsService.postProjectDatasetUpload({
           "content-length": uploadFile.size,
@@ -218,9 +218,9 @@ const NewDataset = ({
             title: data.title,
             description: data.description,
             file: uploadFile,
-            collected_by: data.collected_by || currentUser?.email || null,
-            collected_by_name:
-              data.collected_by && data.collected_by !== currentUser?.email
+            created_by: data.created_by || currentUser?.email || null,
+            created_by_name:
+              data.created_by && data.created_by !== currentUser?.email
                 ? null
                 : currentUser?.full_name ?? null,
           },
@@ -232,10 +232,10 @@ const NewDataset = ({
         description: data.description || null,
       }
       if (source === "primary") {
-        // Recording who collected it is what marks it primary, and the
-        // person filling this in is almost always that person.
-        post.collected_by = [
-          { email: data.collected_by || currentUser?.email || "" },
+        // Recording who created or collected it is what marks it primary,
+        // and the person filling this in is almost always that person.
+        post.created_by = [
+          { email: data.created_by || currentUser?.email || "" },
         ]
       } else {
         const retrieved = data.date_retrieved || null
@@ -471,17 +471,19 @@ const NewDataset = ({
           ) : null}
           {source === "primary" ? (
             <FormControl mb={4}>
-              <FormLabel htmlFor="collected_by">Collected by</FormLabel>
+              <FormLabel htmlFor="created_by">
+                Created or collected by
+              </FormLabel>
               <Input
-                id="collected_by"
+                id="created_by"
                 type="email"
-                {...register("collected_by")}
+                {...register("created_by")}
                 placeholder={currentUser?.email ?? "you@example.org"}
                 autoComplete="off"
               />
               <FormHelperText>
-                Defaults to you. Naming who produced the data is what marks it
-                as primary.
+                Defaults to you. Naming who created or collected the data is
+                what marks it as primary.
               </FormHelperText>
             </FormControl>
           ) : null}

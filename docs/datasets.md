@@ -62,23 +62,25 @@ datasets:
 ## Declaring a dataset you collected yourself
 
 If you manually collected a dataset, i.e., it is a primary artifact,
-that should be declared explicitly like:
+that should be declared explicitly with `created_by`, naming whoever
+collected or measured it, the same key a hand-drawn figure or a photo
+uses:
 
 ```yaml
 datasets:
   - path: data/raw.csv
-    collected_by:
+    created_by:
       email: me@myorg.edu
       orcid: 0000-0002-1825-0097 # Optional
 ```
 
-`collected_by` can be a list, since data is usually collected by more than
+`created_by` can be a list, since data is usually collected by more than
 one person, and each entry carries its own identifiers:
 
 ```yaml
 datasets:
   - path: data/raw.csv
-    collected_by:
+    created_by:
       - email: me@myorg.edu
         orcid: 0000-0002-1825-0097
       - orcid: 0000-0001-5109-3700
@@ -90,12 +92,13 @@ Each person needs an email or an ORCID, or both. A name on its own doesn't
 say which of the several people with that name this is, so credit rests on
 something resolvable. An ORCID is the better of the two, since it identifies
 someone beyond this one project, and it's stored as the full
-`https://orcid.org/...` URL whether you write it that way or not. Its last
-character is a check digit, so a mistyped one is refused rather than
-recorded.
+`https://orcid.org/...` URL whether you write it that way or not. That's
+the form `CITATION.cff` uses too, so the same value can be copied between
+the two. Its last character is a check digit, so a mistyped one is refused
+rather than recorded.
 
 A DOI can be written bare, as `doi:10.5281/zenodo.1234567`, or as the
-`https://doi.org/...` URL; it's stored bare. A `collected_by` and an
+`https://doi.org/...` URL; it's stored bare. A `created_by` and an
 `imported_from` on the same dataset is an error, since data is either
 something you produced or something you got.
 
@@ -113,7 +116,7 @@ datasets:
   - path: data/readings.csv
     title: Bench readings
     description: Voltage and current at each load step, 2026-08-20
-    collected_by:
+    created_by:
       - email: me@myorg.edu
 ```
 

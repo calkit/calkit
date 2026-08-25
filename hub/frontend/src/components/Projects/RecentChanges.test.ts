@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { countNewCommits, timeAgo } from "./RecentChanges"
+import { countNewItems, splitActivityLink, timeAgo } from "./RecentChanges"
 
 describe("RecentChanges helpers", () => {
   it("phrases elapsed time coarsely", () => {
@@ -16,14 +16,29 @@ describe("RecentChanges helpers", () => {
     expect(at("2026-08-20T12:05:00Z")).toBe("just now")
   })
 
-  it("counts commits newer than the last one seen", () => {
-    const commits = [{ hash: "c" }, { hash: "b" }, { hash: "a" }]
-    expect(countNewCommits(commits, "a")).toBe(2)
-    expect(countNewCommits(commits, "c")).toBe(0)
-    // First visit, or a hash that's gone: nothing is "new", since calling
+  it("counts items newer than the last one seen", () => {
+    const items = [{ id: "c" }, { id: "b" }, { id: "a" }]
+    expect(countNewItems(items, "a")).toBe(2)
+    expect(countNewItems(items, "c")).toBe(0)
+    // First visit, or an id that's gone: nothing is "new", since calling
     // everything new would just be noise.
-    expect(countNewCommits(commits, null)).toBe(0)
-    expect(countNewCommits(commits, "zzz")).toBe(0)
-    expect(countNewCommits([], "a")).toBe(0)
+    expect(countNewItems(items, null)).toBe(0)
+    expect(countNewItems(items, "zzz")).toBe(0)
+    expect(countNewItems([], "a")).toBe(0)
+  })
+
+  it("splits an activity link into path and search", () => {
+    expect(splitActivityLink("history?commit=abc123")).toEqual({
+      path: "history",
+      search: { commit: "abc123" },
+    })
+    expect(splitActivityLink("collaborators")).toEqual({
+      path: "collaborators",
+      search: {},
+    })
+    expect(splitActivityLink("comments?path=a%20b&view=1")).toEqual({
+      path: "comments",
+      search: { path: "a b", view: "1" },
+    })
   })
 })

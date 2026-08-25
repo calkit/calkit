@@ -2,6 +2,7 @@ import {
   Badge,
   Box,
   Button,
+  Code,
   Flex,
   Heading,
   Icon,
@@ -39,11 +40,11 @@ import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import Markdown from "../../../../../components/Common/Markdown"
 import PdfCanvas from "../../../../../components/Common/PdfCanvas"
-import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import FigureEditor from "../../../../../components/Figures/FigureEditor"
+import LabelAsFigure from "../../../../../components/Figures/FigureFromExisting"
 import UploadFigure from "../../../../../components/Figures/UploadFigure"
-import useProject from "../../../../../hooks/useProject"
 import TipBubble from "../../../../../components/Onboarding/TipBubble"
+import useProject from "../../../../../hooks/useProject"
 
 const figuresSearchSchema = z.object({
   ref: z.string().optional(),
@@ -472,9 +473,26 @@ function ProjectFigures() {
             <NoArtifactFound
               icon={FaRegFileImage}
               title="No figures found"
-              hint="Declare one in calkit.yaml, or add a pipeline stage that produces an image."
+              hint={
+                <>
+                  Declare one in <Code>calkit.yaml</Code>, or add a pipeline
+                  stage that creates one.
+                </>
+              }
               docsUrl="https://docs.calkit.org/calkit-yaml/"
             >
+              {/* The editor only mounts at the default ref, so the button
+                  would do nothing on a historical view */}
+              {userHasWriteAccess && !ref ? (
+                <Button
+                  mt={3}
+                  size="sm"
+                  variant="primary"
+                  onClick={editorModal.onOpen}
+                >
+                  New figure from data
+                </Button>
+              ) : null}
               {ref && (
                 <Button
                   mt={3}

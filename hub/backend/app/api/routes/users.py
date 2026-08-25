@@ -28,7 +28,11 @@ from app.api.routes.login import CLI_LOGIN_DESCRIPTION
 from app.config import settings
 from app.core import utcnow
 from app.github import token_resp_text_to_dict
-from app.messaging import generate_new_account_email, send_email
+from app.messaging import (
+    generate_new_account_email,
+    generate_verify_email_email,
+    send_email,
+)
 from app.models import (
     Account,
     DiscountCode,
@@ -206,6 +210,69 @@ def update_current_user_password(
 def get_current_user(current_user: CurrentUser) -> UserPublic:
     """Get current user."""
     return UserPublic.model_validate(current_user)
+
+
+@router.post("/user/email-verification")
+def post_user_email_verification(
+    current_user: CurrentUser, session: SessionDep
+) -> Message:
+    """Email the current user a code and a link to prove the address is theirs.
+
+    The code is good for a quarter hour and the link for a day; asking
+    again replaces both, no more than once a minute.
+    """
+    if current_user.email_verified:
+        raise HTTPException(400, "This email is already verified")
+    if not settings.emails_enabled:
+        raise HTTPException(503, "Email isn't configured on this server")
+    code, token = users.create_email_verification(
+        session=session, user=current_user
+    )
+    email_data = generate_verify_email_email(
+        email_to=current_user.email, code=code, token=token
+    )
+    send_email(
+        email_to=current_user.email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+    return Message(message="Verification email sent")
+
+
+class EmailVerificationConfirm(BaseModel):
+    code: str = Field(min_length=6, max_length=6)
+
+
+@router.post("/user/email-verification/confirm")
+def post_user_email_verification_confirm(
+    req: EmailVerificationConfirm,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> UserPublic:
+    """Enter the emailed code; the user comes back with the email verified."""
+    if current_user.email_verified:
+        return UserPublic.model_validate(current_user)
+    user = users.confirm_email_verification_code(
+        session=session, user=current_user, code=req.code
+    )
+    return UserPublic.model_validate(user)
+
+
+class EmailVerificationToken(BaseModel):
+    token: str
+
+
+@router.post("/verify-email")
+def post_verify_email(
+    req: EmailVerificationToken, session: SessionDep
+) -> Message:
+    """Follow the link in the verification email.
+
+    No login needed, since the link may well be opened in a browser that
+    isn't signed in; the token is what proves the address.
+    """
+    users.confirm_email_verification_token(session=session, token=req.token)
+    return Message(message="Email verified")
 
 
 @router.delete("/user")
@@ -921,15 +988,10 @@ def post_user_github_auth(
                 f"'{current_github_username}'"
             ),
         )
-    # The account takes the GitHub name too when nothing points at the old
-    # one yet, so `calkit clone owner/project` and the GitHub URL agree.
-    renamed = users.link_github_account(
+    users.link_github_account(
         session=session, user=current_user, github_username=github_username
     )
-    logger.info(
-        f"Linked GitHub account {github_username}"
-        + (" and renamed the account to match" if renamed else "")
-    )
+    logger.info(f"Linked GitHub account {github_username}")
     users.save_github_token(
         session=session, user=current_user, github_resp=github_resp
     )

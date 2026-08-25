@@ -1,14 +1,16 @@
-"""Copying project files into a publication, as a pipeline stage.
+"""Map-paths stages: copying project paths to where something expects them.
 
-A paper usually wants figures that live elsewhere in the project (the
-root ``figures`` directory, say) under its own directory, where LaTeX can
-find them without ``../``. Copying by hand would drift; a map-paths stage
-makes the copy part of the pipeline, so the paper always builds from the
-figures as they are.
+A file or directory often needs to be somewhere other than where it lives,
+e.g., a paper wants figures from the root ``figures`` directory under its
+own, where LaTeX can find them without ``../``. A symlink would do that on
+one machine, but doesn't survive Git on every platform; a map-paths stage
+is the reproducible, cross-platform stand-in, making the copy part of the
+pipeline so it's always current and any stage that reads it can depend on
+it.
 """
 
 import os
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -30,19 +32,21 @@ from app.git import (
     record_project_update,
 )
 from app.models import PipelineStage
+from calkit.models.pipeline import MapPathsKind, MapPathsStage
 
 router = APIRouter()
 
-MapKind = Literal[
-    "file-to-file", "file-to-dir", "dir-to-dir-merge", "dir-to-dir-replace"
-]
-
 
 class MapPathEntry(BaseModel):
+    """One copy to add, as ``MapPathsStage.mapping_from`` takes it.
+
+    The kind is worked out from what ``src`` is when not given, which the
+    calkit mapping models can't do on their own since they each fix one.
+    """
+
     src: str
     dest: str
-    # Worked out from what ``src`` is when not given
-    kind: MapKind | None = None
+    kind: MapPathsKind | None = None
 
 
 class MapPathsPost(BaseModel):
@@ -129,23 +133,21 @@ def post_project_map_paths(
             is_dir = str(dvc_outs[src].get("md5") or "").endswith(".dir")
         else:
             raise HTTPException(404, f"'{src}' is not in the project")
-        kind = entry.kind or (
-            "dir-to-dir-merge"
-            if is_dir
-            else (
-                "file-to-dir" if entry.dest.endswith("/") else "file-to-file"
+        try:
+            mapping = MapPathsStage.mapping_from(
+                src,
+                # A trailing slash is what asks for a copy into a directory
+                dest + ("/" if entry.dest.endswith("/") else ""),
+                kind=entry.kind,
+                is_dir=is_dir,
             )
-        )
-        if is_dir != kind.startswith("dir"):
-            what = "a directory" if is_dir else "a file"
-            raise HTTPException(
-                422, f"'{src}' is {what}, so it can't be {kind}"
-            )
+        except ValueError as e:
+            raise HTTPException(422, str(e))
         if any(
             p.get("src") == src and p.get("dest") == dest for p in existing
         ):
             continue
-        existing.append({"kind": kind, "src": src, "dest": dest})
+        existing.append(mapping.model_dump())
     _validate_ck_stage(stage, stage_name)
     stages[stage_name] = stage
     if req.target_stage is not None and legacy_target is None:

@@ -271,9 +271,10 @@
       "type": "object"
     },
     "Dataset": {
+      "description": "A dataset, whether computed, collected here, or obtained elsewhere.\n\nData someone collected or measured for this project is a primary\nartifact, and ``created_by`` names them, since there is nothing\nupstream to point at. Data from elsewhere records ``imported_from``.",
       "not": {
         "properties": {
-          "collected_by": {
+          "created_by": {
             "type": [
               "object",
               "array"
@@ -285,11 +286,11 @@
         },
         "required": [
           "imported_from",
-          "collected_by"
+          "created_by"
         ]
       },
       "properties": {
-        "collected_by": {
+        "created_by": {
           "anyOf": [
             {
               "$ref": "#/$defs/_Person"
@@ -305,8 +306,8 @@
             }
           ],
           "default": null,
-          "description": "Who collected or measured this data for this project, which is what marks it as a primary artifact. Primary data has no upstream source to point at, so saying who produced it is the only way to tell it apart from data whose provenance was never recorded.",
-          "title": "Collected By"
+          "description": "Who created this primary artifact here, e.g., collected or measured the data, drew the figure, or took the photo, rather than it being produced by the pipeline or obtained from elsewhere. A primary artifact has no upstream source to point at, so naming who produced it is the only way to tell it apart from one whose provenance was never recorded. Each person discloses the generative AI tools they used via ``with_ai``.",
+          "title": "Created By"
         },
         "description": {
           "anyOf": [
@@ -875,7 +876,7 @@
             }
           ],
           "default": null,
-          "description": "Who made this primary artifact: one produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
+          "description": "Who created this primary artifact here, e.g., collected or measured the data, drew the figure, or took the photo, rather than it being produced by the pipeline or obtained from elsewhere. A primary artifact has no upstream source to point at, so naming who produced it is the only way to tell it apart from one whose provenance was never recorded. Each person discloses the generative AI tools they used via ``with_ai``.",
           "title": "Created By"
         },
         "description": {
@@ -3455,7 +3456,7 @@
             }
           ],
           "default": null,
-          "description": "Who made this primary artifact: one produced here rather than by the pipeline or obtained from elsewhere. Each person discloses the generative AI tools they used via ``with_ai``.",
+          "description": "Who created this primary artifact here, e.g., collected or measured the data, drew the figure, or took the photo, rather than it being produced by the pipeline or obtained from elsewhere. A primary artifact has no upstream source to point at, so naming who produced it is the only way to tell it apart from one whose provenance was never recorded. Each person discloses the generative AI tools they used via ``with_ai``.",
           "title": "Created By"
         },
         "description": {
@@ -4102,7 +4103,12 @@
       "type": "object"
     },
     "Procedure": {
-      "description": "A procedure, typically executed by a human.",
+      "description": "A procedure, typically executed by a human, written out in full.",
+      "not": {
+        "required": [
+          "path"
+        ]
+      },
       "properties": {
         "description": {
           "title": "Description",
@@ -4138,6 +4144,22 @@
         "steps"
       ],
       "title": "Procedure",
+      "type": "object"
+    },
+    "ProcedureFile": {
+      "additionalProperties": false,
+      "description": "A procedure kept in its own YAML or JSON file.\n\nThe file holds what an inline ``Procedure`` would: ``title``,\n``description``, and ``steps``. Nothing else can be given alongside\n``path``, so a procedure is defined in one place, not split between\ncalkit.yaml and the file it points at. ``calkit.procedures.load``\nresolves one of these to the ``Procedure`` it names.",
+      "properties": {
+        "path": {
+          "description": "Path to a YAML or JSON file holding the procedure, relative to the project root.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ProcedureFile",
       "type": "object"
     },
     "ProcedureInput": {
@@ -4278,6 +4300,7 @@
       "type": "object"
     },
     "Publication": {
+      "description": "A publication the project produced, or one it builds upon.\n\nWhether it has been published is not written down but derived: a\npublication of record has a DOI, so ``is_published`` is true exactly\nwhen ``doi`` is set, and reads the same on the hub and in the CLI.",
       "properties": {
         "description": {
           "anyOf": [
@@ -4302,6 +4325,7 @@
             }
           ],
           "default": null,
+          "description": "This publication's own DOI, once it has one. Setting it is what marks the publication as published.",
           "title": "Doi"
         },
         "imported_from": {
@@ -4325,11 +4349,6 @@
           "default": null,
           "description": "Where this came from, if imported.",
           "title": "Imported From"
-        },
-        "is_published": {
-          "default": false,
-          "title": "Is Published",
-          "type": "boolean"
         },
         "kind": {
           "anyOf": [
@@ -8102,10 +8121,17 @@
     },
     "procedures": {
       "additionalProperties": {
-        "$ref": "#/$defs/Procedure"
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ProcedureFile"
+          },
+          {
+            "$ref": "#/$defs/Procedure"
+          }
+        ]
       },
       "default": {},
-      "description": "Procedures, typically executed by a human, keyed by name.",
+      "description": "Procedures, typically executed by a human, keyed by name. Each is written inline or points at the file holding it.",
       "title": "Procedures",
       "type": "object"
     },

@@ -191,6 +191,10 @@ class User(UserBase, table=True):
     hashed_password: str
     stripe_customer_id: str | None = None
     zenodo_user_id: str | None = None
+    # When the user proved the address is theirs, by entering an emailed
+    # code or following its link; null until then. A Google or GitHub
+    # sign-in that vouched for the address sets it too.
+    email_verified_at: datetime | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -235,6 +239,35 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    email_verification: Union["UserEmailVerification", None] = Relationship(
+        back_populates="user", cascade_delete=True
+    )
+    dvc_pushes: list["ProjectDvcPush"] = Relationship(
+        back_populates="user", cascade_delete=True
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_verified(self) -> bool:
+        """Whether the account's email is known to belong to whoever holds it.
+
+        Signing up with a password never checks the address, so anyone can
+        register someone else's email and wait; the verification flow,
+        which stamps ``email_verified_at``, is what settles it. Signing in
+        through Google also checks it (Google only reports an address it
+        has verified, and login refuses the rest) and records which
+        address that was on the credential it leaves behind. Only a match
+        with the account's own email counts there: a Google account
+        connected from settings can be any Google account.
+        """
+        if self.email_verified_at is not None:
+            return True
+        cred = self.get_external_credential("google")
+        return (
+            cred is not None
+            and cred.provider_account_id is not None
+            and cred.provider_account_id.lower() == self.email.lower()
+        )
 
     @computed_field
     @property
@@ -270,7 +303,26 @@ class UserPublic(UserBase):
     id: uuid.UUID
     created: datetime
     github_username: str | None
+    email_verified: bool
     subscription: Union["UserSubscription", None]
+
+
+class UserEmailVerification(SQLModel, table=True):
+    """A code emailed to a user to prove the address is theirs.
+
+    One row per user, replaced on each send: only the hash of the code is
+    kept, and it stops working when it expires, after too many wrong
+    guesses (six digits is a small space to search), or once it's used,
+    when the row is deleted.
+    """
+
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
+    code_hash: str = Field(max_length=64)
+    created: datetime = Field(default_factory=utcnow)
+    expires: datetime
+    attempts: int = Field(default=0)
+    # Relationships
+    user: User = Relationship(back_populates="email_verification")
 
 
 class UsersPublic(SQLModel):
@@ -602,6 +654,9 @@ class Project(ProjectBase, table=True):
     onboarding_flags: list["UserOnboardingFlag"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    dvc_pushes: list["ProjectDvcPush"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -803,6 +858,28 @@ class UserOnboardingFlag(SQLModel, table=True):
     project: Union["Project", None] = Relationship(
         back_populates="onboarding_flags"
     )
+
+
+class ProjectDvcPush(SQLModel, table=True):
+    """A batch of DVC objects a user pushed to a project's storage.
+
+    Object uploads arrive one file at a time, and a push of a directory
+    can be hundreds of them, so a row stands for a burst rather than a
+    file: an upload within a few minutes of the user's last one bumps
+    ``updated`` and the count instead of adding a row. That's enough for
+    the project's activity feed to say "pushed 12 files", which is what
+    a reader wants to know, without a row per object.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(foreign_key="project.id", index=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id")
+    created: datetime = Field(default_factory=utcnow)
+    updated: datetime = Field(default_factory=utcnow)
+    n_files: int = Field(default=1)
+    # Relationships
+    project: "Project" = Relationship(back_populates="dvc_pushes")
+    user: User = Relationship(back_populates="dvc_pushes")
 
 
 class OnboardingFlags(SQLModel):
@@ -1186,14 +1263,14 @@ class DatasetPublic(DatasetBase):
 
     The table keeps ``imported_from`` as a project path for the one kind of
     import the hub can resolve itself; the structured origin (DOI, URL, Git
-    repo, project) and the collectors come straight from calkit.yaml, which
+    repo, project) and the creators come straight from calkit.yaml, which
     is where they're authored.
     """
 
     id: uuid.UUID
     project_id: uuid.UUID
     imported_from_info: dict[str, Any] | None = None
-    collected_by: list[dict[str, Any]] | None = None
+    created_by: list[dict[str, Any]] | None = None
 
 
 class DVCOut(BaseModel):

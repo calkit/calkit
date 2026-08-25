@@ -308,7 +308,7 @@ def check_repro(
     ] = ".",
 ) -> None:
     """Check the reproducibility of a project."""
-    from calkit.check import check_reproducibility
+    from calkit.reproducibility import check_reproducibility
 
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     calkit.echo(res.to_pretty())

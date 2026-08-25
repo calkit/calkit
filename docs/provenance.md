@@ -35,7 +35,7 @@ forms, in short:
 datasets:
   # Collected for this project
   - path: data/raw.csv
-    collected_by:
+    created_by:
       email: me@myorg.edu
       orcid: 0000-0002-1825-0097
   # Obtained from elsewhere
@@ -64,8 +64,10 @@ misc:
 Scripts count. A figure resting on a script nobody will claim has just as
 little behind it as one resting on data nobody collected.
 
-Both `collected_by` and `created_by` take a list, since work usually has
-more than one person behind it, and each entry needs an email or an ORCID.
+`created_by` is the same key for all of them, whether the work was
+collecting data, drawing a diagram, or taking a photograph, and it takes a
+list, since work usually has more than one person behind it. Each entry
+needs an email or an ORCID.
 A name on its own doesn't say which of the several people with that name
 this is, so credit rests on something resolvable.
 
@@ -146,8 +148,8 @@ with a model is usually unremarkable. Data is not. A dataset is either
 measured, or obtained from somewhere, or computed by the pipeline from
 things that were, and a model produced none of those: there is no
 measurement behind it and no derivation to check. Seeing `with_ai` on
-`collected_by` is a reason to ask exactly what the tool did, and to expect a
-specific answer.
+a dataset's `created_by` is a reason to ask exactly what the tool did, and
+to expect a specific answer.
 
 Often the honest answer moves the record somewhere better. If a model
 generated the data itself -- synthetic training data, say -- then a pipeline

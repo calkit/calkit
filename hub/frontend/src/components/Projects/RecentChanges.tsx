@@ -1,9 +1,9 @@
 import {
   Badge,
   Box,
-  Code,
   Flex,
   Heading,
+  Icon,
   Link,
   Skeleton,
   Text,
@@ -11,19 +11,38 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
 import { useEffect, useMemo } from "react"
+import type { IconType } from "react-icons"
+import {
+  FiCheckSquare,
+  FiFolder,
+  FiGitBranch,
+  FiMessageSquare,
+  FiTag,
+  FiUsers,
+} from "react-icons/fi"
 
-import { ProjectsService } from "../../client"
+import { type ProjectActivityItem, ProjectsService } from "../../client"
 
-interface Commit {
-  hash: string
-  short_hash: string
-  message: string
-  summary?: string
-  author: string
-  timestamp: string
+const LAST_SEEN_PREFIX = "last_seen_activity:"
+
+// The same icons the sidebar uses for the page each kind of item links to
+const KIND_ICONS: Record<ProjectActivityItem["kind"], IconType> = {
+  commit: FiGitBranch,
+  "dvc-push": FiFolder,
+  collaborator: FiUsers,
+  todo: FiCheckSquare,
+  comment: FiMessageSquare,
+  release: FiTag,
 }
 
-const LAST_SEEN_PREFIX = "last_seen_commit:"
+const KIND_LABELS: Record<ProjectActivityItem["kind"], string> = {
+  commit: "Commit",
+  "dvc-push": "Data push",
+  collaborator: "Collaborator",
+  todo: "To-do",
+  comment: "Comment",
+  release: "Release",
+}
 
 /** "3 hours ago", without pulling in a date library for one label. */
 export function timeAgo(iso: string, now: Date = new Date()): string {
@@ -48,17 +67,36 @@ export function timeAgo(iso: string, now: Date = new Date()): string {
 }
 
 /**
- * How many of the listed commits landed after the one this browser last
- * saw. Unknown (first visit, or history rewritten) counts as none, since
- * "everything is new" on a first visit is noise rather than news.
+ * How many of the listed items happened after the one this browser last
+ * saw. Unknown (first visit, or the item has dropped out of the window)
+ * counts as none, since "everything is new" on a first visit is noise
+ * rather than news.
  */
-export function countNewCommits(
-  commits: { hash: string }[],
+export function countNewItems(
+  items: { id: string }[],
   lastSeen: string | null,
 ): number {
   if (!lastSeen) return 0
-  const index = commits.findIndex((c) => c.hash === lastSeen)
+  const index = items.findIndex((item) => item.id === lastSeen)
   return index === -1 ? 0 : index
+}
+
+/**
+ * Split an activity link like `history?commit=abc` into the route path and
+ * its search params, since the router wants them separately.
+ */
+export function splitActivityLink(link: string): {
+  path: string
+  search: Record<string, string>
+} {
+  const [path, query] = link.split("?", 2)
+  const search: Record<string, string> = {}
+  if (query) {
+    for (const [key, value] of new URLSearchParams(query)) {
+      search[key] = value
+    }
+  }
+  return { path, search }
 }
 
 interface RecentChangesProps {
@@ -68,12 +106,14 @@ interface RecentChangesProps {
 }
 
 /**
- * The last few commits, with a count of what's new since the last visit.
+ * The last few things that happened, with a count of what's new since the
+ * last visit.
  *
  * A project moves between sessions: a collaborator pushed, a pipeline run
- * landed from the CLI, a paper edit synced from Overleaf. This is the
- * "what changed while I was away" a returning user would otherwise go
- * looking for; the History page has the full list and the diffs.
+ * landed from the CLI, a paper edit synced from Overleaf, a release was
+ * cut. This is the "what changed while I was away" a returning user would
+ * otherwise go looking for; the History page has the full commit list and
+ * the diffs.
  */
 const RecentChanges = ({
   accountName,
@@ -81,20 +121,20 @@ const RecentChanges = ({
   limit = 5,
 }: RecentChangesProps) => {
   const storageKey = `${LAST_SEEN_PREFIX}${accountName}/${projectName}`
-  const historyQuery = useQuery({
-    queryKey: ["projects", accountName, projectName, "history", limit],
+  const activityQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "activity", limit],
     queryFn: () =>
-      ProjectsService.getProjectHistory({
+      ProjectsService.getProjectActivity({
         owner_name: accountName,
         project_name: projectName,
         limit,
-      }).then((response) => response.data as unknown as Commit[]),
+      }).then((response) => response.data),
     retry: false,
     refetchOnWindowFocus: false,
   })
-  const commits = historyQuery.data ?? []
+  const items = activityQuery.data ?? []
   // Read once per load rather than on every render, so the badge holds
-  // still while the effect below records the newest hash as seen.
+  // still while the effect below records the newest item as seen.
   const lastSeen = useMemo(() => {
     try {
       return localStorage.getItem(storageKey)
@@ -102,17 +142,17 @@ const RecentChanges = ({
       return null
     }
   }, [storageKey])
-  const newCount = countNewCommits(commits, lastSeen)
+  const newCount = countNewItems(items, lastSeen)
   useEffect(() => {
-    if (!commits.length) return
+    if (!items.length) return
     try {
-      localStorage.setItem(storageKey, commits[0].hash)
+      localStorage.setItem(storageKey, items[0].id)
     } catch {
       // Storage unavailable; the badge just won't appear next time.
     }
-  }, [commits, storageKey])
-  if (historyQuery.isError) return null
-  const historyTo = `/${accountName}/${projectName}/history`
+  }, [items, storageKey])
+  if (activityQuery.isError) return null
+  const projectTo = `/${accountName}/${projectName}`
   return (
     <Box>
       <Flex align="center" gap={2} mb={2} wrap="wrap">
@@ -123,54 +163,76 @@ const RecentChanges = ({
           </Badge>
         ) : null}
       </Flex>
-      {historyQuery.isPending ? (
+      {activityQuery.isPending ? (
         <>
           <Skeleton height="14px" mb={2} />
           <Skeleton height="14px" mb={2} />
           <Skeleton height="14px" />
         </>
-      ) : commits.length === 0 ? (
+      ) : items.length === 0 ? (
         <Text fontSize="sm" color="ui.dim">
-          No commits yet.
+          Nothing yet.
         </Text>
       ) : (
         <>
-          {commits.map((commit, index) => {
-            const summary = commit.summary ?? commit.message.split("\n")[0]
+          {items.map((item, index) => {
             const isNew = index < newCount
+            const target = item.link ? splitActivityLink(item.link) : null
             return (
-              <Box
-                key={commit.hash}
+              <Flex
+                key={item.id}
                 py={1.5}
-                borderBottomWidth={index < commits.length - 1 ? 1 : 0}
+                gap={2}
+                align="flex-start"
+                borderBottomWidth={index < items.length - 1 ? 1 : 0}
                 fontSize="sm"
               >
-                <Link
-                  as={RouterLink}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  to={historyTo as any}
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  search={{ commit: commit.hash } as any}
-                  display="block"
-                  noOfLines={1}
-                  fontWeight={isNew ? "semibold" : "normal"}
-                  title={summary}
-                >
-                  {summary}
-                </Link>
-                <Text color="ui.dim" fontSize="xs">
-                  <Code fontSize="xs" mr={1}>
-                    {commit.short_hash}
-                  </Code>
-                  {commit.author}, {timeAgo(commit.timestamp)}
-                </Text>
-              </Box>
+                <Icon
+                  as={KIND_ICONS[item.kind]}
+                  color="ui.dim"
+                  boxSize={3.5}
+                  mt={1}
+                  flexShrink={0}
+                  title={KIND_LABELS[item.kind]}
+                  aria-label={KIND_LABELS[item.kind]}
+                />
+                <Box minW={0}>
+                  {target ? (
+                    <Link
+                      as={RouterLink}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      to={`${projectTo}/${target.path}` as any}
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      search={target.search as any}
+                      display="block"
+                      noOfLines={1}
+                      fontWeight={isNew ? "semibold" : "normal"}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </Link>
+                  ) : (
+                    <Text
+                      noOfLines={1}
+                      fontWeight={isNew ? "semibold" : "normal"}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </Text>
+                  )}
+                  <Text color="ui.dim" fontSize="xs">
+                    {KIND_LABELS[item.kind]}
+                    {item.actor ? ` by ${item.actor}` : ""},{" "}
+                    {timeAgo(item.timestamp)}
+                  </Text>
+                </Box>
+              </Flex>
             )
           })}
           <Link
             as={RouterLink}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            to={historyTo as any}
+            to={`${projectTo}/history` as any}
             fontSize="sm"
             display="inline-block"
             mt={2}

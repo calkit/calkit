@@ -390,6 +390,8 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
                 user=existing,
                 github_username=github_username,
             )
+            # GitHub vouched for the address, which is as good as a code
+            users.mark_email_verified(session=session, user=existing)
             user = existing
         else:
             logger.info("Creating new user")
@@ -399,6 +401,8 @@ def login_with_github(req: OAuthCodeExchange, session: SessionDep) -> Token:
                 full_name=gh_user["name"],
                 github_username=github_username,
             )
+            if email_verified:
+                users.mark_email_verified(session=session, user=user)
             mixpanel.user_signed_up(user)
     else:
         logger.info(f"Found existing user with email: {user.email}")
@@ -506,6 +510,7 @@ def login_with_google(req: OAuthCodeExchange, session: SessionDep) -> Token:
         google_resp=google_resp,
         verified_email=email,
     )
+    users.mark_email_verified(session=session, user=user)
     mixpanel.user_logged_in(user)
     access_token, raw_refresh, refresh_db = _make_tokens(
         user.id, description="Google login"

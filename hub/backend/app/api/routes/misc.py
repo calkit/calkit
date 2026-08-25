@@ -75,6 +75,43 @@ def test_email(email_to: EmailStr) -> Message:
     return Message(message="Test email sent")
 
 
+class TemplatePublic(BaseModel):
+    """A template the hub can start a file or project from.
+
+    ``name`` is what ``calkit new`` and the publication routes take, e.g.,
+    ``latex/article``; the rest is for showing it in a list.
+    """
+
+    name: str
+    kind: str
+    title: str
+    description: str | None = None
+
+
+@router.get("/templates")
+def get_templates(kind: str | None = None) -> list[TemplatePublic]:
+    """List the templates in the calkit registry, optionally of one kind.
+
+    Read from the package rather than repeated in the frontend, so adding
+    one there is enough.
+    """
+    from calkit.templates.core import TEMPLATES
+
+    if kind is not None and kind not in TEMPLATES:
+        raise HTTPException(404, f"Unknown template kind '{kind}'")
+    kinds = [kind] if kind is not None else sorted(TEMPLATES)
+    return [
+        TemplatePublic(
+            name=f"{k}/{template.name}",
+            kind=k,
+            title=template.title or template.name,
+            description=template.description,
+        )
+        for k in kinds
+        for template in TEMPLATES[k].values()
+    ]
+
+
 class DiscountCodePublic(BaseModel):
     id: uuid.UUID
     is_valid: bool = True

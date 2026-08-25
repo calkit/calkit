@@ -120,7 +120,7 @@ export const Body_projects_post_project_dataset_uploadSchema = {
       format: "binary",
       title: "File",
     },
-    collected_by: {
+    created_by: {
       anyOf: [
         {
           type: "string",
@@ -129,9 +129,9 @@ export const Body_projects_post_project_dataset_uploadSchema = {
           type: "null",
         },
       ],
-      title: "Collected By",
+      title: "Created By",
     },
-    collected_by_name: {
+    created_by_name: {
       anyOf: [
         {
           type: "string",
@@ -140,7 +140,7 @@ export const Body_projects_post_project_dataset_uploadSchema = {
           type: "null",
         },
       ],
-      title: "Collected By Name",
+      title: "Created By Name",
     },
     storage: {
       anyOf: [
@@ -575,48 +575,6 @@ export const CollaboratorSchema = {
   title: "Collaborator",
 } as const
 
-export const CollectorPostSchema = {
-  properties: {
-    email: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Email",
-    },
-    name: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Name",
-    },
-    orcid: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Orcid",
-    },
-  },
-  type: "object",
-  title: "CollectorPost",
-  description:
-    "Someone credited with collecting a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
-} as const
-
 export const CommentHighlightSchema = {
   properties: {
     position: {
@@ -846,6 +804,48 @@ export const ContentsItemSchema = {
   type: "object",
   required: ["name", "path", "type", "size", "in_repo"],
   title: "ContentsItem",
+} as const
+
+export const CreatorPostSchema = {
+  properties: {
+    email: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Email",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
+    },
+    orcid: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Orcid",
+    },
+  },
+  type: "object",
+  title: "CreatorPost",
+  description:
+    "Someone credited with creating a dataset.\n\nEverything is optional here; that a person needs an email or an ORCID\nis enforced by the calkit model this is validated through, so the rule\nlives in one place rather than being restated and left to drift.",
 } as const
 
 export const DVCImportSchema = {
@@ -1139,11 +1139,11 @@ export const DatasetPostSchema = {
       ],
       title: "Stage",
     },
-    collected_by: {
+    created_by: {
       anyOf: [
         {
           items: {
-            $ref: "#/components/schemas/CollectorPost",
+            $ref: "#/components/schemas/CreatorPost",
           },
           type: "array",
         },
@@ -1151,7 +1151,7 @@ export const DatasetPostSchema = {
           type: "null",
         },
       ],
-      title: "Collected By",
+      title: "Created By",
     },
     imported_from: {
       anyOf: [
@@ -1265,7 +1265,7 @@ export const DatasetPublicSchema = {
       ],
       title: "Imported From Info",
     },
-    collected_by: {
+    created_by: {
       anyOf: [
         {
           items: {
@@ -1278,14 +1278,14 @@ export const DatasetPublicSchema = {
           type: "null",
         },
       ],
-      title: "Collected By",
+      title: "Created By",
     },
   },
   type: "object",
   required: ["path", "id", "project_id"],
   title: "DatasetPublic",
   description:
-    "A dataset as the API returns it, with its provenance spelled out.\n\nThe table keeps ``imported_from`` as a project path for the one kind of\nimport the hub can resolve itself; the structured origin (DOI, URL, Git\nrepo, project) and the collectors come straight from calkit.yaml, which\nis where they're authored.",
+    "A dataset as the API returns it, with its provenance spelled out.\n\nThe table keeps ``imported_from`` as a project path for the one kind of\nimport the hub can resolve itself; the structured origin (DOI, URL, Git\nrepo, project) and the creators come straight from calkit.yaml, which\nis where they're authored.",
 } as const
 
 export const DatasetResponseSchema = {
@@ -1859,6 +1859,32 @@ export const DvcPipelineStageSchema = {
   type: "object",
   required: ["cmd"],
   title: "DvcPipelineStage",
+} as const
+
+export const EmailVerificationConfirmSchema = {
+  properties: {
+    code: {
+      type: "string",
+      maxLength: 6,
+      minLength: 6,
+      title: "Code",
+    },
+  },
+  type: "object",
+  required: ["code"],
+  title: "EmailVerificationConfirm",
+} as const
+
+export const EmailVerificationTokenSchema = {
+  properties: {
+    token: {
+      type: "string",
+      title: "Token",
+    },
+  },
+  type: "object",
+  required: ["token"],
+  title: "EmailVerificationToken",
 } as const
 
 export const EnvironmentSchema = {
@@ -3700,6 +3726,8 @@ export const MapPathEntrySchema = {
   type: "object",
   required: ["src", "dest"],
   title: "MapPathEntry",
+  description:
+    "One copy to add, as ``MapPathsStage.mapping_from`` takes it.\n\nThe kind is worked out from what ``src`` is when not given, which the\ncalkit mapping models can't do on their own since they each fix one.",
 } as const
 
 export const MapPathsPostSchema = {
@@ -5045,6 +5073,63 @@ export const PresignedUrlAccessSchema = {
   type: "object",
   required: ["url", "http_method"],
   title: "PresignedUrlAccess",
+} as const
+
+export const ProjectActivityItemSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: [
+        "commit",
+        "dvc-push",
+        "collaborator",
+        "todo",
+        "comment",
+        "release",
+      ],
+      title: "Kind",
+    },
+    timestamp: {
+      type: "string",
+      format: "date-time",
+      title: "Timestamp",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    actor: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Actor",
+    },
+    id: {
+      type: "string",
+      title: "Id",
+    },
+    link: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Link",
+    },
+  },
+  type: "object",
+  required: ["kind", "timestamp", "title", "id"],
+  title: "ProjectActivityItem",
+  description:
+    "One thing that happened in a project.\n\n``id`` is stable across reads (a commit hash or a row ID) so the\nfrontend can key on it; ``link`` is a route relative to the project\npage, or None when there's nowhere better to send the reader.",
 } as const
 
 export const ProjectAppSchema = {
@@ -8324,6 +8409,22 @@ export const ReproCheckSchema = {
       title: "N Presentations No Import Or Stage",
       default: 0,
     },
+    misc_needing_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Misc Needing Provenance",
+      default: [],
+    },
+    scripts_not_in_pipeline: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Scripts Not In Pipeline",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -8371,6 +8472,16 @@ export const ReproCheckSchema = {
       title: "N Presentations With Import Or Stage",
       readOnly: true,
     },
+    n_misc_needing_provenance: {
+      type: "integer",
+      title: "N Misc Needing Provenance",
+      readOnly: true,
+    },
+    n_scripts_not_in_pipeline: {
+      type: "integer",
+      title: "N Scripts Not In Pipeline",
+      readOnly: true,
+    },
     n_stages_without_env: {
       type: "integer",
       title: "N Stages Without Env",
@@ -8409,6 +8520,8 @@ export const ReproCheckSchema = {
     "n_misc_with_import_or_stage",
     "n_tables_with_import_or_stage",
     "n_presentations_with_import_or_stage",
+    "n_misc_needing_provenance",
+    "n_scripts_not_in_pipeline",
     "n_stages_without_env",
     "n_stages_with_env",
   ],
@@ -9029,6 +9142,39 @@ export const TableTextSchema = {
     "A window of a table as CSV, which is what the table viewer reads.\n\nA table can be wider or longer than a browser can hold (a 2D array in\nan HDF5 file with thousands of columns, say), so the response is a\nwindow in both dimensions and says where it sits in the whole.",
 } as const
 
+export const TemplatePublicSchema = {
+  properties: {
+    name: {
+      type: "string",
+      title: "Name",
+    },
+    kind: {
+      type: "string",
+      title: "Kind",
+    },
+    title: {
+      type: "string",
+      title: "Title",
+    },
+    description: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Description",
+    },
+  },
+  type: "object",
+  required: ["name", "kind", "title"],
+  title: "TemplatePublic",
+  description:
+    "A template the hub can start a file or project from.\n\n``name`` is what ``calkit new`` and the publication routes take, e.g.,\n``latex/article``; the rest is for showing it in a list.",
+} as const
+
 export const TextDiffSchema = {
   properties: {
     path: {
@@ -9447,6 +9593,10 @@ export const UserPublicSchema = {
       ],
       title: "Github Username",
     },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
     subscription: {
       anyOf: [
         {
@@ -9459,7 +9609,14 @@ export const UserPublicSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "created", "github_username", "subscription"],
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
   title: "UserPublic",
 } as const
 
@@ -10560,6 +10717,22 @@ export const ReproCheckWritableSchema = {
       title: "N Presentations No Import Or Stage",
       default: 0,
     },
+    misc_needing_provenance: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Misc Needing Provenance",
+      default: [],
+    },
+    scripts_not_in_pipeline: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Scripts Not In Pipeline",
+      default: [],
+    },
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
@@ -10670,6 +10843,10 @@ export const UserPublicWritableSchema = {
       ],
       title: "Github Username",
     },
+    email_verified: {
+      type: "boolean",
+      title: "Email Verified",
+    },
     subscription: {
       anyOf: [
         {
@@ -10682,7 +10859,14 @@ export const UserPublicWritableSchema = {
     },
   },
   type: "object",
-  required: ["email", "id", "created", "github_username", "subscription"],
+  required: [
+    "email",
+    "id",
+    "created",
+    "github_username",
+    "email_verified",
+    "subscription",
+  ],
   title: "UserPublic",
 } as const
 

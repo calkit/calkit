@@ -15,17 +15,13 @@ import posixpath
 import tempfile
 from typing import Any
 
-import git
 import polars as pl
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 import app.projects
 from app.api.deps import CurrentUserOptional, SessionDep
-from app.dvc import get_data_fpath_for_md5
 from app.git import get_repo, get_repo_tree_for_ref
-from app.models import Project, User
-from app.storage import get_object_fs
 
 logger = logging.getLogger(__name__)
 
@@ -60,67 +56,6 @@ class TableText(BaseModel):
     col_limit: int
     # True when rows or columns lie outside the window
     truncated: bool
-
-
-def _read_project_file(
-    project: Project,
-    repo: git.Repo,
-    path: str,
-    ref: str | None,
-    max_bytes: int,
-    session: SessionDep | None = None,
-    current_user: User | None = None,
-) -> bytes:
-    """A file's bytes, from Git or from DVC storage.
-
-    A dataset imported from another Calkit project is a pointer whose
-    ``remote`` names that project; its bytes live in that project's storage
-    (the pointer is ``push: false``, so they never get copied here). Such a
-    read goes to the source project, after checking the reader can see it.
-    """
-    tree = get_repo_tree_for_ref(repo, ref)
-    if tree.is_file(path):
-        data = bytes(tree.read_bytes(path))
-        if len(data) > max_bytes:
-            raise HTTPException(413, f"'{path}' is too large to view")
-        return data
-    outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-    out = outs.get(path)
-    if out is None or (out.get("md5") or "").endswith(".dir"):
-        raise HTTPException(404, f"'{path}' is not a file in this project")
-    if (out.get("size") or 0) > max_bytes:
-        raise HTTPException(413, f"'{path}' is too large to view")
-    owner_name, project_name = project.owner_account_name, project.name
-    remote = str(out.get("remote") or "")
-    if remote.startswith("calkit:") and "/" in remote:
-        src_owner, src_project = remote[len("calkit:") :].split("/", 1)
-        if session is not None:
-            # Raises if the source project is missing or not readable
-            app.projects.get_project(
-                session=session,
-                owner_name=src_owner,
-                project_name=src_project,
-                current_user=current_user,
-                min_access_level="read",
-            )
-        owner_name, project_name = src_owner, src_project
-    fs = get_object_fs()
-    fpath = get_data_fpath_for_md5(
-        owner_name=owner_name,
-        project_name=project_name,
-        md5=out["md5"],
-        fs=fs,
-    )
-    if fpath is None:
-        where = (
-            f"{owner_name}/{project_name}'s storage" if remote else "storage"
-        )
-        raise HTTPException(404, f"'{path}' has not been pushed to {where}")
-    with fs.open(fpath, "rb") as f:
-        data = bytes(f.read(max_bytes + 1))
-    if len(data) > max_bytes:
-        raise HTTPException(413, f"'{path}' is too large to view")
-    return data
 
 
 def scan_table(fpath: str, path: str) -> pl.LazyFrame:
@@ -236,8 +171,13 @@ def get_project_dataset_csv(
     repo = get_repo(
         project=project, user=current_user, session=session, ref=ref
     )
-    data = _read_project_file(
-        project, repo, path, ref, MAX_TABLE_BYTES, session, current_user
+    data = app.projects.read_project_file(
+        project,
+        get_repo_tree_for_ref(repo, ref),
+        path,
+        MAX_TABLE_BYTES,
+        session=session,
+        current_user=current_user,
     )
     return read_table_window(
         data, path, row_offset, row_limit, col_offset, col_limit
@@ -382,8 +322,13 @@ def get_project_dataset_hdf5(
     repo = get_repo(
         project=project, user=current_user, session=session, ref=ref
     )
-    data = _read_project_file(
-        project, repo, path, ref, MAX_TABLE_BYTES, session, current_user
+    data = app.projects.read_project_file(
+        project,
+        get_repo_tree_for_ref(repo, ref),
+        path,
+        MAX_TABLE_BYTES,
+        session=session,
+        current_user=current_user,
     )
     try:
         if key is None:

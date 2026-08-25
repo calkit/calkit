@@ -182,7 +182,6 @@ from app.storage import (
     make_data_fpath,
     remove_gcs_content_type,
 )
-from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
 from calkit.models.core import Dataset as CkDataset
 from calkit.models.core import Figure as CkFigure
@@ -191,6 +190,7 @@ from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
+from calkit.reproducibility import ReproCheck, check_reproducibility
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1920,7 +1920,6 @@ def get_project_dvc_output_text_diff(
         current_user=current_user,
         min_access_level="read",
     )
-    fs = get_object_fs()
 
     def read(ref: str) -> tuple[str, bool]:
         repo = get_repo(
@@ -1930,28 +1929,16 @@ def get_project_dvc_output_text_diff(
             ttl=ttl,
             ref=ref,
         )
-        tree = app.projects.get_repo_tree_for_ref(repo, ref)
-        outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-        out = outs.get(path)
-        if out is None or not out.get("md5"):
-            raise HTTPException(404, f"'{path}' is not DVC-tracked at {ref}")
-        size = out.get("size")
-        if size is not None and size > pdftext.MAX_PDF_BYTES:
-            raise HTTPException(413, f"'{path}' is too large to compare")
-        fpath = get_data_fpath_for_md5(
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            md5=out["md5"],
-            fs=fs,
-        )
-        if fpath is None:
-            raise HTTPException(
-                404, f"'{path}' has not been pushed to storage at {ref}"
+        try:
+            data = app.projects.read_project_file(
+                project,
+                app.projects.get_repo_tree_for_ref(repo, ref),
+                path,
+                pdftext.MAX_PDF_BYTES,
+                dvc_only=True,
             )
-        with fs.open(fpath, "rb") as f:
-            data = f.read(pdftext.MAX_PDF_BYTES + 1)
-        if len(data) > pdftext.MAX_PDF_BYTES:
-            raise HTTPException(413, f"'{path}' is too large to compare")
+        except HTTPException as e:
+            raise HTTPException(e.status_code, f"{e.detail} at {ref}")
         try:
             return pdftext.extract_text(data)
         except Exception as e:
@@ -4218,9 +4205,9 @@ def get_project_datasets(
     for row in project.datasets:
         ck = by_path.get(row.path, {})
         imported = ck.get("imported_from")
-        collected = ck.get("collected_by")
-        if isinstance(collected, dict):
-            collected = [collected]
+        created = ck.get("created_by")
+        if isinstance(created, dict):
+            created = [created]
         out.append(
             DatasetPublic.model_validate(
                 row,
@@ -4228,7 +4215,7 @@ def get_project_datasets(
                     imported_from_info=(
                         imported if isinstance(imported, dict) else None
                     ),
-                    collected_by=collected if collected else None,
+                    created_by=created if created else None,
                 ),
             )
         )
@@ -4414,8 +4401,8 @@ class GitSourcePost(BaseModel):
     path: str | None = None
 
 
-class CollectorPost(BaseModel):
-    """Someone credited with collecting a dataset.
+class CreatorPost(BaseModel):
+    """Someone credited with creating a dataset.
 
     Everything is optional here; that a person needs an email or an ORCID
     is enforced by the calkit model this is validated through, so the rule
@@ -4517,9 +4504,9 @@ class DatasetPost(BaseModel):
     tabular: bool | None = None
     # The pipeline stage that produces it, for data the project generates.
     stage: str | None = None
-    # Who collected or measured it for this project, which is what marks it
-    # as primary; primary data has no upstream source to point at.
-    collected_by: list[CollectorPost] | None = None
+    # Who created (collected or measured) it for this project, which is what
+    # marks it as primary; primary data has no upstream source to point at.
+    created_by: list[CreatorPost] | None = None
     imported_from: ImportedFromPost | None = None
 
 
@@ -4545,9 +4532,9 @@ def post_project_dataset(
         current_user=current_user,
         min_access_level="write",
     )
-    if req.collected_by and req.imported_from is not None:
+    if req.created_by and req.imported_from is not None:
         raise HTTPException(
-            422, "A dataset can be collected here or imported, not both"
+            422, "A dataset can be created here or imported, not both"
         )
     if req.imported_from is None and not (req.title and req.description):
         raise HTTPException(
@@ -4597,15 +4584,11 @@ def post_project_dataset(
         value = getattr(req, key)
         if value is not None:
             ds[key] = value
-    if req.collected_by:
-        # One collector stays a mapping rather than a one-item list, which is
+    if req.created_by:
+        # One creator stays a mapping rather than a one-item list, which is
         # what the docs show and what reads best in calkit.yaml.
-        collectors = [
-            c.model_dump(exclude_none=True) for c in req.collected_by
-        ]
-        ds["collected_by"] = (
-            collectors[0] if len(collectors) == 1 else collectors
-        )
+        creators = [c.model_dump(exclude_none=True) for c in req.created_by]
+        ds["created_by"] = creators[0] if len(creators) == 1 else creators
     if req.imported_from is not None:
         ds["imported_from"] = req.imported_from.to_ck_dict()
     # An import from a DOI, a URL, or a Git repo is fetched now, so the
@@ -4809,8 +4792,8 @@ def post_project_dataset(
         )
     if req.imported_from is not None:
         source = req.imported_from.kind()
-    elif req.collected_by:
-        source = "collected"
+    elif req.created_by:
+        source = "created"
     else:
         source = "stage" if req.stage else "existing"
     mixpanel.user_added_dataset(
@@ -4858,11 +4841,12 @@ def post_project_dataset_upload(
     title: Annotated[str, Form()],
     description: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
-    # Whoever collected the data, when it's primary data rather than a file
-    # from somewhere else; recorded as the dataset's provenance. The email
+    # Whoever created (collected or measured) the data, when it's primary
+    # data rather than a file from somewhere else; recorded as the
+    # dataset's provenance, the same way a figure's creator is. The email
     # is what identifies them; the name is a courtesy for readers.
-    collected_by: Optional[Annotated[str, Form()]] = Form(None),
-    collected_by_name: Optional[Annotated[str, Form()]] = Form(None),
+    created_by: Optional[Annotated[str, Form()]] = Form(None),
+    created_by_name: Optional[Annotated[str, Form()]] = Form(None),
     # Where the file is tracked. Unset applies the same rule as `calkit
     # add`: small files go in Git, large ones in DVC.
     storage: Optional[Annotated[Literal["git", "dvc"], Form()]] = Form(None),
@@ -4923,11 +4907,11 @@ def post_project_dataset_upload(
         logger.info(f"Git-adding {files_to_stage}")
         repo.git.add(files_to_stage)
     ds: dict[str, Any] = dict(path=path, title=title, description=description)
-    if collected_by:
-        person: dict[str, str] = dict(email=collected_by.strip())
-        if collected_by_name and collected_by_name.strip():
-            person["name"] = collected_by_name.strip()
-        ds["collected_by"] = [person]
+    if created_by:
+        person: dict[str, str] = dict(email=created_by.strip())
+        if created_by_name and created_by_name.strip():
+            person["name"] = created_by_name.strip()
+        ds["created_by"] = [person]
         try:
             CkDataset.model_validate(ds)
         except ValidationError as e:

@@ -160,7 +160,7 @@ def test_update_dataset(tmp_dir):
     assert len(ck_info["datasets"]) == 2
     # An import can't be added to a dataset someone collected
     ck_info["datasets"].append(
-        {"path": "data/raw.csv", "collected_by": {"email": "me@x.edu"}}
+        {"path": "data/raw.csv", "created_by": {"email": "me@x.edu"}}
     )
     calkit.save_calkit_info(ck_info)
     result = runner.invoke(

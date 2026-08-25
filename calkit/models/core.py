@@ -14,6 +14,8 @@ from pydantic import (
     ConfigDict,
     Discriminator,
     Field,
+    Tag,
+    computed_field,
     field_validator,
     model_validator,
 )
@@ -284,54 +286,6 @@ def _refuse_empty_people(key: str, v: object) -> object:
     return v
 
 
-class Dataset(_CalkitObject):
-    model_config = ConfigDict(
-        json_schema_extra=_exclusive_with_imported_from("collected_by")
-    )
-
-    collected_by: _Person | list[_Person] | None = Field(
-        default=None,
-        description=(
-            "Who collected or measured this data for this project, which is "
-            "what marks it as a primary artifact. Primary data has no "
-            "upstream source to point at, so saying who produced it is the "
-            "only way to tell it apart from data whose provenance was never "
-            "recorded."
-        ),
-    )
-    imported_from: ImportedFromType | None = Field(
-        default=None, description=_IMPORTED_FROM_DESCRIPTION
-    )
-
-    @field_validator("collected_by", mode="before")
-    @classmethod
-    def _check_collected_by(cls, v: object) -> object:
-        return _refuse_empty_people("collected_by", v)
-
-    @model_validator(mode="after")
-    def _check_collected_not_imported(self) -> Dataset:
-        # Data is either something you produced or something you got; a
-        # dataset claiming both has one of the two wrong.
-        if self.collected_by is not None and self.imported_from is not None:
-            raise ValueError(
-                "A dataset collected for this project cannot also be "
-                "imported from elsewhere"
-            )
-        return self
-
-
-class ImportedDataset(Dataset):
-    """A dataset known to have been imported, so ``imported_from`` is required.
-
-    Otherwise the same as ``Dataset``, which already takes ``imported_from``
-    and refuses a malformed one. ``ProjectInfo`` validates every dataset as
-    a ``Dataset``; this is for callers holding one they know was imported
-    and wanting that checked, e.g. the hub's create-dataset route.
-    """
-
-    imported_from: ImportedFromType
-
-
 class _AuthoredArtifact(_CalkitObject):
     """An artifact that may need attributing to whoever produced it.
 
@@ -342,19 +296,22 @@ class _AuthoredArtifact(_CalkitObject):
     as evidence while being just as hand-authored as the rest.
 
     Something made here can equally have been obtained from elsewhere, so
-    the same ``imported_from`` forms a dataset takes apply, and the two are
-    exclusive: made here or got from there, not both.
+    every artifact that can be attributed takes the same ``imported_from``
+    forms, and the two are exclusive: made here or got from there, not both.
     """
 
     model_config = ConfigDict(
         json_schema_extra=_exclusive_with_imported_from("created_by")
     )
-
     created_by: _Person | list[_Person] | None = Field(
         default=None,
         description=(
-            "Who made this primary artifact: one produced here rather than "
-            "by the pipeline or obtained from elsewhere. Each person "
+            "Who created this primary artifact here, e.g., collected or "
+            "measured the data, drew the figure, or took the photo, rather "
+            "than it being produced by the pipeline or obtained from "
+            "elsewhere. A primary artifact has no upstream source to point "
+            "at, so naming who produced it is the only way to tell it apart "
+            "from one whose provenance was never recorded. Each person "
             "discloses the generative AI tools they used via ``with_ai``."
         ),
     )
@@ -369,11 +326,34 @@ class _AuthoredArtifact(_CalkitObject):
 
     @model_validator(mode="after")
     def _check_not_both_made_and_imported(self) -> _AuthoredArtifact:
+        # Something is either what you produced or what you got; an entry
+        # claiming both has one of the two wrong.
         if self.created_by is not None and self.imported_from is not None:
             raise ValueError(
                 "An artifact made here cannot also be imported from elsewhere"
             )
         return self
+
+
+class Dataset(_AuthoredArtifact):
+    """A dataset, whether computed, collected here, or obtained elsewhere.
+
+    Data someone collected or measured for this project is a primary
+    artifact, and ``created_by`` names them, since there is nothing
+    upstream to point at. Data from elsewhere records ``imported_from``.
+    """
+
+
+class ImportedDataset(Dataset):
+    """A dataset known to have been imported, so ``imported_from`` is required.
+
+    Otherwise the same as ``Dataset``, which already takes ``imported_from``
+    and refuses a malformed one. ``ProjectInfo`` validates every dataset as
+    a ``Dataset``; this is for callers holding one they know was imported
+    and wanting that checked, e.g. the hub's create-dataset route.
+    """
+
+    imported_from: ImportedFromType
 
 
 class MiscArtifact(_AuthoredArtifact):
@@ -445,6 +425,13 @@ class Presentation(_CalkitObject):
 
 
 class Publication(_CalkitObject):
+    """A publication the project produced, or one it builds upon.
+
+    Whether it has been published is not written down but derived: a
+    publication of record has a DOI, so ``is_published`` is true exactly
+    when ``doi`` is set, and reads the same on the hub and in the CLI.
+    """
+
     # Note posters are presentations, not publications, since they are
     # presented rather than published, and carry no DOI or venue of record.
     # Optional since publications can be created without a kind, e.g., by
@@ -462,14 +449,37 @@ class Publication(_CalkitObject):
         ]
         | None
     ) = None
-    is_published: bool = False
-    doi: str | None = None
+    doi: str | None = Field(
+        default=None,
+        description=(
+            "This publication's own DOI, once it has one. Setting it is "
+            "what marks the publication as published."
+        ),
+    )
     # Distinct from ``doi`` above, which is this publication's own: a paper
     # pulled in from an archive to be cited or built upon records where it
     # was got from here, the same way a dataset does.
     imported_from: ImportedFromType | None = Field(
         default=None, description=_IMPORTED_FROM_DESCRIPTION
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_written_is_published(cls, data: object) -> object:
+        # ``is_published`` used to be a plain field, so older calkit.yaml
+        # files may still write it. It's accepted and dropped rather than
+        # refused: extra keys are ignored by default anyway, and the
+        # computed property below is the only reading of it. A written
+        # ``true`` with no DOI isn't honored, since a claim with nothing
+        # resolvable behind it is exactly what the derivation replaces.
+        if isinstance(data, dict):
+            data = {k: v for k, v in data.items() if k != "is_published"}
+        return data
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_published(self) -> bool:
+        return self.doi is not None
 
 
 class ReferenceFile(BaseModel):
@@ -1135,12 +1145,67 @@ class Timedelta(BaseModel):
 
 
 class Procedure(BaseModel):
-    """A procedure, typically executed by a human."""
+    """A procedure, typically executed by a human, written out in full."""
 
+    # Mirrors ``ProcedureFile``'s refusal of inline keys, so the published
+    # schema rejects the combination the validator does
+    model_config = ConfigDict(
+        json_schema_extra={"not": {"required": ["path"]}}
+    )
     title: str
     description: str
     steps: list[ProcedureStep]
     imported_from: str | None = None
+
+
+class ProcedureFile(BaseModel):
+    """A procedure kept in its own YAML or JSON file.
+
+    The file holds what an inline ``Procedure`` would: ``title``,
+    ``description``, and ``steps``. Nothing else can be given alongside
+    ``path``, so a procedure is defined in one place, not split between
+    calkit.yaml and the file it points at. ``calkit.procedures.load``
+    resolves one of these to the ``Procedure`` it names.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(
+        description=(
+            "Path to a YAML or JSON file holding the procedure, relative "
+            "to the project root."
+        )
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _refuse_inline_fields(cls, data: object) -> object:
+        # Said here rather than left to the extra-keys error, since that
+        # would read as if the inline keys were simply unknown
+        if isinstance(data, dict):
+            inline = sorted(set(data) & set(Procedure.model_fields))
+            if inline:
+                raise ValueError(
+                    "A procedure is either a path to a file or written "
+                    f"inline, not both (got path with {', '.join(inline)})"
+                )
+        return data
+
+
+def _procedure_form(v: object) -> str:
+    # Routes on the presence of ``path`` so the error for a bad entry comes
+    # from the one model it was meant for, rather than from both
+    if isinstance(v, dict):
+        return "file" if "path" in v else "inline"
+    return "file" if isinstance(v, ProcedureFile) else "inline"
+
+
+# What an entry under ``procedures`` can be: the procedure itself, or a
+# pointer to the file that holds it.
+ProcedureEntry = Annotated[
+    Annotated[ProcedureFile, Tag("file")]
+    | Annotated[Procedure, Tag("inline")],
+    Discriminator(_procedure_form),
+]
 
 
 class Release(BaseModel):
@@ -1508,10 +1573,10 @@ class ProjectInfo(BaseModel):
     notebooks: list[Notebook] = Field(
         default=[], description="The project's Jupyter notebooks."
     )
-    procedures: dict[str, Procedure] = Field(
+    procedures: dict[str, ProcedureEntry] = Field(
         default={},
         description="Procedures, typically executed by a human, keyed by "
-        "name.",
+        "name. Each is written inline or points at the file holding it.",
     )
     releases: dict[str, Release] = Field(
         default={},

@@ -81,13 +81,13 @@ export type BodyProjectsPostProjectDatasetUpload = {
    */
   file: Blob | File
   /**
-   * Collected By
+   * Created By
    */
-  collected_by?: string | null
+  created_by?: string | null
   /**
-   * Collected By Name
+   * Created By Name
    */
-  collected_by_name?: string | null
+  created_by_name?: string | null
   /**
    * Storage
    */
@@ -304,30 +304,6 @@ export type Collaborator = {
 }
 
 /**
- * CollectorPost
- *
- * Someone credited with collecting a dataset.
- *
- * Everything is optional here; that a person needs an email or an ORCID
- * is enforced by the calkit model this is validated through, so the rule
- * lives in one place rather than being restated and left to drift.
- */
-export type CollectorPost = {
-  /**
-   * Email
-   */
-  email?: string | null
-  /**
-   * Name
-   */
-  name?: string | null
-  /**
-   * Orcid
-   */
-  orcid?: string | null
-}
-
-/**
  * CommentHighlight
  *
  * Portable anchor for a highlighted region within an artifact.
@@ -469,6 +445,30 @@ export type ContentsItem = {
    * Dir Items
    */
   dir_items?: Array<ContentsItemBase> | null
+}
+
+/**
+ * CreatorPost
+ *
+ * Someone credited with creating a dataset.
+ *
+ * Everything is optional here; that a person needs an email or an ORCID
+ * is enforced by the calkit model this is validated through, so the rule
+ * lives in one place rather than being restated and left to drift.
+ */
+export type CreatorPost = {
+  /**
+   * Email
+   */
+  email?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Orcid
+   */
+  orcid?: string | null
 }
 
 /**
@@ -637,9 +637,9 @@ export type DatasetPost = {
    */
   stage?: string | null
   /**
-   * Collected By
+   * Created By
    */
-  collected_by?: Array<CollectorPost> | null
+  created_by?: Array<CreatorPost> | null
   imported_from?: ImportedFromPost | null
 }
 
@@ -650,7 +650,7 @@ export type DatasetPost = {
  *
  * The table keeps ``imported_from`` as a project path for the one kind of
  * import the hub can resolve itself; the structured origin (DOI, URL, Git
- * repo, project) and the collectors come straight from calkit.yaml, which
+ * repo, project) and the creators come straight from calkit.yaml, which
  * is where they're authored.
  */
 export type DatasetPublic = {
@@ -697,9 +697,9 @@ export type DatasetPublic = {
     [key: string]: unknown
   } | null
   /**
-   * Collected By
+   * Created By
    */
-  collected_by?: Array<{
+  created_by?: Array<{
     [key: string]: unknown
   }> | null
 }
@@ -1027,6 +1027,26 @@ export type DvcPipelineStage = {
    * Wdir
    */
   wdir?: string | null
+}
+
+/**
+ * EmailVerificationConfirm
+ */
+export type EmailVerificationConfirm = {
+  /**
+   * Code
+   */
+  code: string
+}
+
+/**
+ * EmailVerificationToken
+ */
+export type EmailVerificationToken = {
+  /**
+   * Token
+   */
+  token: string
 }
 
 /**
@@ -2148,6 +2168,11 @@ export type ItemLock = {
 
 /**
  * MapPathEntry
+ *
+ * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
+ *
+ * The kind is worked out from what ``src`` is when not given, which the
+ * calkit mapping models can't do on their own since they each fix one.
  */
 export type MapPathEntry = {
   /**
@@ -2999,6 +3024,42 @@ export type PresignedUrlAccess = {
   params?: {
     [key: string]: unknown
   } | null
+}
+
+/**
+ * ProjectActivityItem
+ *
+ * One thing that happened in a project.
+ *
+ * ``id`` is stable across reads (a commit hash or a row ID) so the
+ * frontend can key on it; ``link`` is a route relative to the project
+ * page, or None when there's nowhere better to send the reader.
+ */
+export type ProjectActivityItem = {
+  /**
+   * Kind
+   */
+  kind: "commit" | "dvc-push" | "collaborator" | "todo" | "comment" | "release"
+  /**
+   * Timestamp
+   */
+  timestamp: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Actor
+   */
+  actor?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Link
+   */
+  link?: string | null
 }
 
 /**
@@ -4752,6 +4813,14 @@ export type ReproCheck = {
    */
   n_presentations_no_import_or_stage?: number
   /**
+   * Misc Needing Provenance
+   */
+  misc_needing_provenance?: Array<string>
+  /**
+   * Scripts Not In Pipeline
+   */
+  scripts_not_in_pipeline?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -4785,6 +4854,14 @@ export type ReproCheck = {
    * N Presentations With Import Or Stage
    */
   readonly n_presentations_with_import_or_stage: number
+  /**
+   * N Misc Needing Provenance
+   */
+  readonly n_misc_needing_provenance: number
+  /**
+   * N Scripts Not In Pipeline
+   */
+  readonly n_scripts_not_in_pipeline: number
   /**
    * N Stages Without Env
    */
@@ -5184,6 +5261,33 @@ export type TableText = {
 }
 
 /**
+ * TemplatePublic
+ *
+ * A template the hub can start a file or project from.
+ *
+ * ``name`` is what ``calkit new`` and the publication routes take, e.g.,
+ * ``latex/article``; the rest is for showing it in a list.
+ */
+export type TemplatePublic = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+}
+
+/**
  * TextDiff
  */
 export type TextDiff = {
@@ -5429,6 +5533,10 @@ export type UserPublic = {
    * Github Username
    */
   github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
   subscription: UserSubscription | null
 }
 
@@ -6090,6 +6198,14 @@ export type ReproCheckWritable = {
    */
   n_presentations_no_import_or_stage?: number
   /**
+   * Misc Needing Provenance
+   */
+  misc_needing_provenance?: Array<string>
+  /**
+   * Scripts Not In Pipeline
+   */
+  scripts_not_in_pipeline?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
@@ -6141,6 +6257,10 @@ export type UserPublicWritable = {
    * Github Username
    */
   github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
   subscription: UserSubscriptionWritable | null
 }
 
@@ -6784,6 +6904,77 @@ export type UpdateCurrentUserPasswordResponses = {
 
 export type UpdateCurrentUserPasswordResponse =
   UpdateCurrentUserPasswordResponses[keyof UpdateCurrentUserPasswordResponses]
+
+export type PostUserEmailVerificationData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/email-verification"
+}
+
+export type PostUserEmailVerificationResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserEmailVerificationResponse =
+  PostUserEmailVerificationResponses[keyof PostUserEmailVerificationResponses]
+
+export type PostUserEmailVerificationConfirmData = {
+  body: EmailVerificationConfirm
+  path?: never
+  query?: never
+  url: "/user/email-verification/confirm"
+}
+
+export type PostUserEmailVerificationConfirmErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserEmailVerificationConfirmError =
+  PostUserEmailVerificationConfirmErrors[keyof PostUserEmailVerificationConfirmErrors]
+
+export type PostUserEmailVerificationConfirmResponses = {
+  /**
+   * Successful Response
+   */
+  200: UserPublic
+}
+
+export type PostUserEmailVerificationConfirmResponse =
+  PostUserEmailVerificationConfirmResponses[keyof PostUserEmailVerificationConfirmResponses]
+
+export type PostVerifyEmailData = {
+  body: EmailVerificationToken
+  path?: never
+  query?: never
+  url: "/verify-email"
+}
+
+export type PostVerifyEmailErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostVerifyEmailError =
+  PostVerifyEmailErrors[keyof PostVerifyEmailErrors]
+
+export type PostVerifyEmailResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostVerifyEmailResponse =
+  PostVerifyEmailResponses[keyof PostVerifyEmailResponses]
 
 export type RegisterUserData = {
   body: UserRegister
@@ -7516,6 +7707,39 @@ export type TestEmailResponses = {
 }
 
 export type TestEmailResponse = TestEmailResponses[keyof TestEmailResponses]
+
+export type GetTemplatesData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Kind
+     */
+    kind?: string | null
+  }
+  url: "/templates"
+}
+
+export type GetTemplatesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetTemplatesError = GetTemplatesErrors[keyof GetTemplatesErrors]
+
+export type GetTemplatesResponses = {
+  /**
+   * Response Misc-Get Templates
+   *
+   * Successful Response
+   */
+  200: Array<TemplatePublic>
+}
+
+export type GetTemplatesResponse =
+  GetTemplatesResponses[keyof GetTemplatesResponses]
 
 export type GetDiscountCodeData = {
   body?: never
@@ -12195,6 +12419,49 @@ export type GetProjectDatasetHdf5Responses = {
 
 export type GetProjectDatasetHdf5Response =
   GetProjectDatasetHdf5Responses[keyof GetProjectDatasetHdf5Responses]
+
+export type GetProjectActivityData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/activity"
+}
+
+export type GetProjectActivityErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectActivityError =
+  GetProjectActivityErrors[keyof GetProjectActivityErrors]
+
+export type GetProjectActivityResponses = {
+  /**
+   * Response Projects-Get Project Activity
+   *
+   * Successful Response
+   */
+  200: Array<ProjectActivityItem>
+}
+
+export type GetProjectActivityResponse =
+  GetProjectActivityResponses[keyof GetProjectActivityResponses]
 
 export type GetReferencesData = {
   body?: never

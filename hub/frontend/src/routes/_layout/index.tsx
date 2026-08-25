@@ -2,6 +2,7 @@ import { ExternalLinkIcon } from "@chakra-ui/icons"
 import {
   Box,
   Button,
+  Code,
   Container,
   Flex,
   Heading,
@@ -220,19 +221,19 @@ function EmptyState() {
 const LOOP = [
   {
     title: "Read",
-    body: "Your Zotero library becomes the project's bibliography, and stays in step as you add references.",
+    body: "Your Zotero collection becomes the project's bibliography, and is able to sync bidirectionally as you add references.",
   },
   {
     title: "Collect",
-    body: "Type data in, upload it, or import it by DOI, URL, or repo. Every dataset records where it came from.",
+    body: "Type data in, upload it, or import it by DOI, URL, or Git repo. Every dataset records where it came from.",
   },
   {
     title: "Analyze",
-    body: "Plot in the browser, then save as a pipeline stage with a pinned environment. Figures trace back to code and data.",
+    body: "Plot in the browser, then save as a pipeline stage with a precisely defined environment. Figures trace back to code and data.",
   },
   {
     title: "Write",
-    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked so its figures never go stale.",
+    body: "A LaTeX paper that rebuilds from the pipeline, or the Overleaf project you already have, linked so its figures and results never go stale.",
   },
 ]
 
@@ -287,16 +288,22 @@ function LandingPage() {
       <SimpleGrid columns={{ base: 1, md: 3 }} spacing={6} mb={14}>
         {[
           {
-            title: "Nothing gets locked in",
-            body: "Your project is a Git repo with a calkit.yaml in it. The pipeline, environments, and figures are all declared in files you own.",
+            title: "No lock-in",
+            body: (
+              <>
+                Your project is a Git/DVC repo with a <Code>calkit.yaml</Code>{" "}
+                file in it. The pipeline, environments, and figures are all
+                declared in files you own.
+              </>
+            ),
           },
           {
             title: "It all works offline",
-            body: "The CLI runs pipelines, builds environments, and manages data on your machine. This site is where the work becomes visible to everyone else.",
+            body: "The CLI runs pipelines, builds environments, and manages data on your machine just as easily as the web app does.",
           },
           {
-            title: "Best practice, without the setup",
-            body: "Environments, a DAG, versioned data, and a paper that rebuilds itself: the things a careful researcher wires together by hand, ready to go.",
+            title: "Best practices, without the DIY part",
+            body: "Environment management, a workflow system, versioned data, and a paper that rebuilds itself: components typically integrated manually, ready to go from day one.",
           },
         ].map((item) => (
           <Box key={item.title}>
@@ -314,8 +321,7 @@ function LandingPage() {
           Where are you starting?
         </Heading>
         <Text color="ui.dim" fontSize="sm" mb={4}>
-          Pick the one that sounds like you. You'll sign up on the way, and come
-          back to where you left off.
+          Pick the one that best describes your current situation.
         </Text>
         <StartPaths source="landing" />
       </Box>

@@ -53,7 +53,7 @@ function ProjectApps() {
       <NoArtifactFound
         icon={MdOutlineDashboard}
         title="No apps found"
-        hint="An app lets others explore your findings interactively, e.g. to make predictions from a model the project produced."
+        hint="An app lets others explore your findings interactively, e.g., to make predictions from a model the project produced."
         docsUrl="https://docs.calkit.org/apps/"
       />
     )

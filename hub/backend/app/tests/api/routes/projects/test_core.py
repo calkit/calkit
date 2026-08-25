@@ -3830,16 +3830,16 @@ def test_post_project_dataset_provenance(
     )
     assert resp.status_code == 200, resp.text
     assert written[-1]["imported_from"] == {"url": "https://example.org/d.csv"}
-    # Data collected here: needs a title and description, and the path has
+    # Data created here: needs a title and description, and the path has
     # to already exist, since nothing will fetch it.
     resp = post(
-        {"path": "data/mine.csv", "collected_by": [{"email": "me@x.edu"}]}
+        {"path": "data/mine.csv", "created_by": [{"email": "me@x.edu"}]}
     )
     assert resp.status_code == 400
     resp = post(
         {
             "path": "data/mine.csv",
-            "collected_by": [{"email": "me@x.edu"}],
+            "created_by": [{"email": "me@x.edu"}],
             "title": "Mine",
             "description": "Collected in the lab",
         }
@@ -3850,15 +3850,15 @@ def test_post_project_dataset_provenance(
     resp = post(
         {
             "path": "data/mine.csv",
-            "collected_by": [{"email": "me@x.edu"}],
+            "created_by": [{"email": "me@x.edu"}],
             "title": "Mine",
             "description": "Collected in the lab",
         },
         existing_path=True,
     )
     assert resp.status_code == 200, resp.text
-    # One collector reads better as a mapping than a one-item list.
-    assert written[-1]["collected_by"] == {"email": "me@x.edu"}
+    # One creator reads better as a mapping than a one-item list.
+    assert written[-1]["created_by"] == {"email": "me@x.edu"}
     assert "imported_from" not in written[-1]
     # Produced by a stage: doesn't exist until the pipeline runs.
     resp = post(
@@ -3885,7 +3885,7 @@ def test_post_project_dataset_provenance(
     resp = post(
         {
             "path": "data/both.csv",
-            "collected_by": [{"email": "me@x.edu"}],
+            "created_by": [{"email": "me@x.edu"}],
             "imported_from": {"doi": "10.1/x"},
         }
     )

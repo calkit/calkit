@@ -11,6 +11,8 @@ from calkit.models.core import (
     Figure,
     ImportedDataset,
     MiscArtifact,
+    Procedure,
+    ProcedureFile,
     ProjectInfo,
     Publication,
 )
@@ -29,7 +31,7 @@ def test_dataset_provenance():
     info = ProjectInfo.model_validate(
         {
             "datasets": [
-                {"path": "a.csv", "collected_by": {"email": "me@x.edu"}},
+                {"path": "a.csv", "created_by": {"email": "me@x.edu"}},
                 {
                     "path": "b.csv",
                     "imported_from": {"doi": "10.5281/zenodo.1"},
@@ -80,7 +82,7 @@ def test_dataset_provenance():
                 "datasets": [
                     {
                         "path": "x",
-                        "collected_by": {"email": "m@x.edu"},
+                        "created_by": {"email": "m@x.edu"},
                         "imported_from": {"doi": "10.1234/x"},
                     }
                 ]
@@ -111,7 +113,7 @@ def test_dataset_provenance():
     # An empty list claims nobody, which would count as provenance while
     # naming no one.
     with pytest.raises(ValidationError, match="empty list"):
-        Dataset.model_validate({"path": "x", "collected_by": []})
+        Dataset.model_validate({"path": "x", "created_by": []})
     with pytest.raises(ValidationError, match="empty list"):
         Figure.model_validate({"path": "x", "created_by": []})
     # A DOI is stored bare however it was written, and anything that isn't
@@ -151,7 +153,7 @@ def test_dataset_provenance():
         "datasets": [ds.model_dump(exclude_none=True)],
         "figures": [fig.model_dump(exclude_none=True)],
     }
-    assert "collected_by" not in dumped["datasets"][0]
+    assert "created_by" not in dumped["datasets"][0]
     info = _roundtrip(dumped)
     assert info.datasets[0] == ds
     assert info.figures[0] == fig
@@ -171,17 +173,17 @@ def test_person_orcid():
         "  0000-0002-1825-0097  ",
     ]:
         ds = Dataset.model_validate(
-            {"path": "a", "collected_by": {"email": "m@x.edu", "orcid": given}}
+            {"path": "a", "created_by": {"email": "m@x.edu", "orcid": given}}
         )
-        assert ds.collected_by.orcid == expected
+        assert ds.created_by.orcid == expected
     # The trailing character is an ISO 7064 MOD 11-2 check digit, which
     # can be X; one that doesn't match the other digits is a typo, not an
     # ORCID.
     for good in ["0000-0002-1694-233X", "0000-0002-1694-233x"]:
         assert (
             Dataset.model_validate(
-                {"path": "a", "collected_by": {"orcid": good}}
-            ).collected_by.orcid
+                {"path": "a", "created_by": {"orcid": good}}
+            ).created_by.orcid
             == "https://orcid.org/0000-0002-1694-233X"
         )
     for bad in [
@@ -196,7 +198,7 @@ def test_person_orcid():
             Dataset.model_validate(
                 {
                     "path": "a",
-                    "collected_by": {"email": "m@x.edu", "orcid": bad},
+                    "created_by": {"email": "m@x.edu", "orcid": bad},
                 }
             )
     # An email has to look like one, lightly: an empty string or a bare
@@ -204,12 +206,12 @@ def test_person_orcid():
     for bad_email in ["", "   ", "me", "@x.edu", "me@"]:
         with pytest.raises(ValidationError):
             Dataset.model_validate(
-                {"path": "a", "collected_by": {"email": bad_email}}
+                {"path": "a", "created_by": {"email": bad_email}}
             )
     assert (
         Dataset.model_validate(
-            {"path": "a", "collected_by": {"email": " me@x.edu "}}
-        ).collected_by.email
+            {"path": "a", "created_by": {"email": " me@x.edu "}}
+        ).created_by.email
         == "me@x.edu"
     )
     # Several collectors is the normal case for collaborative work, and
@@ -217,19 +219,19 @@ def test_person_orcid():
     ds = Dataset.model_validate(
         {
             "path": "a",
-            "collected_by": [
+            "created_by": [
                 {"email": "a@x.edu", "orcid": "0000-0002-1825-0097"},
                 {"orcid": "0000-0001-5109-3700"},
                 {"email": "c@x.edu", "name": "C Person"},
             ],
         }
     )
-    assert len(ds.collected_by) == 3
-    assert ds.collected_by[1].email is None
+    assert len(ds.created_by) == 3
+    assert ds.created_by[1].email is None
     # A name alone doesn't say which of the several people with it this is.
     with pytest.raises(ValidationError):
         Dataset.model_validate(
-            {"path": "a", "collected_by": {"name": "Just A Name"}}
+            {"path": "a", "created_by": {"name": "Just A Name"}}
         )
 
 
@@ -304,8 +306,8 @@ def test_figure_attribution():
     # The published schema refuses the combination too, rather than
     # advertising a key the validator then rejects.
     for model, made_key in [
-        (Dataset, "collected_by"),
-        (ImportedDataset, "collected_by"),
+        (Dataset, "created_by"),
+        (ImportedDataset, "created_by"),
         (Figure, "created_by"),
         (MiscArtifact, "created_by"),
     ]:
@@ -318,17 +320,17 @@ def test_figure_attribution():
     ds = Dataset.model_validate(
         {
             "path": "a.csv",
-            "collected_by": {"email": "m@x.edu", "with_ai": "Claude Opus 5"},
+            "created_by": {"email": "m@x.edu", "with_ai": "Claude Opus 5"},
         }
     )
-    assert ds.collected_by.with_ai == "Claude Opus 5"
+    assert ds.created_by.with_ai == "Claude Opus 5"
     # A mistyped key is refused rather than dropped, so an author can't
     # think they recorded something they didn't.
     with pytest.raises(ValidationError):
         Dataset.model_validate(
             {
                 "path": "a.csv",
-                "collected_by": {"email": "m@x.edu", "oricd": "x"},
+                "created_by": {"email": "m@x.edu", "oricd": "x"},
             }
         )
 
@@ -383,3 +385,74 @@ def test_misc_artifact():
         MiscArtifact.model_validate({"path": "x", "stage": "make-it"}).stage
         == "make-it"
     )
+
+
+def test_publication_is_published():
+    # Derived from the DOI rather than written down, so the hub and the CLI
+    # can't disagree with the reference metadata
+    assert not Publication.model_validate({"path": "paper.pdf"}).is_published
+    pub = Publication.model_validate({"path": "paper.pdf", "doi": "10.1234/x"})
+    assert pub.is_published
+    assert pub.model_dump()["is_published"] is True
+    # It was a plain field once, so a calkit.yaml still writing it is read
+    # without complaint, but the DOI decides
+    assert not Publication.model_validate(
+        {"path": "paper.pdf", "is_published": True}
+    ).is_published
+    assert "is_published" not in Publication.model_fields
+    assert "is_published" not in Publication.model_json_schema()["properties"]
+    assert (
+        "is_published"
+        in Publication.model_json_schema(mode="serialization")["properties"]
+    )
+    info = _roundtrip(
+        {
+            "publications": [
+                {"path": "paper.pdf", "doi": "10.1234/x"},
+                {"path": "draft.pdf", "is_published": True},
+            ]
+        }
+    )
+    assert [p.is_published for p in info.publications] == [True, False]
+
+
+def test_procedure_entries():
+    inline = {
+        "title": "Warm up",
+        "description": "Get the rig ready.",
+        "steps": [{"summary": "Turn it on"}],
+    }
+    info = ProjectInfo.model_validate(
+        {
+            "procedures": {
+                "in-file": {"path": "procedures/warm-up.yaml"},
+                "inline": inline,
+            }
+        }
+    )
+    assert isinstance(info.procedures["in-file"], ProcedureFile)
+    assert isinstance(info.procedures["inline"], Procedure)
+    # One or the other, and each form checked as itself: an entry with a
+    # path is refused for carrying inline keys, not for missing them
+    for bad in [
+        {"path": "x.yaml", "title": "T"},
+        {"path": "x.yaml", "steps": []},
+        {"path": "x.yaml", "nonsense": 1},
+        {"title": "T"},
+        {},
+    ]:
+        with pytest.raises(ValidationError):
+            ProjectInfo.model_validate({"procedures": {"p": bad}})
+    with pytest.raises(ValidationError, match="not both"):
+        ProjectInfo.model_validate(
+            {"procedures": {"p": {"path": "x.yaml", "steps": []}}}
+        )
+    # The published schema says the same thing
+    schema = ProjectInfo.model_json_schema()
+    entry = schema["properties"]["procedures"]["additionalProperties"]
+    assert [ref["$ref"] for ref in entry["oneOf"]] == [
+        "#/$defs/ProcedureFile",
+        "#/$defs/Procedure",
+    ]
+    assert schema["$defs"]["ProcedureFile"]["additionalProperties"] is False
+    assert schema["$defs"]["Procedure"]["not"] == {"required": ["path"]}

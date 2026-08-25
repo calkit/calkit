@@ -187,20 +187,20 @@ def test_new_dataset(tmp_dir):
             "Raw data",
             "--description",
             "Measured by hand.",
-            "--collected-by-email",
+            "--created-by-email",
             "me@x.edu",
-            "--collected-by-orcid",
+            "--created-by-orcid",
             "0000-0002-1825-0097",
         ]
     )
     ck_info = calkit.load_calkit_info()
     ds = ck_info["datasets"][0]
     assert ds["path"] == "data/raw.csv"
-    assert ds["collected_by"] == {
+    assert ds["created_by"] == {
         "email": "me@x.edu",
         "orcid": "https://orcid.org/0000-0002-1825-0097",
     }
-    assert "with_ai" not in ds["collected_by"]
+    assert "with_ai" not in ds["created_by"]
     # The disclosure goes on the person, as a list when there are several
     subprocess.check_call(
         [
@@ -212,29 +212,29 @@ def test_new_dataset(tmp_dir):
             "Transcribed",
             "--description",
             "Transcribed from sheets.",
-            "--collected-by-orcid",
+            "--created-by-orcid",
             "0000-0002-1694-233X",
-            "--collected-with-ai",
+            "--created-with-ai",
             "Claude Opus 5",
-            "--collected-with-ai",
+            "--created-with-ai",
             "Copilot",
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert ck_info["datasets"][1]["collected_by"] == {
+    assert ck_info["datasets"][1]["created_by"] == {
         "orcid": "https://orcid.org/0000-0002-1694-233X",
         "with_ai": ["Claude Opus 5", "Copilot"],
     }
     # A mistyped ORCID, or a tool with nobody to answer for it, is refused
     for bad_opts in [
         [
-            "--collected-by-email",
+            "--created-by-email",
             "me@x.edu",
-            "--collected-by-orcid",
+            "--created-by-orcid",
             "0000-0002-1825-009X",
         ],
-        ["--collected-with-ai", "Claude Opus 5"],
-        ["--collected-by-email", "not-an-email"],
+        ["--created-with-ai", "Claude Opus 5"],
+        ["--created-by-email", "not-an-email"],
     ]:
         with pytest.raises(subprocess.CalledProcessError):
             subprocess.check_call(
@@ -266,7 +266,7 @@ def test_new_dataset(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert "collected_by" not in ck_info["datasets"][2]
+    assert "created_by" not in ck_info["datasets"][2]
 
 
 def test_new_result(tmp_dir):

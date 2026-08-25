@@ -224,14 +224,8 @@ def test_imported_dataset_reads_from_source_project(
             side_effect=fake_get_project,
         ),
         patch("app.api.routes.projects.datasets.get_repo", return_value=repo),
-        patch(
-            "app.api.routes.projects.datasets.get_data_fpath_for_md5",
-            side_effect=fake_fpath,
-        ),
-        patch(
-            "app.api.routes.projects.datasets.get_object_fs",
-            return_value=FakeFS(),
-        ),
+        patch("app.dvc.get_data_fpath_for_md5", side_effect=fake_fpath),
+        patch("app.projects.get_object_fs", return_value=FakeFS()),
     ):
         resp = client.get(f"{BASE}/data/imported.csv")
     assert resp.status_code == 200, resp.text

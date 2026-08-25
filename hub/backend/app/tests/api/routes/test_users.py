@@ -641,14 +641,15 @@ def _github_auth(client: TestClient, headers: dict[str, str], username: str):
         )
 
 
-def test_post_user_github_auth_renames_only_on_first_link(
+def test_post_user_github_auth_links_without_renaming(
     client: TestClient, db: Session
 ) -> None:
     from app.tests import authentication_token_from_email
 
     suffix = uuid.uuid4().hex[:8]
-    # An account with no GitHub yet takes the GitHub name when it's free and
-    # nothing points at the old one.
+    # Linking records the GitHub name and nothing else: the account name
+    # is what project URLs and object storage paths are keyed by, so it
+    # never changes, even when it differs and the GitHub name is free.
     fresh = users.create_user(
         session=db,
         user_create=UserCreate(
@@ -665,33 +666,158 @@ def test_post_user_github_auth_renames_only_on_first_link(
     assert r.status_code == 200, r.text
     db.refresh(fresh)
     assert fresh.account.github_name == username
-    assert fresh.account.name == username.lower()
-    # An account already linked keeps its name on reauthorization, even
-    # though it differs from the GitHub login and owns no projects: a token
-    # refresh is not the moment to rename someone.
-    linked = users.create_user(
-        session=db,
-        user_create=UserCreate(
-            email=f"linked-{suffix}@example.com",
-            password="testpassword123",
-            account_name=f"keepme{suffix}",
-            github_username=f"ghlinked{suffix}",
-        ),
-    )
-    headers = authentication_token_from_email(
-        client=client, email=linked.email, db=db
-    )
-    r = _github_auth(client, headers, f"ghlinked{suffix}")
+    assert fresh.account.name == f"fresh{suffix}"
+    # Reauthorizing with the same identity is fine and changes nothing.
+    r = _github_auth(client, headers, username)
     assert r.status_code == 200, r.text
-    db.refresh(linked)
-    assert linked.account.name == f"keepme{suffix}"
-    assert linked.account.github_name == f"ghlinked{suffix}"
+    db.refresh(fresh)
+    assert fresh.account.name == f"fresh{suffix}"
     # A different GitHub identity can't replace the one already linked.
     r = _github_auth(client, headers, f"ghother{suffix}")
     assert r.status_code == 400
     # And one that belongs to another account is refused outright.
-    r = _github_auth(client, headers, username)
+    other = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"other-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"other{suffix}",
+        ),
+    )
+    other_headers = authentication_token_from_email(
+        client=client, email=other.email, db=db
+    )
+    r = _github_auth(client, other_headers, username)
     assert r.status_code == 409
+
+
+def test_email_verification(client: TestClient, db: Session) -> None:
+    from datetime import timedelta
+
+    from app.core import utcnow
+    from app.security import (
+        generate_email_verification_token,
+        generate_password_reset_token,
+    )
+    from app.tests import authentication_token_from_email
+
+    suffix = uuid.uuid4().hex[:8]
+    user = users.create_user(
+        session=db,
+        user_create=UserCreate(
+            email=f"verify-{suffix}@example.com",
+            password="testpassword123",
+            account_name=f"verify{suffix}",
+        ),
+    )
+    headers = authentication_token_from_email(
+        client=client, email=user.email, db=db
+    )
+    base = f"{settings.API_V1_STR}/user/email-verification"
+    # A password signup starts out unverified
+    r = client.get(f"{settings.API_V1_STR}/user", headers=headers)
+    assert r.json()["email_verified"] is False
+    # Nothing to confirm before a code has been sent
+    r = client.post(
+        f"{base}/confirm", json={"code": "123456"}, headers=headers
+    )
+    assert r.status_code == 400
+    sent: list[dict] = []
+    with (
+        patch(
+            "app.api.routes.users.send_email",
+            side_effect=lambda **kw: sent.append(kw),
+        ),
+        patch("app.config.settings.SMTP_HOST", "smtp.example.com"),
+        patch("app.config.settings.EMAILS_FROM_EMAIL", "noreply@example.com"),
+    ):
+        r = client.post(base, headers=headers)
+        assert r.status_code == 200, r.text
+        assert len(sent) == 1
+        assert sent[0]["email_to"] == user.email
+        # The message carries the code and a link with a token
+        code = sent[0]["subject"].split()[-1]
+        assert len(code) == 6 and code.isdigit()
+        assert code in sent[0]["html_content"]
+        assert "/verify-email?token=" in sent[0]["html_content"]
+        # Only the hash is stored
+        db.refresh(user)
+        assert user.email_verification is not None
+        assert code not in user.email_verification.code_hash
+        # Asking again right away is refused
+        r = client.post(base, headers=headers)
+        assert r.status_code == 429
+    # A wrong code doesn't verify, and is counted
+    wrong = "000000" if code != "000000" else "111111"
+    r = client.post(f"{base}/confirm", json={"code": wrong}, headers=headers)
+    assert r.status_code == 400
+    db.refresh(user)
+    assert user.email_verification is not None
+    assert user.email_verification.attempts == 1
+    assert user.email_verified is False
+    # A malformed code is rejected before it counts
+    r = client.post(f"{base}/confirm", json={"code": "12"}, headers=headers)
+    assert r.status_code == 422
+    # The right code verifies and comes back on the user
+    r = client.post(f"{base}/confirm", json={"code": code}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["email_verified"] is True
+    db.refresh(user)
+    assert user.email_verified_at is not None
+    assert user.email_verification is None
+    # Once verified there's nothing more to send
+    r = client.post(base, headers=headers)
+    assert r.status_code == 400
+    # An expired code is thrown away rather than accepted
+    user.email_verified_at = None
+    db.add(user)
+    db.commit()
+    code, _ = users.create_email_verification(session=db, user=user)
+    assert user.email_verification is not None
+    user.email_verification.expires = utcnow() - timedelta(minutes=1)
+    db.add(user.email_verification)
+    db.commit()
+    r = client.post(f"{base}/confirm", json={"code": code}, headers=headers)
+    assert r.status_code == 400
+    assert "expired" in r.json()["detail"]
+    db.refresh(user)
+    assert user.email_verification is None
+    # Too many wrong guesses discards the code
+    code, _ = users.create_email_verification(session=db, user=user)
+    for _ in range(users.EMAIL_VERIFICATION_MAX_ATTEMPTS):
+        r = client.post(
+            f"{base}/confirm",
+            json={"code": "000000" if code != "000000" else "111111"},
+            headers=headers,
+        )
+        assert r.status_code == 400
+    db.refresh(user)
+    assert user.email_verification is None
+    r = client.post(f"{base}/confirm", json={"code": code}, headers=headers)
+    assert r.status_code == 400
+    # The link in the email verifies without being logged in, but only a
+    # verification token for the address the user still has
+    verify_url = f"{settings.API_V1_STR}/verify-email"
+    r = client.post(
+        verify_url, json={"token": generate_password_reset_token(user.email)}
+    )
+    assert r.status_code == 400
+    stale = generate_email_verification_token(
+        user_id=user.id, email=f"old-{suffix}@example.com"
+    )
+    r = client.post(verify_url, json={"token": stale})
+    assert r.status_code == 400
+    r = client.post(verify_url, json={"token": "not-a-token"})
+    assert r.status_code == 400
+    token = generate_email_verification_token(
+        user_id=user.id, email=user.email
+    )
+    r = client.post(verify_url, json={"token": token})
+    assert r.status_code == 200, r.text
+    db.refresh(user)
+    assert user.email_verified is True
+    r = client.get(f"{settings.API_V1_STR}/user", headers=headers)
+    assert r.json()["email_verified"] is True
 
 
 def test_onboarding_flags_round_trip(

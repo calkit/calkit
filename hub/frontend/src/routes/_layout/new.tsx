@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Checkbox,
+  Code,
   Flex,
   FormControl,
   FormErrorMessage,
@@ -235,11 +236,11 @@ function ChoosePathStep({
         What are we starting with?
       </Heading>
       <Text color="ui.dim" mb={6}>
-        A research project moves between reading, collecting data, analyzing it,
-        and writing it up, and the pieces usually live in four different places.
-        Calkit puts them in one project that stays a plain Git repo, so you can
-        move between them without leaving. Nothing you set up here is trapped in
-        Calkit, and all of it works offline.
+        A research project switches between lit review, data collection,
+        analysis, and writing, and the pieces usually live in four different
+        places. Calkit keeps them all together in one project repository, so you
+        can move between them without context switching. Nothing you set up here
+        is trapped or hidden, and all of it works offline.
       </Text>
       <StartPaths onSelect={onSelect} selected={path} source="wizard" />
     </>
@@ -491,7 +492,7 @@ function NameItStep({
               It's in a GitHub repo
             </Radio>
             <Radio value="upload" colorScheme="teal">
-              It's only on my machine: upload a zip of the folder
+              It's only on my machine; upload a zip of the folder
             </Radio>
           </Stack>
         </RadioGroup>
@@ -534,8 +535,8 @@ function NameItStep({
           />
           <FormHelperText>
             Up to 50 MB. A new GitHub repo is created for it, and the contents
-            land as the first commit. Leave large data out and add it with DVC
-            once the project is set up.
+            become the first commit. Leave large data files out and add them
+            with DVC once the project is set up.
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -668,8 +669,8 @@ function NameItStep({
             Make it public
           </Checkbox>
           <FormHelperText>
-            A private project can be made public later. Going the other way
-            isn't possible, so leave it private if you're unsure.
+            A private project can be made public later. Going the other way is
+            more complicated, so leave it private if you're not sure.
           </FormHelperText>
         </FormControl>
       ) : null}
@@ -953,7 +954,7 @@ function DataStep({
           Continue
         </Button>
         <Text fontSize="sm" color="ui.dim">
-          You can add more from the datasets page any time.
+          You can add more from the datasets page at any time.
         </Text>
       </HStack>
       {dataOpen === "enter" || dataOpen === "import" ? (
@@ -1210,8 +1211,8 @@ function PaperStep({
             <Heading size="sm">Overleaf</Heading>
           </Flex>
           <Text fontSize="sm" color="ui.dim" mb={4}>
-            Link the project you're writing in. Its .tex lives in a subfolder of
-            your repo and syncs both ways.
+            Link the project you're currently writing in. Its <Code>.tex</Code>{" "}
+            file lives in a subfolder of your repo and syncs both ways.
           </Text>
           <Button
             size="sm"
@@ -1233,8 +1234,8 @@ function PaperStep({
             <Heading size="sm">Zotero</Heading>
           </Flex>
           <Text fontSize="sm" color="ui.dim" mb={4}>
-            Import a collection into the project's .bib file, and keep it in
-            step as you add references.
+            Import a collection into a <Code>.bib</Code> file in the project
+            repo and keep it synced as you add references in either system.
           </Text>
           <Button size="sm" variant="outline" onClick={zoteroModal.onOpen}>
             Import a collection
@@ -1287,10 +1288,9 @@ function MachineStep({
         Get it onto your machine
       </Heading>
       <Text color="ui.dim" mb={6}>
-        This is where the work happens. The command line interface (CLI) runs
-        the pipeline, manages environments, and moves results between your
-        machine and here, and every bit of it works offline using free and
-        open-source tools.
+        The command line interface (CLI) runs the pipeline, manages
+        environments, and moves results between your machine and here, and every
+        bit of it works offline using free and open-source tools.
       </Text>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>
@@ -1314,10 +1314,6 @@ function MachineStep({
           2. Clone the project
         </Text>
         <CommandBlock command={`calkit clone ${accountName}/${projectName}`} />
-        <Text fontSize="sm" color="ui.dim" mt={2}>
-          The first run opens a browser to sign you in, so there's no separate
-          login step.
-        </Text>
       </Box>
       <Box mb={5}>
         <Text fontWeight="semibold" mb={2}>
@@ -1325,8 +1321,8 @@ function MachineStep({
         </Text>
         <CommandBlock command='calkit run -m "Run pipeline"' />
         <Text fontSize="sm" color="ui.dim" mt={2}>
-          The message tells it to push what the run produced back here, where
-          the project page picks it up.
+          The <Code>-m</Code> flag saves results with a message and pushes them
+          back up here.
         </Text>
       </Box>
       <Flex

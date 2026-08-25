@@ -302,7 +302,12 @@ function Presentations() {
               <NoArtifactFound
                 icon={FiMonitor}
                 title="No presentations found"
-                hint="Declare slides or a poster in calkit.yaml to show them here."
+                hint={
+                  <>
+                    Declare slides or a poster in the <Code>presentations</Code>{" "}
+                    section of <Code>calkit.yaml</Code> to show them here.
+                  </>
+                }
                 docsUrl="https://docs.calkit.org/calkit-yaml/"
               />
             )}

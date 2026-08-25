@@ -1,10 +1,14 @@
 import {
+  Alert,
+  AlertDescription,
   AlertDialog,
   AlertDialogBody,
   AlertDialogContent,
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogOverlay,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Code,
@@ -37,12 +41,14 @@ import { FaPlay } from "react-icons/fa"
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
+import { envPackages, pickPythonEnv } from "../../lib/figureScript"
 import {
   type NotebookCell,
   type ParsedNotebook,
   parseNotebook,
   serializeNotebook,
 } from "../../lib/notebook"
+import { fetchTree, newBudget } from "../../lib/projectFiles"
 import {
   type CellRun,
   PRELUDE,
@@ -56,8 +62,7 @@ import { decodeBase64Utf8 } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import LoadingSpinner from "../Common/LoadingSpinner"
 import Markdown from "../Common/Markdown"
-import { envPackages, pickPythonEnv } from "../../lib/figureScript"
-import { fetchTree, newBudget } from "../../lib/projectFiles"
+import Tooltip from "../Common/Tooltip"
 
 // Inputs are what the code reads, so the caps are about what a browser can
 // hold, not about tidiness: a profiler's sqlite or a results HDF5 can run
@@ -311,12 +316,15 @@ const NotebookRunner = ({
         h="92vh"
         maxH="92vh"
       >
-        <ModalHeader pb={1}>
+        <ModalHeader>
           Notebook: <Code fontSize="md">{path}</Code>
-          <Flex gap={3} fontSize="xs" color="ui.dim" fontWeight="normal" mt={1}>
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pb={4}>
+          <Text fontSize="sm" color="ui.dim" mb={3}>
             {stage ? (
-              <Text as="span">
-                Stage{" "}
+              <>
+                Runs as stage{" "}
                 <Link
                   as={RouterLink}
                   to={`/${ownerName}/${projectName}/pipeline` as any}
@@ -324,29 +332,34 @@ const NotebookRunner = ({
                 >
                   <Code fontSize="xs">{stage}</Code>
                 </Link>
-              </Text>
+                {pythonEnv ? (
+                  <>
+                    {" "}
+                    in environment <Code fontSize="xs">{pythonEnv.name}</Code>
+                  </>
+                ) : null}
+                {inputs.length
+                  ? `, with ${inputs.length} input ${
+                      inputs.length === 1 ? "file" : "files"
+                    }`
+                  : ""}
+                .{" "}
+              </>
+            ) : pythonEnv ? (
+              <>
+                Runs in environment <Code fontSize="xs">{pythonEnv.name}</Code>.{" "}
+              </>
             ) : null}
-            {pythonEnv ? (
-              <Text as="span">
-                Runs in environment <Code fontSize="xs">{pythonEnv.name}</Code>
-              </Text>
-            ) : null}
-            {inputs.length ? (
-              <Text as="span">
-                {inputs.length} input {inputs.length === 1 ? "file" : "files"}
-              </Text>
-            ) : null}
-          </Flex>
-        </ModalHeader>
-        <ModalCloseButton />
-        <ModalBody pt={2} pb={4}>
+            Python runs in your browser, no install needed. Outputs here aren't
+            saved; the pipeline's run is the one that counts.
+          </Text>
           <HStack mb={3} spacing={3}>
             <Button
               size="sm"
               variant="primary"
               onClick={runAll}
               isLoading={runningAll}
-              loadingText={status || "Running"}
+              loadingText="Running"
               isDisabled={!cells.length}
             >
               Run all
@@ -355,34 +368,45 @@ const NotebookRunner = ({
               <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> runs a cell, <Kbd>Shift</Kbd>+
               <Kbd>Enter</Kbd> runs and moves on
             </Text>
-            {status && !runningAll ? (
-              <Text fontSize="xs" color="ui.dim">
-                {status}
-              </Text>
+            {/* Progress lives in its own right-aligned slot so the button
+                and the hint stay put while it changes */}
+            {status ? (
+              <Flex
+                ml="auto"
+                align="center"
+                gap={2}
+                fontSize="xs"
+                color="ui.dim"
+              >
+                <Spinner size="xs" />
+                <Text as="span">{status}</Text>
+              </Flex>
             ) : null}
-            <Text fontSize="xs" color="ui.dim" ml="auto">
-              Python runs in your browser. Outputs here aren't saved; the
-              pipeline's run is the one that counts.
-            </Text>
           </HStack>
           {inputProblems.length ? (
-            <Box
-              mb={3}
-              p={3}
+            <Alert
+              status="warning"
               borderRadius="md"
-              borderWidth={1}
-              borderColor="orange.300"
+              mb={3}
               fontSize="sm"
+              alignItems="flex-start"
             >
-              <Text fontWeight="semibold" mb={1}>
-                Some inputs couldn't be loaded
-              </Text>
-              {inputProblems.map((p) => (
-                <Text key={p} fontFamily="mono" fontSize="xs">
-                  {p}
-                </Text>
-              ))}
-            </Box>
+              <AlertIcon />
+              <Box>
+                <AlertTitle>Some inputs couldn't be loaded</AlertTitle>
+                <AlertDescription
+                  as="pre"
+                  display="block"
+                  fontFamily="mono"
+                  fontSize="xs"
+                  whiteSpace="pre-wrap"
+                  wordBreak="break-word"
+                  m={0}
+                >
+                  {inputProblems.join("\n")}
+                </AlertDescription>
+              </Box>
+            </Alert>
           ) : null}
           {notebookQuery.isPending || (!parsed && !notebookQuery.isError) ? (
             <LoadingSpinner height="40vh" />
@@ -433,10 +457,16 @@ const NotebookRunner = ({
                       </Box>
                     )
                   ) : cell.type === "raw" ? (
-                    <Box px={4} py={2} fontFamily="mono" fontSize="sm">
-                      <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-                        {cell.source}
-                      </pre>
+                    <Box
+                      as="pre"
+                      px={4}
+                      py={2}
+                      fontFamily="mono"
+                      fontSize="sm"
+                      whiteSpace="pre-wrap"
+                      m={0}
+                    >
+                      {cell.source}
                     </Box>
                   ) : (
                     <>
@@ -459,18 +489,16 @@ const NotebookRunner = ({
                                 : " "}
                             ]
                           </Text>
-                          <IconButton
-                            aria-label="Run cell"
-                            title="Run cell (⌘+Enter)"
-                            icon={<FaPlay />}
-                            size="xs"
-                            height="22px"
-                            minW="22px"
-                            fontSize="9px"
-                            variant="primary"
-                            onClick={() => run(cell)}
-                            isLoading={state === "running"}
-                          />
+                          <Tooltip label="Run cell (⌘+Enter)">
+                            <IconButton
+                              aria-label="Run cell"
+                              icon={<FaPlay />}
+                              size="xs"
+                              variant="ghost"
+                              onClick={() => run(cell)}
+                              isLoading={state === "running"}
+                            />
+                          </Tooltip>
                         </Flex>
                         <Box
                           flex={1}
@@ -502,31 +530,29 @@ const NotebookRunner = ({
                           fontSize="sm"
                         >
                           {state.stdout ? (
-                            <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                            <Box as="pre" whiteSpace="pre-wrap" m={0}>
                               {state.stdout}
-                            </pre>
+                            </Box>
                           ) : null}
                           {state.stderr ? (
-                            <pre
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                margin: 0,
-                                opacity: 0.7,
-                              }}
+                            <Box
+                              as="pre"
+                              whiteSpace="pre-wrap"
+                              m={0}
+                              color="ui.dim"
                             >
                               {state.stderr}
-                            </pre>
+                            </Box>
                           ) : null}
                           {state.error ? (
-                            <pre
-                              style={{
-                                whiteSpace: "pre-wrap",
-                                margin: 0,
-                                color: "var(--chakra-colors-red-400)",
-                              }}
+                            <Box
+                              as="pre"
+                              whiteSpace="pre-wrap"
+                              m={0}
+                              color="red.400"
                             >
                               {state.error}
-                            </pre>
+                            </Box>
                           ) : null}
                           {state.images.map((png, i) => (
                             <Image
@@ -538,9 +564,9 @@ const NotebookRunner = ({
                             />
                           ))}
                           {state.result ? (
-                            <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                            <Box as="pre" whiteSpace="pre-wrap" m={0}>
                               {state.result}
-                            </pre>
+                            </Box>
                           ) : null}
                           {!state.stdout &&
                           !state.stderr &&
@@ -561,7 +587,8 @@ const NotebookRunner = ({
                           fontSize="xs"
                           color="ui.dim"
                         >
-                          <Spinner size="xs" /> {status || "Running"}
+                          <Spinner size="xs" />
+                          <Text as="span">{status || "Running"}</Text>
                         </Flex>
                       ) : null}
                     </>

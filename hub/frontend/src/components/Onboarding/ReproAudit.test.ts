@@ -21,6 +21,10 @@ const empty = {
   n_figures_no_import_or_stage: 0,
   n_publications: 0,
   n_publications_no_import_or_stage: 0,
+  scripts_not_in_pipeline: [],
+  n_scripts_not_in_pipeline: 0,
+  misc_needing_provenance: [],
+  n_misc_needing_provenance: 0,
   n_dvc_remotes: 0,
 } as unknown as ReproCheck
 
@@ -32,14 +36,48 @@ describe("auditFindings", () => {
     const findings = auditFindings(empty)
     expect(findings.map((f) => f.key)).toEqual([
       "pipeline",
+      "scripts",
+      "environment",
+      "dataset",
+      "figure",
+      "misc",
+      "publication",
+      "readme",
+    ])
+    // Nothing to run and nothing generated is not a gap on its own; the
+    // rest is.
+    expect(findings.filter((f) => !f.ok).map((f) => f.key)).toEqual([
+      "pipeline",
       "environment",
       "dataset",
       "figure",
       "publication",
       "readme",
     ])
-    expect(findings.every((f) => !f.ok)).toBe(true)
     expect(findings[0].title).toBe("No pipeline yet")
+  })
+
+  it("names the files that a stage or a person should account for", () => {
+    const found = byKey({
+      ...empty,
+      scripts_not_in_pipeline: ["scripts/plot.py"],
+      n_scripts_not_in_pipeline: 1,
+      misc_needing_provenance: ["figures/a.png", "report.pdf"],
+      n_misc_needing_provenance: 2,
+    })
+    expect(found.scripts.ok).toBe(false)
+    expect(found.scripts.title).toBe("1 script no stage runs")
+    expect(found.scripts.paths).toEqual(["scripts/plot.py"])
+    expect(found.misc.ok).toBe(false)
+    expect(found.misc.title).toBe("2 generated files with no stated origin")
+    expect(found.misc.paths).toEqual(["figures/a.png", "report.pdf"])
+    // Older backends may send the list without the count
+    const counted = byKey({
+      ...empty,
+      scripts_not_in_pipeline: ["a.py", "b.py"],
+      n_scripts_not_in_pipeline: undefined,
+    } as unknown as ReproCheck)
+    expect(counted.scripts.title).toBe("2 scripts no stage runs")
   })
 
   it("distinguishes partial from complete", () => {

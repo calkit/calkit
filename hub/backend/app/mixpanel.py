@@ -158,7 +158,7 @@ def user_added_dataset(
 ) -> None:
     """A dataset declared, by where it came from.
 
-    ``source`` is one of collected/url/doi/git/project, which is what says
+    ``source`` is one of created/url/doi/git/project, which is what says
     whether recording provenance is something people actually do.
     """
     track(

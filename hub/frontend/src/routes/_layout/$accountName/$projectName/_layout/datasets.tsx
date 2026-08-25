@@ -1,6 +1,4 @@
 import { ExternalLinkIcon } from "@chakra-ui/icons"
-import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import {
   Badge,
   Box,
@@ -19,24 +17,26 @@ import {
   Text,
 } from "@chakra-ui/react"
 import {
-  createFileRoute,
   Link as RouterLink,
+  createFileRoute,
   useNavigate,
   useSearch,
 } from "@tanstack/react-router"
 import { FaPlus } from "react-icons/fa"
 import { FiDatabase } from "react-icons/fi"
+import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 
-import Markdown from "../../../../../components/Common/Markdown"
-import BrowseDatasets from "../../../../../components/Datasets/BrowseDatasets"
-import DatasetViewer from "../../../../../components/Datasets/DatasetViewer"
-import Tooltip from "../../../../../components/Common/Tooltip"
-import NewDataset from "../../../../../components/Datasets/NewDataset"
-import FigureEditor from "../../../../../components/Figures/FigureEditor"
-import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 import { useQuery } from "@tanstack/react-query"
 import mixpanel from "mixpanel-browser"
 import { z } from "zod"
+import Markdown from "../../../../../components/Common/Markdown"
+import Tooltip from "../../../../../components/Common/Tooltip"
+import BrowseDatasets from "../../../../../components/Datasets/BrowseDatasets"
+import DatasetViewer from "../../../../../components/Datasets/DatasetViewer"
+import NewDataset from "../../../../../components/Datasets/NewDataset"
+import FigureEditor from "../../../../../components/Figures/FigureEditor"
+import useProject, { useProjectDatasets } from "../../../../../hooks/useProject"
 
 import { ProjectsService } from "../../../../../client"
 import TipBubble from "../../../../../components/Onboarding/TipBubble"
@@ -65,7 +65,7 @@ interface Person {
 interface DatasetSourceProps {
   stage?: string | null
   importedFrom?: ImportedFrom | null
-  collectedBy?: Person[] | null
+  createdBy?: Person[] | null
   /** Where the stage link goes, when there is one. */
   pipelineTo?: string
 }
@@ -76,15 +76,15 @@ const personLabel = (p: Person) =>
 /**
  * Where a dataset came from, in one line.
  *
- * A dataset is produced by a stage, collected by someone, or imported from
- * somewhere, and a reader deciding whether to trust a figure needs to know
- * which. A dataset with none of the three is flagged, since that's the one
- * case where the answer is "nobody said".
+ * A dataset is produced by a stage, created or collected by someone, or
+ * imported from somewhere, and a reader deciding whether to trust a figure
+ * needs to know which. A dataset with none of the three is flagged, since
+ * that's the one case where the answer is "nobody said".
  */
 const DatasetSource = ({
   stage,
   importedFrom,
-  collectedBy,
+  createdBy,
   pipelineTo,
 }: DatasetSourceProps) => {
   if (stage) {
@@ -193,12 +193,12 @@ const DatasetSource = ({
       )
     }
   }
-  if (collectedBy?.length) {
-    const names = collectedBy.map(personLabel).join(", ")
-    const withAi = collectedBy.some((p) => p.with_ai)
+  if (createdBy?.length) {
+    const names = createdBy.map(personLabel).join(", ")
+    const withAi = createdBy.some((p) => p.with_ai)
     return (
       <Text fontSize="sm">
-        <strong>Source:</strong> collected by {names}
+        <strong>Source:</strong> created or collected by {names}
         {withAi ? (
           <Text as="span" color="orange.400">
             {" "}
@@ -459,7 +459,7 @@ function ProjectDataView() {
                 <DatasetSource
                   stage={dataset.stage}
                   importedFrom={dataset.imported_from_info as any}
-                  collectedBy={dataset.collected_by as any}
+                  createdBy={dataset.created_by as any}
                   pipelineTo={`/${accountName}/${projectName}/pipeline`}
                 />
                 {(() => {

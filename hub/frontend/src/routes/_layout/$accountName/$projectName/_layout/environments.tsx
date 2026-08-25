@@ -207,7 +207,7 @@ function ProjectEnvsView() {
         <NoArtifactFound
           icon={FaCube}
           title="No environments found"
-          hint="An environment pins what your code needs to run, so a collaborator, a reviewer, or you in a year gets the same numbers back."
+          hint="An environment precisely describes what dependencies your code needs to run, so a collaborator, a reviewer, or future you can easily run it later without lots of manual setup."
           docsUrl="https://docs.calkit.org/environments/"
         >
           {/* The modal only mounts at the default ref, so the button

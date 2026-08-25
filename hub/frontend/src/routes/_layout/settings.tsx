@@ -8,9 +8,9 @@ import {
   Tabs,
 } from "@chakra-ui/react"
 import { useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useNavigate, redirect } from "@tanstack/react-router"
-import { z } from "zod"
+import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
+import { z } from "zod"
 
 import type { UserPublic } from "../../client"
 import Appearance from "../../components/UserSettings/Appearance"
@@ -18,11 +18,11 @@ import ChangePassword from "../../components/UserSettings/ChangePassword"
 import ConnectedAccounts from "../../components/UserSettings/ConnectedAccounts"
 import DeleteAccount from "../../components/UserSettings/DeleteAccount"
 import OnboardingChecklists from "../../components/UserSettings/OnboardingChecklists"
+import Subscription from "../../components/UserSettings/Subscription"
 import UserInformation from "../../components/UserSettings/UserInformation"
 import UserTokens from "../../components/UserSettings/UserTokens"
-import Subscription from "../../components/UserSettings/Subscription"
-import { pageWidthNoSidebar } from "../../lib/layout"
 import { isLoggedIn } from "../../hooks/useAuth"
+import { pageWidthNoSidebar } from "../../lib/layout"
 
 const tabsConfig = [
   { title: "My profile", component: UserInformation, slug: "profile" },
@@ -39,7 +39,12 @@ const tabsConfig = [
   { title: "Danger zone", component: DeleteAccount, slug: "delete-account" },
 ]
 
-const tabSearchSchema = z.object({ tab: z.string().catch("") })
+// `verify` opens the email verification code form on the profile tab, so
+// a reload or a shared link lands on the same step
+const tabSearchSchema = z.object({
+  tab: z.string().catch(""),
+  verify: z.boolean().optional().catch(undefined),
+})
 
 export const Route = createFileRoute("/_layout/settings")({
   component: UserSettings,

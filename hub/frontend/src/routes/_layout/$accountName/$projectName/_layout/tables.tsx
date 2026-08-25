@@ -317,9 +317,12 @@ function Tables() {
           icon={FiGrid}
           title={needle ? `No tables match "${search}"` : "No tables found"}
           hint={
-            needle
-              ? undefined
-              : "Declare one in calkit.yaml, or add a CSV to a tables or results directory."
+            needle ? undefined : (
+              <>
+                Declare one in <Code>calkit.yaml</Code>, or add a CSV to a{" "}
+                <Code>tables</Code> or <Code>results</Code> directory.
+              </>
+            )
           }
           docsUrl={needle ? undefined : "https://docs.calkit.org/calkit-yaml/"}
         />

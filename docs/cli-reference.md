@@ -1100,9 +1100,9 @@ Options:
 | `--dep`                  | text    | no       |         | Path to stage dependency.                                                                                         |
 | `--out`                  | text    | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
 | `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                                             |
-| `--collected-by-email`   | text    | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
-| `--collected-by-orcid`   | text    | no       |         | ORCID of whoever collected this data.                                                                             |
-| `--collected-with-ai`    | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
+| `--created-by-email`     | text    | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
+| `--created-by-orcid`     | text    | no       |         | ORCID of whoever collected this data.                                                                             |
+| `--created-with-ai`      | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
 | `--no-commit`            | boolean | no       | False   |                                                                                                                   |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                                                                         |
 

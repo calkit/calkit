@@ -35,7 +35,7 @@ def _check_path_dir(path: str):
 def _person_from_options(
     option: str, email: str | None, orcid: str | None, with_ai: list[str]
 ) -> dict | None:
-    """Build a ``collected_by``/``created_by`` entry from CLI options.
+    """Build a ``created_by`` entry from CLI options.
 
     Returns ``None`` when none were given. Validated through the model so
     a mistyped ORCID or a ``--with-ai`` with nobody to answer for it is
@@ -1261,27 +1261,27 @@ def new_dataset(
             help="Stage name from which to add outputs as dependencies.",
         ),
     ] = None,
-    collected_by_email: Annotated[
+    created_by_email: Annotated[
         str | None,
         typer.Option(
-            "--collected-by-email",
+            "--created-by-email",
             help=(
                 "Email of whoever collected this data for the project, "
                 "which marks it as primary rather than imported or computed."
             ),
         ),
     ] = None,
-    collected_by_orcid: Annotated[
+    created_by_orcid: Annotated[
         str | None,
         typer.Option(
-            "--collected-by-orcid",
+            "--created-by-orcid",
             help="ORCID of whoever collected this data.",
         ),
     ] = None,
-    collected_with_ai: Annotated[
+    created_with_ai: Annotated[
         list[str],
         typer.Option(
-            "--collected-with-ai",
+            "--created-with-ai",
             help=(
                 "Generative AI tool they used, e.g. 'Claude Opus 5'. "
                 "Repeat for several."
@@ -1314,19 +1314,16 @@ def new_dataset(
         raise_error("Command must be provided")
     if (deps or outs or outs_from_stage) and not stage_name:
         raise_error("Stage name must be provided")
-    collected_by = _person_from_options(
-        "collected-by",
-        collected_by_email,
-        collected_by_orcid,
-        collected_with_ai,
+    created_by = _person_from_options(
+        "created-by", created_by_email, created_by_orcid, created_with_ai
     )
     obj: dict = dict(path=path, title=title)
     if description is not None:
         obj["description"] = description
     if stage_name is not None:
         obj["stage"] = stage_name
-    if collected_by is not None:
-        obj["collected_by"] = collected_by
+    if created_by is not None:
+        obj["created_by"] = created_by
     if cmd:
         if outs_from_stage:
             pipeline = calkit.dvc.read_pipeline()

@@ -4,6 +4,8 @@ from fastapi import APIRouter
 
 # Re-export all public names (including endpoint functions) from submodules
 # for automated frontend client generation
+from .activity import *  # noqa: F401,F403
+from .activity import router as activity_router
 from .core import *  # noqa: F401,F403
 from .core import router as core_router
 from .datasets import *  # noqa: F401,F403
@@ -24,3 +26,4 @@ router.include_router(fs_router)
 router.include_router(pipeline_router)
 router.include_router(figures_router)
 router.include_router(datasets_router)
+router.include_router(activity_router)

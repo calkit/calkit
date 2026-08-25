@@ -71,6 +71,8 @@ import type {
   DeviceAuthRequest,
   DeviceTokenRequest,
   DiscountCodePost,
+  EmailVerificationConfirm,
+  EmailVerificationToken,
   Environment,
   ExternalReleasePost,
   FeedbackPatch,
@@ -105,6 +107,8 @@ import type {
   GetOrgUsersResponses,
   GetOwnedProjectsErrors,
   GetOwnedProjectsResponses,
+  GetProjectActivityErrors,
+  GetProjectActivityResponses,
   GetProjectAppErrors,
   GetProjectAppResponses,
   GetProjectAppsErrors,
@@ -218,6 +222,8 @@ import type {
   GetReleaseViewErrors,
   GetReleaseViewResponses,
   GetSubscriptionPlansResponses,
+  GetTemplatesErrors,
+  GetTemplatesResponses,
   GetUserConnectedAccountsResponses,
   GetUserGithubAppInstallationsResponses,
   GetUserGithubReposErrors,
@@ -358,6 +364,9 @@ import type {
   PostProjectZoteroSyncResponses,
   PostReleaseCommentErrors,
   PostReleaseCommentResponses,
+  PostUserEmailVerificationConfirmErrors,
+  PostUserEmailVerificationConfirmResponses,
+  PostUserEmailVerificationResponses,
   PostUserGithubAuthErrors,
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
@@ -369,6 +378,8 @@ import type {
   PostUserZoteroAuthErrors,
   PostUserZoteroAuthResponses,
   PostUserZoteroAuthStartResponses,
+  PostVerifyEmailErrors,
+  PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
   ProjectInvitationPost,
@@ -1185,6 +1196,107 @@ export class UsersService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/user/password",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post User Email Verification
+   *
+   * Email the current user a code and a link to prove the address is theirs.
+   *
+   * The code is good for a quarter hour and the link for a day; asking
+   * again replaces both, no more than once a minute.
+   */
+  public static postUserEmailVerification<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostUserEmailVerificationResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostUserEmailVerificationResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-verification",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Email Verification Confirm
+   *
+   * Enter the emailed code; the user comes back with the email verified.
+   */
+  public static postUserEmailVerificationConfirm<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      emailVerificationConfirm: EmailVerificationConfirm
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserEmailVerificationConfirmResponses,
+    PostUserEmailVerificationConfirmErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailVerificationConfirm", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserEmailVerificationConfirmResponses,
+      PostUserEmailVerificationConfirmErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-verification/confirm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Verify Email
+   *
+   * Follow the link in the verification email.
+   *
+   * No login needed, since the link may well be opened in a browser that
+   * isn't signed in; the token is what proves the address.
+   */
+  public static postVerifyEmail<ThrowOnError extends boolean = true>(
+    parameters: {
+      emailVerificationToken: EmailVerificationToken
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostVerifyEmailResponses,
+    PostVerifyEmailErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailVerificationToken", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostVerifyEmailResponses,
+      PostVerifyEmailErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/verify-email",
       ...options,
       ...params,
       headers: {
@@ -2051,6 +2163,36 @@ export class MiscService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/test-email/",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Templates
+   *
+   * List the templates in the calkit registry, optionally of one kind.
+   *
+   * Read from the package rather than repeated in the frontend, so adding
+   * one there is enough.
+   */
+  public static getTemplates<ThrowOnError extends boolean = true>(
+    parameters?: {
+      kind?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetTemplatesResponses, GetTemplatesErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "query", key: "kind" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetTemplatesResponses,
+      GetTemplatesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/templates",
       ...options,
       ...params,
     })
@@ -7117,6 +7259,53 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Activity
+   *
+   * The newest ``limit`` things that happened in the project.
+   *
+   * Each source contributes at most ``limit`` items before the merge, so
+   * a busy commit history can't crowd out a release from last week within
+   * the window, only past it. To-dos are GitHub issues, which nothing here
+   * records, so that kind isn't produced yet.
+   */
+  public static getProjectActivity<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectActivityResponses,
+    GetProjectActivityErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectActivityResponses,
+      GetProjectActivityErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/activity",
       ...options,
       ...params,
     })

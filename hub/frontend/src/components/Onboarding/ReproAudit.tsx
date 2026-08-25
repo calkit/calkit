@@ -1,6 +1,7 @@
 import { CheckCircleIcon, WarningTwoIcon } from "@chakra-ui/icons"
 import {
   Box,
+  Code,
   Flex,
   Heading,
   Icon,
@@ -21,7 +22,12 @@ export interface AuditFinding {
   ok: boolean
   title: string
   detail: string
+  /** The files the finding is about, when naming them is the point. */
+  paths?: string[]
 }
+
+/** How many paths a finding shows before folding the rest into "+N more". */
+export const MAX_FINDING_PATHS = 5
 
 /**
  * Turn a repro check into what a reader would say about the project.
@@ -45,6 +51,26 @@ export function auditFindings(check: ReproCheck): AuditFinding[] {
         : "Nothing says which script runs first, or what each one produces. " +
           "A stage per script fixes that.",
   })
+  const looseScripts = check.scripts_not_in_pipeline ?? []
+  const nLooseScripts = check.n_scripts_not_in_pipeline ?? looseScripts.length
+  findings.push({
+    key: "scripts",
+    ok: nLooseScripts === 0,
+    title:
+      nLooseScripts > 0
+        ? `${nLooseScripts} ${
+            nLooseScripts === 1 ? "script" : "scripts"
+          } no stage runs`
+        : "Every script runs from a stage",
+    detail:
+      nLooseScripts > 0
+        ? "A reader can't tell whether these still matter or what order " +
+          "they go in. Add a stage for each one that does, or delete the " +
+          "rest."
+        : "There's no script in the repo whose place in the process is a " +
+          "mystery.",
+    paths: looseScripts,
+  })
   const withoutEnv = check.stages_without_env?.length ?? 0
   findings.push({
     key: "environment",
@@ -64,8 +90,7 @@ export function auditFindings(check: ReproCheck): AuditFinding[] {
         ? "Which Python, which packages, which versions? Right now the " +
           "answer is whatever is on your laptop."
         : withoutEnv > 0
-          ? `${check.stages_without_env.join(", ")}: pin what each one ` +
-            "needs so it runs the same elsewhere."
+          ? `${check.stages_without_env.join(", ")}: pin what each one needs so it runs the same elsewhere.`
           : "Pinned, so it runs the same on a collaborator's machine.",
   })
   const looseData = check.n_datasets_no_import_or_stage
@@ -109,6 +134,25 @@ export function auditFindings(check: ReproCheck): AuditFinding[] {
           ? "A figure with no stage is a file someone once made. Attach " +
             "the stage, or record who drew it by hand."
           : "Change the data and the figures follow.",
+  })
+  const looseMisc = check.misc_needing_provenance ?? []
+  const nLooseMisc = check.n_misc_needing_provenance ?? looseMisc.length
+  findings.push({
+    key: "misc",
+    ok: nLooseMisc === 0,
+    title:
+      nLooseMisc > 0
+        ? `${nLooseMisc} generated ${
+            nLooseMisc === 1 ? "file" : "files"
+          } with no stated origin`
+        : "Every generated file says where it came from",
+    detail:
+      nLooseMisc > 0
+        ? "Images, PDFs and the like that no stage produces, no import " +
+          "records, and nobody claims. Name the stage that makes each " +
+          "one, or record who made it and how."
+        : "Nothing in the repo looks like output that came from nowhere.",
+    paths: looseMisc,
   })
   findings.push({
     key: "publication",
@@ -238,6 +282,20 @@ const ReproAudit = ({ accountName, projectName }: ReproAuditProps) => {
               <Text fontSize="sm" color="ui.dim">
                 {finding.detail}
               </Text>
+              {!finding.ok && finding.paths?.length ? (
+                <Flex gap={1} mt={1} wrap="wrap" align="center">
+                  {finding.paths.slice(0, MAX_FINDING_PATHS).map((path) => (
+                    <Code key={path} fontSize="xs">
+                      {path}
+                    </Code>
+                  ))}
+                  {finding.paths.length > MAX_FINDING_PATHS ? (
+                    <Text fontSize="xs" color="ui.dim">
+                      +{finding.paths.length - MAX_FINDING_PATHS} more
+                    </Text>
+                  ) : null}
+                </Flex>
+              ) : null}
             </Box>
           </Flex>
         ))}

@@ -1,7 +1,9 @@
 """Functionality for working with users."""
 
+import hmac
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,10 +17,12 @@ from app import utcnow
 from app.config import settings
 from app.core import INVALID_ACCOUNT_NAMES, ORG_ONLY_ACCOUNT_NAMES
 from app.github import token_resp_text_to_dict
+from app.messaging import EMAIL_VERIFICATION_CODE_MINUTES
 from app.models import (
     Account,
     User,
     UserCreate,
+    UserEmailVerification,
     UserExternalCredential,
     UserGitHubToken,
     UserSubscription,
@@ -27,7 +31,9 @@ from app.models import (
 from app.security import (
     decrypt_secret,
     encrypt_secret,
+    generate_email_verification_token,
     get_password_hash,
+    verify_email_verification_token,
     verify_password,
 )
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
@@ -211,65 +217,142 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
 def email_is_verified(*, session: Session, user: User) -> bool:
     """Whether the account's email is known to belong to whoever holds it.
 
-    Signing up with a password never checks the address, so anyone can
-    register someone else's email and wait. Signing in through Google does
-    check it (Google only reports an address it has verified, and login
-    refuses the rest) and records which address that was on the credential
-    it leaves behind. Only a match with the account's own email counts: a
-    Google account connected from settings can be any Google account.
+    See ``User.email_verified`` for what counts.
     """
-    cred = get_external_credential(
-        session=session, user=user, provider="google"
+    return user.email_verified
+
+
+EMAIL_VERIFICATION_RESEND_SECONDS = 60
+EMAIL_VERIFICATION_MAX_ATTEMPTS = 5
+
+
+def hash_email_verification_code(code: str) -> str:
+    """The stored form of a code: an HMAC under the server's secret.
+
+    Six digits is too small a space to protect with a slow hash alone,
+    which is why guesses are counted; keying the hash keeps a leaked table
+    from being useful on its own.
+    """
+    return hmac.new(
+        settings.SECRET_KEY.encode(), code.encode(), "sha256"
+    ).hexdigest()
+
+
+def create_email_verification(
+    *, session: Session, user: User
+) -> tuple[str, str]:
+    """Issue a fresh code and link token for the user's current email.
+
+    Returns the code and the token, which the caller emails. Any earlier
+    code stops working. Raises 429 when one was sent less than a minute
+    ago, so the endpoint can't be used to flood an inbox.
+    """
+    now = utcnow()
+    existing = user.email_verification
+    if (
+        existing is not None
+        and (now - existing.created).total_seconds()
+        < EMAIL_VERIFICATION_RESEND_SECONDS
+    ):
+        raise HTTPException(
+            429, "A code was just sent. Wait a minute before asking again."
+        )
+    code = f"{secrets.randbelow(10**6):06d}"
+    expires = now + timedelta(minutes=EMAIL_VERIFICATION_CODE_MINUTES)
+    if existing is None:
+        existing = UserEmailVerification(
+            user_id=user.id,
+            code_hash=hash_email_verification_code(code),
+            expires=expires,
+        )
+    else:
+        existing.code_hash = hash_email_verification_code(code)
+        existing.created = now
+        existing.expires = expires
+        existing.attempts = 0
+    session.add(existing)
+    session.commit()
+    session.refresh(user)
+    token = generate_email_verification_token(
+        user_id=user.id, email=user.email
     )
-    return (
-        cred is not None
-        and cred.provider_account_id is not None
-        and cred.provider_account_id.lower() == user.email.lower()
-    )
+    return code, token
+
+
+def mark_email_verified(*, session: Session, user: User) -> User:
+    """Record that the user's current email is theirs, once."""
+    if user.email_verified_at is None:
+        user.email_verified_at = utcnow()
+        session.add(user)
+    if user.email_verification is not None:
+        session.delete(user.email_verification)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def confirm_email_verification_code(
+    *, session: Session, user: User, code: str
+) -> User:
+    """Check an entered code and, if it's right, mark the email verified.
+
+    A wrong code counts as an attempt; past the limit the code is thrown
+    away and a new one has to be requested, which is what keeps guessing
+    all million of them from being an option.
+    """
+    pending = user.email_verification
+    if pending is None:
+        raise HTTPException(400, "No verification code has been sent")
+    if pending.expires < utcnow():
+        session.delete(pending)
+        session.commit()
+        raise HTTPException(400, "That code has expired; request a new one")
+    if not hmac.compare_digest(
+        pending.code_hash, hash_email_verification_code(code.strip())
+    ):
+        pending.attempts += 1
+        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            session.delete(pending)
+            session.commit()
+            raise HTTPException(400, "Too many wrong codes; request a new one")
+        session.add(pending)
+        session.commit()
+        raise HTTPException(400, "That code isn't right")
+    return mark_email_verified(session=session, user=user)
+
+
+def confirm_email_verification_token(*, session: Session, token: str) -> User:
+    """Mark an email verified from the link in the message, without login.
+
+    The token names the user and the address it was sent to; an address
+    changed since then leaves the old link proving nothing about the new
+    one, so the two have to still match.
+    """
+    claims = verify_email_verification_token(token)
+    if claims is None:
+        raise HTTPException(400, "This link is invalid or has expired")
+    user_id, email = claims
+    user = session.get(User, user_id)
+    if user is None or user.email.lower() != email.lower():
+        raise HTTPException(400, "This link is invalid or has expired")
+    if not user.is_active:
+        raise HTTPException(400, "Inactive user")
+    return mark_email_verified(session=session, user=user)
 
 
 def link_github_account(
     *, session: Session, user: User, github_username: str
-) -> bool:
-    """Attach a GitHub identity to an account, taking its name if free.
+) -> None:
+    """Attach a GitHub identity to an account.
 
-    Account name and GitHub username are separate fields, but everything a
-    user types by hand -- ``calkit clone owner/project``, the project URL --
-    goes through the account name, so two different names to remember is a
-    papercut and a source of "why doesn't this work". Adopting the GitHub
-    name at link time keeps them the same for accounts created some other
-    way first.
-
-    Only the first time, when the new name is free, and the account owns no
-    projects, since renaming is what every existing project URL and
-    configured DVC remote points at, and a reauthorization to refresh a
-    token is not the moment to take a name the user has kept. Returns
-    whether the account was renamed.
+    Only ``github_name`` changes: account names are immutable, since every
+    project URL, configured DVC remote, and object storage path is keyed
+    by them.
     """
-    first_link = user.account.github_name is None
     user.account.github_name = github_username
-    renamed = False
-    desired = github_username.lower()
-    if (
-        first_link
-        and user.account.name != desired
-        and not user.account.owned_projects
-        and desired not in (INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES)
-        and session.exec(
-            select(Account).where(Account.name == desired)
-        ).first()
-        is None
-    ):
-        logger.info(
-            f"Renaming account {user.account.name} to {desired} on GitHub link"
-        )
-        user.account.name = desired
-        user.account.display_name = github_username
-        renamed = True
     session.add(user.account)
     session.commit()
     session.refresh(user)
-    return renamed
 
 
 def get_user_by_github_username(

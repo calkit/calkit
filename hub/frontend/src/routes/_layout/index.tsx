@@ -200,7 +200,7 @@ function EmptyState() {
   return (
     <>
       <Heading size="lg" mt={12} mb={2}>
-        Let's connect all the pieces of your research project
+        Connect all the pieces of your research project
       </Heading>
       <Text color="ui.dim" mb={6} maxW="640px">
         Reading, collecting data, analyzing it, and writing it up, in one

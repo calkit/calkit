@@ -3536,22 +3536,19 @@ def get_project_comments(
     return comments
 
 
-def _make_comment_artifact_link(
-    owner_name: str,
-    project_name: str,
-    artifact_type: str | None,
-    artifact_path: str,
+def comment_artifact_route(
+    artifact_type: str | None, artifact_path: str
 ) -> str:
-    """Frontend-relative deep link to the artifact a comment is about.
+    """Project-relative route to the artifact a comment is about.
 
-    Releases live at a path segment (``/releases/{name}``); other artifacts use
-    a ``?path=`` query on their section page.
+    Releases live at a path segment (``releases/{name}``); other artifacts
+    use a ``?path=`` query on their section page. There is no comments page
+    of its own, so this is where a link to a comment has to land.
     """
-    base = f"/{owner_name}/{project_name}"
     # Encode so paths/names with spaces, #, ?, /, etc. don't break the link.
     encoded = quote(artifact_path, safe="")
     if artifact_type == "release":
-        return f"{base}/releases/{encoded}"
+        return f"releases/{encoded}"
     route_map = {
         "figure": "figures",
         "publication": "publications",
@@ -3561,7 +3558,18 @@ def _make_comment_artifact_link(
         "file": "files",
     }
     route = route_map.get(artifact_type or "", "files")
-    return f"{base}/{route}?path={encoded}"
+    return f"{route}?path={encoded}"
+
+
+def _make_comment_artifact_link(
+    owner_name: str,
+    project_name: str,
+    artifact_type: str | None,
+    artifact_path: str,
+) -> str:
+    """Frontend-relative deep link to the artifact a comment is about."""
+    route = comment_artifact_route(artifact_type, artifact_path)
+    return f"/{owner_name}/{project_name}/{route}"
 
 
 @router.post("/projects/{owner_name}/{project_name}/comments")

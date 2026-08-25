@@ -159,12 +159,13 @@ def test_get_project_activity(
         assert oldest["title"] == "First commit"
         assert reply["title"] == "Replied on the project"
         assert reply["actor"] == "Colla Borator"
-        assert reply["link"] == "comments"
+        assert reply["link"] is None
         assert latest_push["title"] == "Pushed 1 file to DVC storage"
         assert latest_push["actor"] == "Colla Borator"
         assert latest_push["link"] == "files"
         assert comment["title"] == "Commented on figures/plot.png"
         assert comment["id"] == str(top.id)
+        assert comment["link"] == "figures?path=figures%2Fplot.png"
         assert collab["title"] == "Colla Borator joined as write"
         assert collab["link"] == "collaborators"
         assert older_push["title"] == "Pushed 2 files to DVC storage"

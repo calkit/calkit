@@ -16,7 +16,10 @@ from sqlmodel import col, select
 
 import app.projects
 from app.api.deps import CurrentUserOptional, SessionDep
-from app.api.routes.projects.core import FULL_HISTORY_REPO_TTL
+from app.api.routes.projects.core import (
+    FULL_HISTORY_REPO_TTL,
+    comment_artifact_route,
+)
 from app.git import get_commit_history, get_repo
 from app.models import (
     Project,
@@ -171,7 +174,15 @@ def _db_activity(
                 ),
                 actor=_actor(comment.user),
                 id=str(comment.id),
-                link="comments",
+                # A comment on the project as a whole has no page to land
+                # on, so it gets no link rather than a dead one
+                link=(
+                    comment_artifact_route(
+                        comment.artifact_type, comment.artifact_path
+                    )
+                    if comment.artifact_path
+                    else None
+                ),
             )
         )
     releases = session.exec(

@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Literal
 
@@ -352,6 +353,34 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     """Return a DVC repo with ``ck://`` scheme support registered."""
     register_ck_scheme()
     return dvc.repo.Repo(wdir)
+
+
+def commit_path(
+    dvc_repo: dvc.repo.Repo, path: str, allow_missing: bool = True
+) -> None:
+    """Commit a path to DVC, skipping the run cache.
+
+    This is like ``dvc_repo.commit(path, force=True)``, except stages are not
+    saved to the run cache, since doing so requires hashing all of their
+    dependencies, which will fail if any are missing from the workspace, e.g.,
+    if their data has never been pulled.
+    """
+    with dvc.repo.lock_repo(dvc_repo):
+        groups = groupby(
+            dvc_repo.stage.collect_granular(path),
+            key=lambda info: info.stage.dvcfile,
+        )
+        for dvcfile, stages_info_group in groups:
+            to_dump = []
+            for stage_info in stages_info_group:
+                stage = stage_info.stage
+                stage.save(allow_missing=allow_missing, run_cache=False)
+                stage.commit(
+                    filter_info=stage_info.filter_info,
+                    allow_missing=allow_missing,
+                )
+                to_dump.append(stage)
+            dvcfile.dump_stages(to_dump, update_pipeline=False)
 
 
 def ensure_dvc_lock_not_ignored(wdir: str | None = None) -> bool:

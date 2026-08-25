@@ -944,9 +944,11 @@ def add(
             if dvc_repo is not None:
                 dvc_status = dvc_repo.data_status()
                 uncommitted = dvc_status["uncommitted"]
+                dvc_not_in_cache = set(dvc_status.get("not_in_cache", []))
                 dvc_uncommitted_all = uncommitted.get(
                     "modified", []
                 ) + uncommitted.get("deleted", [])
+                missing_from_cache = []
                 for dvc_uncommitted in dvc_uncommitted_all:
                     if os.path.exists(dvc_uncommitted):
                         if dry_run:
@@ -955,11 +957,11 @@ def add(
                             )
                         else:
                             typer.echo(f"Adding {dvc_uncommitted} to DVC")
-                            dvc_repo.commit(
-                                dvc_uncommitted,
-                                force=True,
-                                allow_missing=True,
-                            )
+                            calkit.dvc.commit_path(dvc_repo, dvc_uncommitted)
+                    elif dvc_uncommitted in dvc_not_in_cache:
+                        # The data isn't on this machine at all, so this isn't
+                        # a real deletion and there's nothing to commit
+                        missing_from_cache.append(dvc_uncommitted)
                     else:
                         if dry_run:
                             typer.echo(
@@ -969,11 +971,20 @@ def add(
                             typer.echo(
                                 f"Committing deleted {dvc_uncommitted} to DVC"
                             )
-                            dvc_repo.commit(
-                                dvc_uncommitted,
-                                force=True,
-                                allow_missing=True,
-                            )
+                            calkit.dvc.commit_path(dvc_repo, dvc_uncommitted)
+                if missing_from_cache:
+                    n_shown = 5
+                    paths_txt = ", ".join(missing_from_cache[:n_shown])
+                    if len(missing_from_cache) > n_shown:
+                        paths_txt += (
+                            f", and {len(missing_from_cache) - n_shown} more"
+                        )
+                    warn(
+                        f"Not committing {len(missing_from_cache)} missing "
+                        f"DVC-tracked path(s) since their data is not in the "
+                        f"cache ({paths_txt}); "
+                        "run 'calkit pull' to fetch their data"
+                    )
             if not disable_auto_ignore:
                 for untracked_file in untracked_git_files:
                     if (

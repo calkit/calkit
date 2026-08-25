@@ -942,6 +942,44 @@ def test_save(tmp_dir):
     assert last_commit_message == "A unique message"
 
 
+def test_save_data_not_in_cache(tmp_dir):
+    """Test that we skip DVC-tracked paths that are missing from both the
+    workspace and the cache, e.g., because they were never pulled.
+    """
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("a,b\n1,2\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "data.csv",
+            "-t",
+            "dvc",
+            "-m",
+            "Add data",
+            "--no-push",
+        ]
+    )
+    with open("data.csv.dvc") as f:
+        dvc_out_before = f.read()
+    # Delete the data and its cache, simulating a machine onto which it was
+    # never pulled
+    os.remove("data.csv")
+    shutil.rmtree(os.path.join(".dvc", "cache"))
+    with open("README.md", "a") as f:
+        f.write("\nSome more info.\n")
+    out = subprocess.check_output(
+        ["calkit", "save", "-am", "Update README", "--no-push"], text=True
+    )
+    assert "data.csv" in out and "not in the cache" in out
+    # The DVC pointer file should be untouched, since there's nothing to commit
+    with open("data.csv.dvc") as f:
+        assert f.read() == dvc_out_before
+    repo = git.Repo()
+    assert not repo.git.status("--porcelain")
+
+
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])

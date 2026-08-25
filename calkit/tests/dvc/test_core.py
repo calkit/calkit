@@ -487,3 +487,40 @@ def test_init_detects_subdir(tmp_path, monkeypatch):
     assert _init_args(wdir=str(scratch))[0] == ["init"]
     # The repo root itself is never "ignored by" its own repo
     assert not calkit.dvc.enclosing_repo_ignores(str(tmp_path))
+
+
+def test_commit_path_with_missing_dep(tmp_dir):
+    """Test that we can commit a deleted output whose stage has a dependency
+    that is missing from the workspace.
+
+    DVC's own ``commit`` fails in that case, since saving to the run cache
+    requires hashing all of the stage's dependencies.
+    """
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("input.txt", "w") as f:
+        f.write("sup")
+    with open("dvc.yaml", "w") as f:
+        f.write(
+            "stages:\n"
+            "  my-stage:\n"
+            "    cmd: cp input.txt output.txt\n"
+            "    deps:\n"
+            "      - input.txt\n"
+            "    outs:\n"
+            "      - output.txt\n"
+        )
+    subprocess.check_call(["dvc", "repro"])
+    assert os.path.isfile("output.txt")
+    # Delete both the dependency and the output, e.g., as if neither had been
+    # pulled to this machine
+    os.remove("input.txt")
+    os.remove("output.txt")
+    with pytest.raises(FileNotFoundError):
+        dvc.repo.Repo().commit("output.txt", force=True, allow_missing=True)
+    calkit.dvc.commit_path(dvc.repo.Repo(), "output.txt")
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    # The output's hash should be kept, since there's nothing new to hash
+    assert lock["stages"]["my-stage"]["outs"][0]["path"] == "output.txt"
+    assert "md5" in lock["stages"]["my-stage"]["outs"][0]

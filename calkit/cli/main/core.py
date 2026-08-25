@@ -286,9 +286,18 @@ def init(
         needs_own_repo = True
     if needs_own_repo:
         subprocess.run(["git", "init"])
-    result = calkit.dvc.init(force=force)
-    if result != 0:
-        raise_error("Failed to initialize DVC")
+    # A DVC repo can already exist here without a calkit.yaml, e.g., on
+    # platforms that set one up for us, so leave it alone rather than
+    # failing on DVC's refusal to initialize over an existing .dvc. The
+    # marker is .dvc/config, as elsewhere: a .dvc directory without one is
+    # an interrupted initialization, which has nothing worth keeping and
+    # which DVC will only initialize over with --force.
+    if os.path.isfile(os.path.join(".dvc", "config")) and not force:
+        typer.echo("DVC is already initialized")
+    else:
+        result = calkit.dvc.init(force=force or os.path.isdir(".dvc"))
+        if result != 0:
+            raise_error("Failed to initialize DVC")
     # Ensure autostage is enabled for DVC
     result = calkit.dvc.run_dvc_command(["config", "core.autostage", "true"])
     if result != 0:

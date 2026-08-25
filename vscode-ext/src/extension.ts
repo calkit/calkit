@@ -31,6 +31,11 @@ import type {
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
+import {
+  formatYamlSyntaxError,
+  yamlSyntaxError,
+  type YamlSyntaxError,
+} from "./yaml";
 import { CalkitSidebarProvider } from "./sidebar";
 import {
   resolveFigureRefStage,
@@ -138,6 +143,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.41.15";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
+const WINDOWS_INSTALL_COMMAND = `powershell -ExecutionPolicy ByPass -c "${WINDOWS_INSTALL_SCRIPT}"`;
+const UNIX_INSTALL_COMMAND = "curl -LsSf install.calkit.org | sh";
 const MISSING_IJULIA_ERROR_TEXT =
   "IJulia is not installed in this Julia environment";
 
@@ -1531,32 +1539,54 @@ async function promptCalkitInstallOrUpgrade(options: {
     return;
   }
 
-  const command = await pickCalkitSetupCommand(options.mode);
-  if (!command) {
+  const selected = await pickCalkitSetupCommand(options.mode);
+  if (!selected) {
     return;
   }
-
-  const terminal = vscode.window.createTerminal("Calkit Setup");
+  // The PowerShell installer runs as the terminal's own shell rather than as
+  // text typed into one. VS Code hands these arguments to the process
+  // directly, so nothing can strip the quotes that keep `irm ... | iex`
+  // inside -Command; when they were stripped, the outer shell took the pipe
+  // and fed the script to `iex` a line at a time, which fails (issue #1569).
+  const terminal = selected.powershell
+    ? vscode.window.createTerminal({
+        name: "Calkit Setup",
+        shellPath: "powershell.exe",
+        shellArgs: [
+          "-NoExit",
+          "-ExecutionPolicy",
+          "ByPass",
+          "-Command",
+          WINDOWS_INSTALL_SCRIPT,
+        ],
+      })
+    : vscode.window.createTerminal("Calkit Setup");
   terminal.show(true);
-  terminal.sendText(command, true);
+  if (!selected.powershell) {
+    terminal.sendText(selected.command, true);
+  }
   void vscode.window.showInformationMessage(
     "Started Calkit setup command in terminal. After it finishes, reload VS Code.",
   );
 }
 
+interface CalkitSetupCommand extends vscode.QuickPickItem {
+  /** The command line, as documented. */
+  command: string;
+  /** Run it as a PowerShell process instead of typing it into a terminal. */
+  powershell?: boolean;
+}
+
 async function pickCalkitSetupCommand(
   mode: "install" | "upgrade",
-): Promise<string | undefined> {
+): Promise<CalkitSetupCommand | undefined> {
   const isWindows = process.platform === "win32";
-  const installItems = [
+  const installItems: CalkitSetupCommand[] = [
     {
       label: "Official installer (recommended)",
-      description: isWindows
-        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
-        : "curl -LsSf install.calkit.org | sh",
-      command: isWindows
-        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
-        : "curl -LsSf install.calkit.org | sh",
+      description: isWindows ? WINDOWS_INSTALL_COMMAND : UNIX_INSTALL_COMMAND,
+      command: isWindows ? WINDOWS_INSTALL_COMMAND : UNIX_INSTALL_COMMAND,
+      powershell: isWindows,
     },
     {
       label: "uv tool",
@@ -1576,15 +1606,14 @@ async function pickCalkitSetupCommand(
     },
     {
       label: "Windows PowerShell installer",
-      description:
-        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
-      command:
-        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+      description: WINDOWS_INSTALL_COMMAND,
+      command: WINDOWS_INSTALL_COMMAND,
+      powershell: true,
     },
     {
       label: "Linux/macOS installer",
-      description: "curl -LsSf install.calkit.org | sh",
-      command: "curl -LsSf install.calkit.org | sh",
+      description: UNIX_INSTALL_COMMAND,
+      command: UNIX_INSTALL_COMMAND,
     },
   ];
 
@@ -1593,7 +1622,7 @@ async function pickCalkitSetupCommand(
     placeHolder: "Choose an installation command to run in terminal",
     matchOnDescription: true,
   });
-  return selected?.command;
+  return selected;
 }
 
 export function deactivate(): void {
@@ -1628,7 +1657,15 @@ async function readDvcYaml(
     if (isFileNotFoundError(error)) {
       return {};
     }
-    log(`Failed to read dvc.yaml: ${String(error)}`);
+    // Logged rather than shown: dvc.yaml is generated from calkit.yaml, so a
+    // syntax error in it is already being reported against its source, and a
+    // read that lands mid-write shouldn't raise a notification.
+    const syntaxError = yamlSyntaxError(error);
+    log(
+      syntaxError
+        ? formatYamlSyntaxError("dvc.yaml", syntaxError)
+        : `Failed to read dvc.yaml: ${String(error)}`,
+    );
     return undefined;
   }
 }
@@ -4099,16 +4136,78 @@ async function readCalkitConfig(
     const bytes = await vscode.workspace.fs.readFile(fileUri);
     const raw = Buffer.from(bytes).toString("utf8");
     const parsed = YAML.parse(raw) as CalkitInfo | undefined;
+    clearYamlProblem(fileUri);
     return parsed ?? {};
   } catch (error) {
     if (isFileNotFoundError(error)) {
+      clearYamlProblem(fileUri);
       return {};
     }
-    void vscode.window.showErrorMessage(
-      `Failed to read calkit.yaml: ${String(error)}`,
-    );
+    reportYamlProblem(fileUri, error);
     return undefined;
   }
+}
+
+// A file we can't read is reported once per distinct problem: the config is
+// re-read on every refresh, so a broken file would otherwise stack up an
+// unbounded pile of identical notifications.
+const reportedYamlProblems = new Map<string, string>();
+
+function clearYamlProblem(fileUri: vscode.Uri): void {
+  reportedYamlProblems.delete(fileUri.fsPath);
+}
+
+function reportYamlProblem(fileUri: vscode.Uri, error: unknown): void {
+  const fileName = path.basename(fileUri.fsPath);
+  const syntaxError = yamlSyntaxError(error);
+  const message = syntaxError
+    ? formatYamlSyntaxError(fileName, syntaxError)
+    : `Failed to read ${fileName}: ${String(error)}`;
+  log(message);
+  if (reportedYamlProblems.get(fileUri.fsPath) === message) {
+    return;
+  }
+  reportedYamlProblems.set(fileUri.fsPath, message);
+  // Not awaited: reads happen during refreshes that shouldn't block on the
+  // user dismissing a notification.
+  void (async () => {
+    const openAction = `Open ${fileName}`;
+    const choice = await vscode.window.showErrorMessage(message, openAction);
+    if (choice === openAction) {
+      await revealYamlProblem(fileUri, syntaxError);
+    }
+  })().catch((openError: unknown) => {
+    // The file can be deleted, or lose read permission, between the
+    // notification and the click, so opening it is allowed to fail.
+    const failure = `Failed to open ${fileName}: ${String(openError)}`;
+    log(failure);
+    void vscode.window.showErrorMessage(failure);
+  });
+}
+
+async function revealYamlProblem(
+  fileUri: vscode.Uri,
+  syntaxError: YamlSyntaxError | undefined,
+): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(fileUri);
+  const editor = await vscode.window.showTextDocument(document);
+  if (syntaxError?.line === undefined) {
+    return;
+  }
+  // The parser reports one-based positions, and it can point past the end of
+  // the file, so clamp before jumping there.
+  const line = Math.min(syntaxError.line - 1, document.lineCount - 1);
+  const position = document.validatePosition(
+    new vscode.Position(
+      Math.max(line, 0),
+      Math.max((syntaxError.column ?? 1) - 1, 0),
+    ),
+  );
+  editor.selection = new vscode.Selection(position, position);
+  editor.revealRange(
+    new vscode.Range(position, position),
+    vscode.TextEditorRevealType.InCenter,
+  );
 }
 
 async function fileExists(fsPath: string): Promise<boolean> {

@@ -72,6 +72,10 @@ const useOnboardingFlags = (projectId?: string | null) => {
     )
   return {
     flagsQuery,
+    // Whether the flags are still on their way. A checklist rendered before
+    // they land reads as undismissed and unchecked, which flashes a fresh
+    // user's checklist at someone who put it away months ago.
+    flagsLoading: flagsQuery.isLoading,
     accountFlags,
     projectFlags,
     setFlag,

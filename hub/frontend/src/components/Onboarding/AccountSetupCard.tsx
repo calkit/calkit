@@ -32,7 +32,7 @@ const CHROME_EXT_URL =
 const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
   const showToast = useCustomToast()
   const overleafModal = useDisclosure()
-  const { accountFlags, setFlag } = useOnboardingFlags()
+  const { accountFlags, setFlag, flagsLoading } = useOnboardingFlags()
   const connectedAccountsQuery = useQuery({
     queryKey: ["user", "connected-accounts"],
     queryFn: () =>
@@ -60,7 +60,10 @@ const AccountSetupCard = ({ projectCount }: { projectCount: number }) => {
     projectCount,
     flags: accountFlags,
   })
-  if (connectedAccountsQuery.isPending) {
+  // Nothing shows until both the connected accounts and the user's flags
+  // are in hand: a card rendered on either one alone flashes a full
+  // checklist at a user who finished or dismissed it long ago.
+  if (connectedAccountsQuery.isPending || flagsLoading) {
     return null
   }
   const actions: Record<string, React.ReactNode> = {

@@ -41,7 +41,7 @@ const ProjectChecklist = ({
   projectName,
   projectId,
 }: ProjectChecklistProps) => {
-  const { projectFlags, setFlag } = useOnboardingFlags(projectId)
+  const { projectFlags, setFlag, flagsLoading } = useOnboardingFlags(projectId)
   const { questionsRequest } = useProjectQuestions(accountName, projectName)
   // Both of these read the project's repo, which the page has already had
   // cloned and cached for the README and showcase, so they're cheap here
@@ -86,7 +86,9 @@ const ProjectChecklist = ({
   // someone whose project is already in good shape, which is the worst
   // first impression this card can make. A read that failed outright says
   // nothing about the project either, so that's no reason to show one.
-  if (reproCheckQuery.isPending || reproCheckQuery.isError) {
+  // The flags say whether this list was dismissed, so they have to land
+  // before anything renders for the same reason.
+  if (reproCheckQuery.isPending || reproCheckQuery.isError || flagsLoading) {
     return null
   }
   const actions: Record<string, React.ReactNode> = {

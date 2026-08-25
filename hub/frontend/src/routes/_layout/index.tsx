@@ -205,7 +205,7 @@ function EmptyState() {
       <Text color="ui.dim" mb={6} maxW="640px">
         Reading, collecting data, analyzing it, and writing it up, in one
         project instead of multiple. Stored as a plain Git/DVC repo, anyone can
-        clone and re-run it, and every part can run offline.
+        clone and re-run it, and it all works offline.
       </Text>
       <Box mb={10}>
         <StartPaths source="empty-state" />

@@ -350,10 +350,18 @@ class ImportedDataset(Dataset):
     Otherwise the same as ``Dataset``, which already takes ``imported_from``
     and refuses a malformed one. ``ProjectInfo`` validates every dataset as
     a ``Dataset``; this is for callers holding one they know was imported
-    and wanting that checked, e.g. the hub's create-dataset route.
+    and wanting that checked, e.g., the hub's create-dataset route.
+
+    Required through a validator rather than by redeclaring the field
+    without a default, which type checkers reject as an override that drops
+    the parent's default.
     """
 
-    imported_from: ImportedFromType
+    @model_validator(mode="after")
+    def _require_imported_from(self) -> ImportedDataset:
+        if self.imported_from is None:
+            raise ValueError("An imported dataset must say where it came from")
+        return self
 
 
 class MiscArtifact(_AuthoredArtifact):

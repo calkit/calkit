@@ -15,6 +15,7 @@ from calkit.models.core import (
     ProcedureFile,
     ProjectInfo,
     Publication,
+    _ImportedFromDoi,
 )
 
 
@@ -102,14 +103,13 @@ def test_dataset_provenance():
             )
     # ImportedDataset only narrows imported_from to required, for callers
     # holding a dataset they know was imported.
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError, match="where it came from"):
         ImportedDataset.model_validate({"path": "x"})
-    assert (
-        ImportedDataset.model_validate(
-            {"path": "x", "imported_from": {"doi": "10.1234/x"}}
-        ).imported_from.doi
-        == "10.1234/x"
-    )
+    imported = ImportedDataset.model_validate(
+        {"path": "x", "imported_from": {"doi": "10.1234/x"}}
+    ).imported_from
+    assert isinstance(imported, _ImportedFromDoi)
+    assert imported.doi == "10.1234/x"
     # An empty list claims nobody, which would count as provenance while
     # naming no one.
     with pytest.raises(ValidationError, match="empty list"):

@@ -1019,26 +1019,28 @@ calkit new|create docker-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                 |
-| ------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                           |
-| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                      |
-| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                       |
-| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                       |
-| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                        |
-| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                              |
-| `--gpus`            | text    | no       |         |                                                                                                                             |
-| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                    |
-| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                 |
-| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                          |
-| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint. |
-| `--user`            | text    | no       |         | User account to use to run the container.                                                                                   |
-| `--platform`        | text    | no       |         | Which platform(s) to build for.                                                                                             |
-| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                         |
-| `--description`     | text    | no       |         | Description.                                                                                                                |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                          |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                      |
-| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                      |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                              |
+| ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                                                                                        |
+| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                                                                                   |
+| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                                                                                    |
+| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                                                                                    |
+| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                                                                                     |
+| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                                                                                           |
+| `--gpus`            | text    | no       |         |                                                                                                                                                                                          |
+| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                                                                                 |
+| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                                                                              |
+| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                                                                                       |
+| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                              |
+| `--user`            | text    | no       |         | User account to use to run the container.                                                                                                                                                |
+| `--platform`        | text    | no       |         | Which platform(s) to build for.                                                                                                                                                          |
+| `--registry`        | text    | no       |         | Registry prefix to push built images to and pull them from instead of rebuilding, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. |
+| `--build-platform`  | text    | no       |         | Platform to build the image for, e.g., 'linux/amd64'. Repeat for a multi-platform image, which requires a registry.                                                                      |
+| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                                                                                      |
+| `--description`     | text    | no       |         | Description.                                                                                                                                                                             |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                                                                                       |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                                                                                   |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                                                                                   |
 
 <a id="subcommand-new-create-foreach-stage"></a>
 

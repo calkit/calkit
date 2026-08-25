@@ -36,6 +36,7 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
+import app.dvc
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     normalize_artifact_path,
@@ -314,6 +315,76 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
         )
         outs.setdefault(path, out)
     return outs
+
+
+def read_project_file(
+    project: Project,
+    tree: RepoTree,
+    path: str,
+    max_bytes: int,
+    session: Session | None = None,
+    current_user: User | None = None,
+    dvc_only: bool = False,
+) -> bytes:
+    """A file's bytes at a ref, from Git or from DVC storage.
+
+    Git-tracked files come out of the tree; anything else is looked up
+    among the DVC outputs and read from object storage. A DVC output
+    imported from another Calkit project is a pointer whose ``remote``
+    names that project; its bytes live in that project's storage (the
+    pointer is ``push: false``, so they never get copied here). Such a
+    read goes to the source project, after checking the reader can see
+    it, when a session is given.
+
+    Raises 404 when the path isn't a file (a directory, or not in the
+    project) or its object was never pushed, and 413 when it's larger
+    than ``max_bytes``, checked before reading and again after, since a
+    DVC output's recorded size is what the pusher said it was.
+    """
+    if not dvc_only and tree.is_file(path):
+        data = bytes(tree.read_bytes(path))
+        if len(data) > max_bytes:
+            raise HTTPException(413, f"'{path}' is too large to read")
+        return data
+    outs = dvc_outputs_from_tree(project=project, tree=tree)
+    out = outs.get(path)
+    if out is None or not out.get("md5"):
+        what = "DVC-tracked" if dvc_only else "a file in this project"
+        raise HTTPException(404, f"'{path}' is not {what}")
+    if str(out.get("md5")).endswith(".dir"):
+        raise HTTPException(404, f"'{path}' is a directory, not a file")
+    if (out.get("size") or 0) > max_bytes:
+        raise HTTPException(413, f"'{path}' is too large to read")
+    remote = str(out.get("remote") or "")
+    if session is not None and remote.startswith("calkit:") and "/" in remote:
+        src_owner, src_project = remote[len("calkit:") :].split("/", 1)
+        # Raises if the source project is missing or not readable
+        get_project(
+            session=session,
+            owner_name=src_owner,
+            project_name=src_project,
+            current_user=current_user,
+            min_access_level="read",
+        )
+    fs = get_object_fs()
+    fpath = app.dvc.object_fpath_for_out(
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        dvc_out=out,
+        fs=fs,
+    )
+    if fpath is None:
+        where = (
+            f"{remote[len('calkit:') :]}'s storage"
+            if remote.startswith("calkit:")
+            else "storage"
+        )
+        raise HTTPException(404, f"'{path}' has not been pushed to {where}")
+    with fs.open(fpath, "rb") as f:
+        data = bytes(f.read(max_bytes + 1))
+    if len(data) > max_bytes:
+        raise HTTPException(413, f"'{path}' is too large to read")
+    return data
 
 
 def read_app_file(
@@ -679,8 +750,11 @@ def get_ck_info_and_dvc_outs_from_tree(
     ck_bytes = (
         tree.read_bytes("calkit.yaml") if tree.is_file("calkit.yaml") else b""
     )
-    dvc_bytes = (
+    dvc_lock_bytes = (
         tree.read_bytes("dvc.lock") if tree.is_file("dvc.lock") else b""
+    )
+    dvc_yaml_bytes = (
+        tree.read_bytes("dvc.yaml") if tree.is_file("dvc.yaml") else b""
     )
     zip_paths_json = ".calkit/zip/paths.json"
     zip_bytes = (
@@ -695,7 +769,7 @@ def get_ck_info_and_dvc_outs_from_tree(
     h.update(project_name.encode())
     h.update(b"\0")
     h.update(hashlib.sha1(ck_bytes).digest())
-    h.update(hashlib.sha1(dvc_bytes).digest())
+    h.update(hashlib.sha1(dvc_lock_bytes).digest())
     h.update(hashlib.sha1(zip_bytes).digest())
     cache_key = h.hexdigest()
     now = time.monotonic()
@@ -725,7 +799,14 @@ def get_ck_info_and_dvc_outs_from_tree(
     if not isinstance(ck_info, dict):
         ck_info = {}
     normalize_ck_info_paths(ck_info)
-    dvc_lock = (_yaml_load(dvc_bytes) or {}) if dvc_bytes else {}
+    dvc_lock = (_yaml_load(dvc_lock_bytes) or {}) if dvc_lock_bytes else {}
+    if dvc_yaml_bytes:
+        try:
+            dvc_lock = app.dvc.drop_stale_lock_stages(
+                dvc_lock, _yaml_load(dvc_yaml_bytes) or {}
+            )
+        except Exception as e:
+            logger.warning(f"Could not read dvc.yaml to prune the lock: {e}")
     t_parse = time.perf_counter() - t1
     logger.info(f"Parsed calkit.yaml and dvc.lock in {t_parse * 1000:.0f}ms")
     t2 = time.perf_counter()
@@ -1081,10 +1162,10 @@ def get_contents_from_tree(
         content = None
         url = None
         if md5:
-            fp = get_data_fpath_for_md5(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             if fp is not None:
@@ -1127,10 +1208,10 @@ def get_contents_from_tree(
             else:
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
-            fp = get_data_fpath_for_md5(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             url = (

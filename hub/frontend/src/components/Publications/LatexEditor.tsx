@@ -6,7 +6,9 @@ import {
   Flex,
   FormLabel,
   HStack,
+  IconButton,
   Input,
+  Kbd,
   Link,
   Modal,
   ModalBody,
@@ -24,8 +26,9 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
+import { FaPlus, FaTimes } from "react-icons/fa"
 import { merge as diff3Merge } from "node-diff3"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
@@ -37,7 +40,15 @@ import {
   type LatexFile,
   findMissingPackages,
 } from "../../lib/latexCompiler"
-import { loadLatexProject } from "../../lib/latexProject"
+import {
+  TEXT_EXT,
+  ext,
+  loadLatexProject,
+  type MappedPath,
+  mappedPaths,
+} from "../../lib/latexProject"
+import { fetchTree, newBudget } from "../../lib/projectFiles"
+import PathPicker from "../Releases/PathPicker"
 import { trimForSave } from "../../lib/strings"
 import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
@@ -51,6 +62,8 @@ interface LatexEditorProps {
   // The publication's pipeline-stage deps, if any — used to load figures and
   // other inputs that live outside the .tex's own directory.
   deps?: string[] | null
+  // The publication's build stage, which a mapped path is wired into.
+  stage?: string | null
 }
 
 // Display a repo path relative to the main file's directory, surfacing `../`
@@ -76,10 +89,14 @@ const LatexEditor = ({
   projectName,
   texPath,
   deps,
+  stage,
 }: LatexEditorProps) => {
   // Files are keyed by their full repo path so relative refs (e.g.
   // \includegraphics{../figures/x.png}) resolve against the real layout.
   const viewRef = useRef<EditorView | null>(null)
+  const paperDir = texPath.includes("/")
+    ? texPath.slice(0, texPath.lastIndexOf("/"))
+    : ""
   const compilerRef = useRef<LatexCompiler | null>(null)
   const buffersRef = useRef<Map<string, string>>(new Map())
   // Base (last-reconciled) content per text file — the common ancestor for
@@ -123,6 +140,21 @@ const LatexEditor = ({
   const [conflicts, setConflicts] = useState<Set<string>>(new Set())
   const [mergeNonce, setMergeNonce] = useState(0)
 
+  // What map-paths stages copy into the paper's directory, so a mapping
+  // can be undone from here as well as made.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: isOpen,
+  })
+  const mapped = useMemo(
+    () => mappedPaths(pipelineQuery.data?.calkit_yaml, paperDir),
+    [pipelineQuery.data?.calkit_yaml, paperDir],
+  )
   const { data: projectFiles } = useQuery({
     queryKey: ["projects", ownerName, projectName, "latex-project", texPath],
     queryFn: () => loadLatexProject(ownerName, projectName, texPath, deps),
@@ -197,6 +229,113 @@ const LatexEditor = ({
     }
   }, [])
 
+  // Mapping a path: copies land under the paper's directory at the source's name,
+  // which is where \\includegraphics{figures/x.png} expects them. The bytes
+  // go straight into the editor so the preview has them now; the stage
+  // makes the same copies on the next pipeline run.
+  const [mapping, setMapping] = useState(false)
+  const mapPath = async (src: string) => {
+    const name = src.split("/").pop() ?? src
+    const dest = paperDir ? `${paperDir}/${name}` : name
+    if (src === dest || src.startsWith(`${paperDir}/`)) {
+      showToast(
+        "Already in the paper's directory",
+        `${src} can be referenced as is.`,
+        "success",
+      )
+      return
+    }
+    setMapping(true)
+    mixpanel.track("Mapped path into LaTeX editor", {
+      isDir: !ext(src),
+    })
+    try {
+      const problems: string[] = []
+      const files = await fetchTree(
+        ownerName,
+        projectName,
+        src,
+        newBudget(),
+        setStatus,
+        problems,
+      )
+      const added: string[] = []
+      for (const file of files) {
+        const target = dest + file.path.slice(src.length)
+        if (TEXT_EXT.has(ext(target))) {
+          const text = new TextDecoder().decode(file.data)
+          buffersRef.current.set(target, text)
+          baseBuffersRef.current.set(target, text)
+          generatedRef.current.add(target)
+          added.push(target)
+        } else {
+          binariesRef.current.set(target, file.data)
+        }
+      }
+      if (added.length) {
+        setTextPaths((current) => [...current, ...added].sort())
+      }
+      setStatus("")
+      const stageResp = await ProjectsService.postProjectMapPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+        mapPathsPost: {
+          paths: [{ src, dest }],
+          target_stage: stage ?? null,
+        },
+      }).then((response) => response.data)
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline"],
+      })
+      showToast(
+        `Mapped ${src}`,
+        `It's at ${dest} here and copied there by stage ${stageResp.name} ` +
+          "on each pipeline run." +
+          (problems.length ? ` Not loaded: ${problems.join("; ")}` : ""),
+        problems.length ? "error" : "success",
+      )
+      if (autoCompile) scheduleCompile()
+    } catch (e) {
+      handleError(e as AxiosError, showToast)
+    } finally {
+      setMapping(false)
+    }
+  }
+  const removeMappedPath = async (entry: MappedPath) => {
+    mixpanel.track("Removed mapped path from LaTeX editor")
+    try {
+      await ProjectsService.deleteProjectMapPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: entry.stage,
+        src: entry.src,
+        dest: entry.dest,
+        target_stage: stage ?? null,
+      })
+      const under = (p: string) =>
+        p === entry.dest || p.startsWith(`${entry.dest}/`)
+      for (const p of [...buffersRef.current.keys()].filter(under)) {
+        buffersRef.current.delete(p)
+        baseBuffersRef.current.delete(p)
+        generatedRef.current.delete(p)
+      }
+      for (const p of [...binariesRef.current.keys()].filter(under)) {
+        binariesRef.current.delete(p)
+      }
+      setTextPaths((current) => current.filter((p) => !under(p)))
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline"],
+      })
+      showToast(
+        `Removed ${entry.src}`,
+        `Stage ${entry.stage} no longer copies it.`,
+        "success",
+      )
+      if (autoCompile) scheduleCompile()
+    } catch (e) {
+      handleError(e as AxiosError, showToast)
+    }
+  }
   const compile = async (trigger: "manual" | "auto" = "manual") => {
     // Serialize compiles; if one is requested while another runs, recompile
     // once it finishes (so the preview reflects the latest edits).
@@ -226,7 +365,9 @@ const LatexEditor = ({
       const result = await compilerRef.current.compile(files, mainPath)
       // exit_code can be 0 with an empty PDF (busytex returns an empty array
       // when no PDF was written) — treat that as a failure, not a blank preview.
-      if (result.exitCode === 0 && result.pdf && result.pdf.byteLength > 0) {
+      // A PDF with errors behind it still shows, the way Overleaf does;
+      // the status and log say what went wrong.
+      if (result.pdf && result.pdf.byteLength > 0) {
         const pdfBytes = new Uint8Array(result.pdf)
         const blob = new Blob([pdfBytes], { type: "application/pdf" })
         setPdfUrl((prev) => {
@@ -235,8 +376,14 @@ const LatexEditor = ({
           }
           return URL.createObjectURL(blob)
         })
-        setStatus("Compiled ✓")
-        succeeded = true
+        setStatus(
+          result.exitCode === 0
+            ? "Compiled ✓"
+            : "Compiled with errors (see log)",
+        )
+        setLog(result.log)
+        // Counted as a success for tracking only when TeX was happy too
+        succeeded = result.exitCode === 0
       } else {
         const missing = findMissingPackages(result.log)
         setStatus(
@@ -530,8 +677,12 @@ const LatexEditor = ({
     }
   }
 
-  // Ctrl/Cmd+S (and the Save button) ask for a commit message before saving.
+  // Ctrl/Cmd+S, Cmd+Enter in the editor, and the Save button all ask for a
+  // commit message before saving.
   const requestSave = () => {
+    if (saveMutation.isPending) {
+      return
+    }
     // Block saving while unresolved conflict markers remain in any buffer.
     const unresolved = [...dirtyRef.current].filter((p) =>
       (buffersRef.current.get(p) ?? "").includes("<<<<<<<"),
@@ -641,6 +792,9 @@ const LatexEditor = ({
             >
               Save
             </Button>
+            <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> to save
+            </Text>
             <Button size="sm" variant="ghost" onClick={logPanel.onToggle}>
               {logPanel.isOpen ? "Hide log" : "Show log"}
             </Button>
@@ -678,9 +832,35 @@ const LatexEditor = ({
                   p={2}
                   flexShrink={0}
                 >
-                  <Text fontSize="xs" color="ui.dim" mb={1} px={1}>
-                    Files
-                  </Text>
+                  <Flex align="center" mb={1} px={1}>
+                    <Text fontSize="xs" color="ui.dim">
+                      Files
+                    </Text>
+                    {/* Bring a file or folder from elsewhere in the project
+                        into the paper's directory: here, for the preview,
+                        and as a map-paths stage, for the pipeline. */}
+                    <PathPicker
+                      ownerName={ownerName}
+                      projectName={projectName}
+                      value=""
+                      allowFolders
+                      onChange={(path) => {
+                        if (path) mapPath(path)
+                      }}
+                      trigger={
+                        <IconButton
+                          aria-label="Map a file or folder from the project into the paper"
+                          icon={<FaPlus fontSize="9px" />}
+                          size="xs"
+                          variant="primary"
+                          height="16px"
+                          minW="16px"
+                          ml={1.5}
+                          isLoading={mapping}
+                        />
+                      }
+                    />
+                  </Flex>
                   <VStack align="stretch" spacing={0}>
                     {textPaths.map((p) => (
                       <Button
@@ -724,6 +904,45 @@ const LatexEditor = ({
                         </Text>
                       ))}
                   </VStack>
+                  {mapped.length ? (
+                    <>
+                      <Text fontSize="xs" color="ui.dim" mt={3} mb={1} px={1}>
+                        Mapped paths
+                      </Text>
+                      <VStack align="stretch" spacing={0}>
+                        {mapped.map((entry) => (
+                          <Flex
+                            key={`${entry.stage}:${entry.src}:${entry.dest}`}
+                            align="center"
+                            px={1}
+                            py={0.5}
+                          >
+                            <Text
+                              fontSize="xs"
+                              isTruncated
+                              flex={1}
+                              title={`${entry.src} → ${entry.dest} (stage ${entry.stage})`}
+                            >
+                              {/* map-paths notation, from the paper's
+                                  directory: ../figures->figures */}
+                              {relativeTo(paperDir, entry.src)}
+                              {"->"}
+                              {relativeTo(paperDir, entry.dest)}
+                            </Text>
+                            <IconButton
+                              aria-label={`Stop mapping ${entry.src}`}
+                              icon={<FaTimes fontSize="9px" />}
+                              size="xs"
+                              variant="ghost"
+                              height="16px"
+                              minW="16px"
+                              onClick={() => removeMappedPath(entry)}
+                            />
+                          </Flex>
+                        ))}
+                      </VStack>
+                    </>
+                  ) : null}
                 </Box>
                 <Box flex="1" borderRightWidth="1px" minW={0}>
                   <CodeEditorPane
@@ -732,6 +951,7 @@ const LatexEditor = ({
                     path={activePath}
                     viewRef={viewRef}
                     onChange={(text) => markDirty(activePath, text)}
+                    onModEnter={requestSave}
                   />
                 </Box>
                 <Box flex="1" minW={0} position="relative" bg="blackAlpha.50">
@@ -855,6 +1075,7 @@ const LatexEditor = ({
           <ModalCloseButton />
           <ModalBody>
             <Input
+              autoComplete="off"
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}

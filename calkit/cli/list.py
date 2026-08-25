@@ -45,6 +45,7 @@ def _list_objects(
         "figures",
         "references",
         "publications",
+        "misc",
     ],
     json_output: bool = False,
 ):
@@ -239,6 +240,18 @@ def list_publications(
 ):
     """List publications in the project."""
     _list_objects("publications", json_output)
+
+
+@list_app.command(name="misc")
+def list_misc(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """List misc artifacts in the project, i.e., attributed paths that
+    aren't one of the typed kinds.
+    """
+    _list_objects("misc", json_output)
 
 
 @list_app.command(name="references|refs")

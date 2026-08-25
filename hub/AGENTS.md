@@ -51,6 +51,23 @@ Key points:
 These use an isolated test database inside containers. Don't try to run tests
 out on the system.
 
+**Never invoke `pytest` directly, even inside the backend container.** The
+isolation comes from `backend/tests-start.sh`, which points `POSTGRES_DB` at
+a throwaway `*_test` database, recreates it, and migrates it before handing
+off to pytest. A bare `docker compose exec backend pytest ...` skips all of
+that and runs against the **development database**, where the fixtures
+create users and projects that then stay there.
+
+To run a subset, pass pytest's arguments through the same script rather than
+reaching for pytest yourself:
+
+```sh
+docker compose exec backend bash ./tests-start.sh app/tests/api/routes/test_users.py -k onboarding -q
+```
+
+Note the paths are relative to `backend/`, which is the container's working
+directory, not the repo root.
+
 ## Troubleshooting
 
 ### A frontend request "500s" but the backend looks fine

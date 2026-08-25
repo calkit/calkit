@@ -51,6 +51,131 @@ def test_update_project_config(tmp_dir, monkeypatch):
     assert not repo.git.status("--porcelain")
 
 
+def test_update_dataset(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["calkit", "init"])
+    # A DOI is normalized and the date is kept as a date, not a string
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/a.csv",
+            "--imported-from-doi",
+            "https://doi.org/10.5281/zenodo.1234567",
+            "--imported-from-date",
+            "2026-01-02",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"] == [
+        {
+            "path": "data/a.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1234567",
+                "date": date(2026, 1, 2),
+            },
+        }
+    ]
+    # Git needs a commit hash; a branch would move
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-rev",
+            "main",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "commit hash" in result.output
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--imported-from-git-rev is required" in result.output
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-rev",
+            "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "--imported-from-git-path",
+            "data/x.csv",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["imported_from"] == {
+        "git": {
+            "repo_url": "https://github.com/a/b",
+            "rev": "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "path": "data/x.csv",
+        }
+    }
+    # Only one source, and the extras need a source to go with
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/c.csv",
+            "--imported-from-url",
+            "https://x.org/c.csv",
+            "--imported-from-doi",
+            "10.5281/zenodo.1",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "only one of" in result.output
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/c.csv", "--imported-from-date", "2026-01-02"],
+    )
+    assert result.exit_code != 0
+    assert "go with one of" in result.output
+    # Existing entries are updated in place, and a stage can be set alone
+    result = runner.invoke(
+        update_app, ["dataset", "data/a.csv", "--stage", "fetch"]
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][0]["stage"] == "fetch"
+    assert ck_info["datasets"][0]["imported_from"]["doi"] == (
+        "10.5281/zenodo.1234567"
+    )
+    assert len(ck_info["datasets"]) == 2
+    # An import can't be added to a dataset someone collected
+    ck_info["datasets"].append(
+        {"path": "data/raw.csv", "created_by": {"email": "me@x.edu"}}
+    )
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/raw.csv", "--imported-from-url", "https://x"],
+    )
+    assert result.exit_code != 0
+    assert "cannot also be imported" in result.output
+    ck_info = calkit.load_calkit_info()
+    assert "imported_from" not in ck_info["datasets"][2]
+    # What was written validates as a whole, dates included
+    info = ProjectInfo.model_validate(ck_info)
+    assert info.datasets[0].imported_from.date == date(2026, 1, 2)
+
+
 def test_update_github_actions(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     workflow_dir = os.path.join(".github", "workflows")

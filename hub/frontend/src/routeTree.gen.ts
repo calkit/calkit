@@ -11,6 +11,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as RecoverPasswordRouteImport } from './routes/recover-password'
@@ -26,7 +27,7 @@ import { Route as AuthGoogleRouteImport } from './routes/auth/google'
 import { Route as LayoutSettingsRouteImport } from './routes/_layout/settings'
 import { Route as LayoutProjectsRouteImport } from './routes/_layout/projects'
 import { Route as LayoutOrgsRouteImport } from './routes/_layout/orgs'
-import { Route as LayoutLearnRouteImport } from './routes/_layout/learn'
+import { Route as LayoutNewRouteImport } from './routes/_layout/new'
 import { Route as LayoutDatasetsRouteImport } from './routes/_layout/datasets'
 import { Route as LayoutAdminRouteImport } from './routes/_layout/admin'
 import { Route as LayoutAccountNameIndexRouteImport } from './routes/_layout/$accountName/index'
@@ -57,6 +58,11 @@ const LayoutAccountNameProjectNameRouteImport = createFileRoute(
   '/_layout/$accountName/$projectName',
 )()
 
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
   path: '/signup',
@@ -131,9 +137,9 @@ const LayoutOrgsRoute = LayoutOrgsRouteImport.update({
   path: '/orgs',
   getParentRoute: () => LayoutRoute,
 } as any)
-const LayoutLearnRoute = LayoutLearnRouteImport.update({
-  id: '/learn',
-  path: '/learn',
+const LayoutNewRoute = LayoutNewRouteImport.update({
+  id: '/new',
+  path: '/new',
   getParentRoute: () => LayoutRoute,
 } as any)
 const LayoutDatasetsRoute = LayoutDatasetsRouteImport.update({
@@ -294,9 +300,10 @@ export interface FileRoutesByFullPath {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
   '/datasets': typeof LayoutDatasetsRoute
-  '/learn': typeof LayoutLearnRoute
+  '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -336,9 +343,10 @@ export interface FileRoutesByTo {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/admin': typeof LayoutAdminRoute
   '/datasets': typeof LayoutDatasetsRoute
-  '/learn': typeof LayoutLearnRoute
+  '/new': typeof LayoutNewRoute
   '/orgs': typeof LayoutOrgsRoute
   '/projects': typeof LayoutProjectsRoute
   '/settings': typeof LayoutSettingsRoute
@@ -378,9 +386,10 @@ export interface FileRoutesById {
   '/recover-password': typeof RecoverPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
+  '/verify-email': typeof VerifyEmailRoute
   '/_layout/admin': typeof LayoutAdminRoute
   '/_layout/datasets': typeof LayoutDatasetsRoute
-  '/_layout/learn': typeof LayoutLearnRoute
+  '/_layout/new': typeof LayoutNewRoute
   '/_layout/orgs': typeof LayoutOrgsRoute
   '/_layout/projects': typeof LayoutProjectsRoute
   '/_layout/settings': typeof LayoutSettingsRoute
@@ -423,9 +432,10 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/verify-email'
     | '/admin'
     | '/datasets'
-    | '/learn'
+    | '/new'
     | '/orgs'
     | '/projects'
     | '/settings'
@@ -465,9 +475,10 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/verify-email'
     | '/admin'
     | '/datasets'
-    | '/learn'
+    | '/new'
     | '/orgs'
     | '/projects'
     | '/settings'
@@ -506,9 +517,10 @@ export interface FileRouteTypes {
     | '/recover-password'
     | '/reset-password'
     | '/signup'
+    | '/verify-email'
     | '/_layout/admin'
     | '/_layout/datasets'
-    | '/_layout/learn'
+    | '/_layout/new'
     | '/_layout/orgs'
     | '/_layout/projects'
     | '/_layout/settings'
@@ -551,6 +563,7 @@ export interface RootRouteChildren {
   RecoverPasswordRoute: typeof RecoverPasswordRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
   AuthGoogleRoute: typeof AuthGoogleRoute
   AuthZenodoRoute: typeof AuthZenodoRoute
   AuthZoteroRoute: typeof AuthZoteroRoute
@@ -561,6 +574,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/signup': {
       id: '/signup'
       path: '/signup'
@@ -666,11 +686,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LayoutOrgsRouteImport
       parentRoute: typeof LayoutRoute
     }
-    '/_layout/learn': {
-      id: '/_layout/learn'
-      path: '/learn'
-      fullPath: '/learn'
-      preLoaderRoute: typeof LayoutLearnRouteImport
+    '/_layout/new': {
+      id: '/_layout/new'
+      path: '/new'
+      fullPath: '/new'
+      preLoaderRoute: typeof LayoutNewRouteImport
       parentRoute: typeof LayoutRoute
     }
     '/_layout/datasets': {
@@ -963,7 +983,7 @@ const LayoutAccountNameProjectNameRouteWithChildren =
 interface LayoutRouteChildren {
   LayoutAdminRoute: typeof LayoutAdminRoute
   LayoutDatasetsRoute: typeof LayoutDatasetsRoute
-  LayoutLearnRoute: typeof LayoutLearnRoute
+  LayoutNewRoute: typeof LayoutNewRoute
   LayoutOrgsRoute: typeof LayoutOrgsRoute
   LayoutProjectsRoute: typeof LayoutProjectsRoute
   LayoutSettingsRoute: typeof LayoutSettingsRoute
@@ -975,7 +995,7 @@ interface LayoutRouteChildren {
 const LayoutRouteChildren: LayoutRouteChildren = {
   LayoutAdminRoute: LayoutAdminRoute,
   LayoutDatasetsRoute: LayoutDatasetsRoute,
-  LayoutLearnRoute: LayoutLearnRoute,
+  LayoutNewRoute: LayoutNewRoute,
   LayoutOrgsRoute: LayoutOrgsRoute,
   LayoutProjectsRoute: LayoutProjectsRoute,
   LayoutSettingsRoute: LayoutSettingsRoute,
@@ -994,6 +1014,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecoverPasswordRoute: RecoverPasswordRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
   AuthGoogleRoute: AuthGoogleRoute,
   AuthZenodoRoute: AuthZenodoRoute,
   AuthZoteroRoute: AuthZoteroRoute,

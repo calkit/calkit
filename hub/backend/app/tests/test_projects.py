@@ -8,6 +8,7 @@ import git
 import pytest
 from sqlmodel import Session
 
+import app.dvc
 import app.projects
 from app.models import Account, Project
 
@@ -734,3 +735,64 @@ def test_find_notebook_paths_in_tree(tmp_path: Path) -> None:
             app.projects.get_repo_tree_for_ref(repo, None)
         )
     )
+
+
+def test_drop_stale_lock_stages() -> None:
+    from app.dvc import drop_stale_lock_stages
+
+    lock = {
+        "schema": "2.0",
+        "stages": {
+            "baseline-nsys": {"outs": [{"path": "r/b.sqlite", "md5": "live"}]},
+            "baseline-nsys-to-sqlite": {
+                "outs": [{"path": "r/b.sqlite", "md5": "stale"}]
+            },
+            "plot@0": {"outs": [{"path": "f/0.png", "md5": "a"}]},
+            "plot@1": {"outs": [{"path": "f/1.png", "md5": "b"}]},
+            "gone@0": {"outs": [{"path": "f/x.png", "md5": "c"}]},
+        },
+    }
+    dvc_yaml = {"stages": {"baseline-nsys": {}, "plot": {"foreach": [0, 1]}}}
+    pruned = drop_stale_lock_stages(lock, dvc_yaml)
+    # Live stages stay, foreach instances count under their base name, and
+    # the renamed stage's leftover entry is gone, so the path resolves to
+    # the live hash
+    assert set(pruned["stages"]) == {"baseline-nsys", "plot@0", "plot@1"}
+    assert pruned["schema"] == "2.0"
+    # Nothing to prune returns the same object; odd inputs pass through
+    assert drop_stale_lock_stages(pruned, dvc_yaml) is pruned
+    assert drop_stale_lock_stages(lock, {}) is lock
+    assert drop_stale_lock_stages({}, dvc_yaml) == {}
+
+
+def test_object_fpath_for_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_lookup(owner_name: str, project_name: str, md5: str, fs) -> str:
+        calls.append((owner_name, project_name, md5))
+        return f"/{owner_name}/{project_name}/{md5}"
+
+    monkeypatch.setattr(app.dvc, "get_data_fpath_for_md5", fake_lookup)
+    # A plain output is looked up in the project's own storage
+    out = {"md5": "abc", "size": 3}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/me/proj/abc"
+    )
+    # An import from another Calkit project is a pointer whose bytes only
+    # live in the source project's storage
+    out = {"md5": "def", "remote": "calkit:them/source", "push": False}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/them/source/def"
+    )
+    # Other remotes (a plain DVC remote name) stay local, and no md5 means
+    # nothing to look up
+    out = {"md5": "ghi", "remote": "s3"}
+    assert app.dvc.object_fpath_for_out("me", "proj", out, fs=None) == (
+        "/me/proj/ghi"
+    )
+    assert app.dvc.object_fpath_for_out("me", "proj", {}, fs=None) is None
+    assert [c[:2] for c in calls] == [
+        ("me", "proj"),
+        ("them", "source"),
+        ("me", "proj"),
+    ]

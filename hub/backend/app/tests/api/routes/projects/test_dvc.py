@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import uuid
 from types import SimpleNamespace
 from unittest.mock import ANY, MagicMock, patch
 
@@ -22,7 +23,9 @@ GET_URL = (
 def _fake_project() -> SimpleNamespace:
     sub = SimpleNamespace(storage_limit=10.0)
     owner = SimpleNamespace(subscription=sub)
-    return SimpleNamespace(owner=owner)
+    # No such project row, so recording the push for the activity feed
+    # fails quietly rather than being tested here
+    return SimpleNamespace(owner=owner, id=uuid.uuid4())
 
 
 def _dvc_scope_headers(

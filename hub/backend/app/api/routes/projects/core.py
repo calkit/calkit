@@ -2,6 +2,7 @@
 
 import base64
 import concurrent.futures
+import hashlib
 import io
 import json
 import logging
@@ -11,9 +12,11 @@ import posixpath
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 import zipfile
 from copy import deepcopy
+from datetime import date as date_type
 from datetime import datetime, timedelta
 from fnmatch import fnmatch
 from io import StringIO
@@ -39,15 +42,25 @@ from fastapi import (
 )
 from fastapi.responses import RedirectResponse, StreamingResponse
 from git.exc import GitCommandError
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
+import app.imports
 import app.projects
 import calkit
+import calkit.core
 import calkit.detect
+import calkit.environments
 import calkit.latex
+import calkit.pipeline
 import calkit.resources
+import calkit.templates
 from app import (
     arxiv,
     github,
@@ -91,6 +104,7 @@ from app.git import (
     get_repo,
     get_repo_tree_for_ref,
     get_zip_path_map_from_repo,
+    record_project_update,
     resolve_commit_sha,
     search_refs,
 )
@@ -99,10 +113,12 @@ from app.models import (
     ContentsItem,
     Dataset,
     DatasetForImport,
+    DatasetPublic,
     Figure,
     FileLock,
     GitRef,
     Message,
+    MiscArtifact,
     Notebook,
     Notification,
     Org,
@@ -127,6 +143,8 @@ from app.models import (
     ProjectPublic,
     ProjectsPublic,
     Publication,
+    PublicationComponent,
+    PublicationComponents,
     Question,
     QuestionEvidence,
     QuestionPublic,
@@ -168,12 +186,17 @@ from app.storage import (
     make_data_fpath,
     remove_gcs_content_type,
 )
-from calkit.check import ReproCheck, check_reproducibility
 from calkit.models import ProjectStatus
+from calkit.models.core import Dataset as CkDataset
+from calkit.models.core import Figure as CkFigure
+from calkit.models.core import ImportedDataset as CkImportedDataset
+from calkit.models.core import MiscArtifact as CkMiscArtifact
+from calkit.models.io import InputsFromStageOutputs
 from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
+from calkit.reproducibility import ReproCheck, check_reproducibility
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -374,12 +397,332 @@ def get_projects(
         .distinct()
         .join(Project.user_access_records, isouter=True)  # type: ignore
         .where(where_clause)
-        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+        # Most recently active first; a project never touched since
+        # creation sorts by when it was made
+        .order_by(
+            sqlalchemy.desc(Project.updated).nulls_last(),  # type: ignore
+            sqlalchemy.desc(Project.created),  # type: ignore
+        )
         .limit(limit)
         .offset(offset)
     )
     projects = session.exec(select_query).all()
     return ProjectsPublic(data=projects, count=count)  # type: ignore
+
+
+# A project small enough to arrive as a zip is the point; anything bigger
+# belongs in Git and DVC rather than an upload form.
+MAX_PROJECT_UPLOAD_BYTES = 50_000_000
+# Guards against a zip that unpacks to far more than it claims.
+MAX_PROJECT_UNPACKED_BYTES = 250_000_000
+
+
+def _valid_project_upload_size(
+    content_length: Annotated[int | None, Header()] = None,
+) -> int | None:
+    """Reject an oversized upload before buffering it.
+
+    Optional because the browser sets this header itself, and requiring it
+    would put it in the generated client's signature as something callers
+    have to compute. The handler counts bytes as it reads regardless, so
+    this is an early out rather than the actual guard.
+    """
+    if (
+        content_length is not None
+        and content_length > MAX_PROJECT_UPLOAD_BYTES
+    ):
+        raise HTTPException(
+            413,
+            f"Upload is larger than "
+            f"{MAX_PROJECT_UPLOAD_BYTES // 1_000_000} MB.",
+        )
+    return content_length
+
+
+def _inside(root: str, path: str) -> bool:
+    """Whether ``path`` resolves to ``root`` itself or something beneath it.
+
+    Both sides go through ``realpath``, so ``..`` segments and symlinks are
+    judged by where they end up rather than how they're spelled. This is
+    the one check behind every place a path from a request body, an
+    archive, or a project's own calkit.yaml is joined under a clone on the
+    server.
+    """
+    root_real = os.path.realpath(root)
+    real = os.path.realpath(path)
+    return real == root_real or real.startswith(root_real + os.sep)
+
+
+def _iter_project_zip(
+    archive: zipfile.ZipFile,
+) -> list[tuple[zipfile.ZipInfo, str]]:
+    """Pair each member worth extracting with its path inside the project.
+
+    Every member is checked to land inside the destination: a zip can name
+    ``../../etc/passwd``, and this runs on our server against a path we
+    control. Anything Git owns is skipped, since the repo already exists and
+    the upload is its contents, not its history. Declared sizes are summed
+    against the cap here too, so a zip bomb is refused before anything is
+    created for it.
+    """
+    # A single top-level folder is what most zips of a project look like, and
+    # keeping it would nest the whole project one level deeper than intended.
+    names = [n for n in archive.namelist() if not n.startswith("__MACOSX/")]
+    tops = {n.split("/")[0] for n in names if n.strip("/")}
+    strip = (
+        f"{tops.pop()}/"
+        if len(tops) == 1 and all(n.count("/") >= 1 for n in names if n)
+        else ""
+    )
+    members = []
+    declared = 0
+    for info in archive.infolist():
+        name = info.filename
+        if name.startswith("__MACOSX/") or not name.strip("/"):
+            continue
+        if strip and name.startswith(strip):
+            name = name[len(strip) :]
+        if not name:
+            continue
+        parts = PurePosixPath(name).parts
+        # The repo's own Git data is not the uploader's to replace.
+        if ".git" in parts or ".dvc" in parts:
+            continue
+        # Judged from the name alone, since the destination doesn't exist
+        # yet when this runs ahead of creating the project.
+        if PurePosixPath(name).is_absolute() or ".." in parts:
+            raise HTTPException(
+                400, f"Archive contains a path outside the project: {name}"
+            )
+        if not info.is_dir():
+            declared += info.file_size
+            if declared > MAX_PROJECT_UNPACKED_BYTES:
+                raise HTTPException(
+                    400, "Archive unpacks to more than the size limit allows"
+                )
+        members.append((info, name))
+    return members
+
+
+def _open_project_zip(zip_bytes: bytes) -> zipfile.ZipFile:
+    try:
+        return zipfile.ZipFile(io.BytesIO(zip_bytes))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "That file isn't a valid zip archive")
+
+
+def _extract_project_zip(zip_bytes: bytes, dest: str) -> int:
+    """Unpack an uploaded project zip into a repo working directory.
+
+    The archive is validated again here even when it already was ahead of
+    creating the project, since the check is the cheap half of the work
+    and this is what actually writes to disk. Returns the bytes written.
+    """
+    extracted = 0
+    archive = _open_project_zip(zip_bytes)
+    dest_root = os.path.realpath(dest)
+    for info, name in _iter_project_zip(archive):
+        target = os.path.realpath(os.path.join(dest_root, name))
+        # The archive-level check can't see symlinks already present in the
+        # destination, so the resolved target is checked as well.
+        if not _inside(dest_root, target):
+            raise HTTPException(
+                400, f"Archive contains a path outside the project: {name}"
+            )
+        if info.is_dir():
+            os.makedirs(target, exist_ok=True)
+            continue
+        extracted += info.file_size
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with archive.open(info) as src, open(target, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return extracted
+
+
+def _push_dvc_cache_to_storage(
+    repo_dir: str, owner_name: str, project_name: str
+) -> int:
+    """Copy a repo's local DVC cache into this project's object storage.
+
+    Walking the cache rather than reading each .dvc file covers directory
+    outputs and their .dir objects the same way single files are covered,
+    which is the difference between a pointer that resolves and one that
+    dangles. Returns how many objects were written.
+    """
+    cache_dir = os.path.join(repo_dir, ".dvc", "cache", "files", "md5")
+    if not os.path.isdir(cache_dir):
+        return 0
+    fs = get_object_fs()
+    count = 0
+    for idx in sorted(os.listdir(cache_dir)):
+        idx_dir = os.path.join(cache_dir, idx)
+        if not os.path.isdir(idx_dir):
+            continue
+        for rest in sorted(os.listdir(idx_dir)):
+            src = os.path.join(idx_dir, rest)
+            if not os.path.isfile(src):
+                continue
+            fpath = make_data_fpath(
+                owner_name=owner_name,
+                project_name=project_name,
+                idx=idx,
+                md5=rest,
+            )
+            with open(src, "rb") as f_in, fs.open(fpath, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            if settings.ENVIRONMENT != "local":
+                remove_gcs_content_type(fpath)
+            count += 1
+    return count
+
+
+@router.post(
+    "/projects/upload", dependencies=[Depends(_valid_project_upload_size)]
+)
+def post_project_upload(
+    *,
+    session: SessionDep,
+    current_user: CurrentUser,
+    title: Annotated[str, Form()],
+    name: Annotated[str, Form()],
+    file: Annotated[UploadFile, File()],
+    description: Annotated[str | None, Form()] = None,
+    is_public: Annotated[bool, Form()] = False,
+) -> ProjectPublic:
+    """Create a project from an uploaded zip of an existing one.
+
+    For work that isn't on GitHub yet, which is most of what "clean up a
+    project in progress" means. The repo is created and scaffolded the same
+    way an empty project is, then the archive is committed on top of it, so
+    the first two commits read as "here's the scaffolding" and "here's what
+    I had".
+    """
+    zip_bytes = file.file.read(MAX_PROJECT_UPLOAD_BYTES + 1)
+    if len(zip_bytes) > MAX_PROJECT_UPLOAD_BYTES:
+        raise HTTPException(
+            413,
+            f"Upload is larger than "
+            f"{MAX_PROJECT_UPLOAD_BYTES // 1_000_000} MB.",
+        )
+    # The archive is checked in full before anything is created for it:
+    # creating the project first and refusing the zip after would leave a
+    # row and a GitHub repo behind for an upload that never landed.
+    _iter_project_zip(_open_project_zip(zip_bytes))
+    created = post_project(
+        session=session,
+        current_user=current_user,
+        project_in=ProjectPost(
+            name=name,
+            title=title,
+            description=description,
+            is_public=is_public,
+            template=None,
+            git_repo_exists=False,
+        ),
+    )
+    # post_project is declared as returning the public shape, so the row
+    # itself is fetched back for the repo work below.
+    project = app.projects.get_project(
+        session=session,
+        owner_name=created.owner_account_name,
+        project_name=created.name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    _extract_project_zip(zip_bytes, str(repo.working_dir))
+    # Ours are the project's identity on the hub, so they win over whatever
+    # the archive happened to carry; everything else in its calkit.yaml is
+    # the user's and is kept.
+    ck_info = calkit.load_calkit_info(wdir=str(repo.working_dir))
+    ck_info |= {
+        "owner": project.owner_account_name,
+        "name": project.name,
+        "title": project.title,
+        "description": project.description,
+        "hub": settings.frontend_host,
+        "git_repo_url": project.git_repo_url,
+    }
+    with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    # Which files belong in Git and which in DVC is a real decision (size,
+    # extension, directories of many small files), and calkit already makes
+    # it. Shelling out keeps that judgment in one place rather than growing
+    # a second copy here that drifts.
+    # Run as a module of this interpreter, the way app.dvc does, so it's
+    # the calkit installed alongside the app and not whatever is on PATH.
+    # `calkit add` only prompts when the directory isn't a Git repo, which
+    # this one is, but a closed stdin makes any prompt fail rather than hang
+    # the request.
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "calkit", "add", "."],
+            cwd=str(repo.working_dir),
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError as e:
+        logger.exception(f"calkit add failed for uploaded project: {e}")
+        raise HTTPException(
+            500, "Failed to sort the uploaded files into Git and DVC"
+        )
+    # Everything DVC took is now in the local cache; copying it into object
+    # storage is what `dvc push` would do, and the server is the remote.
+    n_objects = _push_dvc_cache_to_storage(
+        repo_dir=str(repo.working_dir),
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+    )
+    logger.info(f"Uploaded {n_objects} DVC objects for {project.name}")
+    repo.git.add(["-A"])
+    if repo.git.diff("--staged"):
+        repo.git.commit(["-m", "Import existing project files"])
+        repo.git.push(["origin", repo.active_branch.name])
+    mixpanel.user_uploaded_project(
+        user=current_user,
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        n_bytes=len(zip_bytes),
+        n_dvc_objects=n_objects,
+    )
+    return created
+
+
+@router.get("/projects/featured")
+def get_featured_projects(
+    session: SessionDep, current_user: CurrentUserOptional
+) -> ProjectsPublic:
+    """Return the hub's curated example projects, in configured order.
+
+    Curated rather than newest-first, since the projects a first-time
+    visitor should see are the ones that show what a finished Calkit
+    project looks like, not whatever was created most recently.
+    """
+    slugs = settings.FEATURED_PROJECTS
+    if not slugs:
+        return ProjectsPublic(data=[], count=0)
+    # A featured project is only ever shown to someone who could find it
+    # anyway, so a slug that names a private project simply drops out.
+    owner_names = {slug.split("/")[0] for slug in slugs}
+    project_names = {slug.split("/")[1] for slug in slugs}
+    query = (
+        select(Project)
+        .join(Project.owner_account)  # type: ignore
+        .where(
+            Project.is_public,
+            Account.name.in_(owner_names),  # type: ignore
+            Project.name.in_(project_names),  # type: ignore
+        )
+    )
+    by_slug = {
+        f"{project.owner_account_name}/{project.name}": project
+        for project in session.exec(query).all()
+    }
+    # Sorting in Python keeps the configured order, which a SQL ORDER BY
+    # can't express without a CASE over every slug.
+    projects = [by_slug[slug] for slug in slugs if slug in by_slug]
+    return ProjectsPublic(data=projects, count=len(projects))
 
 
 @router.get("/user/projects")
@@ -431,7 +774,12 @@ def get_owned_projects(
     statement = (
         select(Project)
         .where(where_clause)
-        .order_by(sqlalchemy.desc(Project.created))  # type: ignore
+        # Most recently worked on first, which is what a returning user is
+        # looking for; creation order is the tie-breaker
+        .order_by(
+            sqlalchemy.desc(Project.updated).nulls_last(),  # type: ignore
+            sqlalchemy.desc(Project.created),  # type: ignore
+        )
         .offset(offset)
         .limit(limit)
     )
@@ -506,7 +854,14 @@ def post_project(
     # is private
     if not project_in.git_repo_exists and not project_in.is_public:
         logger.info(f"Checking private project count for {owner_name}")
-        if current_user.account.name == owner_name.lower():
+        # is_user_org is the answer already worked out above, from the
+        # GitHub username. Re-deriving it from the Calkit account name would
+        # be wrong for anyone whose two names differ -- which is everyone
+        # who linked GitHub to an account created some other way, since
+        # linking deliberately leaves the account name alone. For them this
+        # took the org branch and failed with "Could not fetch org from
+        # GitHub" while creating a project for themselves.
+        if not is_user_org:
             # Count private projects for user
             account_id = current_user.account.id
             subscription = current_user.subscription
@@ -649,17 +1004,28 @@ def post_project(
                 repo.git.pull(["upstream", repo.active_branch.name])
                 # Remove upstream remote so we don't have any confusion later
                 repo.git.remote(["remove", "upstream"])
+                if not project_in.keep_template_history:
+                    # The template's commits are its history, not this
+                    # project's. Start from one commit holding its tree;
+                    # `derived_from` in calkit.yaml records where it came
+                    # from and at which revision.
+                    branch = repo.active_branch.name
+                    repo.git.checkout("--orphan", "calkit-fresh-start")
+                    repo.git.add("-A")
+                    repo.git.commit(
+                        ["-m", f"Start from template {project_in.template}"]
+                    )
+                    repo.git.branch("-D", branch)
+                    repo.git.branch("-m", branch)
                 template_repo = get_repo(
                     project=template_project,
                     session=session,
                     user=current_user,
                     fresh=True,
                 )
-                # Delete files that don't belong in a template
-                delete_files = ["dvc.lock"]
-                for f in delete_files:
-                    if os.path.isfile(os.path.join(repo.working_dir, f)):
-                        repo.git.rm(f, "-f")
+                # dvc.lock stays: its hashes name the template's outputs,
+                # which are copied into this project's storage below, so
+                # the figures and paper are there before the first run.
             # Add a calkit.yaml file
             # First existing info, which is empty unless we're using a template
             ck_info = calkit.load_calkit_info(wdir=repo.working_dir)  # type: ignore
@@ -728,6 +1094,12 @@ def post_project(
                 commit_msg = "Create README.md, DVC config, and calkit.yaml"
             repo.git.commit(["-m", commit_msg])
             repo.git.push(["origin", repo.active_branch.name])
+            if project_in.template is not None:
+                _copy_template_dvc_objects(
+                    repo_dir=str(repo.working_dir),
+                    template_project=template_project,
+                    project=project,
+                )
         except Exception as e:
             # The project row is already committed, and it would block a retry
             # since a Git repo can only back one project, so remove it and let
@@ -826,6 +1198,67 @@ def post_project(
         session.commit()
         session.refresh(project)
     return project  # type: ignore
+
+
+def _copy_template_dvc_objects(
+    repo_dir: str, template_project: Project, project: Project
+) -> int:
+    """Copy the template's pipeline outputs into the new project's storage.
+
+    The new repo carries the template's dvc.lock, whose hashes point at
+    objects in the template's storage. Copying them across is what lets the
+    project page show the figures and the paper immediately, and what lets
+    `calkit run` on a fresh clone find everything up to date instead of
+    rebuilding from scratch. Best-effort: a missing object only means that
+    output isn't shown until the pipeline runs. Returns how many were
+    copied.
+    """
+    lock_path = os.path.join(repo_dir, "dvc.lock")
+    if not os.path.isfile(lock_path):
+        return 0
+    try:
+        with open(lock_path) as f:
+            dvc_lock = yaml.safe_load(f) or {}
+        fs = get_object_fs()
+        outs = expand_dvc_lock_outs(
+            dvc_lock,
+            owner_name=template_project.owner_account_name,
+            project_name=template_project.name,
+            fs=fs,
+        )
+    except Exception as e:
+        logger.warning(f"Could not read template outputs for copying: {e}")
+        return 0
+    count = 0
+    for out in outs.values():
+        md5 = out.get("md5")
+        if not md5:
+            continue
+        src = make_data_fpath(
+            owner_name=template_project.owner_account_name,
+            project_name=template_project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        dst = make_data_fpath(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        try:
+            if fs.exists(dst) or not fs.exists(src):
+                continue
+            fs.copy(src, dst)
+            count += 1
+        except Exception as e:
+            logger.warning(f"Could not copy template object {md5}: {e}")
+    logger.info(
+        f"Copied {count} template objects from "
+        f"{template_project.owner_account_name}/{template_project.name} "
+        f"to {project.owner_account_name}/{project.name}"
+    )
+    return count
 
 
 class ProjectOptionalExtended(ProjectPublic):
@@ -1493,7 +1926,6 @@ def get_project_dvc_output_text_diff(
         current_user=current_user,
         min_access_level="read",
     )
-    fs = get_object_fs()
 
     def read(ref: str) -> tuple[str, bool]:
         repo = get_repo(
@@ -1503,28 +1935,16 @@ def get_project_dvc_output_text_diff(
             ttl=ttl,
             ref=ref,
         )
-        tree = app.projects.get_repo_tree_for_ref(repo, ref)
-        outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-        out = outs.get(path)
-        if out is None or not out.get("md5"):
-            raise HTTPException(404, f"'{path}' is not DVC-tracked at {ref}")
-        size = out.get("size")
-        if size is not None and size > pdftext.MAX_PDF_BYTES:
-            raise HTTPException(413, f"'{path}' is too large to compare")
-        fpath = get_data_fpath_for_md5(
-            owner_name=project.owner_account_name,
-            project_name=project.name,
-            md5=out["md5"],
-            fs=fs,
-        )
-        if fpath is None:
-            raise HTTPException(
-                404, f"'{path}' has not been pushed to storage at {ref}"
+        try:
+            data = app.projects.read_project_file(
+                project,
+                app.projects.get_repo_tree_for_ref(repo, ref),
+                path,
+                pdftext.MAX_PDF_BYTES,
+                dvc_only=True,
             )
-        with fs.open(fpath, "rb") as f:
-            data = f.read(pdftext.MAX_PDF_BYTES + 1)
-        if len(data) > pdftext.MAX_PDF_BYTES:
-            raise HTTPException(413, f"'{path}' is too large to compare")
+        except HTTPException as e:
+            raise HTTPException(e.status_code, f"{e.detail} at {ref}")
         try:
             return pdftext.extract_text(data)
         except Exception as e:
@@ -2042,6 +2462,10 @@ def get_project_questions(
 
 class QuestionPost(BaseModel):
     question: str
+    # Optional so a question can be recorded alongside what the researcher
+    # expects to find, which is what makes it worth writing down before the
+    # analysis rather than after.
+    hypothesis: str | None = None
 
 
 @router.post("/projects/{owner_name}/{project_name}/questions")
@@ -2064,7 +2488,14 @@ def post_project_question(
     )
     ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     ck_questions = ck_info.get("questions", [])
-    ck_questions.append(req.question)
+    # A bare string is the compact form for a question with nothing else
+    # attached; only expand to a mapping when there's a hypothesis to hold.
+    if req.hypothesis:
+        ck_questions.append(
+            {"question": req.question, "hypothesis": req.hypothesis}
+        )
+    else:
+        ck_questions.append(req.question)
     ck_info["questions"] = ck_questions
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
@@ -2073,6 +2504,12 @@ def post_project_question(
     repo.git.push(["origin", repo.active_branch.name])
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
+    )
+    mixpanel.user_added_question(
+        user=current_user,
+        owner_name=owner_name,
+        project_name=project_name,
+        has_hypothesis=bool(req.hypothesis),
     )
     return project.questions[-1]
 
@@ -2931,8 +3368,19 @@ def post_project_figure(
     description: Annotated[str, Form()],
     stage: Optional[Annotated[str, Form()]] = Form(None),
     file: Optional[Annotated[UploadFile, File()]] = Form(None),
+    # Who made an uploaded figure. A figure that didn't come out of a stage
+    # has no other provenance, so the person uploading it stands behind it.
+    created_by: Optional[Annotated[str, Form()]] = Form(None),
+    created_by_name: Optional[Annotated[str, Form()]] = Form(None),
+    created_with_ai: Optional[Annotated[str, Form()]] = Form(None),
 ) -> Figure:
     path = _normalize_artifact_file_path(path)
+    if file is not None and stage is None and not created_by:
+        raise HTTPException(
+            422,
+            "An uploaded figure needs someone to stand behind it: say who "
+            "created it (created_by), or name the stage that produces it",
+        )
     file_data: bytes | None = None
     full_fig_path: str | None = None
     if file is not None:
@@ -3004,9 +3452,23 @@ def post_project_figure(
             400, "File must exist in repo if not being uploaded"
         )
     # Update figures
-    figures.append(
-        dict(path=path, title=title, description=description, stage=stage)
+    fig_entry: dict[str, Any] = dict(
+        path=path, title=title, description=description, stage=stage
     )
+    if stage is None:
+        fig_entry.pop("stage")
+    if created_by and stage is None:
+        person: dict[str, Any] = dict(email=created_by.strip())
+        if created_by_name and created_by_name.strip():
+            person["name"] = created_by_name.strip()
+        if created_with_ai and created_with_ai.strip():
+            person["with_ai"] = created_with_ai.strip()
+        fig_entry["created_by"] = person
+        try:
+            CkFigure.model_validate(fig_entry)
+        except ValidationError as e:
+            raise HTTPException(422, f"Invalid figure: {e}")
+    figures.append(fig_entry)
     ck_info["figures"] = figures
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
@@ -3080,22 +3542,19 @@ def get_project_comments(
     return comments
 
 
-def _make_comment_artifact_link(
-    owner_name: str,
-    project_name: str,
-    artifact_type: str | None,
-    artifact_path: str,
+def comment_artifact_route(
+    artifact_type: str | None, artifact_path: str
 ) -> str:
-    """Frontend-relative deep link to the artifact a comment is about.
+    """Project-relative route to the artifact a comment is about.
 
-    Releases live at a path segment (``/releases/{name}``); other artifacts use
-    a ``?path=`` query on their section page.
+    Releases live at a path segment (``releases/{name}``); other artifacts
+    use a ``?path=`` query on their section page. There is no comments page
+    of its own, so this is where a link to a comment has to land.
     """
-    base = f"/{owner_name}/{project_name}"
     # Encode so paths/names with spaces, #, ?, /, etc. don't break the link.
     encoded = quote(artifact_path, safe="")
     if artifact_type == "release":
-        return f"{base}/releases/{encoded}"
+        return f"releases/{encoded}"
     route_map = {
         "figure": "figures",
         "publication": "publications",
@@ -3105,7 +3564,18 @@ def _make_comment_artifact_link(
         "file": "files",
     }
     route = route_map.get(artifact_type or "", "files")
-    return f"{base}/{route}?path={encoded}"
+    return f"{route}?path={encoded}"
+
+
+def _make_comment_artifact_link(
+    owner_name: str,
+    project_name: str,
+    artifact_type: str | None,
+    artifact_path: str,
+) -> str:
+    """Frontend-relative deep link to the artifact a comment is about."""
+    route = comment_artifact_route(artifact_type, artifact_path)
+    return f"/{owner_name}/{project_name}/{route}"
 
 
 @router.post("/projects/{owner_name}/{project_name}/comments")
@@ -3720,7 +4190,7 @@ def get_project_datasets(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-) -> list[Dataset]:
+) -> list[DatasetPublic]:
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -3739,7 +4209,31 @@ def get_project_datasets(
     project = _sync_datasets_with_db(
         ck_info=ck_info, project=project, session=session
     )
-    return project.datasets
+    # Provenance as written in calkit.yaml, keyed by path
+    by_path: dict[str, dict] = {
+        ds["path"]: ds
+        for ds in ck_info.get("datasets", []) or []
+        if isinstance(ds, dict) and ds.get("path")
+    }
+    out = []
+    for row in project.datasets:
+        ck = by_path.get(row.path, {})
+        imported = ck.get("imported_from")
+        created = ck.get("created_by")
+        if isinstance(created, dict):
+            created = [created]
+        out.append(
+            DatasetPublic.model_validate(
+                row,
+                update=dict(
+                    imported_from_info=(
+                        imported if isinstance(imported, dict) else None
+                    ),
+                    created_by=created if created else None,
+                ),
+            )
+        )
+    return out
 
 
 @router.get("/projects/{owner_name}/{project_name}/datasets/{path:path}")
@@ -3784,6 +4278,11 @@ def get_project_dataset(
             break
     if ds is None:
         raise HTTPException(404, f"Dataset at path {path} does not exist")
+    # The import model keeps imported_from as a string; a structured origin
+    # (DOI, URL, Git) is carried as JSON rather than dropped
+    ds = dict(ds)
+    if isinstance(ds.get("imported_from"), dict):
+        ds["imported_from"] = json.dumps(dict(ds["imported_from"]))
     # Is this dataset tracked with Git?
     # If so, our response will be different
     git_files = repo.git.ls_files(path)
@@ -3908,23 +4407,141 @@ def get_project_dataset(
         return DatasetForImport.model_validate(ds)
 
 
-class LabelDatasetPost(BaseModel):
-    imported_from: str | None = None
+class GitSourcePost(BaseModel):
+    repo_url: str
+    # None means the default branch's current head, which is fetched and
+    # then recorded by its commit, so the entry is pinned either way
+    rev: str | None = None
+    path: str | None = None
+
+
+class CreatorPost(BaseModel):
+    """Someone credited with creating a dataset.
+
+    Everything is optional here; that a person needs an email or an ORCID
+    is enforced by the calkit model this is validated through, so the rule
+    lives in one place rather than being restated and left to drift.
+    """
+
+    email: str | None = None
+    name: str | None = None
+    orcid: str | None = None
+    # Generative AI tools this person used, disclosed per person; the same
+    # shape the calkit model takes
+    with_ai: str | list[str] | None = None
+
+
+class ImportedFromPost(BaseModel):
+    """Where a dataset came from, as one of four mutually exclusive kinds.
+
+    Sent flat rather than as a tagged union so the generated client has one
+    shape to build; exactly which kind it is falls out of which field is
+    set, and that's checked below rather than trusted.
+    """
+
+    # Another Calkit project, by "owner/name".
+    project: str | None = None
+    # For a project import: which path within it, and at which revision.
+    path: str | None = None
+    git_rev: str | None = None
+    url: str | None = None
+    doi: str | None = None
+    git: GitSourcePost | None = None
+    # Aliased type: the field is also called `date`, and under Python 3.14's
+    # lazy annotations a bare `date` here resolves to this field's default.
+    date: date_type | None = None
+
+    @model_validator(mode="after")
+    def _doi_urls_are_dois(self) -> "ImportedFromPost":
+        """A doi.org link pasted as a URL is a DOI, and is kept as one.
+
+        The DOI is the durable identifier; the URL is just one way to
+        reach it. Recording the DOI also lets the fetch go through the
+        archive's API rather than a landing page.
+        """
+        if self.url and not self.doi:
+            doi = app.imports.doi_from_url(self.url)
+            if doi:
+                self.doi = doi
+                self.url = None
+        if self.doi:
+            self.doi = app.imports.normalize_doi(self.doi)
+        return self
+
+    def kind(self) -> str:
+        """Which of the four sources this is.
+
+        Raises if it doesn't name exactly one, since a dataset whose
+        provenance is ambiguous is worse than one with none recorded.
+        """
+        kinds = [
+            k
+            for k in ["project", "url", "doi", "git"]
+            if getattr(self, k) is not None
+        ]
+        if len(kinds) != 1:
+            raise HTTPException(
+                422,
+                "An imported dataset must name exactly one source: a "
+                "project, a URL, a DOI, or a Git repo",
+            )
+        return kinds[0]
+
+    def to_ck_dict(self) -> dict[str, Any]:
+        """Render the calkit.yaml form of this source."""
+        kind = self.kind()
+        out: dict[str, Any] = {}
+        if kind == "project":
+            out["project"] = self.project
+            if self.path:
+                out["path"] = self.path
+            if self.git_rev:
+                out["git_rev"] = self.git_rev
+            # A project import is pinned by git_rev, so a retrieval date
+            # would be a second, weaker answer to the same question.
+            return out
+        if kind == "url":
+            out["url"] = self.url
+        elif kind == "doi":
+            out["doi"] = self.doi
+        else:
+            assert self.git is not None
+            out["git"] = self.git.model_dump(exclude_none=True)
+        if self.date is not None:
+            out["date"] = self.date.isoformat()
+        return out
+
+
+class DatasetPost(BaseModel):
+    """A dataset to declare, however it came to be part of the project."""
+
     path: str
     title: str | None = None
-    tabular: bool | None = None
-    stage: str | None = None
     description: str | None = None
+    tabular: bool | None = None
+    # The pipeline stage that produces it, for data the project generates.
+    stage: str | None = None
+    # Who created (collected or measured) it for this project, which is what
+    # marks it as primary; primary data has no upstream source to point at.
+    created_by: list[CreatorPost] | None = None
+    imported_from: ImportedFromPost | None = None
 
 
-@router.post("/projects/{owner_name}/{project_name}/datasets/label")
-def post_project_dataset_label(
+@router.post("/projects/{owner_name}/{project_name}/datasets")
+def post_project_dataset(
     owner_name: str,
     project_name: str,
     current_user: CurrentUser,
     session: SessionDep,
-    req: LabelDatasetPost,
+    req: DatasetPost,
 ) -> Dataset:
+    """Declare a dataset, imported or already in the repo.
+
+    One route for every way a dataset joins a project: pick a path that's
+    already there (collected, or produced by a stage), or name where it was
+    imported from. Which one it is decides whether the path has to exist
+    yet -- an import names data that hasn't been fetched.
+    """
     project = app.projects.get_project(
         session=session,
         owner_name=owner_name,
@@ -3932,45 +4549,291 @@ def post_project_dataset_label(
         current_user=current_user,
         min_access_level="write",
     )
-    if not req.imported_from:
-        if not req.title or not req.description:
-            raise HTTPException(
-                400, "Non-imported datasets must have titles and descriptions"
-            )
+    if req.created_by and req.imported_from is not None:
+        raise HTTPException(
+            422, "A dataset can be created here or imported, not both"
+        )
+    if req.imported_from is None and not (req.title and req.description):
+        raise HTTPException(
+            400, "Non-imported datasets must have titles and descriptions"
+        )
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
     ck_info = app.projects.get_ck_info_from_repo(repo=repo)
     datasets = ck_info.get("datasets", [])
-    ds_paths = [ds.get("path") for ds in datasets]
-    if req.path in ds_paths:
+    if req.path in [ds.get("path") for ds in datasets]:
         raise HTTPException(400, "Dataset already exists")
-    local_path = os.path.join(repo.working_dir, req.path)
-    zip_path_map = get_zip_path_map_from_repo(repo=repo)
-    if not req.imported_from and not (
-        os.path.isfile(local_path)
-        or os.path.isdir(local_path)
-        or os.path.isfile(local_path + ".dvc")
-        or req.path in zip_path_map
-    ):
-        raise HTTPException(400, "Path does not exist in the repo")
-    ds = dict(path=req.path)
-    for k, v in req.model_dump().items():
-        if k == "path":
-            continue
-        if v is not None:
-            ds[k] = v
+    # An import names data that isn't here yet, and a stage names data the
+    # pipeline hasn't produced yet. Anything else has to already be in the
+    # project, or the entry points at nothing.
+    if req.imported_from is None and not req.stage:
+        local_path = os.path.join(repo.working_dir, req.path)
+        zip_path_map = get_zip_path_map_from_repo(repo=repo)
+        # Tracked by Git (the checkout has it), tracked by DVC (a .dvc
+        # pointer stands in for content that isn't pulled), or inside a
+        # tracked zip. DVC-tracked data is checked by pointer rather than by
+        # the file itself, which is absent in a fresh clone.
+        dvc_outs = app.projects.dvc_outputs_from_tree(
+            project=project,
+            tree=app.projects.get_repo_tree_for_ref(repo, ref=None),
+        )
+        exists = (
+            os.path.isfile(local_path)
+            or os.path.isdir(local_path)
+            or os.path.isfile(local_path + ".dvc")
+            or req.path in zip_path_map
+            or req.path in dvc_outs
+            # A directory tracked by DVC covers the paths under it.
+            or any(
+                out == req.path or req.path.startswith(f"{out}/")
+                for out in dvc_outs
+            )
+        )
+        if not exists:
+            raise HTTPException(
+                400,
+                f"'{req.path}' is not tracked by Git or DVC in this project. "
+                "Add and commit it first, or say where it was imported from.",
+            )
+    ds: dict[str, Any] = {"path": req.path}
+    for key in ["title", "description", "tabular", "stage"]:
+        value = getattr(req, key)
+        if value is not None:
+            ds[key] = value
+    if req.created_by:
+        # One creator stays a mapping rather than a one-item list, which is
+        # what the docs show and what reads best in calkit.yaml.
+        creators = [c.model_dump(exclude_none=True) for c in req.created_by]
+        ds["created_by"] = creators[0] if len(creators) == 1 else creators
+    if req.imported_from is not None:
+        ds["imported_from"] = req.imported_from.to_ck_dict()
+    # An import from a DOI, a URL, or a Git repo is fetched now, so the
+    # declaration and the data arrive together. A project import is left to
+    # `calkit import dataset`, which pulls it through DVC on the machine
+    # that needs it.
+    fetch_kind = req.imported_from.kind() if req.imported_from else None
+    storage: str | None = None
+    if fetch_kind == "project":
+        # The same thing `calkit import dataset` does: DVC-tracked data
+        # becomes a .dvc pointer at the source project's remote, so the
+        # bytes stay in one place and `dvc pull` fetches them; Git-tracked
+        # files are copied in. Either way the path is real afterwards.
+        assert req.imported_from is not None
+        wdir = str(repo.working_dir)
+        src_spec = str(req.imported_from.project)
+        try:
+            src_owner, src_project = src_spec.strip("/").split("/", 1)
+        except ValueError:
+            raise HTTPException(422, "Project should be given as owner/name")
+        src_path = req.imported_from.path or req.path
+        if os.path.exists(os.path.join(wdir, req.path)) or os.path.isfile(
+            os.path.join(wdir, req.path + ".dvc")
+        ):
+            raise HTTPException(400, f"'{req.path}' already exists")
+        info = get_project_dataset(
+            path=src_path,
+            owner_name=src_owner,
+            project_name=src_project,
+            current_user=current_user,
+            session=session,
+            filter_paths=None,
+            ref=None,
+        )
+        if info.dvc_import is not None:
+            remote_name = f"calkit:{src_owner}/{src_project}"
+            run_dvc_command(
+                [
+                    "remote",
+                    "add",
+                    "-f",
+                    remote_name,
+                    f"ck://{src_owner}/{src_project}",
+                ],
+                wdir=wdir,
+                check=True,
+            )
+            repo.git.add(".dvc/config")
+            dvc_fpath = req.path + ".dvc"
+            dvc_dir = os.path.dirname(dvc_fpath)
+            os.makedirs(os.path.join(wdir, dvc_dir) or wdir, exist_ok=True)
+            dvc_import = info.dvc_import.model_dump()
+            outs = dvc_import.get("outs") or []
+            # Paths in a .dvc file are relative to the file itself
+            if len(outs) > 1:
+                for out in outs:
+                    out["path"] = os.path.relpath(out["path"], dvc_dir or ".")
+                    out["remote"] = remote_name
+            elif outs:
+                outs[0]["path"] = os.path.basename(req.path)
+                outs[0]["remote"] = remote_name
+            dvc_import["outs"] = outs
+            with open(os.path.join(wdir, dvc_fpath), "w") as f:
+                ryaml.dump(dvc_import, f)
+            repo.git.add(dvc_fpath)
+            gitignore_path = os.path.join(wdir, ".gitignore")
+            existing_ignore = (
+                open(gitignore_path).read()
+                if os.path.isfile(gitignore_path)
+                else ""
+            )
+            if req.path not in existing_ignore.split("\n"):
+                with open(gitignore_path, "w") as f:
+                    f.write(existing_ignore.rstrip() + "\n" + req.path + "\n")
+                repo.git.add(".gitignore")
+            storage = "dvc-import"
+        elif info.git_import is not None:
+            src_repo = get_repo(
+                project=app.projects.get_project(
+                    session=session,
+                    owner_name=src_owner,
+                    project_name=src_project,
+                    current_user=current_user,
+                    min_access_level="read",
+                ),
+                user=current_user,
+                session=session,
+                ttl=DEFAULT_REPO_TTL,
+            )
+            files = info.git_import.files
+            for f_rel in files:
+                src_file = os.path.join(str(src_repo.working_dir), f_rel)
+                if len(files) == 1 and f_rel == src_path:
+                    dest_file = os.path.join(wdir, req.path)
+                else:
+                    dest_file = os.path.join(
+                        wdir, req.path, os.path.relpath(f_rel, src_path)
+                    )
+                os.makedirs(os.path.dirname(dest_file) or wdir, exist_ok=True)
+                shutil.copy2(src_file, dest_file)
+            size = calkit.get_size(os.path.join(wdir, req.path))
+            if size < calkit.core.DVC_SIZE_THRESH_BYTES:
+                storage = "git"
+                repo.git.add(req.path)
+            else:
+                storage = "dvc"
+                if not os.path.isdir(os.path.join(wdir, ".dvc")):
+                    run_dvc_command(["init"], wdir=wdir, check=True)
+                run_dvc_command(["add", req.path], wdir=wdir, check=True)
+                repo.git.add([req.path + ".dvc"])
+                gitignore = os.path.join(
+                    os.path.dirname(req.path), ".gitignore"
+                )
+                if os.path.isfile(os.path.join(wdir, gitignore)):
+                    repo.git.add(gitignore)
+        else:
+            raise HTTPException(
+                400, f"{src_spec}/{src_path} has nothing to import"
+            )
+        ds["imported_from"] = dict(
+            project=f"{src_owner}/{src_project}",
+            path=src_path,
+            git_rev=info.git_rev,
+        )
+    if fetch_kind in ("url", "doi", "git"):
+        wdir = str(repo.working_dir)
+        assert req.imported_from is not None
+        if os.path.exists(os.path.join(wdir, req.path)):
+            raise HTTPException(400, f"'{req.path}' already exists")
+        # A multi-file record lands in a folder even when a file name was
+        # given, so the path written to calkit.yaml is the one that exists
+        landed = req.path
+        if fetch_kind == "url":
+            url = str(req.imported_from.url)
+            name = posixpath.basename(urlparse(url).path) or "download"
+            landed, _ = app.imports.fetch_files({name: url}, wdir, req.path)
+        elif fetch_kind == "doi":
+            files = app.imports.resolve_doi_files(str(req.imported_from.doi))
+            landed, _ = app.imports.fetch_files(files, wdir, req.path)
+        else:
+            git_src = req.imported_from.git
+            assert git_src is not None
+            commit = app.imports.fetch_git_path(
+                git_src.repo_url, git_src.rev, git_src.path, wdir, req.path
+            )
+            # What's recorded is the commit that was fetched: a request
+            # without one (the default branch's head) is pinned from here
+            # on, like any other
+            git_entry = (ds.get("imported_from") or {}).get("git")
+            if isinstance(git_entry, dict):
+                git_entry["rev"] = commit
+        if landed != req.path:
+            if landed in [d.get("path") for d in datasets] or os.path.exists(
+                os.path.join(wdir, landed + ".dvc")
+            ):
+                shutil.rmtree(os.path.join(wdir, landed), ignore_errors=True)
+                raise HTTPException(
+                    400,
+                    f"The record has several files, which go in a folder, "
+                    f"and '{landed}' is already taken",
+                )
+            ds["path"] = landed
+        # Small goes in Git, large in DVC, the same rule as `calkit add`
+        size = calkit.get_size(os.path.join(wdir, landed))
+        if size < calkit.core.DVC_SIZE_THRESH_BYTES:
+            storage = "git"
+            repo.git.add(landed)
+        else:
+            storage = "dvc"
+            if not os.path.isdir(os.path.join(wdir, ".dvc")):
+                run_dvc_command(["init"], wdir=wdir, check=True)
+            run_dvc_command(["add", landed], wdir=wdir, check=True)
+            to_stage = [landed + ".dvc"]
+            gitignore = os.path.join(os.path.dirname(landed), ".gitignore")
+            if os.path.isfile(os.path.join(wdir, gitignore)):
+                to_stage.append(gitignore)
+            repo.git.add(to_stage)
+    # Validated against the models that own calkit.yaml, so this route can't
+    # write a shape the CLI would later reject.
+    try:
+        if req.imported_from is not None:
+            CkImportedDataset.model_validate(ds)
+        else:
+            CkDataset.model_validate(ds)
+    except ValidationError as e:
+        raise HTTPException(422, f"Invalid dataset: {e}")
     datasets.append(ds)
     ck_info["datasets"] = datasets
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
-    # Make a commit
-    repo.git.commit(["-m", f"Add dataset {req.path}"])
+    repo.git.commit(["-m", f"Add dataset {ds['path']}"])
     repo.git.push(["origin", repo.active_branch.name])
+    if storage == "dvc":
+        # The pointer is pushed with Git; the bytes go to this project's
+        # object storage so a clone can pull them
+        _push_dvc_cache_to_storage(
+            repo_dir=str(repo.working_dir),
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+        )
+    if req.imported_from is not None:
+        source = req.imported_from.kind()
+    elif req.created_by:
+        source = "created"
+    else:
+        source = "stage" if req.stage else "existing"
+    mixpanel.user_added_dataset(
+        user=current_user,
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        source=source,
+    )
     # TODO: Put datasets into database
     return Dataset.model_validate(
-        ds | dict(project_id=project.id, id=uuid.uuid4())
+        ds
+        | dict(
+            project_id=project.id,
+            id=uuid.uuid4(),
+            # The DB model still stores this as a string; the structured
+            # form is what lives in calkit.yaml, so it's sent as JSON a
+            # client can parse rather than a Python repr it can't.
+            imported_from=(
+                json.dumps(ds["imported_from"])
+                if "imported_from" in ds
+                else None
+            ),
+        )
     )
 
 
@@ -3995,6 +4858,15 @@ def post_project_dataset_upload(
     title: Annotated[str, Form()],
     description: Annotated[str, Form()],
     file: Annotated[UploadFile, File()],
+    # Whoever created (collected or measured) the data, when it's primary
+    # data rather than a file from somewhere else; recorded as the
+    # dataset's provenance, the same way a figure's creator is. The email
+    # is what identifies them; the name is a courtesy for readers.
+    created_by: Optional[Annotated[str, Form()]] = Form(None),
+    created_by_name: Optional[Annotated[str, Form()]] = Form(None),
+    # Where the file is tracked. Unset applies the same rule as `calkit
+    # add`: small files go in Git, large ones in DVC.
+    storage: Optional[Annotated[Literal["git", "dvc"], Form()]] = Form(None),
 ) -> Dataset:
     logger.info(
         f"Received dataset file {path} with content type: {file.content_type}"
@@ -4026,29 +4898,42 @@ def post_project_dataset_upload(
     full_ds_path = os.path.join(repo.working_dir, path)
     with open(full_ds_path, "wb") as f:
         f.write(file_data)
-    # Either git add {path} or dvc add {path}
-    # If we DVC add, we'll get output like
-    # To track the changes with git, run:
-
-    #         git add figures/.gitignore figures/my-figure.png.dvc
-
-    # To enable auto staging, run:
-
-    #         dvc config core.autostage true
-    # Initialize DVC if it's never been
-    if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
-        logger.info("Calling dvc init since .dvc directory is missing")
-        run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
-    logger.info(f"Running dvc add {path}")
-    run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
-    files_to_stage = [path + ".dvc"]
-    gitignore = os.path.join(os.path.dirname(path), ".gitignore")
-    if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
-        files_to_stage.append(gitignore)
-    logger.info(f"Git-adding {files_to_stage}")
-    repo.git.add(files_to_stage)
-    # Update figures
-    datasets.append(dict(path=path, title=title, description=description))
+    if storage is None:
+        storage = (
+            "git"
+            if len(file_data) < calkit.core.DVC_SIZE_THRESH_BYTES
+            else "dvc"
+        )
+    url: str | None = None
+    if storage == "git":
+        # A small file is simplest as a plain Git-tracked file: no pointer,
+        # no object storage round trip, readable straight from the repo.
+        logger.info(f"Git-adding {path}")
+        repo.git.add(path)
+    else:
+        # Initialize DVC if it's never been
+        if not os.path.isdir(os.path.join(repo.working_dir, ".dvc")):
+            logger.info("Calling dvc init since .dvc directory is missing")
+            run_dvc_command(["init"], wdir=str(repo.working_dir), check=True)
+        logger.info(f"Running dvc add {path}")
+        run_dvc_command(["add", path], wdir=str(repo.working_dir), check=True)
+        files_to_stage = [path + ".dvc"]
+        gitignore = os.path.join(os.path.dirname(path), ".gitignore")
+        if os.path.isfile(os.path.join(repo.working_dir, gitignore)):
+            files_to_stage.append(gitignore)
+        logger.info(f"Git-adding {files_to_stage}")
+        repo.git.add(files_to_stage)
+    ds: dict[str, Any] = dict(path=path, title=title, description=description)
+    if created_by:
+        person: dict[str, str] = dict(email=created_by.strip())
+        if created_by_name and created_by_name.strip():
+            person["name"] = created_by_name.strip()
+        ds["created_by"] = [person]
+        try:
+            CkDataset.model_validate(ds)
+        except ValidationError as e:
+            raise HTTPException(422, f"Invalid dataset: {e}")
+    datasets.append(ds)
     ck_info["datasets"] = datasets
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
@@ -4057,25 +4942,26 @@ def post_project_dataset_upload(
     repo.git.commit(["-m", f"Add dataset {path}"])
     # Push to GitHub, and optionally DVC remote if we used it
     repo.git.push(["origin", repo.active_branch.name])
-    # If using the DVC remote, we can just put it in the expected location
-    # since we'll have the md5 hash in the dvc file
-    with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
-        dvc_yaml = yaml.safe_load(f)
-    md5 = dvc_yaml["outs"][0]["md5"]
-    fs = get_object_fs()
-    fpath = make_data_fpath(
-        owner_name=owner_name,
-        project_name=project_name,
-        idx=md5[:2],
-        md5=md5[2:],
-    )
-    with fs.open(fpath, "wb") as f:
-        f.write(file_data)  # type: ignore[arg-type]
-    if settings.ENVIRONMENT != "local":
-        remove_gcs_content_type(fpath)
-    url = get_object_url(fpath=fpath, fname=os.path.basename(path))
-    # Finally, remove the dataset from the cached repo
-    os.remove(full_ds_path)
+    if storage == "dvc":
+        # If using the DVC remote, we can just put it in the expected
+        # location since we'll have the md5 hash in the dvc file
+        with open(os.path.join(repo.working_dir, path + ".dvc")) as f:
+            dvc_yaml = yaml.safe_load(f)
+        md5 = dvc_yaml["outs"][0]["md5"]
+        fs = get_object_fs()
+        fpath = make_data_fpath(
+            owner_name=owner_name,
+            project_name=project_name,
+            idx=md5[:2],
+            md5=md5[2:],
+        )
+        with fs.open(fpath, "wb") as f:
+            f.write(file_data)
+        if settings.ENVIRONMENT != "local":
+            remove_gcs_content_type(fpath)
+        url = get_object_url(fpath=fpath, fname=os.path.basename(path))
+        # Finally, remove the dataset from the cached repo
+        os.remove(full_ds_path)
     # TODO: Put this dataset into the database
     return Dataset(
         project_id=project.id,
@@ -4083,7 +4969,7 @@ def post_project_dataset_upload(
         path=path,
         title=title,
         description=description,
-        content=None,  # type: ignore
+        content=None,
         url=url,
     )
 
@@ -4191,6 +5077,425 @@ def get_project_publications(
                 )
         resp.append(Publication.model_validate(pub))
     return resp
+
+
+# Files a publication's author writes by hand rather than the pipeline
+# producing: LaTeX and plain-text sources
+PUBLICATION_SOURCE_EXTS = {
+    ".tex",
+    ".bib",
+    ".sty",
+    ".cls",
+    ".bst",
+    ".bbx",
+    ".cbx",
+    ".md",
+    ".txt",
+}
+# What a LaTeX build leaves behind, which says nothing about provenance
+LATEX_BUILD_EXTS = {
+    ".aux",
+    ".log",
+    ".bbl",
+    ".blg",
+    ".fls",
+    ".fdb_latexmk",
+    ".synctex.gz",
+    ".out",
+    ".toc",
+    ".nav",
+    ".snm",
+}
+# Files that could be a copy of one of the project's figures
+PUBLICATION_FIGURE_EXTS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pdf",
+    ".svg",
+    ".eps",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+# Bigger than this and a component isn't compared byte-for-byte against
+# the project's figures
+PUBLICATION_COMPONENT_MATCH_MAX_BYTES = 20_000_000
+
+
+@router.get("/projects/{owner_name}/{project_name}/publications/components")
+def get_project_publication_components(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str,
+    ref: str | None = None,
+) -> PublicationComponents:
+    """List the files a publication is made of, each with its provenance.
+
+    A component is any file in the publication's folder, i.e., the
+    directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
+    than dotfiles, the publication's own output, and LaTeX build leftovers
+    (``via`` is ``folder``), plus anything its build stage reads from
+    outside that folder, with ``from_stage_outputs`` inputs expanded and
+    directories walked (``via`` is ``input``). Each is one of:
+
+    - ``produced``: an output of a pipeline stage, whether declared in its
+      ``outputs`` or as the destination of a map-paths mapping (a file, or
+      anything under a directory destination). ``stage`` names it, and
+      ``stage_kind`` says whether that's a copy (``map-paths``) or
+      something computed.
+    - ``attested``: declared in calkit.yaml as a figure, dataset, or misc
+      artifact with ``created_by``.
+    - ``imported``: declared likewise with ``imported_from``.
+    - ``authored``: a LaTeX or text source, edited in Overleaf when the
+      folder is synced with one (``source``), otherwise in Git.
+    - ``unknown``: anything else. A figure-like file at or under 20 MB is
+      compared byte-for-byte against the project's declared figures, and
+      ``matching_figure`` names one with identical content, which is what
+      a copy made without a map-paths stage looks like.
+
+    ``n_unknown`` counts the ``unknown`` items.
+    """
+
+    def walk(tree: RepoTree, dirname: str, found: list[str]) -> None:
+        for name in sorted(tree.listdir(dirname or None)):
+            if name.startswith("."):
+                continue
+            p = posixpath.join(dirname, name) if dirname else name
+            if tree.is_dir(p):
+                walk(tree, p, found)
+            elif tree.is_file(p):
+                found.append(p)
+
+    def md5_of(p: str) -> str | None:
+        # A DVC out's recorded md5 is the md5 of its bytes, so it stands
+        # in for reading them
+        out = dvc_outs.get(p)
+        if out and out.get("md5") and not str(out["md5"]).endswith(".dir"):
+            return str(out["md5"])
+        try:
+            data = app.projects.read_project_file(
+                project=project,
+                tree=tree,
+                path=p,
+                max_bytes=PUBLICATION_COMPONENT_MATCH_MAX_BYTES,
+                session=session,
+                current_user=current_user,
+            )
+        except HTTPException:
+            return None
+        return hashlib.md5(data).hexdigest()
+
+    pub_path = _normalize_artifact_file_path(path)
+    folder = posixpath.dirname(pub_path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref, read_only=True
+    )
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    # Every file in the folder, from Git and from DVC
+    file_paths: list[str] = []
+    if not folder or tree.is_dir(folder):
+        walk(tree, folder, file_paths)
+    for out_path, out in dvc_outs.items():
+        if str(out.get("md5") or "").endswith(".dir"):
+            continue
+        if out_path not in file_paths and (
+            not folder or PurePosixPath(out_path).is_relative_to(folder)
+        ):
+            file_paths.append(out_path)
+    file_paths = [
+        p
+        for p in sorted(file_paths)
+        if p != pub_path
+        and not any(part.startswith(".") for part in p.split("/"))
+        and not any(p.endswith(ext) for ext in LATEX_BUILD_EXTS)
+    ]
+    # What the pipeline produces, by output path. calkit.yaml stages come
+    # first; dvc.yaml covers a pipeline written without them.
+    produced_by: dict[str, str] = {}
+    stage_kinds: dict[str, str] = {}
+    valid_ck_stages: dict[str, Any] = {}
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for name, stage_map in ck_stages.items():
+        try:
+            ck_stage = _validate_ck_stage(stage_map, name)
+        except HTTPException:
+            continue
+        valid_ck_stages[name] = ck_stage
+        stage_kinds[name] = str(ck_stage.kind)
+        for out in ck_stage.dvc_out_paths:
+            produced_by.setdefault(normalize_artifact_path(out), name)
+    dvc_pipeline = app.projects.get_dvc_pipeline_for_ref(repo, ref)
+    for name, dvc_stage in (dvc_pipeline.get("stages") or {}).items():
+        for out in (dvc_stage or {}).get("outs") or []:
+            out_path = out if isinstance(out, str) else next(iter(out))
+            produced_by.setdefault(
+                normalize_artifact_path(str(out_path)), name
+            )
+    # What the build stage reads from outside the folder: the publication's
+    # stage's inputs, with other stages' outputs expanded and directories
+    # walked, since "other inputs" are components too
+    pub_stage_name = next(
+        (
+            str(pub.get("stage"))
+            for pub in ck_info.get("publications") or []
+            if isinstance(pub, dict)
+            and pub.get("path")
+            and pub.get("stage")
+            and normalize_artifact_path(str(pub["path"])) == pub_path
+        ),
+        None,
+    )
+    input_paths: list[str] = []
+    pub_stage = valid_ck_stages.get(pub_stage_name or "")
+    for inp in pub_stage.inputs if pub_stage is not None else []:
+        if isinstance(inp, InputsFromStageOutputs):
+            src_stage = valid_ck_stages.get(inp.from_stage_outputs)
+            raw_paths = src_stage.dvc_out_paths if src_stage else []
+        else:
+            raw_paths = [inp if isinstance(inp, str) else inp.path]
+        for raw in raw_paths:
+            p = normalize_artifact_path(str(raw))
+            if p == pub_path or (
+                folder and PurePosixPath(p).is_relative_to(folder)
+            ):
+                continue
+            if tree.is_dir(p):
+                walk(tree, p, input_paths)
+            elif p not in input_paths:
+                input_paths.append(p)
+    input_paths = [
+        p
+        for p in sorted(set(input_paths))
+        if p not in file_paths
+        and not any(part.startswith(".") for part in p.split("/"))
+    ]
+    # What calkit.yaml attributes, by path
+    declared: dict[str, Literal["attested", "imported"]] = {}
+    for section in ["figures", "datasets", "misc"]:
+        for entry in ck_info.get(section) or []:
+            if not isinstance(entry, dict) or not entry.get("path"):
+                continue
+            entry_path = normalize_artifact_path(str(entry["path"]))
+            if entry.get("created_by"):
+                declared.setdefault(entry_path, "attested")
+            elif entry.get("imported_from"):
+                declared.setdefault(entry_path, "imported")
+    overleaf_info = calkit.overleaf.get_sync_info(
+        wdir=repo.working_dir, ck_info=ck_info, fix_legacy=False
+    )
+    authored_source: Literal["overleaf", "git"] = (
+        "overleaf" if folder in overleaf_info else "git"
+    )
+    figure_paths = [
+        normalize_artifact_path(str(fig["path"]))
+        for fig in ck_info.get("figures") or []
+        if isinstance(fig, dict) and fig.get("path")
+    ]
+    # Figure hashes are computed once, and only if something needs them
+    figure_md5s: dict[str, str | None] = {}
+    items: list[PublicationComponent] = []
+    for p, via in [(p, "folder") for p in file_paths] + [
+        (p, "input") for p in input_paths
+    ]:
+        size: int | None = None
+        if tree.is_file(p):
+            size = tree.size(p)
+        elif p in dvc_outs and dvc_outs[p].get("size") is not None:
+            size = int(dvc_outs[p]["size"])
+        stage = produced_by.get(p)
+        if stage is None:
+            for out_path, out_stage in produced_by.items():
+                if out_path and PurePosixPath(p).is_relative_to(out_path):
+                    stage = out_stage
+                    break
+        if stage is not None:
+            items.append(
+                PublicationComponent(
+                    path=p,
+                    kind="produced",
+                    via=via,
+                    stage=stage,
+                    stage_kind=stage_kinds.get(stage),
+                    size=size,
+                )
+            )
+            continue
+        if p in declared:
+            items.append(
+                PublicationComponent(
+                    path=p, kind=declared[p], via=via, size=size
+                )
+            )
+            continue
+        ext = posixpath.splitext(p)[1].lower()
+        if ext in PUBLICATION_SOURCE_EXTS:
+            items.append(
+                PublicationComponent(
+                    path=p,
+                    kind="authored",
+                    via=via,
+                    source=authored_source,
+                    size=size,
+                )
+            )
+            continue
+        matching_figure = None
+        if (
+            ext in PUBLICATION_FIGURE_EXTS
+            and size is not None
+            and size <= PUBLICATION_COMPONENT_MATCH_MAX_BYTES
+        ):
+            p_md5 = md5_of(p)
+            for fig_path in figure_paths:
+                if p_md5 is None or fig_path == p:
+                    continue
+                if fig_path not in figure_md5s:
+                    figure_md5s[fig_path] = md5_of(fig_path)
+                if figure_md5s[fig_path] == p_md5:
+                    matching_figure = fig_path
+                    break
+        items.append(
+            PublicationComponent(
+                path=p,
+                kind="unknown",
+                via=via,
+                matching_figure=matching_figure,
+                size=size,
+            )
+        )
+    return PublicationComponents(
+        folder=folder,
+        items=items,
+        n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+class MiscArtifactPost(BaseModel):
+    """A path to attribute, either to whoever made it here or to where it
+    came from, for a file that isn't a figure, dataset, or publication.
+    """
+
+    path: str
+    title: str | None = None
+    description: str | None = None
+    created_by: list[CreatorPost] | None = None
+    # One of calkit's ``imported_from`` forms, e.g., ``{"url": ...}``,
+    # ``{"doi": ...}``, ``{"project": "owner/name", "path": ...}``, or
+    # ``{"git": {"repo_url": ..., "rev": ..., "path": ...}}``; validated
+    # through the calkit model rather than restated here
+    imported_from: dict[str, Any] | None = None
+    # Commit message, in place of the default
+    message: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/misc")
+def post_project_misc(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    req: MiscArtifactPost,
+) -> MiscArtifact:
+    """Declare a misc artifact: attest to who made a file, or record where
+    it was imported from.
+
+    The path has to exist in the project and not already be declared as a
+    figure, dataset, publication, or misc artifact, since those carry the
+    same attribution and are edited as what they are.
+    """
+    path = _normalize_artifact_file_path(req.path)
+    project = app.projects.get_project(
+        session=session,
+        owner_name=owner_name,
+        project_name=project_name,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    if req.created_by is None and req.imported_from is None:
+        raise HTTPException(
+            422,
+            "A misc artifact must say who created it or where it was "
+            "imported from",
+        )
+    repo = get_repo(
+        project=project, user=current_user, session=session, ttl=None
+    )
+    ck_info = get_ck_info_from_repo(repo)
+    for section, label in [
+        ("figures", "figure"),
+        ("datasets", "dataset"),
+        ("publications", "publication"),
+        ("misc", "misc artifact"),
+    ]:
+        for existing in ck_info.get(section) or []:
+            if isinstance(existing, dict) and (
+                normalize_artifact_path(str(existing.get("path") or ""))
+                == path
+            ):
+                raise HTTPException(
+                    400,
+                    f"'{path}' is already declared as a {label}; edit that "
+                    "entry instead",
+                )
+    # Whether tracked by Git or DVC, the path has to be here to attribute
+    wdir = str(repo.working_dir)
+    if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
+        os.path.join(wdir, path + ".dvc")
+    ):
+        tree = get_repo_tree_for_ref(repo, None)
+        if path not in app.projects.dvc_outputs_from_tree(
+            project=project, tree=tree
+        ):
+            raise HTTPException(404, f"'{path}' does not exist in the project")
+    entry: dict[str, Any] = {"path": path}
+    if req.title:
+        entry["title"] = req.title
+    if req.description:
+        entry["description"] = req.description
+    if req.created_by is not None:
+        entry["created_by"] = [
+            person.model_dump(exclude_none=True) for person in req.created_by
+        ]
+    if req.imported_from is not None:
+        entry["imported_from"] = req.imported_from
+    # Validated against the model that owns calkit.yaml, which is where
+    # the rules live, e.g., made here or imported but not both, and at
+    # least one person named
+    try:
+        entry = CkMiscArtifact.model_validate(entry).model_dump(
+            exclude_none=True, mode="json"
+        )
+    except ValidationError as e:
+        raise HTTPException(422, f"Invalid misc artifact: {e}")
+    misc = ck_info.get("misc", [])
+    misc.append(entry)
+    ck_info["misc"] = misc
+    with open(os.path.join(wdir, "calkit.yaml"), "w") as f:
+        ryaml.dump(ck_info, f)
+    repo.git.add("calkit.yaml")
+    repo.git.commit(["-m", req.message or f"Add misc artifact {path}"])
+    repo.git.push(["origin", repo.active_branch.name])
+    record_project_update(project, repo, session)
+    return MiscArtifact.model_validate(entry)
 
 
 @router.get("/projects/{owner_name}/{project_name}/presentations")
@@ -4477,8 +5782,9 @@ def post_project_publication(
         logger.info(f"Git-adding {files_to_stage}")
         repo.git.add(files_to_stage)
     elif template is not None:
-        # TODO: Centralize template names
-        if template not in ["latex/article", "latex/jfm"]:
+        try:
+            calkit.templates.get_template(template)
+        except ValueError:
             raise HTTPException(422, "Invalid template name")
         cmd = [
             "calkit",
@@ -4496,6 +5802,14 @@ def post_project_publication(
         if description is not None:
             cmd += ["--description", description]
         if stage is not None:
+            # A stage is addressed as `dvc.yaml:name` and by `calkit run
+            # name`, so a path-like name with slashes breaks both
+            if not STAGE_NAME_RE.fullmatch(stage):
+                raise HTTPException(
+                    422,
+                    "Stage names may contain letters, numbers, dashes, "
+                    "underscores, and dots",
+                )
             cmd += ["--stage", stage]
         if environment is not None:
             cmd += ["--environment", environment]
@@ -4598,6 +5912,9 @@ async def post_project_overleaf_publication(
     environment_name: Optional[Annotated[str, Form()]] = Form(None),
     overleaf_token: Optional[Annotated[str, Form()]] = Form(None),
     auto_build: Optional[Annotated[bool, Form()]] = Form(False),
+    # Replace a folder that already exists at ``path``, e.g., a template's
+    # placeholder paper, rather than refusing to import over it.
+    replace_existing: Optional[Annotated[bool, Form()]] = Form(False),
     file: Optional[Annotated[UploadFile, File()]] = File(None),
 ) -> Publication:
     """Import a publication from Overleaf into a project.
@@ -4610,6 +5927,15 @@ async def post_project_overleaf_publication(
 
     Accepts multipart/form-data with an optional 'file' field
     (for the ZIP archive).
+
+    With ``replace_existing``, a folder already at ``path`` is emptied
+    first. The publications declared in it and the stages that built them
+    are dropped, but "feeder" stages, i.e., ones whose outputs land in the
+    folder like a template's figure and results copies, are kept and wired
+    into the new build stage as ``from_stage_outputs`` inputs. Showcase
+    entries pointing at a dropped publication are retargeted to the new
+    one, and reference files in the folder stay declared only when the
+    Overleaf project carries the same file.
     """
     # Validate input: require either an Overleaf URL or a ZIP file
     if (
@@ -4635,20 +5961,69 @@ async def post_project_overleaf_publication(
     repo = get_repo(
         project=project, user=current_user, session=session, ttl=None
     )
-    if os.path.exists(os.path.join(repo.working_dir, path)):
-        raise HTTPException(400, f"Path '{path}' already exists in the repo")
     # Make sure path is a posix path
     path = Path(path).as_posix()
+    path_exists = os.path.exists(os.path.join(repo.working_dir, path))
+    if path_exists and not replace_existing:
+        raise HTTPException(
+            400,
+            (
+                f"Folder '{path}' already exists in the repo; replace it "
+                "or import to a different path"
+            ),
+        )
+    replacing = path_exists and bool(replace_existing)
     # Handle projects that aren't yet Calkit projects
     ck_info = get_ck_info_from_repo(repo)
     publications = ck_info.get("publications", [])
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    # When replacing, the publications declared in the folder go, along
+    # with the stages that built them, while the feeder stages whose
+    # outputs land in the folder stay so the imported paper is fed by them
+    removed_pubs: list[dict[str, Any]] = []
+    removed_stage_names: list[str] = []
+    feeder_stage_names: list[str] = []
+    feeder_out_paths: list[str] = []
+    if replacing:
+        for pub in publications:
+            pub_path = normalize_artifact_path(pub.get("path") or "")
+            if pub_path and PurePosixPath(pub_path).is_relative_to(path):
+                removed_pubs.append(pub)
+                pub_stage = pub.get("stage")
+                if pub_stage and pub_stage not in removed_stage_names:
+                    removed_stage_names.append(pub_stage)
+        publications = [pub for pub in publications if pub not in removed_pubs]
+        for name, stage_map in stages.items():
+            if name in removed_stage_names:
+                continue
+            try:
+                ck_stage = _validate_ck_stage(stage_map, name)
+            except HTTPException as exc:
+                logger.warning(f"Skipping stage '{name}': {exc.detail}")
+                continue
+            outs = [
+                normalize_artifact_path(out)
+                for out in ck_stage.dvc_out_paths
+                if PurePosixPath(normalize_artifact_path(out)).is_relative_to(
+                    path
+                )
+            ]
+            if outs:
+                feeder_stage_names.append(name)
+                feeder_out_paths += outs
+        for name in removed_stage_names:
+            stages.pop(name, None)
+        logger.info(
+            f"Replacing '{path}': dropping publications "
+            f"{[pub.get('path') for pub in removed_pubs]} and stages "
+            f"{removed_stage_names}; keeping feeders {feeder_stage_names}"
+        )
     # Make sure a publication with this path doesn't already exist
     pubpaths = [pub.get("path") for pub in publications]
     if path in pubpaths:
         raise HTTPException(400, "A publication already exists at this path")
     # Make sure we don't already have a stage with the same name
-    pipeline = ck_info.get("pipeline", {})
-    stages = pipeline.get("stages", {})
     if not stage_name:
         stage_name = f"build-{path.replace('/', '-')}"
     if stage_name and stage_name in stages:
@@ -4688,23 +6063,26 @@ async def post_project_overleaf_publication(
     # Determine mode: link vs zip
     import_zip_mode = file is not None
     overleaf_repo = None
-    if import_zip_mode:
+    zf: zipfile.ZipFile | None = None
+    # Files the Overleaf project carries, relative to its root, so what's
+    # being replaced can be compared against what's coming in
+    incoming_files: list[str] = []
+    if file is not None:
         overleaf_abs_path = os.path.join(repo.working_dir, path)
         logger.info("Importing Overleaf ZIP archive; skipping linkage")
-        # Unzip the whole archive into the requested path
-        os.makedirs(overleaf_abs_path, exist_ok=True)
+        # Check the archive before touching the repo; it's extracted into
+        # the requested path once that's been emptied, if replacing
         resolved_dest = os.path.realpath(overleaf_abs_path)
-        with zipfile.ZipFile(io.BytesIO(await file.read()), "r") as zf:
-            for member in zf.namelist():
-                member_dest = os.path.realpath(
-                    os.path.join(resolved_dest, member)
+        zf = zipfile.ZipFile(io.BytesIO(await file.read()), "r")
+        for member in zf.namelist():
+            member_dest = os.path.realpath(os.path.join(resolved_dest, member))
+            if not member_dest.startswith(resolved_dest + os.sep):
+                raise HTTPException(
+                    400,
+                    f"ZIP entry '{member}' would escape target directory",
                 )
-                if not member_dest.startswith(resolved_dest + os.sep):
-                    raise HTTPException(
-                        400,
-                        f"ZIP entry '{member}' would escape target directory",
-                    )
-            zf.extractall(overleaf_abs_path)
+            if not member.endswith("/"):
+                incoming_files.append(Path(member).as_posix())
     elif overleaf_project_url is not None:
         overleaf_project_id = overleaf_project_url.split("/")[-1]
         # Handle token saving and validation for link mode
@@ -4735,7 +6113,49 @@ async def post_project_overleaf_publication(
                     "and that Git integration is enabled on Overleaf"
                 ),
             )
-        overleaf_abs_path = overleaf_repo.working_dir
+        overleaf_abs_path = str(overleaf_repo.working_dir)
+        for dirpath, dirnames, filenames in os.walk(overleaf_abs_path):
+            dirnames[:] = [d for d in dirnames if d != ".git"]
+            for fname in filenames:
+                incoming_files.append(
+                    Path(
+                        os.path.relpath(
+                            os.path.join(dirpath, fname), overleaf_abs_path
+                        )
+                    ).as_posix()
+                )
+    if replacing:
+        # A reference file the Overleaf project also carries stays
+        # declared; the rest go with the folder
+        references = ck_info.get("references", [])
+        kept_references = []
+        for reference in references:
+            ref_path = normalize_artifact_path(reference.get("path") or "")
+            if ref_path and PurePosixPath(ref_path).is_relative_to(path):
+                rel_ref_path = (
+                    PurePosixPath(ref_path).relative_to(path).as_posix()
+                )
+                if rel_ref_path not in incoming_files:
+                    continue
+            kept_references.append(reference)
+        if references:
+            ck_info["references"] = kept_references
+        # Remove everything in the folder, tracked or not; the feeder
+        # stages regenerate their outputs on the next run
+        try:
+            repo.git.rm(["-r", "-f", "--quiet", path])
+        except GitCommandError:
+            logger.info(f"No tracked files to remove under '{path}'")
+        replaced_abs_path = os.path.join(repo.working_dir, path)
+        if os.path.isdir(replaced_abs_path):
+            shutil.rmtree(replaced_abs_path)
+        elif os.path.exists(replaced_abs_path):
+            os.remove(replaced_abs_path)
+    if zf is not None:
+        # Unzip the whole archive into the requested path
+        os.makedirs(overleaf_abs_path, exist_ok=True)
+        zf.extractall(overleaf_abs_path)
+        zf.close()
     # Detect target path
     if not target_path:
         overleaf_files = os.listdir(overleaf_abs_path)
@@ -4775,13 +6195,22 @@ async def post_project_overleaf_publication(
         ):
             continue
         project_rel_path = os.path.join(path, p)
+        # A path a feeder stage produces is an input through that stage
+        if any(
+            PurePosixPath(project_rel_path).is_relative_to(out)
+            for out in feeder_out_paths
+        ):
+            continue
         if project_rel_path not in input_paths:
             input_paths.append(project_rel_path)
+    stage_inputs: list[str | dict[str, str]] = list(input_paths)
+    for feeder_stage_name in feeder_stage_names:
+        stage_inputs.append({"from_stage_outputs": feeder_stage_name})
     stage = {
         "kind": "latex",
         "target_path": os.path.join(path, target_path),
         "environment": env_name,
-        "inputs": input_paths,
+        "inputs": stage_inputs,
     }
     stages[stage_name] = stage
     pipeline["stages"] = stages
@@ -4798,6 +6227,20 @@ async def post_project_overleaf_publication(
     }
     publications.append(publication)
     ck_info["publications"] = publications
+    if replacing:
+        # A showcase entry for a dropped publication now shows the new one
+        removed_pub_paths = [
+            normalize_artifact_path(pub.get("path") or "")
+            for pub in removed_pubs
+        ]
+        for showcase_item in ck_info.get("showcase") or []:
+            if isinstance(showcase_item, dict) and (
+                normalize_artifact_path(
+                    str(showcase_item.get("publication") or "")
+                )
+                in removed_pub_paths
+            ):
+                showcase_item["publication"] = pdf_output_path
     if not import_zip_mode and overleaf_repo is not None:
         overleaf_sync_in_ck_info = ck_info.get("overleaf_sync", {})
         overleaf_sync_in_ck_info[path] = {"url": overleaf_project_url}
@@ -4861,10 +6304,12 @@ async def post_project_overleaf_publication(
     repo.git.add("calkit.yaml")
     if not import_zip_mode:
         repo.git.add(calkit.overleaf.get_sync_info_fpath())
-    repo.git.add(path)
     subprocess.run(
         ["calkit", "check", "pipeline", "--compile"], cwd=repo.working_dir
     )
+    # Added after compiling, which manages the folder's .gitignore, so the
+    # commit holds what's on disk
+    repo.git.add(path)
     repo.git.add("dvc.yaml")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")
@@ -5357,14 +6802,24 @@ def get_project_pipeline(
         stream = io.StringIO()
         ryaml.dump({"pipeline": ck_info["pipeline"]}, stream)
         calkit_content = stream.getvalue()
+    ck_stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    dvc_pipeline = None
+    dvc_content = None
     if tree.is_file("dvc.yaml"):
         dvc_content = tree.read_text("dvc.yaml")
-        dvc_pipeline = ryaml.load(dvc_content)
-    elif (ck_info.get("pipeline") or {}).get("stages"):
-        # A Calkit pipeline can be declared before it has ever been run,
-        # e.g., right after creating a publication from a template, in which
-        # case no dvc.yaml has been compiled and committed yet. Compile in
-        # memory so the pipeline still shows up.
+        dvc_pipeline = ryaml.load(dvc_content) or {}
+    # calkit.yaml is the source of truth, and the committed dvc.yaml can lag
+    # behind it: a stage added from the hub, a publication from a template,
+    # a run not made yet. When the Calkit pipeline declares a stage the
+    # committed file doesn't have, compile in memory so what's shown is
+    # what `calkit run` would run.
+    committed = set((dvc_pipeline or {}).get("stages") or {})
+    missing = [
+        name
+        for name in ck_stages
+        if not str(name).startswith("_") and name not in committed
+    ]
+    if ck_stages and (dvc_pipeline is None or missing):
         try:
             stages = calkit.pipeline.to_dvc(
                 ck_info=ck_info,
@@ -5372,17 +6827,18 @@ def get_project_pipeline(
                 write=False,
                 manage_gitignore=False,
             )
+            dvc_pipeline = {"stages": stages}
+            stream = io.StringIO()
+            ryaml.dump(dvc_pipeline, stream)
+            dvc_content = stream.getvalue()
         except Exception as e:
             logger.warning(
                 f"Failed to compile Calkit pipeline for "
                 f"{owner_name}/{project_name}: {e}"
             )
-            return None
-        dvc_pipeline = {"stages": stages}
-        stream = io.StringIO()
-        ryaml.dump(dvc_pipeline, stream)
-        dvc_content = stream.getvalue()
-    else:
+            if dvc_pipeline is None:
+                return None
+    if dvc_pipeline is None or dvc_content is None:
         return None
     # Pop off any private stages
     for stage_name in list(dvc_pipeline.get("stages", {}).keys()):
@@ -5451,7 +6907,7 @@ def _abs_path_within(root: str, rel_path: str) -> str:
     """
     root_real = os.path.realpath(root)
     resolved = os.path.realpath(os.path.join(root_real, rel_path))
-    if resolved != root_real and not resolved.startswith(root_real + os.sep):
+    if not _inside(root_real, resolved):
         raise HTTPException(422, f"Path is outside the project: {rel_path}")
     return resolved
 
@@ -5471,6 +6927,9 @@ def _load_ck_stage_map(stage_yaml: str) -> Any:
     if not isinstance(stage_map, dict):
         raise HTTPException(422, "A stage must be a YAML mapping")
     return stage_map
+
+
+STAGE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 
 
 def _validate_ck_stage(stage_map: Any, stage_name: str) -> CkStage:
@@ -5501,7 +6960,7 @@ def _dump_ck_stage_map(stage_map: Any) -> str:
 
 
 @router.get(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
 )
 def get_project_pipeline_stage(
     owner_name: str,
@@ -5539,7 +6998,7 @@ def get_project_pipeline_stage(
 
 
 @router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
     "/remove-defaults"
 )
 def remove_project_pipeline_stage_defaults(
@@ -5585,7 +7044,7 @@ def remove_project_pipeline_stage_defaults(
 
 
 @router.post(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
     "/detect-inputs"
 )
 def detect_project_pipeline_stage_inputs(
@@ -5645,7 +7104,7 @@ def detect_project_pipeline_stage_inputs(
 
 
 @router.put(
-    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+    "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name:path}"
 )
 def put_project_pipeline_stage(
     owner_name: str,
@@ -5679,11 +7138,23 @@ def put_project_pipeline_stage(
     with open(os.path.join(repo.working_dir, "calkit.yaml"), "w") as f:
         ryaml.dump(ck_info, f)
     repo.git.add("calkit.yaml")
+    # Recompile dvc.yaml, which is what the pipeline view and `dvc repro`
+    # read; otherwise the edit sits in calkit.yaml until the next run.
+    try:
+        calkit.pipeline.to_dvc(
+            ck_info=ck_info, wdir=str(repo.working_dir), write=True
+        )
+        repo.git.add("-A")
+    except Exception as e:
+        repo.git.checkout("--", ".")
+        repo.git.clean("-fd")
+        raise HTTPException(422, f"Could not compile the pipeline: {e}")
     if repo.is_dirty():
         repo.git.commit(
             ["-m", req.message or f"Update pipeline stage {stage_name}"]
         )
         repo.git.push(["origin", repo.active_branch.name])
+        record_project_update(project, repo, session)
     return PipelineStage(name=stage_name, yaml=_dump_ck_stage_map(stage_map))
 
 
@@ -6768,6 +8239,12 @@ def post_project_reference_item(
     """
     if not req.key.strip():
         raise HTTPException(422, "A citation key is required")
+    # bibtexparser drops an entry with no fields when the file is read back
+    # (and writes it out as a comment), so one would vanish without a trace
+    if not any(v.strip() for v in req.fields.values()):
+        raise HTTPException(
+            422, "A reference needs at least one field, usually a title"
+        )
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -6875,6 +8352,12 @@ def put_project_reference_item(
             entry[field] = value.strip()
         else:
             entry.pop(field, None)
+    # Same rule as adding: an entry stripped of every field would be lost on
+    # the next read, which is not what clearing fields should mean
+    if not any(k not in ("ENTRYTYPE", "ID") for k in entry):
+        raise HTTPException(
+            422, "A reference needs at least one field, usually a title"
+        )
     # Push the edit to Zotero first for a linked collection (this also follows a
     # key rename in the item map); a failure aborts before the local write.
     # Skip the push when nothing actually changed, so a redundant save doesn't
@@ -7883,6 +9366,16 @@ def put_project_reference_notes(
     )
 
 
+class EnvironmentLock(BaseModel):
+    """A lock file pinning what an environment actually resolved to."""
+
+    path: str
+    content: str
+    # Set when the file was too large to send whole, so the viewer can say so
+    # rather than presenting a truncated lock as the lock.
+    truncated: bool = False
+
+
 class Environment(BaseModel):
     name: str
     kind: str
@@ -7891,6 +9384,86 @@ class Environment(BaseModel):
     imported_from: str | None = None
     all_attrs: dict
     file_content: str | None = None
+    # The spec says what was asked for; the lock says what that resolved to,
+    # which is the half that makes the environment reproducible. Docker,
+    # venv, and conda lock per platform, so there can be several.
+    locks: list[EnvironmentLock] = []
+
+
+# Locks can be large (a uv.lock for a real project runs to hundreds of
+# kilobytes), and the point of showing one is to see what it pinned, not to
+# ship the whole file to a browser that will render it in a code block.
+MAX_ENV_LOCK_BYTES = 256_000
+
+
+def _read_env_locks(
+    env: dict[str, Any], env_name: str, wdir: str
+) -> list[dict[str, Any]]:
+    """Read whatever lock files an environment has.
+
+    Which file that is per kind belongs to calkit, so the path comes from
+    there rather than being reconstructed here. Docker, venv, and conda lock
+    once per platform, and ``for_dvc`` resolves those to the directory
+    holding them, so a directory means "several locks" rather than an error.
+    """
+    try:
+        lock_path = calkit.environments.get_env_lock_fpath(
+            env=env, env_name=env_name, wdir=wdir, for_dvc=True
+        )
+    except Exception as e:
+        # A malformed environment (e.g. a Julia env whose path isn't a
+        # Project.toml) shouldn't take the whole page down over its lock.
+        logger.warning(f"Could not resolve lock path for {env_name}: {e}")
+        return []
+    if not lock_path:
+        return []
+    # get_env_lock_fpath resolves against wdir, so what comes back is
+    # absolute. Paths are shown to the user and used to look files up in the
+    # repo, so they have to read as project paths, not server paths.
+    full_path = (
+        lock_path
+        if os.path.isabs(lock_path)
+        else os.path.join(wdir, lock_path)
+    )
+    # The name and path come from the project's own calkit.yaml, which
+    # anyone with write access composes, so a lock that resolves outside
+    # the clone is not a lock to go read.
+    if not _inside(wdir, full_path):
+        logger.warning(f"Lock path for {env_name} is outside the project")
+        return []
+    if os.path.isdir(full_path):
+        # Docker, venv, and conda lock once per platform, so this is a
+        # directory of them rather than a single file.
+        candidates = [
+            os.path.join(full_path, name)
+            for name in sorted(os.listdir(full_path))
+            if os.path.isfile(os.path.join(full_path, name))
+        ]
+    elif os.path.isfile(full_path):
+        candidates = [full_path]
+    else:
+        return []
+    locks = []
+    for abs_path in candidates:
+        # A symlink in the locks directory can point anywhere.
+        if not _inside(wdir, abs_path):
+            continue
+        rel_path = Path(os.path.relpath(abs_path, wdir)).as_posix()
+        try:
+            size = os.path.getsize(abs_path)
+            with open(abs_path, errors="replace") as f:
+                content = f.read(MAX_ENV_LOCK_BYTES)
+        except OSError as e:
+            logger.warning(f"Could not read lock {rel_path}: {e}")
+            continue
+        locks.append(
+            {
+                "path": rel_path,
+                "content": content,
+                "truncated": size > MAX_ENV_LOCK_BYTES,
+            }
+        )
+    return locks
 
 
 @router.get("/projects/{owner_name}/{project_name}/environments")
@@ -7928,9 +9501,14 @@ def get_project_environments(
         env_path = env.get("path")
         if env_path:
             fpath = os.path.join(repo.working_dir, env_path)
-            if os.path.isfile(fpath):
+            # The path is the project's to set, not ours, so it's held to
+            # the clone the same way every other project path is.
+            if _inside(str(repo.working_dir), fpath) and os.path.isfile(fpath):
                 with open(fpath) as f:
                     env_resp["file_content"] = f.read()
+        env_resp["locks"] = _read_env_locks(
+            env=env, env_name=env_name, wdir=str(repo.working_dir)
+        )
         try:
             resp.append(Environment.model_validate(env_resp))
         except ValidationError as e:
@@ -7982,6 +9560,21 @@ def post_project_environment(
         repo.git.add(fpath)
     repo.git.commit(["-m", f"Add environment {req.name}"])
     repo.git.push(["origin", repo.active_branch])
+    mixpanel.user_created_environment(
+        user=current_user,
+        owner_name=owner_name,
+        project_name=project_name,
+        kind=req.kind,
+        # How many packages the spec file declares, which is the difference
+        # between a preset and someone starting from nothing.
+        n_packages=len(
+            [
+                line
+                for line in (req.file_content or "").splitlines()
+                if line.strip() and not line.lstrip().startswith("#")
+            ]
+        ),
+    )
     return Environment.model_validate(new_env | {"all_attrs": new_env})
 
 

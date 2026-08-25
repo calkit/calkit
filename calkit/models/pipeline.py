@@ -18,6 +18,7 @@ from pydantic import (
     Discriminator,
     Field,
     PrivateAttr,
+    TypeAdapter,
     ValidationError,
     field_validator,
     model_validator,
@@ -768,12 +769,42 @@ class MapPathsStage(Stage):
 
     kind: Literal["map-paths"] = "map-paths"
     environment: str = "_system"
-    paths: list[
-        Annotated[
-            (CopyFileToFile | CopyFileToDir | DirToDirMerge | DirToDirReplace),
-            Discriminator("kind"),
-        ]
-    ] = Field(description="Copy operations to perform.")
+    paths: list[MapPathsMapping] = Field(
+        description="Copy operations to perform."
+    )
+
+    @classmethod
+    def mapping_from(
+        cls,
+        src: str,
+        dest: str,
+        kind: MapPathsKind | None = None,
+        is_dir: bool | None = None,
+    ) -> MapPathsMapping:
+        """Build one copy operation, working out its kind when not given.
+
+        A directory is merged into its destination; a file is copied into
+        a directory when ``dest`` ends with a slash and to a path otherwise.
+        ``is_dir`` says what ``src`` is when the caller knows better than
+        the filesystem (e.g., a DVC-tracked directory that isn't checked
+        out); when it's None, ``src`` is looked up on disk. A ``kind`` that
+        doesn't match what ``src`` is raises a ``ValueError``, since the
+        copy would fail at run time.
+        """
+        if is_dir is None:
+            is_dir = os.path.isdir(src)
+        if kind is None:
+            kind = (
+                "dir-to-dir-merge"
+                if is_dir
+                else ("file-to-dir" if dest.endswith("/") else "file-to-file")
+            )
+        if is_dir != kind.startswith("dir"):
+            what = "a directory" if is_dir else "a file"
+            raise ValueError(f"'{src}' is {what}, so it can't be {kind}")
+        return TypeAdapter(MapPathsMapping).validate_python(
+            {"kind": kind, "src": src, "dest": dest.rstrip("/") or dest}
+        )
 
     @property
     def dvc_cmd(self) -> str:
@@ -796,6 +827,23 @@ class MapPathsStage(Stage):
         for path in self.paths:
             outs.append({path.out_path: {"cache": False, "persist": True}})
         return outs + super().dvc_outs
+
+
+MapPathsKind = Literal[
+    "file-to-file", "file-to-dir", "dir-to-dir-merge", "dir-to-dir-replace"
+]
+MapPathsMapping = Annotated[
+    (
+        MapPathsStage.CopyFileToFile
+        | MapPathsStage.CopyFileToDir
+        | MapPathsStage.DirToDirMerge
+        | MapPathsStage.DirToDirReplace
+    ),
+    Discriminator("kind"),
+]
+# ``paths`` names the union above, which the nested classes it's made of
+# can't precede, so the model finishes building here
+MapPathsStage.model_rebuild()
 
 
 class LatexStage(Stage):

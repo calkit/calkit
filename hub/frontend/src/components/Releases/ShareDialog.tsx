@@ -76,7 +76,7 @@ const MintedLink = ({
         ) : null}
       </Text>
       <InputGroup size="sm">
-        <Input value={url} isReadOnly pr="4rem" />
+        <Input autoComplete="off" value={url} isReadOnly pr="4rem" />
         <InputRightElement width="4rem">
           <Button h="1.5rem" size="xs" onClick={onCopy}>
             {hasCopied ? "Copied" : "Copy"}
@@ -191,7 +191,7 @@ const ShareDialog = ({
               Link to this release
             </Text>
             <InputGroup size="sm">
-              <Input value={pageUrl} isReadOnly pr="4rem" />
+              <Input autoComplete="off" value={pageUrl} isReadOnly pr="4rem" />
               <InputRightElement width="4rem">
                 <Button h="1.5rem" size="xs" onClick={onCopyPage}>
                   {hasCopiedPage ? "Copied" : "Copy"}
@@ -217,6 +217,7 @@ const ShareDialog = ({
               Recipient email (optional)
             </FormLabel>
             <Input
+              autoComplete="off"
               id="share-email"
               type="email"
               placeholder="Ex: reviewer@example.com (blank = anyone with the link)"
@@ -236,6 +237,7 @@ const ShareDialog = ({
           <FormControl mt={3}>
             <FormLabel htmlFor="share-note">Note (optional)</FormLabel>
             <Input
+              autoComplete="off"
               id="share-note"
               placeholder="Ex: Reviewer 2"
               value={note}

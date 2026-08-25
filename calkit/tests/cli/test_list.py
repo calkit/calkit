@@ -218,6 +218,7 @@ def test_list_objects_json(tmp_dir):
         "publications": [{"path": "paper.pdf", "kind": "journal-article"}],
         "references": [{"path": "refs.bib", "key": "my-refs"}],
         "procedures": {"proc1": {"title": "Do the thing"}},
+        "misc": [{"path": "rig.jpg", "created_by": {"email": "me@x.edu"}}],
     }
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -233,6 +234,10 @@ def test_list_objects_json(tmp_dir):
         ["calkit", "list", "references", "--json"], text=True
     )
     assert json.loads(out) == ck_info["references"]
+    out = subprocess.check_output(
+        ["calkit", "list", "misc", "--json"], text=True
+    )
+    assert json.loads(out) == ck_info["misc"]
     out = subprocess.check_output(
         ["calkit", "list", "procedures", "--json"], text=True
     )

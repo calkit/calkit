@@ -4,6 +4,10 @@ import {
   DownloadIcon,
 } from "@chakra-ui/icons"
 import {
+  Alert,
+  AlertDescription,
+  AlertIcon,
+  AlertTitle,
   Box,
   Button,
   Checkbox,
@@ -22,24 +26,32 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
+  Radio,
+  RadioGroup,
   Select,
+  Stack,
   Switch,
   Text,
   Textarea,
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { getRouteApi } from "@tanstack/react-router"
-import { useState } from "react"
+import { useParams } from "@tanstack/react-router"
+import { useRef, useState } from "react"
 import { type SubmitHandler, useForm } from "react-hook-form"
+import { useDebounce } from "use-debounce"
 
 import type { AxiosError } from "axios"
-import { ProjectsService, UsersService } from "../../client"
+import { ProjectsService, type Publication, UsersService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
 import { handleError } from "../../lib/errors"
 
 interface ImportOverleafProps {
   isOpen: boolean
   onClose: () => void
+  // Supplied when the modal is opened outside a project route, e.g. from the
+  // new-project wizard, which has the project but isn't rendered under it.
+  ownerName?: string
+  projectName?: string
 }
 
 interface OverleafImportPost {
@@ -63,11 +75,94 @@ interface OverleafImportPost {
   file?: FileList
 }
 
-const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
+/** What to do when the destination folder is already taken. */
+type CollisionChoice = "replace" | "rename"
+
+// How a new publication collides with what a project already has.
+
+/** The folder a publication lives in, i.e., the directory of its path. */
+export function publicationFolder(path: string): string {
+  const i = path.lastIndexOf("/")
+  return i < 0 ? "" : path.slice(0, i)
+}
+
+function normalizeFolder(path: string): string {
+  return path
+    .trim()
+    .replace(/^\.?\/+/, "")
+    .replace(/\/+$/, "")
+}
+
+/**
+ * Whether a publication is the untouched one a new project's template
+ * starts with, so replacing it costs nothing.
+ */
+export function isTemplatePublication(
+  publication: Pick<Publication, "path" | "title">,
+): boolean {
+  return (
+    publication.title === "The paper" || publication.path === "paper/paper.pdf"
+  )
+}
+
+export interface PublicationCollision<P> {
+  folder: string
+  /** The publication already living in that folder, if there is one. */
+  publication: P | null
+  /** Whether the folder can be replaced without losing anything but the
+   * template placeholder. */
+  replaceable: boolean
+}
+
+/**
+ * What importing into `path` would run into: a publication already declared
+ * in that folder, or a folder that exists in the repo, whether or not a
+ * publication is declared there.
+ *
+ * Returns null when the folder is free.
+ */
+export function findPublicationCollision<
+  P extends Pick<Publication, "path" | "title">,
+>(
+  path: string,
+  publications: P[],
+  folderExists: boolean,
+): PublicationCollision<P> | null {
+  const folder = normalizeFolder(path)
+  if (!folder) return null
+  const publication =
+    publications.find((pub) => {
+      const pubFolder = publicationFolder(pub.path)
+      return (
+        pubFolder === folder ||
+        pubFolder.startsWith(`${folder}/`) ||
+        pub.path === folder
+      )
+    }) ?? null
+  if (!publication && !folderExists) return null
+  return {
+    folder,
+    publication,
+    replaceable: publication ? isTemplatePublication(publication) : false,
+  }
+}
+
+const ImportOverleaf = ({
+  isOpen,
+  onClose,
+  ownerName,
+  projectName: projectNameProp,
+}: ImportOverleafProps) => {
   const queryClient = useQueryClient()
   const showToast = useCustomToast()
-  const routeApi = getRouteApi("/_layout/$accountName/$projectName")
-  const { accountName, projectName } = routeApi.useParams()
+  // Non-strict so this reads as empty rather than throwing when the modal is
+  // rendered outside the project route.
+  const routeParams = useParams({ strict: false }) as {
+    accountName?: string
+    projectName?: string
+  }
+  const accountName = ownerName ?? routeParams.accountName ?? ""
+  const projectName = projectNameProp ?? routeParams.projectName ?? ""
   const connectedAccountsQuery = useQuery({
     queryFn: () =>
       UsersService.getUserConnectedAccounts().then((response) => response.data),
@@ -97,6 +192,67 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
     },
   })
   const [showAdvanced, setShowAdvanced] = useState(false)
+  // Whether the destination is already taken, checked as the user types
+  // against the declared publications and the repo's folders. A folder
+  // that isn't there 404s, which reads as free.
+  const currentPath = watch("path")?.trim() ?? ""
+  const [debouncedPath] = useDebounce(currentPath, 300)
+  const projectKnown = Boolean(accountName && projectName)
+  const publicationsQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "publications", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPublications({
+        owner_name: accountName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: isOpen && projectKnown,
+    retry: false,
+  })
+  const folderQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "contents", debouncedPath],
+    queryFn: () =>
+      ProjectsService.getProjectContents({
+        owner_name: accountName,
+        project_name: projectName,
+        path: debouncedPath,
+      }).then((response) => response.data),
+    enabled: isOpen && projectKnown && debouncedPath !== "",
+    retry: false,
+  })
+  const collision = findPublicationCollision(
+    debouncedPath,
+    publicationsQuery.data ?? [],
+    folderQuery.isSuccess,
+  )
+  const checking =
+    projectKnown &&
+    currentPath !== "" &&
+    (currentPath !== debouncedPath ||
+      folderQuery.isFetching ||
+      publicationsQuery.isPending)
+  // Transient form state: which way out of the collision the user picked,
+  // remembered per folder so a new folder starts over from the default,
+  // which is to replace only the template's placeholder.
+  const [pickedChoice, setPickedChoice] = useState<{
+    folder: string
+    value: CollisionChoice
+  } | null>(null)
+  const collisionChoice: CollisionChoice =
+    collision && pickedChoice?.folder === collision.folder
+      ? pickedChoice.value
+      : collision?.replaceable
+        ? "replace"
+        : "rename"
+  const setCollisionChoice = (value: CollisionChoice) => {
+    if (collision) setPickedChoice({ folder: collision.folder, value })
+  }
+  const pathInputRef = useRef<HTMLInputElement | null>(null)
+  const { ref: registerPathRef, ...pathField } = register("path", {
+    required: "Path is required",
+    validate: (value) => value.trim() !== "" || "Path is required",
+  })
+  const replaceExisting = Boolean(collision) && collisionChoice === "replace"
+  const collisionUnresolved = Boolean(collision) && !replaceExisting
   const mutation = useMutation({
     mutationFn: (data: OverleafImportPost) =>
       ProjectsService.postProjectOverleafPublication({
@@ -112,6 +268,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
           environment_name: data.environment || undefined,
           overleaf_token: data.overleaf_token || undefined,
           file: data.file ? data.file[0] : null,
+          replace_existing: replaceExisting,
         },
         owner_name: accountName,
         project_name: projectName,
@@ -133,9 +290,20 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
       queryClient.invalidateQueries({
         queryKey: ["projects", accountName, projectName, "publications"],
       })
+      // Replacing rewires stages and rewrites the folder
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "pipeline"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "contents"],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ["projects", accountName, projectName, "files"],
+      })
     },
   })
   const onSubmit: SubmitHandler<OverleafImportPost> = (data) => {
+    if (collisionUnresolved) return
     mutation.mutate(data)
   }
 
@@ -181,6 +349,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
               <FormLabel htmlFor="overleaf_url">Overleaf project URL</FormLabel>
               <HStack>
                 <Input
+                  autoComplete="off"
                   id="overleaf_url"
                   {...register("overleaf_url", {
                     validate: (value) => {
@@ -242,6 +411,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
               >
                 <FormLabel htmlFor="overleaf_token">Overleaf token</FormLabel>
                 <Input
+                  autoComplete="off"
                   id="overleaf_token"
                   {...register("overleaf_token", {
                     validate: (value) => {
@@ -267,12 +437,13 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
             <FormControl mt={4} isRequired isInvalid={!!errors.path}>
               <FormLabel htmlFor="path">Destination folder</FormLabel>
               <Input
+                autoComplete="off"
                 id="path"
-                {...register("path", {
-                  required: "Path is required",
-                  validate: (value) =>
-                    value.trim() !== "" || "Path is required",
-                })}
+                {...pathField}
+                ref={(el) => {
+                  registerPathRef(el)
+                  pathInputRef.current = el
+                }}
                 placeholder={"Ex: paper"}
                 type="text"
               />
@@ -280,6 +451,50 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                 <FormErrorMessage>{errors.path.message}</FormErrorMessage>
               )}
             </FormControl>
+            {collision && (
+              <Alert
+                status="warning"
+                borderRadius="md"
+                mt={2}
+                fontSize="sm"
+                alignItems="flex-start"
+              >
+                <AlertIcon />
+                <Box>
+                  <AlertTitle fontSize="sm">
+                    {collision.publication
+                      ? `"${collision.publication.title}" is already at `
+                      : "A folder already exists at "}
+                    <Text as="code">{collision.folder}</Text>
+                  </AlertTitle>
+                  <AlertDescription>
+                    <RadioGroup
+                      mt={2}
+                      value={collisionChoice}
+                      onChange={(value) => {
+                        setCollisionChoice(value as CollisionChoice)
+                        if (value === "rename") pathInputRef.current?.focus()
+                      }}
+                    >
+                      <Stack spacing={1}>
+                        <Radio value="replace" colorScheme="teal" size="sm">
+                          Replace what's at{" "}
+                          <Text as="code">{collision.folder}</Text>
+                        </Radio>
+                        <Text fontSize="xs" color="ui.dim" pl={6}>
+                          The current paper there is removed. Pipeline stages
+                          that copy figures and results into it are kept and
+                          wired to the new paper.
+                        </Text>
+                        <Radio value="rename" colorScheme="teal" size="sm">
+                          Use a different folder
+                        </Radio>
+                      </Stack>
+                    </RadioGroup>
+                  </AlertDescription>
+                </Box>
+              </Alert>
+            )}
             {/* Publication type */}
             <FormControl mt={4} isRequired isInvalid={!!errors.kind}>
               <FormLabel htmlFor="kind">Type</FormLabel>
@@ -363,6 +578,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                     Target TeX file path
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="target_path"
                     {...register("target_path")}
                     placeholder={"Ex: main.tex"}
@@ -380,6 +596,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                     Docker environment name
                   </FormLabel>
                   <Input
+                    autoComplete="off"
                     id="environment"
                     {...register("environment")}
                     placeholder="Ex: tex"
@@ -395,6 +612,7 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
                 <FormControl mt={4} isInvalid={!!errors.stage}>
                   <FormLabel htmlFor="stage">Pipeline stage name</FormLabel>
                   <Input
+                    autoComplete="off"
                     id="stage"
                     {...register("stage")}
                     placeholder="Ex: build-paper"
@@ -412,8 +630,9 @@ const ImportOverleaf = ({ isOpen, onClose }: ImportOverleafProps) => {
               variant="primary"
               type="submit"
               isLoading={isSubmitting || mutation.isPending}
+              isDisabled={checking || collisionUnresolved}
             >
-              Save
+              {replaceExisting ? "Replace and import" : "Save"}
             </Button>
             <Button onClick={onClose}>Cancel</Button>
           </ModalFooter>

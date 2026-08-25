@@ -55,6 +55,7 @@ nav:
   - JupyterLab: jupyterlab.md
   - High performance computing (HPC): hpc.md
   - Datasets: datasets.md
+  - Provenance: provenance.md
   - References: references.md
   - Calculations: calculations.md
   - Apps: apps.md

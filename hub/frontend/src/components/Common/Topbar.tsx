@@ -14,8 +14,10 @@ import {
   useDisclosure,
 } from "@chakra-ui/react"
 import { Link as RouterLink, useNavigate } from "@tanstack/react-router"
+import mixpanel from "mixpanel-browser"
 import { useEffect } from "react"
 import { FaGithub, FaPlus } from "react-icons/fa"
+import { FiHelpCircle } from "react-icons/fi"
 
 import { useQuery } from "@tanstack/react-query"
 
@@ -25,13 +27,18 @@ import NewOrg from "../Orgs/NewOrg"
 import NewProject from "../Projects/NewProject"
 import UserMenu from "./UserMenu"
 import GlobalSearch from "./GlobalSearch"
+import HelpFeedback from "./HelpFeedback"
 import NotificationBell from "./NotificationBell"
 
-interface Props {
-  children: React.ReactNode
-}
-
-const Links = ["Orgs", "Projects", "Datasets", "Learn"]
+// "Docs" leaves the app entirely rather than going to a page that only
+// links onward to the documentation site, which is where that content is
+// actually maintained.
+const NAV_LINKS: { label: string; to?: string; href?: string }[] = [
+  { label: "Orgs", to: "/orgs" },
+  { label: "Projects", to: "/projects" },
+  { label: "Datasets", to: "/datasets" },
+  { label: "Docs", href: "https://docs.calkit.org" },
+]
 
 /**
  * Which hub this is, next to the repo it's built from.
@@ -60,27 +67,24 @@ const HubVersion = () => {
   )
 }
 
-const getPath = (link: React.ReactNode) => {
-  const linkString = link?.toString()
-  return `/${linkString?.toLowerCase()}`
-}
-
-const NavLink = (props: Props) => {
-  const { children } = props
-
+const NavLink = ({
+  label,
+  to,
+  href,
+}: { label: string; to?: string; href?: string }) => {
+  const hoverBg = useColorModeValue("gray.200", "gray.700")
+  const linkProps = href
+    ? { as: "a" as const, href, target: "_blank", rel: "noopener noreferrer" }
+    : { as: RouterLink, to }
   return (
     <Box
-      as={RouterLink}
+      {...(linkProps as any)}
       px={2}
       py={1}
       rounded={"md"}
-      _hover={{
-        textDecoration: "none",
-        bg: useColorModeValue("gray.200", "gray.700"),
-      }}
-      to={getPath(children)}
+      _hover={{ textDecoration: "none", bg: hoverBg }}
     >
-      {children}
+      {label}
     </Box>
   )
 }
@@ -89,8 +93,12 @@ export default function Topbar() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { user } = useAuth()
+  // The new-project button goes to the wizard now; this modal is still here
+  // for the "use as template" form, which sends the user off to connect
+  // GitHub and comes back with ?newProject=1 to be reopened.
   const newProjectModal = useDisclosure()
   const newOrgModal = useDisclosure()
+  const helpModal = useDisclosure()
   // Reopen whichever creation modal sent the user off to connect GitHub,
   // and drop the marker so a refresh doesn't reopen it again
   useEffect(() => {
@@ -155,8 +163,8 @@ export default function Topbar() {
               spacing={4}
               display={{ base: "none", md: "flex" }}
             >
-              {Links.map((link) => (
-                <NavLink key={link}>{link}</NavLink>
+              {NAV_LINKS.map((link) => (
+                <NavLink key={link.label} {...link} />
               ))}
             </HStack>
           </HStack>
@@ -174,11 +182,33 @@ export default function Topbar() {
             <Button
               aria-label="new-project"
               size="sm"
-              onClick={user ? newProjectModal.onOpen : goToLoginWithRedirect}
+              as={RouterLink}
+              to="/new"
             >
               <Icon as={FaPlus} mr={1} />
               New project
             </Button>
+            {user ? (
+              <>
+                <Button
+                  aria-label="help"
+                  size="sm"
+                  onClick={() => {
+                    mixpanel.track("Opened help and feedback", {
+                      source: "topbar",
+                    })
+                    helpModal.onOpen()
+                  }}
+                  leftIcon={<Icon as={FiHelpCircle} />}
+                >
+                  Help
+                </Button>
+                <HelpFeedback
+                  isOpen={helpModal.isOpen}
+                  onClose={helpModal.onClose}
+                />
+              </>
+            ) : null}
             <NewProject
               onClose={newProjectModal.onClose}
               isOpen={newProjectModal.isOpen}
@@ -216,8 +246,8 @@ export default function Topbar() {
         {isOpen ? (
           <Box pb={4} display={{ md: "none" }}>
             <Stack as={"nav"} spacing={4}>
-              {Links.map((link) => (
-                <NavLink key={link}>{link}</NavLink>
+              {NAV_LINKS.map((link) => (
+                <NavLink key={link.label} {...link} />
               ))}
             </Stack>
           </Box>

@@ -14,6 +14,8 @@ from passlib.context import CryptContext
 
 from app.config import settings
 
+EMAIL_VERIFICATION_LINK_HOURS = 24
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = "HS256"
@@ -96,6 +98,40 @@ def verify_password_reset_token(token: str) -> str | None:
         )
         return str(decoded_token["sub"])
     except InvalidTokenError:
+        return None
+
+
+def generate_email_verification_token(user_id: uuid.UUID, email: str) -> str:
+    """A signed link token naming the user and the address it went to."""
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(hours=EMAIL_VERIFICATION_LINK_HOURS)
+    return jwt.encode(
+        {
+            "exp": expires.timestamp(),
+            "nbf": now,
+            "sub": str(user_id),
+            "email": email,
+            "purpose": "verify-email",
+        },
+        settings.SECRET_KEY,
+        algorithm="HS256",
+    )
+
+
+def verify_email_verification_token(
+    token: str,
+) -> tuple[uuid.UUID, str] | None:
+    """The user ID and email a verification link token was issued for.
+
+    The purpose claim is checked so a password reset token, which is
+    signed the same way, can't be handed in as a verification.
+    """
+    try:
+        decoded = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if decoded.get("purpose") != "verify-email":
+            return None
+        return uuid.UUID(str(decoded["sub"])), str(decoded["email"])
+    except (InvalidTokenError, KeyError, ValueError):
         return None
 
 

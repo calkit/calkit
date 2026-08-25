@@ -4,7 +4,6 @@ import {
   Code,
   Flex,
   Heading,
-  Icon,
   IconButton,
   Link,
   Modal,
@@ -31,6 +30,7 @@ import { z } from "zod"
 import type { Table } from "../../../../../client"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import Markdown from "../../../../../components/Common/Markdown"
 import TableThumbnail from "../../../../../components/Tables/TableThumbnail"
 import TableView from "../../../../../components/Tables/TableView"
@@ -116,9 +116,17 @@ function TableModal({
   }, [onPrev, onNext])
 
   return (
-    <Modal isOpen onClose={onClose} size="full" scrollBehavior="inside">
+    <Modal
+      isOpen
+      onClose={onClose}
+      size="6xl"
+      scrollBehavior="inside"
+      isCentered
+    >
       <ModalOverlay />
-      <ModalContent>
+      {/* Wide enough for a table's columns, still a dialog over the page,
+          and a fixed height so filtering changes the rows, not the box */}
+      <ModalContent maxW={{ base: "100%", lg: "92vw" }} h="92vh" maxH="92vh">
         <ModalHeader pb={1}>
           <Flex align="center" gap={2}>
             <IconButton
@@ -201,7 +209,7 @@ function TableModal({
             // query rather than keeping the one being left behind.
             key={table.path}
             table={table}
-            maxHeight="calc(100vh - 260px)"
+            maxHeight="calc(92vh - 260px)"
             highlight={highlight}
             onHighlightChange={onHighlightChange}
             search={search}
@@ -305,26 +313,19 @@ function Tables() {
         ) : null}
       </Flex>
       {matched.length === 0 ? (
-        <Flex
-          direction="column"
-          align="center"
-          justify="center"
-          height="300px"
-          color="gray.500"
-        >
-          <Icon as={FiGrid} fontSize="4xl" mb={3} />
-          {needle ? (
-            <Text>No tables match "{search}"</Text>
-          ) : (
-            <>
-              <Text>No tables found</Text>
-              <Text fontSize="sm" mt={1}>
-                Declare one in calkit.yaml, or add a CSV to a tables or results
-                directory.
-              </Text>
-            </>
-          )}
-        </Flex>
+        <NoArtifactFound
+          icon={FiGrid}
+          title={needle ? `No tables match "${search}"` : "No tables found"}
+          hint={
+            needle ? undefined : (
+              <>
+                Declare one in <Code>calkit.yaml</Code>, or add a CSV to a{" "}
+                <Code>tables</Code> or <Code>results</Code> directory.
+              </>
+            )
+          }
+          docsUrl={needle ? undefined : "https://docs.calkit.org/calkit-yaml/"}
+        />
       ) : (
         <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} spacing={4}>
           {matched.map((table) => (

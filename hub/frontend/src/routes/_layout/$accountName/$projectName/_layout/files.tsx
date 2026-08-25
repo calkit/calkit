@@ -1,5 +1,7 @@
 import {
   Box,
+  Button,
+  ButtonGroup,
   Flex,
   Heading,
   Icon,
@@ -38,6 +40,8 @@ import {
 } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import NotebookView from "../../../../../components/Notebooks/NotebookView"
 import FileEditorModal, {
   isEditableText,
 } from "../../../../../components/Files/FileEditorModal"
@@ -56,6 +60,10 @@ const fileSearchSchema = z.object({
   compare_ref: z.string().optional(),
   editor_open: z.boolean().optional(),
   file_editor_open: z.boolean().optional(),
+  // For a notebook: whether the source or the executed copy is shown, and
+  // whether the in-browser runner is open
+  nb_view: z.enum(["source", "executed"]).optional(),
+  nb_run: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -252,6 +260,8 @@ function Files() {
     compare_ref,
     editor_open,
     file_editor_open,
+    nb_view,
+    nb_run,
   } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
@@ -393,6 +403,34 @@ function Files() {
     navigate({ search: (prev) => ({ ...prev, file_editor_open: true }) })
   const closeFileEditor = () =>
     navigate({ search: (prev) => ({ ...prev, file_editor_open: undefined }) })
+  // A notebook has two faces: its source, and the executed copy the
+  // pipeline produced (HTML or a notebook with outputs). The notebooks
+  // endpoint knows about the second and about the stage that runs it.
+  const isNotebook = Boolean(selectedPath?.toLowerCase().endsWith(".ipynb"))
+  const notebooksQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "notebooks", ref],
+    queryFn: () =>
+      ProjectsService.getProjectNotebooks({
+        owner_name: accountName,
+        project_name: projectName,
+        ref,
+      }).then((response) => response.data),
+    enabled: isNotebook,
+    retry: false,
+  })
+  const notebook = isNotebook
+    ? (notebooksQuery.data ?? []).find((nb) => nb.path === selectedPath)
+    : undefined
+  const hasExecuted = Boolean(notebook && (notebook.content || notebook.url))
+  // Executed is the default: it's what the pipeline made, and the thing a
+  // reader wants first. Source is the fallback when there isn't one.
+  const nbView = nb_view ?? "executed"
+  const showExecuted =
+    isNotebook &&
+    nbView === "executed" &&
+    (notebooksQuery.isPending || hasExecuted)
+  const setNbView = (view: "source" | "executed") =>
+    navigate({ search: (prev) => ({ ...prev, nb_view: view }) })
 
   return (
     <>
@@ -450,8 +488,44 @@ function Files() {
           </PageMenu>
           <Flex flex={1} minW={0} gap={6} align="flex-start">
             <Box flex={1} minW={0} minH={0} overflowY="auto" overflowX="auto">
+              {isNotebook && selectedItemQuery?.data ? (
+                <ButtonGroup size="xs" isAttached variant="outline" mb={2}>
+                  <Button
+                    onClick={() => setNbView("source")}
+                    isActive={
+                      nbView === "source" ||
+                      (!notebooksQuery.isPending && !hasExecuted)
+                    }
+                  >
+                    Source
+                  </Button>
+                  <Button
+                    onClick={() => setNbView("executed")}
+                    isActive={nbView === "executed" && hasExecuted}
+                    isDisabled={!notebooksQuery.isPending && !hasExecuted}
+                    title={
+                      hasExecuted
+                        ? undefined
+                        : "No executed copy yet; run the pipeline to make one"
+                    }
+                  >
+                    Executed
+                  </Button>
+                </ButtonGroup>
+              ) : null}
               {selectedPath !== undefined && selectedItemQuery.isPending ? (
                 <LoadingSpinner />
+              ) : showExecuted ? (
+                notebooksQuery.isPending || !notebook ? (
+                  <LoadingSpinner />
+                ) : (
+                  // NotebookView fills its container, and this column has no
+                  // height of its own, so give it the same height FileContent
+                  // uses for its panes, less the toggle above.
+                  <Box height="calc(100vh - 200px)">
+                    <NotebookView notebook={notebook} />
+                  </Box>
+                )
               ) : selectedItemQuery?.data?.content ||
                 selectedItemQuery?.data?.url ? (
                 <FileContent item={selectedItemQuery.data!} />
@@ -493,6 +567,24 @@ function Files() {
                   ) : (
                     ""
                   )}
+                  {isNotebook && selectedPath && userHasWriteAccess && !ref ? (
+                    <NotebookRunLauncher
+                      ownerName={accountName}
+                      projectName={projectName}
+                      path={selectedPath}
+                      stage={notebook?.stage}
+                      source="files-page"
+                      isOpen={Boolean(nb_run)}
+                      onOpenChange={(open) =>
+                        navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            nb_run: open || undefined,
+                          }),
+                        })
+                      }
+                    />
+                  ) : null}
                 </>
               )}
             </Box>

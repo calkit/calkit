@@ -291,6 +291,92 @@ Simply declare the environment and use it in a pipeline stage
 and Calkit will ensure it is built and up to date.
 There is no need to think about building images as a separate step.
 
+#### Caching images in a registry
+
+An image built from a Dockerfile can take a long time to build,
+and once it's gone from the local Docker image store,
+rebuilding it is the only way to get it back.
+Worse, a rebuild isn't guaranteed to produce the same image,
+since the packages the Dockerfile installs move on over time.
+
+Setting `registry` on the environment makes Calkit push each image it
+builds, and pull it back by digest whenever it's missing,
+rather than rebuilding it:
+
+```yaml
+# In calkit.yaml
+environments:
+  foam2:
+    kind: docker
+    path: Dockerfile
+    image: foam2
+    registry: auto
+```
+
+`auto` resolves to the project's namespace in the GitHub Container
+Registry, e.g., `ghcr.io/someone/some-project`,
+but any registry prefix works,
+and `none` keeps images local.
+The lock file records the image's digest,
+so what gets pulled back is exactly what was built,
+and Calkit checks the image's layers against the lock after pulling.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Pushing to a registry requires being logged into it. For the GitHub
+    Container Registry, Calkit will log in for you using your GitHub
+    credentials. In GitHub Actions, the `calkit/calkit/actions/run` action
+    logs in automatically, so long as the workflow grants the
+    `packages: write` permission.
+
+To rebuild or repull an image and write fresh lock files, e.g., after an
+image's tag has been moved out from under the digest in the lock, run:
+
+```sh
+calkit update docker-env --name foam2 --lock
+```
+
+#### Locking multiple platforms
+
+A Docker environment is locked per architecture, in
+`.calkit/env-locks/{name}`.
+Calkit reads the image's manifest from the registry and writes a lock file
+for each platform it provides, not just the one it's running on,
+so moving a project between an `arm64` laptop and an `amd64` server doesn't
+invalidate every stage in the environment.
+
+Images from a registry are multi-platform already.
+An image built from a Dockerfile is built for one platform by default;
+to build and lock more than one, declare them:
+
+```yaml
+# In calkit.yaml
+environments:
+  foam2:
+    kind: docker
+    path: Dockerfile
+    image: foam2
+    registry: auto
+    platforms:
+      - linux/amd64
+      - linux/arm64
+```
+
+Building for multiple platforms requires a registry,
+since a multi-platform image can only be kept in one.
+
+#### Archiving images in a release
+
+A registry makes no promise to keep an image forever,
+so a project release archives its Docker images alongside its data,
+and records what it archived in
+`.calkit/releases/{name}/docker-images.yaml`.
+When an image is missing and no registry can serve it,
+the environment check finds it in a release by its layers and fetches it
+back from there.
+Pass `--no-docker-images` to `calkit new release` to skip this.
+
 ### uv
 
 uv can create both _project_ and _venv_ virtual environments.
@@ -919,24 +1005,26 @@ Model class: `CondaEnvironment`
 
 Model class: `DockerEnvironment`
 
-| Parameter      | Type                           | Required | Description                                                                                                                                       |
-| -------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                 |
-| path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                    |
-| image          | str                            | yes      | Name of the Docker image.                                                                                                                         |
-| layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                             |
-| shell          | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                          |
-| command_mode   | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                   |
-| platform       | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                          |
-| wdir           | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                      |
-| user           | str                            | no       | User to run the container as. Defaults to the host user.                                                                                          |
-| deps           | list[str]                      | no       | Files added to the container as dependencies.                                                                                                     |
-| env_vars       | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                  |
-| ports          | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                 |
-| gpus           | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                            |
-| args           | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                           |
-| jupyter_kernel | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images. |
-| description    | str                            | no       | A description of the environment.                                                                                                                 |
+| Parameter      | Type                           | Required | Description                                                                                                                                                                                                                                   |
+| -------------- | ------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                             |
+| path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                |
+| image          | str                            | yes      | Name of the Docker image.                                                                                                                                                                                                                     |
+| registry       | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. Images are kept local if this is unset. |
+| platforms      | list[str]                      | no       | Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64']. Building for more than one requires a registry, since a multi-platform image can only be kept in one.                                                                 |
+| layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                                                                                                                         |
+| shell          | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                                                                                                                      |
+| command_mode   | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                                                                                                               |
+| platform       | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                                                                                                                      |
+| wdir           | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                                                                                                                  |
+| user           | str                            | no       | User to run the container as. Defaults to the host user.                                                                                                                                                                                      |
+| deps           | list[str]                      | no       | Files added to the container as dependencies.                                                                                                                                                                                                 |
+| env_vars       | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                                                                                                              |
+| ports          | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                                                                                                             |
+| gpus           | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                                                                                                                        |
+| args           | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                                                                                                                       |
+| jupyter_kernel | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.                                                                                             |
+| description    | str                            | no       | A description of the environment.                                                                                                                                                                                                             |
 
 #### `julia`
 

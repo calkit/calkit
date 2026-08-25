@@ -1642,6 +1642,7 @@ Options:
 | `--kind`                  | text    | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
 | `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
 | `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                                                                                      |
+| `--no-docker-images`      | boolean | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                |
 | `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
 | `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
 | `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
@@ -2672,10 +2673,12 @@ calkit update docker-env [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description            |
-| -------------- | ---- | -------- | ------- | ---------------------- |
-| `--name`, `-n` | text | yes      |         | Environment name.      |
-| `--image`      | text | no       |         | Docker image name/tag. |
+| Option         | Type    | Required | Default | Description                                                                                                                                            |
+| -------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n` | text    | yes      |         | Environment name.                                                                                                                                      |
+| `--image`      | text    | no       |         | Docker image name/tag.                                                                                                                                 |
+| `--registry`   | text    | no       |         | Registry prefix to push images to and pull them from, or 'auto' for the project's GitHub Container Registry namespace, or 'none' to keep images local. |
+| `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                         |
 
 <a id="subcommand-update-slurm-env"></a>
 
@@ -2994,21 +2997,25 @@ Arguments:
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                                                                                   |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-i`, `--input`   | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                      |
-| `--output`, `-o`  | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`         | text    | no       |         | Alternative lock file input paths to read.                                                                                                                    |
-| `--input-delete`  | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                    |
-| `--platform`      | text    | no       |         | Which platform(s) to build for.                                                                                                                               |
-| `--user`          | text    | no       |         | Which user to run the container as.                                                                                                                           |
-| `--wdir`          | text    | no       |         | Working directory inside the container.                                                                                                                       |
-| `--dep`, `-d`     | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                         |
-| `--env-var`, `-e` | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                   |
-| `--port`, `-p`    | text    | no       |         | Declare an explicit port for the container.                                                                                                                   |
-| `--gpus`, `-g`    | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                        |
-| `--arg`, `-a`     | text    | no       |         | Declare an explicit run argument for the container.                                                                                                           |
-| `--quiet`, `-q`   | boolean | no       | False   | Be quiet.                                                                                                                                                     |
+| Option             | Type    | Required | Default | Description                                                                                                                                                   |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i`, `--input`    | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                      |
+| `--output`, `-o`   | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`          | text    | no       |         | Alternative lock file input paths to read.                                                                                                                    |
+| `--input-delete`   | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                    |
+| `--platform`       | text    | no       |         | Which platform(s) to build for.                                                                                                                               |
+| `--user`           | text    | no       |         | Which user to run the container as.                                                                                                                           |
+| `--wdir`           | text    | no       |         | Working directory inside the container.                                                                                                                       |
+| `--dep`, `-d`      | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                         |
+| `--env-var`, `-e`  | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                   |
+| `--port`, `-p`     | text    | no       |         | Declare an explicit port for the container.                                                                                                                   |
+| `--gpus`, `-g`     | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                        |
+| `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                           |
+| `--platform-build` | text    | no       |         | Platform to build the image for, e.g., 'linux/amd64'. Repeat for a multi-platform image, which requires a registry.                                           |
+| `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                       |
+| `--no-push`        | boolean | no       | False   | Do not push newly built images to the registry.                                                                                                               |
+| `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                   |
+| `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                     |
 
 <a id="subcommand-check-conda-env"></a>
 

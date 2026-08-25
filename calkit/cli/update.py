@@ -872,16 +872,69 @@ def update_docker_env(
         str | None,
         typer.Option("--image", help="Docker image name/tag."),
     ] = None,
+    registry: Annotated[
+        str | None,
+        typer.Option(
+            "--registry",
+            help=(
+                "Registry prefix to push images to and pull them from, or "
+                "'auto' for the project's GitHub Container Registry "
+                "namespace, or 'none' to keep images local."
+            ),
+        ),
+    ] = None,
+    lock: Annotated[
+        bool,
+        typer.Option(
+            "--lock",
+            help=(
+                "Rebuild or repull the image and write fresh lock files for "
+                "every architecture."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Update a docker environment."""
+    from calkit.environments import (
+        get_all_docker_lock_fpaths,
+        get_env_lock_fpath,
+    )
+
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
-    if image is None:
-        raise_error("No updates specified. Use --image to set the image.")
-    env["image"] = image
-    calkit.save_calkit_info(ck_info)
-    typer.echo(f"Updated docker environment '{env_name}'")
+    if image is None and registry is None and not lock:
+        raise_error(
+            "No updates specified. Use --image, --registry, or --lock."
+        )
+    if image is not None:
+        env["image"] = image
+    if registry is not None:
+        if registry.lower() in ["none", "false"]:
+            env["registry"] = "none"
+        else:
+            env["registry"] = registry
+    if image is not None or registry is not None:
+        calkit.save_calkit_info(ck_info)
+        typer.echo(f"Updated docker environment '{env_name}'")
+    if not lock:
+        return
+    # Relocking throws away the existing lock files so the image is fetched or
+    # rebuilt from the environment's spec, which is the only way to pick up an
+    # image whose tag has been moved out from under a recorded digest
+    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
+        if os.path.isfile(lock_fpath):
+            typer.echo(f"Removing lock file: {lock_fpath}")
+            os.remove(lock_fpath)
+    legacy_lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, as_posix=False, legacy=True
+    )
+    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
+        os.remove(legacy_lock_fpath)
+    from calkit.cli.check import check_environment
+
+    typer.echo(f"Relocking docker environment '{env_name}'")
+    check_environment(env_name=env_name, verbose=True)
 
 
 @update_app.command(name="slurm-env")

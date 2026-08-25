@@ -781,6 +781,22 @@
           "description": "Platform to run as, e.g., 'linux/amd64'.",
           "title": "Platform"
         },
+        "platforms": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64']. Building for more than one requires a registry, since a multi-platform image can only be kept in one.",
+          "title": "Platforms"
+        },
         "ports": {
           "anyOf": [
             {
@@ -796,6 +812,19 @@
           "default": null,
           "description": "Ports to expose, e.g., '8080:80'.",
           "title": "Ports"
+        },
+        "registry": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. Images are kept local if this is unset.",
+          "title": "Registry"
         },
         "shell": {
           "default": "sh",

@@ -4,8 +4,10 @@ For more information on the citation file format, see:
 https://github.com/citation-file-format/citation-file-format
 """
 
+import gzip
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -538,3 +540,153 @@ def check_project_release_archive(
                 "Released project archive failed pipeline checks: "
                 "`calkit run` failed."
             ) from e
+
+
+DOCKER_IMAGES_FNAME = "docker-images.yaml"
+
+
+def get_release_dir(name: str, wdir: str | None = None) -> str:
+    """Return the directory holding a release's metadata."""
+    base = os.path.join(wdir, ".calkit") if wdir else ".calkit"
+    return os.path.join(base, "releases", name)
+
+
+def save_docker_images(
+    release_files_dir: str, wdir: str | None = None
+) -> dict:
+    """Export a project's Docker images into a release's upload directory.
+
+    Registries make no promise to keep an image forever, and an image built
+    from a Dockerfile can't be rebuilt to the same bytes once its upstream
+    dependencies have moved on, so a release that's meant to stand on its own
+    has to carry the image itself.
+
+    Returns breadcrumbs keyed by image ID, which the environment check reads
+    to fetch an image back out of a release when no registry can serve it.
+    """
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    resp = {}
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if not isinstance(env, dict) or env.get("kind") != "docker":
+            continue
+        image = env.get("image")
+        if not image:
+            continue
+        info = calkit.docker.inspect_image(image)
+        if info is None:
+            from calkit.cli import warn
+
+            warn(
+                f"Docker environment '{env_name}' has no local image "
+                f"({image}) to archive; run the pipeline first"
+            )
+            continue
+        fname = f"docker-image-{env_name}.tar.gz"
+        fpath = os.path.join(release_files_dir, fname)
+        proc = subprocess.Popen(
+            ["docker", "save", image], stdout=subprocess.PIPE
+        )
+        assert proc.stdout is not None
+        with gzip.open(fpath, "wb") as f:
+            shutil.copyfileobj(proc.stdout, f)
+        proc.stdout.close()
+        if proc.wait() != 0:
+            raise RuntimeError(f"Failed to save Docker image {image}")
+        image_id = info.get("Id")
+        if not image_id:
+            continue
+        resp[image_id] = dict(
+            environment=env_name,
+            image=image,
+            path=fname,
+            architecture=info.get("Architecture"),
+            os=info.get("Os"),
+            layers=(info.get("RootFS") or {}).get("Layers") or [],
+            repo_digests=info.get("RepoDigests") or [],
+        )
+    return resp
+
+
+def find_archived_docker_image(
+    layers: list[str], wdir: str | None = None
+) -> tuple[str, str, dict] | None:
+    """Find the newest release that archived an image with these layers.
+
+    Layers identify the image's content exactly, so a match means the release
+    holds the image a lock file calls for, whatever it happens to be named.
+    Returns the release name, the image ID, and its breadcrumb.
+    """
+    if not layers:
+        return None
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    releases = ck_info.get("releases") or {}
+    for name in reversed(list(releases)):
+        release = releases[name]
+        if not isinstance(release, dict) or not release.get("record_id"):
+            continue
+        fpath = os.path.join(
+            get_release_dir(name, wdir=wdir), DOCKER_IMAGES_FNAME
+        )
+        if not os.path.isfile(fpath):
+            continue
+        with open(fpath) as f:
+            images = calkit.ryaml.load(f) or {}
+        for image_id, entry in images.items():
+            if isinstance(entry, dict) and entry.get("layers") == layers:
+                return name, image_id, entry
+    return None
+
+
+def fetch_archived_docker_image(
+    release_name: str, entry: dict, wdir: str | None = None
+) -> bool:
+    """Download an image archived in a release and load it into Docker."""
+    import urllib.request
+    from typing import cast
+
+    from calkit.invenio import ServiceName
+
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    release = (ck_info.get("releases") or {}).get(release_name) or {}
+    record_id = release.get("record_id")
+    service = cast(ServiceName, release.get("publisher") or "zenodo")
+    if not record_id:
+        return False
+    try:
+        urls = calkit.invenio.get_download_urls(
+            record_id, service=service, auth=False
+        )
+    except Exception:
+        try:
+            urls = calkit.invenio.get_download_urls(
+                record_id, service=service, auth=True
+            )
+        except Exception:
+            return False
+    url = urls.get(entry.get("path", ""))
+    if url is None:
+        return False
+    # Keep the download out of version control and off the pipeline's radar,
+    # since it's a machine-local cache of something already published
+    cache_dir = os.path.join(
+        calkit.ensure_local_dir(wdir=wdir), "container-images"
+    )
+    os.makedirs(cache_dir, exist_ok=True)
+    fpath = os.path.join(cache_dir, f"{release_name}-{entry['path']}")
+    if not os.path.isfile(fpath):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as resp:
+                with open(fpath + ".part", "wb") as f:
+                    shutil.copyfileobj(resp, f)
+            os.replace(fpath + ".part", fpath)
+        except Exception:
+            if os.path.isfile(fpath + ".part"):
+                os.remove(fpath + ".part")
+            return False
+    try:
+        subprocess.check_output(
+            ["docker", "load", "-i", fpath], stderr=subprocess.STDOUT
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return True

@@ -375,3 +375,62 @@ def test_zip_paths(tmp_dir):
         assert "data/sub/file.txt" in names
         assert "root.txt" in names
         assert zipf.getinfo("root.txt").compress_type == zipfile.ZIP_DEFLATED
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_archive_docker_images(tmp_dir):
+    import calkit
+    from calkit.releases import (
+        DOCKER_IMAGES_FNAME,
+        find_archived_docker_image,
+        get_release_dir,
+        save_docker_images,
+    )
+
+    image = "calkit-release-archive-test"
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo archived > /hi.txt\n")
+    subprocess.check_call(["docker", "build", "-t", image, "."])
+    try:
+        calkit.save_calkit_info(
+            {
+                "environments": {
+                    "main": {
+                        "kind": "docker",
+                        "path": "Dockerfile",
+                        "image": image,
+                    },
+                    "py": {"kind": "uv-venv", "path": "pyproject.toml"},
+                },
+                "releases": {
+                    "v1": {"kind": "project", "record_id": 12345},
+                },
+            }
+        )
+        os.makedirs("files", exist_ok=True)
+        images = save_docker_images("files")
+        # Only Docker environments are archived, and each carries enough to
+        # be matched back to a lock file
+        assert len(images) == 1
+        image_id, entry = next(iter(images.items()))
+        assert entry["environment"] == "main"
+        assert entry["image"] == image
+        assert entry["layers"]
+        assert os.path.isfile(os.path.join("files", entry["path"]))
+        release_dir = get_release_dir("v1")
+        os.makedirs(release_dir, exist_ok=True)
+        with open(os.path.join(release_dir, DOCKER_IMAGES_FNAME), "w") as f:
+            calkit.ryaml.dump(images, f)
+        # Layers identify the image exactly, so a lock file's layers are
+        # enough to find the release that archived it
+        found = find_archived_docker_image(entry["layers"])
+        assert found is not None
+        assert found[0] == "v1"
+        assert found[1] == image_id
+        assert find_archived_docker_image(["sha256:nope"]) is None
+        assert find_archived_docker_image([]) is None
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)

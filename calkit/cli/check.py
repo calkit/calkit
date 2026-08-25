@@ -8,6 +8,7 @@ import os
 import platform as _platform
 import shutil
 import subprocess
+import textwrap
 from typing import Annotated, Callable
 
 import dotenv
@@ -377,6 +378,9 @@ def check_environment(
             user=env.get("user"),
             wdir=env.get("wdir"),
             args=env.get("args", []),
+            platforms=env.get("platforms", []),
+            registry=env.get("registry"),
+            lock_archs=calkit.docker.get_lock_archs(env),
             quiet=not verbose,
         )
     elif env["kind"] == "conda":
@@ -917,45 +921,57 @@ def check_docker_env(
             help="Declare an explicit run argument for the container.",
         ),
     ] = [],
+    platforms: Annotated[
+        list[str],
+        typer.Option(
+            "--platform-build",
+            help=(
+                "Platform to build the image for, e.g., 'linux/amd64'. "
+                "Repeat for a multi-platform image, which requires a "
+                "registry."
+            ),
+        ),
+    ] = [],
+    registry: Annotated[
+        str | None,
+        typer.Option(
+            "--registry",
+            help=(
+                "Registry prefix to push built images to and pull them from, "
+                "e.g., 'ghcr.io/someone/some-project', or 'none' to disable."
+            ),
+        ),
+    ] = None,
+    no_push: Annotated[
+        bool,
+        typer.Option(
+            "--no-push",
+            help="Do not push newly built images to the registry.",
+        ),
+    ] = False,
+    lock_archs: Annotated[
+        list[str],
+        typer.Option(
+            "--lock-arch",
+            help=(
+                "Architecture to write an additional lock file for, "
+                "alongside this machine's, e.g., 'amd64'."
+            ),
+        ),
+    ] = [],
     quiet: Annotated[
         bool, typer.Option("--quiet", "-q", help="Be quiet.")
     ] = False,
 ) -> None:
     """Check that Docker environment is up-to-date."""
+    from calkit import docker as ck_docker
+    from calkit.environments import get_docker_arch
+
     if fpath is None and lock_fpath is None:
         raise_error(
             "Lock file output path must be provided if input Dockerfile is not"
         )
-
-    def get_docker_inspect(obj_id: str = tag) -> dict:
-        # This command returns a list, of which we want the first object
-        out = json.loads(
-            subprocess.check_output(["docker", "inspect", obj_id]).decode()
-        )
-        # Remove some keys that can change without the important aspects of
-        # the image changing
-        # Only keep certain keys that are relevant for identifying the
-        # content in the image
-        keys = [
-            "RepoTags",
-            "RepoDigests",
-            "Architecture",
-            "Os",
-            "RootFS",
-        ]
-        resp = {}
-        for key in keys:
-            resp[key] = out[0].get(key)
-        return resp
-
     outfile = open(os.devnull, "w") if quiet else None
-    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
-    # First call Docker inspect
-    try:
-        inspect = get_docker_inspect()
-    except subprocess.CalledProcessError:
-        typer.echo(f"No image with tag {tag} found locally", file=outfile)
-        inspect = {}
     if fpath is not None:
         typer.echo(f"Reading Dockerfile from {fpath}", file=outfile)
         dockerfile_md5 = get_md5(fpath)
@@ -969,25 +985,34 @@ def check_docker_env(
     deps_md5s = {}
     for dep in deps:
         deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
-    rebuild_or_pull = True
+
+    def read_lock(path: str) -> dict | None:
+        # A lock that can't be read is treated as one that isn't there, since
+        # rebuilding is always an option and crashing the check isn't
+        try:
+            with open(path) as f:
+                loaded = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return None
+        # Handle legacy lock files that are lists
+        if isinstance(loaded, list):
+            loaded = loaded[0] if loaded else None
+        return loaded if isinstance(loaded, dict) else None
+
+    # Read the lock file, falling back to legacy paths and then to other
+    # architectures, which still identify the image well enough to pull it
     lock = None
+    lock_is_current_arch = False
     if os.path.isfile(lock_fpath):
         typer.echo(f"Reading lock file: {lock_fpath}", file=outfile)
-        with open(lock_fpath) as f:
-            lock = json.load(f)
-        # Handle legacy lock files that are lists
-        if isinstance(lock, list):
-            lock = lock[0]
+        lock = read_lock(lock_fpath)
+        lock_is_current_arch = lock is not None
     else:
         typer.echo(f"Lock file ({lock_fpath}) does not exist", file=outfile)
         for alt_lock_fpath in alt_lock_fpaths_delete:
             if os.path.isfile(alt_lock_fpath):
                 typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
-                with open(alt_lock_fpath) as f:
-                    lock = json.load(f)
-                # Handle legacy lock files that are lists
-                if isinstance(lock, list):
-                    lock = lock[0]
+                lock = read_lock(alt_lock_fpath)
                 os.remove(alt_lock_fpath)
                 break
         if lock is None:
@@ -996,101 +1021,288 @@ def check_docker_env(
                     typer.echo(
                         f"Reading alternative lock file: {alt_lock_fpath}"
                     )
-                    with open(alt_lock_fpath) as f:
-                        lock = json.load(f)
-                    # Handle legacy lock files that are lists
-                    if isinstance(lock, list):
-                        lock = lock[0]
-                    break
-    if inspect and lock:
+                    lock = read_lock(alt_lock_fpath)
+                    if lock is not None:
+                        break
+    # A lock that doesn't describe the current spec is stale, not merely
+    # out-of-date with the local image: the image it identifies was built
+    # from a different Dockerfile, dependencies, or name, so it must not be
+    # pulled in place of the one asked for
+    if lock is not None and not ck_docker.lock_matches_spec(
+        lock, image=tag, dockerfile_md5=dockerfile_md5, deps_md5s=deps_md5s
+    ):
         typer.echo(
-            "Checking image and Dockerfile against lock file", file=outfile
+            "Lock file does not match the current environment", file=outfile
         )
-        rebuild_or_pull = inspect["RootFS"]["Layers"] != lock["RootFS"][
-            "Layers"
-        ] or dockerfile_md5 != lock.get("DockerfileMD5")
-        if not rebuild_or_pull:
-            for dep, md5 in deps_md5s.items():
-                if md5 != lock.get("DepsMD5s", {}).get(dep):
-                    typer.echo(f"Found modified dependency: {dep}")
-                    rebuild_or_pull = True
-                    break
+        lock = None
+        lock_is_current_arch = False
+    # Work out where this image lives in a registry, so it can be pulled
+    # instead of rebuilt, and pushed after being built. Only an image built
+    # from a Dockerfile goes to the project's registry; one named directly
+    # already lives somewhere it can be pulled back from.
+    remote_ref = None
+    registry_prefix = ck_docker.resolve_registry_prefix(
+        {"registry": registry, "path": fpath}
+    )
+    if registry_prefix is None and ck_docker.registry_is_auto(registry):
+        warn(
+            "Could not work out a registry for this project; name one "
+            "explicitly, e.g., 'ghcr.io/someone/some-project', or set "
+            "a GitHub remote"
+        )
+    if registry_prefix is not None and fpath is not None:
+        remote_ref = ck_docker.get_remote_image_ref(tag, registry_prefix)
+    typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
+    identity = ck_docker.inspect_image_for_lock(tag)
+    if identity is None:
+        typer.echo(f"No image with tag {tag} found locally", file=outfile)
+    up_to_date = (
+        identity is not None
+        and lock is not None
+        and (
+            not lock_is_current_arch
+            or ck_docker.lock_matches_image(lock, identity)
+        )
+    )
 
     def delete_lock_on_failure() -> None:
         if lock_fpath and os.path.exists(lock_fpath):
             os.remove(lock_fpath)
 
-    if fpath is not None and rebuild_or_pull:
-        dockerfile_dir, dockerfile_name = os.path.split(fpath)
-        if not dockerfile_dir:
-            dockerfile_dir = None
-        cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
-        if platform is not None:
-            cmd += ["--platform", platform]
-        cmd.append(".")
-        try:
-            subprocess.check_output(cmd, cwd=dockerfile_dir)
-        except subprocess.CalledProcessError:
-            delete_lock_on_failure()
-            raise_error(
-                f"Failed to build Docker image with tag {tag} from {fpath}"
-            )
-    elif fpath is None and rebuild_or_pull:
-        # First try to pull by repo digest
-        pulled = False
-        if lock and "RepoDigests" in lock:
-            repo_digests = lock["RepoDigests"]
-            if repo_digests:
-                image_with_digest = repo_digests[0]
-                typer.echo(f"Pulling image by digest: {image_with_digest}")
-                cmd = ["docker", "pull", image_with_digest]
-                tag_cmd = ["docker", "tag", image_with_digest, tag]
-                try:
-                    subprocess.check_output(cmd)
-                    # Now tag the pulled image
-                    subprocess.check_output(tag_cmd)
-                    pulled = True
-                except subprocess.CalledProcessError:
-                    delete_lock_on_failure()
+    built = False
+    already_pushed = False
+    if not up_to_date:
+        obtained = False
+        # Prefer pulling the exact image the lock identifies, since a rebuild
+        # can't reproduce it, and would silently pick up whatever its
+        # undeclared upstream dependencies have become
+        if lock is not None:
+            for digest_ref in ck_docker.get_lock_digest_refs(lock, remote_ref):
+                typer.echo(f"Pulling image by digest: {digest_ref}")
+                if not ck_docker.pull_image(digest_ref, platform=platform):
+                    # A private image needs credentials we may be able to get
+                    if not ck_docker.login_to_registry(
+                        digest_ref
+                    ) or not ck_docker.pull_image(
+                        digest_ref, platform=platform
+                    ):
+                        warn(f"Failed to pull image by digest: {digest_ref}")
+                        continue
+                if not ck_docker.tag_image(digest_ref, tag):
+                    warn(f"Failed to tag pulled image as {tag}")
+                    continue
+                identity = ck_docker.inspect_image_for_lock(tag)
+                if identity is None:
+                    continue
+                if lock_is_current_arch and not ck_docker.lock_matches_image(
+                    lock, identity
+                ):
                     warn(
-                        f"Failed to pull image by digest: {image_with_digest}; "
-                        "falling back to pulling by tag"
+                        f"Image pulled from {digest_ref} does not match the "
+                        "lock file"
                     )
-                    pulled = False
-        if not pulled:
-            typer.echo(f"Pulling image: {tag}")
-            cmd = ["docker", "pull", tag]
+                    continue
+                obtained = True
+                break
+        # Fall back to an image archived in a release, since a registry makes
+        # no promise to keep an image forever, and rebuilding can't reproduce
+        # one whose upstream dependencies have moved on
+        if not obtained and lock is not None and lock_is_current_arch:
+            layers = (lock.get("RootFS") or {}).get("Layers") or []
+            archived = calkit.releases.find_archived_docker_image(layers)
+            if archived is not None:
+                release_name, image_id, entry = archived
+                typer.echo(
+                    f"Fetching image archived in release '{release_name}'"
+                )
+                if calkit.releases.fetch_archived_docker_image(
+                    release_name, entry
+                ) and ck_docker.tag_image(image_id, tag):
+                    identity = ck_docker.inspect_image_for_lock(tag)
+                    if identity is not None and ck_docker.lock_matches_image(
+                        lock, identity
+                    ):
+                        obtained = True
+                    else:
+                        warn(
+                            f"Image archived in release '{release_name}' does "
+                            "not match the lock file"
+                        )
+                else:
+                    warn(
+                        "Failed to fetch image archived in release "
+                        f"'{release_name}'"
+                    )
+        if not obtained and fpath is not None:
+            dockerfile_dir, dockerfile_name = os.path.split(fpath)
+            build_cwd = dockerfile_dir if dockerfile_dir else None
+            # A multi-platform image can't live in the local image store, so
+            # it's built straight into the registry and pulled back for the
+            # platform we're on
+            multi_platform = len(platforms) > 1
+            if multi_platform and remote_ref is None:
+                raise_error(
+                    "Building for multiple platforms requires a registry; "
+                    "set 'registry' on this environment"
+                )
+            if multi_platform:
+                assert remote_ref is not None
+                cmd = [
+                    "docker",
+                    "buildx",
+                    "build",
+                    "--platform",
+                    ",".join(platforms),
+                    "-t",
+                    remote_ref,
+                    "--push",
+                    "-f",
+                    dockerfile_name,
+                    ".",
+                ]
+            else:
+                cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
+                build_platform = platforms[0] if platforms else platform
+                if build_platform is not None:
+                    cmd += ["--platform", build_platform]
+                cmd.append(".")
             try:
-                subprocess.check_output(cmd)
+                subprocess.check_output(cmd, cwd=build_cwd)
             except subprocess.CalledProcessError:
                 delete_lock_on_failure()
+                raise_error(
+                    f"Failed to build Docker image with tag {tag} from {fpath}"
+                )
+            built = True
+            if multi_platform:
+                assert remote_ref is not None
+                already_pushed = True
+                if not ck_docker.pull_image(
+                    remote_ref, platform=platform
+                ) or not ck_docker.tag_image(remote_ref, tag):
+                    delete_lock_on_failure()
+                    raise_error(
+                        f"Failed to pull image back from {remote_ref} after "
+                        "building it"
+                    )
+        elif not obtained:
+            typer.echo(f"Pulling image: {tag}")
+            if not ck_docker.pull_image(tag, platform=platform):
+                delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
-    # Write the lock file
-    inspect = get_docker_inspect()
-    # Ensure repo tags only have the tag we wanted, not the digest, so we
-    # don't cause stages to rerun from lock file change
-    inspect["RepoTags"] = [tag]
-    inspect["DockerfileMD5"] = dockerfile_md5
-    inspect["DepsMD5s"] = deps_md5s
+    # Push newly built images so collaborators, CI, and this machine after a
+    # 'docker system prune' can pull them back instead of rebuilding
+    pushed = already_pushed
+    if built and not pushed and remote_ref is not None and not no_push:
+        typer.echo(f"Pushing image to {remote_ref}")
+        if ck_docker.tag_image(tag, remote_ref):
+            success, push_output = ck_docker.push_image(remote_ref)
+            if not success and ck_docker.login_to_registry(remote_ref):
+                typer.echo("Logged in to registry; retrying push")
+                success, push_output = ck_docker.push_image(remote_ref)
+            if success:
+                pushed = True
+            else:
+                warn(
+                    f"Failed to push image to {remote_ref}; it will need to "
+                    "be rebuilt elsewhere\n"
+                    + textwrap.indent(push_output.strip()[-500:], "    ")
+                )
+    identity = ck_docker.inspect_image_for_lock(tag)
+    if identity is None:
+        delete_lock_on_failure()
+        raise_error(f"Failed to inspect image with tag {tag}")
+    assert identity is not None
+    # Only a reference a registry can resolve tells us anything, which rules
+    # out an image built here and never pushed anywhere
+    remote_source_ref = None
+    if pushed or (remote_ref is not None and not built):
+        remote_source_ref = remote_ref
+    elif fpath is None:
+        remote_source_ref = tag
+    # Which digests an image carries locally depends on how it was obtained:
+    # building assigns one under a repo no registry serves, and pulling by
+    # digest then tagging leaves both. Keeping only the ones the project's
+    # own repo can serve makes the lock the same either way, so that pulling
+    # an image back doesn't rewrite the lock and rerun every stage
+    identity = ck_docker.keep_only_repo_digests(identity, remote_source_ref)
+    # Run configuration doesn't affect which image we need, but does affect
+    # how stages run in it, so it belongs in the lock to invalidate them
+    run_config: dict = {}
     if platform is not None:
-        inspect["Platform"] = platform
+        run_config["Platform"] = platform
     if wdir is not None:
-        inspect["WorkDir"] = wdir
+        run_config["WorkDir"] = wdir
     if user is not None:
-        inspect["User"] = user
+        run_config["User"] = user
     if env_vars:
-        inspect["EnvVars"] = env_vars
+        run_config["EnvVars"] = env_vars
     if ports:
-        inspect["Ports"] = ports
+        run_config["Ports"] = ports
     if gpus:
-        inspect["GPUs"] = gpus
+        run_config["GPUs"] = gpus
     if args:
-        inspect["Args"] = args
+        run_config["Args"] = args
+
+    def write_lock(arch: str, arch_identity: dict) -> None:
+        if arch == current_arch:
+            arch_lock_fpath = lock_fpath
+        else:
+            arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
+        arch_lock = ck_docker.build_lock(
+            identity=arch_identity,
+            image=tag,
+            dockerfile_md5=dockerfile_md5,
+            deps_md5s=deps_md5s,
+            run_config=run_config,
+        )
+        with open(arch_lock_fpath, "w") as f:
+            json.dump(arch_lock, f, indent=4)
+
+    current_arch = get_docker_arch()
     lock_dir = os.path.dirname(lock_fpath)
     if lock_dir:
         os.makedirs(lock_dir, exist_ok=True)
-    with open(lock_fpath, "w") as f:
-        json.dump(inspect, f, indent=4)
+    write_lock(current_arch, identity)
+    # Lock the platforms this machine can't run, so that moving the project
+    # to one of them doesn't invalidate every stage in the environment. An
+    # existing lock that still describes this spec is reused rather than
+    # re-read from the registry, which keeps checks working offline
+    stale_archs = []
+    for arch in [a for a in lock_archs if a != current_arch]:
+        arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
+        existing = (
+            read_lock(arch_lock_fpath)
+            if os.path.isfile(arch_lock_fpath)
+            else None
+        )
+        if existing is not None and ck_docker.lock_matches_spec(
+            existing,
+            image=tag,
+            dockerfile_md5=dockerfile_md5,
+            deps_md5s=deps_md5s,
+        ):
+            write_lock(arch, existing)
+        else:
+            stale_archs.append(arch)
+    if stale_archs and remote_source_ref is not None:
+        typer.echo(
+            f"Reading platforms available for {remote_source_ref}",
+            file=outfile,
+        )
+        remote_locks = ck_docker.get_remote_image_platform_locks(
+            remote_source_ref
+        )
+    else:
+        remote_locks = {}
+    for arch in stale_archs:
+        arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
+        if arch in remote_locks:
+            write_lock(arch, remote_locks[arch])
+        elif os.path.isfile(arch_lock_fpath):
+            # A lock left behind for a platform this image no longer has
+            # would describe an image built from something else entirely
+            os.remove(arch_lock_fpath)
 
 
 @check_app.command(

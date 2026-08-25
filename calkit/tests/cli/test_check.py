@@ -1,10 +1,12 @@
 """Tests for ``calkit.cli.check``."""
 
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -246,6 +248,67 @@ def test_check_docker_env(tmp_dir):
             "Dockerfile-lock.json",
         ]
     )
+    with open("Dockerfile-lock.json") as f:
+        lock = json.load(f)
+    assert lock["RepoTags"] == ["python-3.9-slim"]
+    # An image built here and never pushed anywhere has a digest no registry
+    # can serve, which would send anyone reading the lock on a failed pull
+    assert lock["RepoDigests"] == []
+    # Checking again with nothing changed must not rebuild, and must leave
+    # the lock byte-identical so no stage using it reruns
+    with open("Dockerfile-lock.json", "rb") as f:
+        lock_bytes = f.read()
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == lock_bytes
+    # Changing the Dockerfile must invalidate the lock rather than reuse the
+    # image it identifies
+    with open("Dockerfile", "w") as f:
+        f.write("FROM python:3.9-slim\nRUN touch /changed\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    with open("Dockerfile-lock.json") as f:
+        new_lock = json.load(f)
+    assert new_lock["DockerfileMD5"] != lock["DockerfileMD5"]
+    assert new_lock["RootFS"]["Layers"] != lock["RootFS"]["Layers"]
+    # Renaming the image must do the same, since the lock's digest identifies
+    # the image built for the old name
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim-renamed",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    with open("Dockerfile-lock.json") as f:
+        renamed_lock = json.load(f)
+    assert renamed_lock["RepoTags"] == ["python-3.9-slim-renamed"]
     # Now modify the image to fail to build and ensure the lock file is deleted
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
@@ -263,6 +326,132 @@ def test_check_docker_env(tmp_dir):
             ]
         )
     assert not os.path.exists("Dockerfile-lock.json")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_locks_every_platform(tmp_dir):
+    from calkit.environments import get_docker_arch
+
+    arch = get_docker_arch()
+    other_arch = "amd64" if arch != "amd64" else "arm64"
+    argv = [
+        "calkit",
+        "check",
+        "docker-env",
+        "alpine:3.18",
+        "-o",
+        f"locks/{arch}.json",
+        "--lock-arch",
+        "amd64",
+        "--lock-arch",
+        "arm64",
+    ]
+    subprocess.check_call(argv)
+    # Both platforms get locked from this one machine, so moving the project
+    # to the other doesn't invalidate every stage in the environment
+    with open(f"locks/{arch}.json") as f:
+        mine = json.load(f)
+    with open(f"locks/{other_arch}.json") as f:
+        theirs = json.load(f)
+    assert mine["Architecture"] == arch
+    assert theirs["Architecture"] == other_arch
+    assert mine["RootFS"]["Layers"] != theirs["RootFS"]["Layers"]
+    # Both name the same multi-platform index, which is what makes either
+    # one pullable from either machine
+    assert mine["RepoDigests"] == theirs["RepoDigests"]
+    assert mine["RepoDigests"]
+    # Deleting the image must bring it back by the digest in the lock rather
+    # than by tag, and must leave the lock files untouched
+    with open(f"locks/{arch}.json", "rb") as f:
+        lock_bytes = f.read()
+    subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
+    out = subprocess.check_output(argv, text=True)
+    assert "Pulling image by digest" in out
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == lock_bytes
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
+    container = "calkit-test-registry"
+    registry = "localhost:5678"
+    subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            "5678:5000",
+            "registry:2",
+        ],
+        capture_output=True,
+    )
+    if started.returncode != 0:
+        pytest.skip("Could not start a local registry")
+    try:
+        for _ in range(30):
+            up = subprocess.run(
+                ["docker", "exec", container, "true"], capture_output=True
+            )
+            if up.returncode == 0:
+                break
+            time.sleep(1)
+        with open("Dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo hi > /hi.txt\n")
+        argv = [
+            "calkit",
+            "check",
+            "docker-env",
+            "calkit-registry-test",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "lock.json",
+            "--registry",
+            f"{registry}/proj",
+        ]
+        subprocess.check_call(argv)
+        with open("lock.json") as f:
+            lock = json.load(f)
+        # Having been pushed, the image is identified by a digest that can be
+        # pulled back, which is what makes a rebuild unnecessary
+        assert lock["RepoDigests"] == [
+            f"{registry}/proj/calkit-registry-test@"
+            + lock["RepoDigests"][0].split("@")[1]
+        ]
+        with open("lock.json", "rb") as f:
+            lock_bytes = f.read()
+        subprocess.check_call(
+            [
+                "docker",
+                "rmi",
+                "-f",
+                "calkit-registry-test",
+                f"{registry}/proj/calkit-registry-test:latest",
+            ]
+        )
+        out = subprocess.check_output(argv, text=True)
+        assert "Pulling image by digest" in out
+        assert "Pushing image" not in out
+        # Coming back from the registry has to leave the lock exactly as it
+        # was, or every stage in the environment reruns for nothing
+        with open("lock.json", "rb") as f:
+            assert f.read() == lock_bytes
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+        subprocess.run(
+            ["docker", "rmi", "-f", "calkit-registry-test"],
+            capture_output=True,
+        )
 
 
 def test_check_env_rejects_an_invalid_lock_property(tmp_dir):

@@ -5,6 +5,16 @@ from calkit.docker import (
     _parse_docker_run_command,
     _parse_volume_spec,
     _uses_entrypoint_command_mode,
+    build_lock,
+    get_lock_archs,
+    get_lock_digest_refs,
+    get_remote_image_ref,
+    keep_only_repo_digests,
+    lock_matches_image,
+    lock_matches_spec,
+    platform_to_arch_name,
+    resolve_registry_prefix,
+    split_image_ref,
 )
 
 
@@ -68,3 +78,192 @@ def test_parse_docker_run_command_with_common_and_unknown_flags():
     assert parsed is not None
     assert parsed["image"] == "minlag/mermaid-cli:latest"
     assert parsed["command"] == ["-i", "in.mmd", "-o", "out.svg"]
+
+
+def test_split_image_ref():
+    assert split_image_ref("ubuntu") == (None, "ubuntu", None, None)
+    assert split_image_ref("ubuntu:22.04") == (None, "ubuntu", "22.04", None)
+    assert split_image_ref("library/ubuntu") == (
+        None,
+        "library/ubuntu",
+        None,
+        None,
+    )
+    assert split_image_ref("ghcr.io/o/p/env:v1") == (
+        "ghcr.io",
+        "o/p/env",
+        "v1",
+        None,
+    )
+    assert split_image_ref("localhost:5000/foo/bar:v1") == (
+        "localhost:5000",
+        "foo/bar",
+        "v1",
+        None,
+    )
+    assert split_image_ref("ghcr.io/o/p@sha256:abc") == (
+        "ghcr.io",
+        "o/p",
+        None,
+        "sha256:abc",
+    )
+
+
+def test_get_remote_image_ref():
+    assert (
+        get_remote_image_ref("my-image", "ghcr.io/owner/proj")
+        == "ghcr.io/owner/proj/my-image:latest"
+    )
+    # Repository names must be lowercase, but a tag is case-sensitive
+    assert (
+        get_remote_image_ref("My-Image:v1.2-RC", "ghcr.io/Owner/Proj")
+        == "ghcr.io/owner/proj/my-image:v1.2-RC"
+    )
+    # An already-qualified local name keeps only its final component
+    assert (
+        get_remote_image_ref("docker.io/someone/img:v1", "reg.example.com/ns")
+        == "reg.example.com/ns/img:v1"
+    )
+    assert (
+        get_remote_image_ref("img", "ghcr.io/owner/proj/")
+        == "ghcr.io/owner/proj/img:latest"
+    )
+
+
+def test_platform_to_arch_name():
+    assert platform_to_arch_name("linux/amd64") == "amd64"
+    assert platform_to_arch_name("linux/arm/v7") == "arm-v7"
+    assert platform_to_arch_name({"os": "linux", "architecture": "arm64"}) == (
+        "arm64"
+    )
+    assert (
+        platform_to_arch_name(
+            {"os": "linux", "architecture": "arm", "variant": "v5"}
+        )
+        == "arm-v5"
+    )
+    # Attestation manifests and non-Linux images aren't runnable environments
+    assert (
+        platform_to_arch_name({"os": "unknown", "architecture": "unknown"})
+        is None
+    )
+    assert platform_to_arch_name("windows/amd64") is None
+
+
+def test_lock_matching():
+    lock = {
+        "RepoTags": ["my-image"],
+        "RootFS": {"Type": "layers", "Layers": ["sha256:a", "sha256:b"]},
+        "DockerfileMD5": "abc",
+        "DepsMD5s": {"reqs.txt": "def"},
+    }
+    kwargs = dict(
+        image="my-image", dockerfile_md5="abc", deps_md5s={"reqs.txt": "def"}
+    )
+    assert lock_matches_spec(lock, **kwargs)  # type: ignore[arg-type]
+    # A renamed image must not reuse a lock recorded for the old one
+    assert not lock_matches_spec(
+        lock,
+        image="other",
+        dockerfile_md5="abc",
+        deps_md5s={"reqs.txt": "def"},
+    )
+    assert not lock_matches_spec(
+        lock,
+        image="my-image",
+        dockerfile_md5="changed",
+        deps_md5s={"reqs.txt": "def"},
+    )
+    assert not lock_matches_spec(
+        lock, image="my-image", dockerfile_md5="abc", deps_md5s={}
+    )
+    assert lock_matches_image(
+        lock, {"RootFS": {"Layers": ["sha256:a", "sha256:b"]}}
+    )
+    assert not lock_matches_image(lock, {"RootFS": {"Layers": ["sha256:a"]}})
+    assert not lock_matches_image(lock, {})
+    assert not lock_matches_image({}, {"RootFS": {"Layers": ["sha256:a"]}})
+
+
+def test_get_lock_digest_refs():
+    lock = {
+        "RepoDigests": [
+            "my-image@sha256:local",
+            "ghcr.io/o/p/my-image@sha256:remote",
+        ]
+    }
+    assert get_lock_digest_refs(lock) == [
+        "my-image@sha256:local",
+        "ghcr.io/o/p/my-image@sha256:remote",
+    ]
+    # The project's own registry is tried first, since that's the copy it
+    # controls and keeps around
+    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest")[0] == (
+        "ghcr.io/o/p/my-image@sha256:remote"
+    )
+    assert get_lock_digest_refs({}) == []
+    assert get_lock_digest_refs({"RepoDigests": ["no-digest-here"]}) == []
+
+
+def test_keep_only_repo_digests():
+    identity = {
+        "RepoDigests": [
+            "my-image@sha256:local",
+            "ghcr.io/o/p/my-image@sha256:remote",
+        ]
+    }
+    assert keep_only_repo_digests(identity, None)["RepoDigests"] == []
+    assert keep_only_repo_digests(identity, "ghcr.io/o/p/my-image:latest")[
+        "RepoDigests"
+    ] == ["ghcr.io/o/p/my-image@sha256:remote"]
+    # The original is left alone so callers can keep using it
+    assert len(identity["RepoDigests"]) == 2
+
+
+def test_build_lock():
+    identity = {
+        "RepoTags": ["something-else:latest"],
+        "RepoDigests": ["my-image@sha256:abc"],
+        "Architecture": "amd64",
+        "Os": "linux",
+        "RootFS": {"Type": "layers", "Layers": ["sha256:a"]},
+    }
+    lock = build_lock(
+        identity=identity,
+        image="my-image",
+        dockerfile_md5="abc",
+        deps_md5s={},
+        run_config={"WorkDir": "/work"},
+    )
+    # Only the tag asked for is recorded, so that pulling by digest and
+    # tagging doesn't rewrite the lock and rerun every stage
+    assert lock["RepoTags"] == ["my-image"]
+    assert lock["WorkDir"] == "/work"
+    assert lock["DockerfileMD5"] == "abc"
+    # Key order has to be stable, since a lock written for another platform
+    # must match what that platform would write for itself
+    other = build_lock(
+        identity=dict(reversed(list(identity.items()))),
+        image="my-image",
+        dockerfile_md5="abc",
+        deps_md5s={},
+        run_config={"WorkDir": "/work"},
+    )
+    assert list(lock) == list(other)
+
+
+def test_resolve_registry_prefix(tmp_dir):
+    # Registries are opt-in, since pushing publishes an image
+    assert resolve_registry_prefix(
+        {"kind": "docker", "path": "Dockerfile"}
+    ) is (None)
+    assert resolve_registry_prefix({"registry": "none"}) is None
+    assert resolve_registry_prefix({"registry": "reg.example.com/ns"}) == (
+        "reg.example.com/ns"
+    )
+
+
+def test_get_lock_archs():
+    assert get_lock_archs({}) == ["amd64", "arm64"]
+    archs = get_lock_archs({"platforms": ["linux/amd64", "linux/arm/v7"]})
+    assert archs == ["amd64", "arm64", "arm-v7"]

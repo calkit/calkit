@@ -26,6 +26,14 @@ inputs:
     description: Arguments passed to calkit run command.
     required: false
     default: ""
+  login_ghcr:
+    description:
+      Whether to log in to the GitHub Container Registry, so that Docker
+      environments configured to use it can push images they build and pull
+      them back instead of rebuilding. Requires the workflow to grant the
+      packages':' write permission.
+    required: false
+    default: "true"
 outputs: {}
 runs:
   using: composite
@@ -259,6 +267,17 @@ runs:
     - name: Setup Docker Buildx
       if: ${{ steps.detect.outputs.needs_docker == 'true' }}
       uses: docker/setup-buildx-action@v3
+
+    # Logging in lets an environment with `registry: auto` push what it
+    # builds here, so that later runs and everyone's laptops pull the image
+    # instead of rebuilding it. Harmless when no environment uses a registry.
+    - name: Log in to the GitHub Container Registry
+      if: ${{ steps.detect.outputs.needs_docker == 'true' && inputs.login_ghcr == 'true' }}
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
 
     - name: Report unsupported environment kinds
       if: ${{ steps.detect.outputs.unsupported_kinds != '' }}

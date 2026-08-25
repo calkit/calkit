@@ -823,6 +823,25 @@ class DockerEnvironment(Environment):
         ),
     )
     image: str = Field(description="Name of the Docker image.")
+    registry: str | None = Field(
+        default=None,
+        description=(
+            "Registry prefix images built from this environment's Dockerfile "
+            "are pushed to and pulled from, e.g., "
+            "'ghcr.io/someone/some-project', or 'auto' for the project's "
+            "GitHub Container Registry namespace. Images are kept local if "
+            "this is unset."
+        ),
+    )
+    platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "Platforms to build the image for, e.g., "
+            "['linux/amd64', 'linux/arm64']. Building for more than one "
+            "requires a registry, since a multi-platform image can only be "
+            "kept in one."
+        ),
+    )
     layers: list[str] | None = Field(
         default=None,
         description="Predefined layers to add to the generated Dockerfile.",

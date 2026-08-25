@@ -149,6 +149,20 @@ def test_init(tmp_dir):
     # --force allows re-initialization without clobbering calkit.yaml
     subprocess.check_call(["calkit", "init", "--force"], cwd="sub")
     assert calkit.load_calkit_info(wdir="sub") == ck_info
+    # An existing DVC repo with no calkit.yaml is left alone rather than
+    # failing on DVC's refusal to initialize over an existing .dvc (#1013)
+    os.remove(os.path.join("sub", "calkit.yaml"))
+    assert os.path.isdir(os.path.join("sub", ".dvc"))
+    result = subprocess.run(
+        ["calkit", "init"],
+        cwd="sub",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "already initialized" in result.stdout.lower()
+    assert os.path.isfile(os.path.join("sub", "calkit.yaml"))
+    assert calkit.load_calkit_info(wdir="sub") == {}
     # --no-commit stages the initial files without committing, so a
     # bootstrap (as run by xr) can be rolled back by restoring files
     os.makedirs("nocommit")

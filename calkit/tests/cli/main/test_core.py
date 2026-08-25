@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import socket
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -943,9 +944,8 @@ def test_save(tmp_dir):
 
 
 def test_save_data_not_in_cache(tmp_dir):
-    """Test that we skip DVC-tracked paths that are missing from both the
-    workspace and the cache, e.g., because they were never pulled.
-    """
+    # We should skip DVC-tracked paths that are missing from both the
+    # workspace and the cache, e.g., because they were never pulled
     subprocess.check_call(["calkit", "init"])
     with open("data.csv", "w") as f:
         f.write("a,b\n1,2\n")
@@ -966,7 +966,15 @@ def test_save_data_not_in_cache(tmp_dir):
     # Delete the data and its cache, simulating a machine onto which it was
     # never pulled
     os.remove("data.csv")
-    shutil.rmtree(os.path.join(".dvc", "cache"))
+    cache_dir = os.path.join(".dvc", "cache")
+    # DVC protects cached files by making them read-only, which stops them
+    # from being deleted on Windows
+    for dirpath, _, fnames in os.walk(cache_dir):
+        for fname in fnames:
+            os.chmod(
+                os.path.join(dirpath, fname), stat.S_IWRITE | stat.S_IREAD
+            )
+    shutil.rmtree(cache_dir)
     with open("README.md", "a") as f:
         f.write("\nSome more info.\n")
     out = subprocess.check_output(

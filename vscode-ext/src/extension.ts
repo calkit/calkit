@@ -4176,7 +4176,13 @@ function reportYamlProblem(fileUri: vscode.Uri, error: unknown): void {
     if (choice === openAction) {
       await revealYamlProblem(fileUri, syntaxError);
     }
-  })();
+  })().catch((openError: unknown) => {
+    // The file can be deleted, or lose read permission, between the
+    // notification and the click, so opening it is allowed to fail.
+    const failure = `Failed to open ${fileName}: ${String(openError)}`;
+    log(failure);
+    void vscode.window.showErrorMessage(failure);
+  });
 }
 
 async function revealYamlProblem(

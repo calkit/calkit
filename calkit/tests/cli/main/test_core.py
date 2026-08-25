@@ -163,6 +163,11 @@ def test_init(tmp_dir):
     assert "already initialized" in result.stdout.lower()
     assert os.path.isfile(os.path.join("sub", "calkit.yaml"))
     assert calkit.load_calkit_info(wdir="sub") == {}
+    # A .dvc directory left behind by an interrupted init has no config in
+    # it, so it is re-initialized rather than taken for a working repo
+    os.remove(os.path.join("sub", ".dvc", "config"))
+    subprocess.check_call(["calkit", "init"], cwd="sub")
+    assert os.path.isfile(os.path.join("sub", ".dvc", "config"))
     # --no-commit stages the initial files without committing, so a
     # bootstrap (as run by xr) can be rolled back by restoring files
     os.makedirs("nocommit")

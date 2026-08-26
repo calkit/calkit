@@ -3521,7 +3521,11 @@ def run_in_env(
         try:
             if setup_argv is not None:
                 # Run directly rather than through the platform shell, so
-                # the chain reaches bash intact on Windows too
+                # the chain reaches bash intact on Windows too. The shell
+                # is found on PATH here rather than left to CreateProcess,
+                # which on Windows looks in System32 first and finds WSL's
+                # stub bash.exe instead of Git Bash.
+                setup_argv[0] = shutil.which(setup_argv[0]) or setup_argv[0]
                 subprocess.check_call(setup_argv, cwd=wdir)
             else:
                 subprocess.check_call(shell_cmd, shell=True, cwd=wdir)

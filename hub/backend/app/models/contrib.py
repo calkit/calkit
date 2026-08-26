@@ -1,14 +1,14 @@
-"""Collaboration request models.
+"""Contriboration request models.
 
-A ``CollabRequest`` is an ask for a specific contribution to a specific
+A ``ContribRequest`` is an ask for a specific contribution to a specific
 artifact -- a review of a paper at a given revision, edits to a figure, a
 chapter uploaded to a proceedings volume -- addressed to a named recipient or
 to anyone holding the link. It replaces the pull request for research work:
 the framing is the deliverable, not the diff. Requests go both ways, outbound
 (the lead solicits) and inbound (someone proposes).
 
-Answers come back as ``CollabRequestResponse`` rows -- one request can collect
-many -- each carrying zero or more ``CollabSuggestion`` items the lead accepts
+Answers come back as ``ContribRequestResponse`` rows -- one request can collect
+many -- each carrying zero or more ``ContribSuggestion`` items the lead accepts
 or rejects one at a time.
 
 The case this is built around is internal review of a manuscript before
@@ -21,8 +21,8 @@ ingested the same way, as somebody else's marked-up document.
 
 A note on where the authority sits. Sending a request genuinely needs a hub:
 something has to receive an email, host a link, and check a token, so
-``CollabRequest`` and its access control live here. What comes back does not.
-The queue of suggestions is meant to be materializable into the project's own
+``ContribRequest`` and its access control live here. What comes back does not.
+The board of tasks is meant to be materializable into the project's own
 repo, so a student who was emailed a marked-up document can ingest it with
 the CLI and work through it offline, in a project that never touched a hub.
 These tables are then a view over that data plus the hub-only parts, not its
@@ -43,13 +43,19 @@ from pydantic import BaseModel, computed_field
 from sqlmodel import Field, Relationship, SQLModel
 
 from app import utcnow
-from app.models.core import CommentHighlight, Project, User
+from app.models.core import Project, User
+
+# tasks imports back from here only under TYPE_CHECKING, so importing it at
+# runtime is safe -- and necessary: TaskPost and TaskPublic are plain pydantic
+# fields on the response schemas below, and a forward reference to a name
+# that's only visible to type checkers would never resolve.
+from app.models.tasks import Task, TaskPost, TaskPublic  # noqa: E402
 
 # What the request points at. ``project`` is the whole thing; the rest name an
 # artifact declared in calkit.yaml (or a bare repo path for ``path``),
 # identified by ``target_path``. ``figures`` is the whole figures collection,
 # ``figure`` a single one.
-CollabTargetKind = Literal[
+ContribTargetKind = Literal[
     "project",
     "publication",
     "figure",
@@ -67,7 +73,7 @@ CollabTargetKind = Literal[
 #   ``submit``  -- upload files to the one place ``target_path`` names, and
 #                  see nothing else; the bulk-contribution case, e.g., a
 #                  hundred authors each handing in a chapter
-#   ``suggest`` -- propose edits, which land as gated suggestions the lead
+#   ``suggest`` -- propose edits, which land as gated tasks the lead
 #                  accepts or rejects individually. The default: the
 #                  responder marks up the work without taking custody of it,
 #                  so nothing has to be handed back before the author can
@@ -75,13 +81,13 @@ CollabTargetKind = Literal[
 #   ``edit``    -- commit directly to the project's default branch. The only
 #                  permission that can collide with another responder, and so
 #                  the only one locking applies to
-CollabPermission = Literal["review", "submit", "suggest", "edit"]
+ContribPermission = Literal["review", "submit", "suggest", "edit"]
 
 # Which way the ask points. ``outbound`` is a solicitation the project lead
 # sent ("please review this"); ``inbound`` is a proposal someone made to the
 # project ("may I change this?"), which is the gated stand-in for a pull
 # request from a stranger.
-CollabDirection = Literal["outbound", "inbound"]
+ContribDirection = Literal["outbound", "inbound"]
 
 # How sure we need to be about who is responding:
 #   ``anonymous`` -- the link is the only credential
@@ -89,13 +95,13 @@ CollabDirection = Literal["outbound", "inbound"]
 #                    the link was mailed to or one they enter and confirm with
 #                    a code
 #   ``account``   -- a signed-in Calkit user is required
-CollabIdentityRequirement = Literal["anonymous", "email", "account"]
+ContribIdentityRequirement = Literal["anonymous", "email", "account"]
 
 
 # A reviewer's verdict on the work, kept separate from the lead's verdict on
 # the response. A recommendation is an opinion the requester weighs ("this
 # isn't ready to submit"); the response status is what the requester decided.
-CollabRecommendation = Literal[
+ContribRecommendation = Literal[
     "accept",
     "minor_revision",
     "major_revision",
@@ -104,9 +110,9 @@ CollabRecommendation = Literal[
 
 # A response is ``draft`` while the responder is still working, ``submitted``
 # once handed back, then ``accepted``/``rejected`` by the lead. The per-item
-# verdicts live on the suggestions -- a response can be accepted as a whole
-# with only some of its suggestions taken.
-CollabResponseStatus = Literal[
+# verdicts live on the individual tasks -- a response can be accepted as a
+# whole with only some of its proposed changes taken.
+ContribResponseStatus = Literal[
     "draft",
     "declined",
     "submitted",
@@ -114,39 +120,8 @@ CollabResponseStatus = Literal[
     "rejected",
 ]
 
-CollabSuggestionStatus = Literal["pending", "accepted", "rejected"]
 
-# How a suggestion locates what it changes. ``text`` carries an original and a
-# replacement string, ``highlight`` pins to a PDF region (the
-# react-pdf-highlighter anchor releases and project comments already use), and
-# ``note`` is a comment with no proposed edit.
-CollabSuggestionKind = Literal["text", "highlight", "note"]
-
-# Where a suggestion came from. Ingested sources matter because they carry
-# different confidence: something typed into the hub knows exactly what it's
-# attached to, while a tracked change lifted out of a Word document had to be
-# matched back to the source it was generated from.
-CollabSuggestionSource = Literal["manual", "docx", "pdf", "email"]
-
-# Whether an ingested suggestion could be located in the project's source.
-#   ``resolved``   -- matched a unique spot; accepting can write it directly
-#   ``ambiguous``  -- the context matched more than one place
-#   ``unresolved`` -- no match, e.g., structural edits or rewritten equations
-# Anything but ``resolved`` still belongs in the queue -- it just needs a
-# human to place it, which is the honest outcome for a good fraction of a
-# heavily marked-up document.
-CollabAnchorStatus = Literal["resolved", "ambiguous", "unresolved"]
-
-# Where an item sits on the board, which is a different question from
-# ``CollabSuggestionStatus``. That one is a verdict -- do we agree with this
-# feedback? This one is progress -- have we done it yet? A one-line typo fix
-# collapses both into a single click, but "redo Figure 3 with log axes" is a
-# week of work that's agreed to long before it's finished, and there's nowhere
-# to put it if the only states are pending, accepted, and rejected.
-CollabTaskStatus = Literal["todo", "in_progress", "blocked", "done"]
-
-
-class CollabRequest(SQLModel, table=True):
+class ContribRequest(SQLModel, table=True):
     """A request for a specific contribution, sent out by a project lead.
 
     Access is by unguessable link: only the SHA-256 ``token_hash`` is stored,
@@ -174,7 +149,7 @@ class CollabRequest(SQLModel, table=True):
     # who was asked to comment proposes a concrete change instead. Null for a
     # request that stands on its own.
     in_response_to_request_id: uuid.UUID | None = Field(
-        default=None, foreign_key="collabrequest.id"
+        default=None, foreign_key="contribrequest.id"
     )
     target_kind: str = Field(default="project", max_length=32)
     # Path to the targeted artifact, or None/"." for the whole project.
@@ -195,7 +170,7 @@ class CollabRequest(SQLModel, table=True):
     # publication's whole review history is one walk back through this link.
     round: int = Field(default=1, ge=1)
     supersedes_request_id: uuid.UUID | None = Field(
-        default=None, foreign_key="collabrequest.id"
+        default=None, foreign_key="contribrequest.id"
     )
     # Intended recipient; None means "whoever has the link".
     email: str | None = Field(default=None, max_length=320)
@@ -217,24 +192,24 @@ class CollabRequest(SQLModel, table=True):
     view_count: int = Field(default=0)
     created: datetime = Field(default_factory=utcnow)
     # Relationships
-    project: Project = Relationship(back_populates="collab_requests")
-    in_response_to: "CollabRequest | None" = Relationship(
+    project: Project = Relationship(back_populates="contrib_requests")
+    in_response_to: "ContribRequest | None" = Relationship(
         sa_relationship_kwargs=dict(
-            remote_side="CollabRequest.id",
-            foreign_keys="[CollabRequest.in_response_to_request_id]",
+            remote_side="ContribRequest.id",
+            foreign_keys="[ContribRequest.in_response_to_request_id]",
         )
     )
-    supersedes: "CollabRequest | None" = Relationship(
+    supersedes: "ContribRequest | None" = Relationship(
         sa_relationship_kwargs=dict(
-            remote_side="CollabRequest.id",
-            foreign_keys="[CollabRequest.supersedes_request_id]",
+            remote_side="ContribRequest.id",
+            foreign_keys="[ContribRequest.supersedes_request_id]",
         )
     )
     created_by: User = Relationship()
-    responses: list["CollabRequestResponse"] = Relationship(
+    responses: list["ContribRequestResponse"] = Relationship(
         back_populates="request", cascade_delete=True
     )
-    attachments: list["CollabAttachment"] = Relationship(
+    attachments: list["ContribAttachment"] = Relationship(
         back_populates="request", cascade_delete=True
     )
 
@@ -260,8 +235,8 @@ class CollabRequest(SQLModel, table=True):
         return True
 
 
-class CollabRequestResponse(SQLModel, table=True):
-    """One party's answer to a collaboration request.
+class ContribRequestResponse(SQLModel, table=True):
+    """One party's answer to a contribution request.
 
     A request is one-to-many with responses so a public or team-wide ask can
     collect several. The responder is a signed-in user (``user_id``) or an
@@ -272,7 +247,7 @@ class CollabRequestResponse(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     request_id: uuid.UUID = Field(
-        foreign_key="collabrequest.id", index=True, ondelete="CASCADE"
+        foreign_key="contribrequest.id", index=True, ondelete="CASCADE"
     )
     # Set when the responder was signed in; None for link-scoped visitors.
     user_id: uuid.UUID | None = Field(default=None, foreign_key="user.id")
@@ -300,7 +275,7 @@ class CollabRequestResponse(SQLModel, table=True):
     # The revision the response was written against, copied from the request
     # so a later re-pin doesn't silently re-target the feedback.
     git_rev: str | None = Field(default=None, max_length=40)
-    # Where accepted suggestions were staged, once any were applied: a branch
+    # Where accepted changes were staged, once any were applied: a branch
     # in the project repo and, if the project is on GitHub, its pull request.
     branch_name: str | None = Field(default=None, max_length=256)
     github_pr_url: str | None = Field(default=None, max_length=2048)
@@ -315,124 +290,31 @@ class CollabRequestResponse(SQLModel, table=True):
     )
     created: datetime = Field(default_factory=utcnow)
     # Relationships (user_id disambiguated from the reviewed_by_user_id FK)
-    request: CollabRequest = Relationship(back_populates="responses")
+    request: ContribRequest = Relationship(back_populates="responses")
     user: User | None = Relationship(
         sa_relationship_kwargs={
-            "foreign_keys": "[CollabRequestResponse.user_id]"
+            "foreign_keys": "[ContribRequestResponse.user_id]"
         }
     )
-    suggestions: list["CollabSuggestion"] = Relationship(
+    tasks: list[Task] = Relationship(
         back_populates="response", cascade_delete=True
     )
-    attachments: list["CollabAttachment"] = Relationship(
+    attachments: list["ContribAttachment"] = Relationship(
         back_populates="response", cascade_delete=True
     )
 
     @computed_field
     @property
-    def suggestion_count(self) -> int:
-        return len(self.suggestions)
+    def task_count(self) -> int:
+        return len(self.tasks)
 
     @computed_field
     @property
     def accepted_count(self) -> int:
-        return sum(1 for s in self.suggestions if s.status == "accepted")
+        return sum(1 for t in self.tasks if t.verdict == "accepted")
 
 
-class CollabSuggestion(SQLModel, table=True):
-    """One atomic proposed change (or plain note) inside a response.
-
-    Suggestions are the unit the lead accepts or rejects, so a reviewer's
-    twenty edits to a paper don't have to be taken or dropped as a block.
-    Accepting is what turns a suggestion into a commit; ``applied_git_rev``
-    records where it landed.
-
-    They're also the queue a marked-up document is turned into. Tracked
-    changes and comments in a ``.docx`` are structured records, not prose, so
-    each becomes one row here with its own anchor and verdict -- the same
-    shape as a comment typed into the hub, arriving by a different road. The
-    grad student works the list one item at a time instead of hunting a
-    document for what changed.
-
-    This is the part that has to work without a hub, so the fields here are
-    deliberately a superset of what a repo-native queue item needs: ingesting
-    a document with the CLI and syncing the result up should be a
-    serialization, not a translation.
-    """
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    response_id: uuid.UUID = Field(
-        foreign_key="collabrequestresponse.id",
-        index=True,
-        ondelete="CASCADE",
-    )
-    kind: str = Field(default="text", max_length=16)
-    # Repo path the change applies to. For a paper this is the source the
-    # target is built from (e.g., the .tex), not the rendered PDF.
-    path: str | None = Field(default=None, max_length=512)
-    # For ``text``: the exact string being replaced and what to replace it
-    # with. Kept verbatim rather than as a diff so acceptance can verify the
-    # original still matches before writing.
-    original_text: str | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.Text)
-    )
-    suggested_text: str | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.Text)
-    )
-    # For ``highlight``: a react-pdf-highlighter anchor, the same shape
-    # ProjectComment.highlight and ReleaseComment.highlight use. Stored as a
-    # plain dict; CommentHighlight validates it on the way in.
-    highlight: dict | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.JSON)
-    )
-    # The reviewer's rationale, and the only content for a ``note``.
-    comment: str | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.Text)
-    )
-    source: str = Field(default="manual", max_length=16)
-    # The file this was extracted from, for provenance: "comment 12 of
-    # advisor-review.docx" rather than a free-floating suggestion.
-    attachment_id: uuid.UUID | None = Field(
-        default=None, foreign_key="collabattachment.id"
-    )
-    anchor_status: str = Field(default="resolved", max_length=16)
-    # Text surrounding the change in the document it was extracted from, kept
-    # so an ambiguous or unresolved item can still be placed by a person (or
-    # re-matched later, after the source has moved on).
-    context_before: str | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.Text)
-    )
-    context_after: str | None = Field(
-        default=None, sa_column=sqlalchemy.Column(sqlalchemy.Text)
-    )
-    status: str = Field(default="pending", max_length=16)
-    # Board state, assignee, and ordering. Set when an item is accepted:
-    # anything that could be applied automatically lands in ``done``, while
-    # anything needing real work lands in ``todo`` for someone to pick up.
-    task_status: str = Field(default="todo", max_length=16, index=True)
-    assigned_to_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
-    )
-    # Position within its column. A float so a card can be dropped between two
-    # others without renumbering the rest of the column.
-    board_position: float = Field(default=0.0)
-    # The GitHub issue this item was mirrored to, so the queue can be worked
-    # through alongside the rest of the project's issues.
-    github_issue_url: str | None = Field(default=None, max_length=2048)
-    decided_by_user_id: uuid.UUID | None = Field(
-        default=None, foreign_key="user.id"
-    )
-    decided_at: datetime | None = Field(default=None)
-    # Set once an accepted suggestion has actually been written to the repo.
-    applied_git_rev: str | None = Field(default=None, max_length=40)
-    created: datetime = Field(default_factory=utcnow)
-    # Relationships
-    response: CollabRequestResponse = Relationship(
-        back_populates="suggestions"
-    )
-
-
-class CollabAttachment(SQLModel, table=True):
+class ContribAttachment(SQLModel, table=True):
     """A file sent with a request or handed back with a response.
 
     The round trip a PI actually wants: mail out the manuscript as a Word
@@ -443,11 +325,11 @@ class CollabAttachment(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     request_id: uuid.UUID | None = Field(
-        default=None, foreign_key="collabrequest.id", ondelete="CASCADE"
+        default=None, foreign_key="contribrequest.id", ondelete="CASCADE"
     )
     response_id: uuid.UUID | None = Field(
         default=None,
-        foreign_key="collabrequestresponse.id",
+        foreign_key="contribrequestresponse.id",
         ondelete="CASCADE",
     )
     filename: str = Field(max_length=512)
@@ -459,23 +341,23 @@ class CollabAttachment(SQLModel, table=True):
     )
     created: datetime = Field(default_factory=utcnow)
     # Relationships
-    request: CollabRequest | None = Relationship(back_populates="attachments")
-    response: CollabRequestResponse | None = Relationship(
+    request: ContribRequest | None = Relationship(back_populates="attachments")
+    response: ContribRequestResponse | None = Relationship(
         back_populates="attachments"
     )
 
 
-class CollabRequestPost(SQLModel):
+class ContribRequestPost(SQLModel):
     title: str = Field(min_length=1, max_length=255)
     message: str | None = None
-    direction: CollabDirection = "outbound"
+    direction: ContribDirection = "outbound"
     in_response_to_request_id: uuid.UUID | None = None
-    target_kind: CollabTargetKind = "project"
+    target_kind: ContribTargetKind = "project"
     target_path: str | None = None
     # If None, the project's default branch HEAD is pinned at creation.
     git_ref: str | None = None
-    permission: CollabPermission = "suggest"
-    identity_requirement: CollabIdentityRequirement = "anonymous"
+    permission: ContribPermission = "suggest"
+    identity_requirement: ContribIdentityRequirement = "anonymous"
     due_at: datetime | None = None
     # Set to chain a new review round onto a previous request; the round
     # number is derived from it.
@@ -489,7 +371,7 @@ class CollabRequestPost(SQLModel):
     create_github_issue: bool = False
 
 
-class CollabRequestPatch(SQLModel):
+class ContribRequestPatch(SQLModel):
     """Fields a lead may change after a request has gone out.
 
     Deliberately narrow: the target, revision, and permission are what the
@@ -506,7 +388,7 @@ class CollabRequestPatch(SQLModel):
     revoked: bool | None = None
 
 
-class CollabRequestPublic(SQLModel):
+class ContribRequestPublic(SQLModel):
     """A request as the project lead sees it -- never includes the token."""
 
     id: uuid.UUID
@@ -536,7 +418,7 @@ class CollabRequestPublic(SQLModel):
     created: datetime
 
 
-class CollabRequestCreated(CollabRequestPublic):
+class ContribRequestCreated(ContribRequestPublic):
     """Returned once at mint time; carries the raw token and its link."""
 
     token: str
@@ -547,7 +429,7 @@ class CollabRequestCreated(CollabRequestPublic):
     email_sent: bool = False
 
 
-class CollabRequestView(SQLModel):
+class ContribRequestView(SQLModel):
     """A request as the responder sees it on the respond page.
 
     Omits internal identifiers and the requester's private metadata; exposes
@@ -581,51 +463,18 @@ class CollabRequestView(SQLModel):
     can_respond: bool = True
 
 
-class CollabSuggestionPost(SQLModel):
-    kind: CollabSuggestionKind = "text"
-    source: CollabSuggestionSource = "manual"
-    path: str | None = None
-    original_text: str | None = None
-    suggested_text: str | None = None
-    highlight: CommentHighlight | None = None
-    comment: str | None = None
-
-
-class CollabResponsePost(SQLModel):
+class ContribResponsePost(SQLModel):
     message: str | None = None
     confidential_note: str | None = None
-    recommendation: CollabRecommendation | None = None
+    recommendation: ContribRecommendation | None = None
     responder_name: str | None = None
     responder_email: str | None = None
-    suggestions: list[CollabSuggestionPost] = Field(default_factory=list)
+    tasks: list[TaskPost] = Field(default_factory=list)
     # False saves a draft the responder can come back to; True hands it in.
     submit: bool = True
 
 
-class CollabSuggestionPublic(SQLModel):
-    id: uuid.UUID
-    kind: str
-    source: str
-    anchor_status: str
-    attachment_id: uuid.UUID | None
-    github_issue_url: str | None
-    task_status: str
-    assigned_to_user_id: uuid.UUID | None
-    board_position: float
-    context_before: str | None
-    context_after: str | None
-    path: str | None
-    original_text: str | None
-    suggested_text: str | None
-    highlight: dict | None
-    comment: str | None
-    status: str
-    decided_at: datetime | None
-    applied_git_rev: str | None
-    created: datetime
-
-
-class CollabAttachmentPublic(SQLModel):
+class ContribAttachmentPublic(SQLModel):
     id: uuid.UUID
     filename: str
     content_type: str | None
@@ -633,7 +482,7 @@ class CollabAttachmentPublic(SQLModel):
     created: datetime
 
 
-class CollabResponsePublic(SQLModel):
+class ContribResponsePublic(SQLModel):
     id: uuid.UUID
     request_id: uuid.UUID
     responder_name: str | None
@@ -651,51 +500,32 @@ class CollabResponsePublic(SQLModel):
     submitted_at: datetime | None
     reviewed_at: datetime | None
     review_note: str | None
-    suggestion_count: int
+    task_count: int
     accepted_count: int
     created: datetime
-    suggestions: list[CollabSuggestionPublic] = Field(default_factory=list)
-    attachments: list[CollabAttachmentPublic] = Field(default_factory=list)
+    tasks: list[TaskPublic] = Field(default_factory=list)
+    attachments: list[ContribAttachmentPublic] = Field(default_factory=list)
 
 
-class CollabResponseDeclinePost(SQLModel):
+class ContribResponseDeclinePost(SQLModel):
     """An invited responder turning the request down."""
 
     reason: str | None = None
 
 
-class CollabResponseReviewPost(SQLModel):
+class ContribResponseReviewPost(SQLModel):
     """The lead's verdict on a whole response."""
 
     status: Literal["accepted", "rejected"]
     review_note: str | None = None
 
 
-class CollabSuggestionBoardPatch(SQLModel):
-    """Move a card: change its column, assignee, or position within a column.
-
-    Separate from the accept/reject decision on purpose -- dragging a card to
-    "in progress" says nothing about whether the suggestion was agreed with,
-    and agreeing with it says nothing about whether it's been done.
-    """
-
-    task_status: CollabTaskStatus | None = None
-    assigned_to_user_id: uuid.UUID | None = None
-    board_position: float | None = None
-
-
-class CollabSuggestionDecisionPost(SQLModel):
-    """Accept or reject a single suggestion."""
-
-    status: Literal["accepted", "rejected", "pending"]
-
-
-class CollabIdentityChallengePost(BaseModel):
+class ContribIdentityChallengePost(BaseModel):
     """Start email confirmation for a request that requires it."""
 
     email: str
 
 
-class CollabIdentityConfirmPost(BaseModel):
+class ContribIdentityConfirmPost(BaseModel):
     email: str
     code: str

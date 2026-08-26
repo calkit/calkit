@@ -1049,7 +1049,12 @@ def new_docker_env(
     ] = None,
     platform: Annotated[
         str | None,
-        typer.Option("--platform", help="Which platform(s) to build for."),
+        typer.Option(
+            "--platform",
+            help=(
+                "Platform to pull and run the image as, e.g., 'linux/amd64'."
+            ),
+        ),
     ] = None,
     registry: Annotated[
         str | None,
@@ -1066,11 +1071,11 @@ def new_docker_env(
     platforms: Annotated[
         list[str],
         typer.Option(
-            "--build-platform",
+            "--platform-build",
             help=(
-                "Platform to build the image for, e.g., 'linux/amd64'. "
-                "Repeat for a multi-platform image, which requires a "
-                "registry."
+                "Platform to build the image for, as opposed to --platform, "
+                "which is the one it's pulled and run as. Repeat for a "
+                "multi-platform image, which requires a registry."
             ),
         ),
     ] = [],

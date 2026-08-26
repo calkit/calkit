@@ -1034,9 +1034,9 @@ Options:
 | `--wdir`            | text    | no       | /work   | Working directory.                                                                                                                                                                       |
 | `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                              |
 | `--user`            | text    | no       |         | User account to use to run the container.                                                                                                                                                |
-| `--platform`        | text    | no       |         | Which platform(s) to build for.                                                                                                                                                          |
+| `--platform`        | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'.                                                                                                                              |
 | `--registry`        | text    | no       |         | Registry prefix to push built images to and pull them from instead of rebuilding, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. |
-| `--build-platform`  | text    | no       |         | Platform to build the image for, e.g., 'linux/amd64'. Repeat for a multi-platform image, which requires a registry.                                                                      |
+| `--platform-build`  | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry.                        |
 | `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                                                                                      |
 | `--description`     | text    | no       |         | Description.                                                                                                                                                                             |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                                                                                       |
@@ -3000,25 +3000,25 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                                                                                   |
-| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-i`, `--input`    | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                      |
-| `--output`, `-o`   | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`          | text    | no       |         | Alternative lock file input paths to read.                                                                                                                    |
-| `--input-delete`   | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                    |
-| `--platform`       | text    | no       |         | Which platform(s) to build for.                                                                                                                               |
-| `--user`           | text    | no       |         | Which user to run the container as.                                                                                                                           |
-| `--wdir`           | text    | no       |         | Working directory inside the container.                                                                                                                       |
-| `--dep`, `-d`      | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                         |
-| `--env-var`, `-e`  | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                   |
-| `--port`, `-p`     | text    | no       |         | Declare an explicit port for the container.                                                                                                                   |
-| `--gpus`, `-g`     | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                        |
-| `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                           |
-| `--platform-build` | text    | no       |         | Platform to build the image for, e.g., 'linux/amd64'. Repeat for a multi-platform image, which requires a registry.                                           |
-| `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                       |
-| `--no-push`        | boolean | no       | False   | Do not push newly built images to the registry.                                                                                                               |
-| `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                   |
-| `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                     |
+| Option             | Type    | Required | Default | Description                                                                                                                                                       |
+| ------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i`, `--input`    | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                          |
+| `--output`, `-o`   | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension.     |
+| `--input`          | text    | no       |         | Alternative lock file input paths to read.                                                                                                                        |
+| `--input-delete`   | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                        |
+| `--platform`       | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'. Also used when building, unless --platform-build says otherwise.                                      |
+| `--user`           | text    | no       |         | Which user to run the container as.                                                                                                                               |
+| `--wdir`           | text    | no       |         | Working directory inside the container.                                                                                                                           |
+| `--dep`, `-d`      | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                             |
+| `--env-var`, `-e`  | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                       |
+| `--port`, `-p`     | text    | no       |         | Declare an explicit port for the container.                                                                                                                       |
+| `--gpus`, `-g`     | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                            |
+| `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                               |
+| `--platform-build` | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry. |
+| `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
+| `--no-push`        | boolean | no       | False   | Do not push newly built images to the registry.                                                                                                                   |
+| `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
+| `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
 
 <a id="subcommand-check-conda-env"></a>
 

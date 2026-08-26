@@ -871,7 +871,14 @@ def check_docker_env(
     ] = [],
     platform: Annotated[
         str | None,
-        typer.Option("--platform", help="Which platform(s) to build for."),
+        typer.Option(
+            "--platform",
+            help=(
+                "Platform to pull and run the image as, e.g., "
+                "'linux/amd64'. Also used when building, unless "
+                "--platform-build says otherwise."
+            ),
+        ),
     ] = None,
     user: Annotated[
         str | None,
@@ -926,9 +933,9 @@ def check_docker_env(
         typer.Option(
             "--platform-build",
             help=(
-                "Platform to build the image for, e.g., 'linux/amd64'. "
-                "Repeat for a multi-platform image, which requires a "
-                "registry."
+                "Platform to build the image for, as opposed to --platform, "
+                "which is the one it's pulled and run as. Repeat for a "
+                "multi-platform image, which requires a registry."
             ),
         ),
     ] = [],
@@ -987,8 +994,8 @@ def check_docker_env(
         deps_md5s[dep] = get_md5(dep, exclude_files=[lock_fpath])
 
     def read_lock(path: str) -> dict | None:
-        # A lock that can't be read is treated as one that isn't there, since
-        # rebuilding is always an option and crashing the check isn't
+        # A lock that can't be read is treated as one that isn't there:
+        # rebuilding is always an option, so there's no reason to fail
         try:
             with open(path) as f:
                 loaded = json.load(f)

@@ -27,11 +27,11 @@ inputs:
     required: false
     default: ""
   login_ghcr:
-    description:
+    description: >-
       Whether to log in to the GitHub Container Registry, so that Docker
       environments configured to use it can push images they build and pull
       them back instead of rebuilding. Requires the workflow to grant the
-      packages':' write permission.
+      "packages: write" permission.
     required: false
     default: "true"
 outputs: {}

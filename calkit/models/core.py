@@ -830,7 +830,7 @@ class DockerEnvironment(Environment):
             "are pushed to and pulled from, e.g., "
             "'ghcr.io/someone/some-project', or 'auto' for the project's "
             "GitHub Container Registry namespace. Images are kept local if "
-            "this is unset."
+            "this is unset or set to 'none'."
         ),
     )
     platforms: list[str] | None = Field(

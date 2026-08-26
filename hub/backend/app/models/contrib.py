@@ -113,6 +113,13 @@ ContribDirection = Literal["outbound", "inbound"]
 # creation; inbound ones start ``pending`` and wait for a lead.
 ContribApprovalStatus = Literal["approved", "pending", "denied"]
 
+# How an answer got back to us. The point of the non-``hub`` ones is that a PI
+# should never have to visit calkit.io: they reply to the email or the Slack
+# thread the artifact arrived in, in the client they already have open, and
+# what they wrote becomes tasks. The reviewer's side of this feature is
+# supposed to be invisible.
+ContribChannel = Literal["hub", "email", "slack", "cli", "api"]
+
 # How sure we need to be about who is responding:
 #   ``anonymous`` -- the link is the only credential
 #   ``email``     -- the responder proves control of an address, either the one
@@ -226,6 +233,14 @@ class ContribRequest(SQLModel, table=True):
     denial_reason: str | None = Field(default=None, max_length=1024)
     closed_at: datetime | None = Field(default=None)
     revoked: bool = Field(default=False)
+    # Opaque key identifying this request's reply channel: the local part of
+    # a per-request address (so hitting Reply in any mail client lands back
+    # here), and the handle a Slack thread is mapped to. Kept separate from
+    # ``token_hash`` because it travels in email headers, which are copied,
+    # forwarded, and logged far more freely than a link is.
+    reply_key: str | None = Field(
+        default=None, index=True, unique=True, max_length=64
+    )
     # The GitHub issue this request is mirrored to, if the project is
     # connected to GitHub, so the ask is visible to repo watchers too.
     github_issue_url: str | None = Field(default=None, max_length=2048)
@@ -299,6 +314,14 @@ class ContribRequestResponse(SQLModel, table=True):
     # signed-in user's verified account.
     email_verified: bool = Field(default=False)
     status: str = Field(default="draft", max_length=16)
+    via: str = Field(default="hub", max_length=16)
+    # The Message-ID of the email, or the Slack message timestamp, this came
+    # in on. Stored to keep replies threaded and, more importantly, so the
+    # same reply delivered twice doesn't produce two sets of tasks.
+    external_message_id: str | None = Field(default=None, max_length=512)
+    # A link back to where the conversation actually happened, e.g., the
+    # Slack thread. The discussion stays where the team already talks.
+    external_thread_url: str | None = Field(default=None, max_length=2048)
     # Why an invited responder turned the request down, if they said.
     decline_reason: str | None = Field(default=None, max_length=1024)
     # The reviewer's verdict on the work itself, e.g., "minor_revision".
@@ -537,6 +560,8 @@ class ContribResponsePublic(SQLModel):
     responder_email: str | None
     email_verified: bool
     status: str
+    via: str
+    external_thread_url: str | None
     decline_reason: str | None
     recommendation: str | None
     message: str | None

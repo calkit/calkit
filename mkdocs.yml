@@ -92,6 +92,11 @@ nav:
   - Reproducibility: reproducibility.md
   - Governance: governance.md
   - Acknowledgements: acknowledgements.md
+# Internal design notes live in docs/dev; they're for contributors, not
+# users, so they're built out of the site rather than shown unlinked.
+exclude_docs: |
+  dev/
+
 markdown_extensions:
   - admonition
   - attr_list

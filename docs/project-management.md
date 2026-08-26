@@ -30,27 +30,35 @@ doesn't land on you as a merge chore.
 Retyping forty tracked changes into a `.tex` file by hand is worse than
 the problem it solved.
 
-It doesn't have to work that way, because tracked changes and comments in
-a `.docx` aren't prose--they're structured data.
-Every insertion, deletion, and comment is a separate, addressable record
-with its own author, timestamp, and anchor in the text.
-Calkit pulls them out and turns each one into a single item in a queue:
-what was said, where it applies, and what it proposes.
+It doesn't have to work that way, because a `.docx` isn't prose--it's
+structured data, and more usefully, **Calkit rendered the copy that was
+sent out in the first place**.
+So finding what changed isn't a matter of reading someone's edits and
+guessing.
+It's a comparison between the document we produced at a pinned revision
+and the one that came back, paragraph by paragraph.
+Everything that differs is something the reviewer did.
 
-Since the document was generated from the project's own source, each item
-carries enough surrounding context to be matched back to the LaTeX or
-Markdown it came from.
-When the match is unambiguous, the item becomes a suggestion you accept
-or reject like any other, and accepting writes it to the source.
-When it isn't--and it won't always be--the item stays in the queue with
-its context attached, for you to place by hand.
+Each changed paragraph, and each comment they left, becomes one task:
+what was said, where it applies, and what it proposes.
+Because Calkit knows which part of the source produced which part of the
+document, most of those resolve to an exact location in the LaTeX or
+Markdown, and accepting one writes it straight to the source.
+Paragraphs the reviewer added or moved don't have a source location to
+resolve to, so those stay on the board with their surrounding context
+attached, for you to place.
+
+This also means it doesn't matter whether they remembered to turn on
+track changes.
+Half of them won't, and it makes no difference to what comes back.
 
 <!-- prettier-ignore -->
 !!! warning
     Sentence-level edits and comments round-trip well.
     Structural surgery does not:
     reordered sections, rebuilt tables, rewritten equations, and anything
-    touching generated figures will come back as items that need a human.
+    touching generated figures will come back as tasks that need a human
+    to place.
     The goal isn't a perfect automatic merge, it's never having to hunt
     through a document for what changed.
 

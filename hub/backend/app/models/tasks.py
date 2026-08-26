@@ -58,8 +58,9 @@ TaskKind = Literal["edit", "highlight", "note"]
 # Where the item came from. Ingested sources matter because they carry
 # different confidence: something written in the app knows exactly what it's
 # attached to, while a tracked change lifted out of a Word document had to be
-# matched back to the source that document was generated from.
-TaskSource = Literal["manual", "docx", "pdf", "email"]
+# matched back to the source that document was generated from, and a line in
+# a reply email had to be matched back to whatever the sender was looking at.
+TaskSource = Literal["manual", "docx", "pdf", "pptx", "email", "slack"]
 
 # Whether an ingested item could be located in the project's source.
 #   ``resolved``   -- matched a unique spot; accepting can write it directly
@@ -126,7 +127,24 @@ class Task(SQLModel, table=True):
     attachment_id: uuid.UUID | None = Field(
         default=None, foreign_key="contribattachment.id"
     )
+    # Where in the reviewed document this came from, e.g., ``slide:4``,
+    # ``page:12``, ``comment:7``. Human-readable on purpose: it's what a
+    # person (or an agent) reads to understand what the reviewer was looking
+    # at when they said it.
+    source_ref: str | None = Field(default=None, max_length=64)
+    # The pipeline stage that produces ``path``, as of the reviewed revision.
+    # Derivable from the pipeline, but stored so the task is self-contained:
+    # "this comment is about a figure that came out of the ``sweep`` stage"
+    # is the whole trace, and it shouldn't need the project checked out to
+    # answer.
+    stage: str | None = Field(default=None, max_length=255)
     anchor_status: str = Field(default="resolved", max_length=16)
+    # Line in ``path``, at the reviewed revision, where this applies. A hint
+    # rather than a coordinate: the source will have moved on by the time
+    # anyone acts on it, so this narrows the search and ``original_text``
+    # decides. Exactly how a patch hunk header works, and for the same
+    # reason.
+    anchor_line: int | None = Field(default=None)
     # Text surrounding the change in the document it came from, kept so an
     # ambiguous or unresolved item can still be placed by a person, or
     # re-matched later after the source has moved on.
@@ -197,7 +215,10 @@ class TaskPublic(SQLModel):
     title: str
     kind: str
     source: str
+    source_ref: str | None
+    stage: str | None
     anchor_status: str
+    anchor_line: int | None
     attachment_id: uuid.UUID | None
     context_before: str | None
     context_after: str | None

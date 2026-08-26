@@ -267,6 +267,104 @@ no account, no repo.
     and it still lands attached to the pinned revision rather than in an
     inbox.
 
+## Assembling something to send
+
+Every week or two, a student pulls together a handful of figures into
+slides for the group meeting or an advisor check-in.
+It's the most common review cycle in research and the one that leaks the
+most.
+The deck gets built by hand:
+export a figure, paste it into PowerPoint, retype the caption, notice the
+numbers changed, redo it.
+Convergence after a period of divergence, done by copy and paste.
+
+Two things get lost every time.
+The provenance goes first--once a plot is a picture in a slide, nothing
+connects it to the code and data that made it,
+and a question in the meeting about how it was computed can't be answered
+from the deck.
+Then the work goes:
+next fortnight, the arranging and the commentary get done again from
+scratch, because the deck was drawn rather than declared.
+
+In Calkit a review deck is **declared, not drawn**.
+You say which figures go in it, in what order, with what commentary,
+and the deck is generated from the project's own
+[pipeline](pipeline/index.md) outputs at a pinned revision--which makes it
+a [presentation](calkit-yaml.md) artifact like any other, produced by a
+stage, rebuildable on demand.
+
+That changes both halves.
+Regenerating next fortnight picks up current results while your ordering
+and commentary survive, because those live in the declaration rather than
+in a binary someone has to redo.
+And every slide knows what it came from, so a comment on slide 4 resolves
+to the figure on it, to the stage that produced that figure, and to the
+data that stage consumed.
+
+<!-- prettier-ignore -->
+!!! note
+    Rearranging and writing commentary is real work and shouldn't be
+    automated away--the synthesis is the point of the exercise.
+    What should be automated away is the copying, the retyping, and the
+    silent staleness when a figure changes and the slide doesn't.
+
+The deck is then just another target.
+Send it for review, and comments come back as tasks that already know
+which figure and which stage they're about,
+rather than as "slide 4" in an email thread nobody can act on in a month.
+
+## Meeting people where they are
+
+The hardest constraint on this whole feature is that the most important
+reviewer is the least likely to cooperate.
+A PI who checks email and Slack and nothing else is not going to visit
+calkit.io because a student asked them to,
+and any design that requires it has already failed for the person whose
+feedback matters most.
+
+So the reviewer never has to.
+An artifact arrives in their inbox or in a Slack thread.
+They reply, in the client they already have open, in prose:
+
+> Figure 3 should have log axes. The intro is about a page too long, and
+> Table 2 is missing units.
+
+That reply comes back to Calkit and becomes three
+[tasks](project-management.md) on the student's board.
+No account, no link, no login--the reviewer's half of this feature is
+supposed to be invisible to them.
+
+Each request carries its own reply address, so hitting **Reply** is the
+whole interaction.
+Attachments come along:
+if the PI marked up the Word version instead of writing prose,
+that gets [ingested](project-management.md#marked-up-documents-become-tasks)
+the same way.
+Slack works the same, with the thread mapped to the request, and a link
+back to it kept on the response so the conversation stays where the team
+already talks.
+
+<!-- prettier-ignore -->
+!!! warning
+    A reply proves less about who sent it than a confirmed link does.
+    From addresses can be forged, so an emailed response is only treated
+    as verified when the message actually authenticates as the sender's
+    domain.
+    For a request that needs real certainty about identity, require an
+    account and accept the friction--but that should be rare, and it's
+    the wrong default for a PI.
+
+Whatever channel it came in on, the response is pinned to the revision
+the artifact was sent at.
+That's the part that makes this more than a nicer inbox:
+"Figure 3 should have log axes" is attached to a specific Figure 3,
+produced by a specific pipeline stage, from specific data, at a specific
+commit.
+Six weeks later the student--or an agent working on their behalf--can
+follow that comment back to exactly what produced the thing being
+complained about.
+
 ## Responding to a request
 
 The response page shows what's being asked, the artifact as it stood at
@@ -371,6 +469,16 @@ and accepted contributions can be surfaced as pull requests.
     - Whether a reviewer can run pipeline stages themselves, and where.
       Verifying a result means executing it somewhere, which a review
       link can't do on its own.
+    - How a reply email is split into individual tasks.
+      "Figure 3 needs log axes, and the intro is too long" is two tasks,
+      but prose doesn't come with delimiters, and getting this wrong in
+      either direction is annoying.
+    - Whether Slack support is a Calkit app a workspace installs, or a
+      bot invited to a channel, and what it does with threads nobody
+      asked it about.
+    - Where a review deck's declaration lives, e.g., in `calkit.yaml`
+      alongside other presentations, or in its own file next to the
+      generated deck.
     - Whether Calkit eventually hosts Git itself, with GitHub as one
       sync target rather than the substrate.
       Contribution requests don't force that decision and don't depend

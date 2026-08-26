@@ -114,6 +114,18 @@ This is what lets a checkout of the project find its way back to the image
 later, described in
 [Fetching images](environments.md#how-images-are-fetched).
 
+The archive is a gzipped tarball written by `docker save`.
+Its contents follow the
+[OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md)
+--- an `oci-layout` marker, an `index.json`, and content-addressed blobs
+under `blobs/sha256/` --- so it can be read by any OCI-aware tool, not only
+Docker, with a legacy `manifest.json` written alongside for older versions
+of Docker to load.
+Note that this format comes from the Docker daemon rather than from Calkit:
+a daemon using the containerd image store writes an OCI layout, while one
+using the legacy image store writes the older Docker image format instead.
+Either loads with `docker load`.
+
 <!-- prettier-ignore -->
 !!! note
 

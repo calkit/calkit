@@ -3018,7 +3018,7 @@ def run_in_env(
     shell = env.get("shell", "sh")
     platform = env.get("platform")
 
-    def _with_system_env_setup(shell_cmd: str) -> str:
+    def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
 
         The setup commands and the stage share one shell, so what the setup
@@ -3028,6 +3028,12 @@ def run_in_env(
         runs in the environment's shell (bash by default) rather than the
         platform's, since ``source`` is a bashism and sourcing a setup
         script is the case this exists for.
+
+        Returns the invocation as a program and its arguments, or None
+        when there is nothing to set up. Left as a list rather than a
+        string so the caller decides how to quote it: over SSH the far end
+        is a POSIX shell, but locally on Windows it would be cmd.exe, which
+        reads single quotes as ordinary characters.
         """
         stage_setup = [c for c in setup_cmds if c.strip()]
         env_setup = [c for c in (env.get("default_setup") or []) if c.strip()]
@@ -3038,9 +3044,9 @@ def run_in_env(
         else:
             setup = stage_setup
         if not setup:
-            return shell_cmd
+            return None
         chained = " && ".join([*setup, shell_cmd])
-        return f"{env.get('shell', 'bash')} -c {shlex.quote(chained)}"
+        return [env.get("shell", "bash"), "-c", chained]
 
     def save_env_check_cache() -> None:
         """Record a successful check so repeat calls can skip it."""
@@ -3343,7 +3349,11 @@ def run_in_env(
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
         repo = calkit.git.get_repo()
-        remote_shell_cmd = _with_system_env_setup(_to_shell_cmd(cmd))
+        remote_shell_cmd = _to_shell_cmd(cmd)
+        if (
+            setup_argv := _with_system_env_setup(remote_shell_cmd)
+        ) is not None:
+            remote_shell_cmd = shlex.join(setup_argv)
         try:
             workspace.run_in_workspace(
                 workspace=ws,
@@ -3501,11 +3511,20 @@ def run_in_env(
         # tool-managed workspace instead would execute a different copy of
         # the project from the one DVC is about to hash. Only the stage's
         # own wdir, which is relative to the project root, applies.
-        shell_cmd = _with_system_env_setup(_to_shell_cmd(cmd))
+        shell_cmd = _to_shell_cmd(cmd)
+        setup_argv = _with_system_env_setup(shell_cmd)
         if verbose:
-            typer.echo(f"Running command: {shell_cmd}")
+            typer.echo(
+                "Running command: "
+                + (shlex.join(setup_argv) if setup_argv else shell_cmd)
+            )
         try:
-            subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
+            if setup_argv is not None:
+                # Run directly rather than through the platform shell, so
+                # the chain reaches bash intact on Windows too
+                subprocess.check_call(setup_argv, cwd=wdir)
+            else:
+                subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in system environment")
     else:

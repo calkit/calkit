@@ -27,6 +27,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -133,6 +144,22 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -488,6 +515,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -594,6 +632,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -657,22 +711,6 @@
           "title": "Command Mode",
           "type": "string"
         },
-        "deps": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "Files added to the container as dependencies.",
-          "title": "Deps"
-        },
         "description": {
           "anyOf": [
             {
@@ -719,6 +757,22 @@
           "description": "Name of the Docker image.",
           "title": "Image",
           "type": "string"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files added to the container as dependencies. Their checksums are recorded in the environment's lock file, so editing one rebuilds the image and reruns the stages that use it.",
+          "title": "Inputs"
         },
         "jupyter_kernel": {
           "anyOf": [
@@ -1183,6 +1237,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "default": "_system",
           "title": "Environment",
@@ -1306,6 +1371,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -1362,6 +1443,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -1470,6 +1562,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -1573,6 +1681,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -1686,6 +1805,22 @@
           "title": "Script Path",
           "type": "string"
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -1759,6 +1894,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -1931,6 +2077,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -2035,6 +2197,17 @@
           },
           "title": "Diffs",
           "type": "array"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -2200,6 +2373,22 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -2476,6 +2665,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "default": "_system",
           "title": "Environment",
@@ -2613,6 +2813,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -2668,6 +2884,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -2835,6 +3062,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "show_code": {
           "default": false,
           "description": "Show the notebook's code in the app.",
@@ -2904,6 +3147,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "default": "_system",
@@ -2986,6 +3240,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -3043,6 +3313,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -3150,6 +3431,22 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -3260,6 +3557,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -3384,6 +3692,22 @@
           "description": "Path to the MATLAB script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -3792,6 +4116,22 @@
           "description": "Host on which to submit jobs, over SSH if not localhost.",
           "title": "Host",
           "type": "string"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "pbs",
@@ -4473,6 +4813,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -4585,6 +4936,22 @@
           "title": "Script Path",
           "type": "string"
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -4650,6 +5017,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -4757,6 +5135,22 @@
           ],
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -4953,6 +5347,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -5063,6 +5468,22 @@
           "description": "Path to the R script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -5721,6 +6142,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -5871,6 +6303,22 @@
           "description": "Path to the script to submit.",
           "title": "Script Path",
           "type": "string"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "slurm": {
           "anyOf": [
@@ -6046,6 +6494,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
           "title": "Environment",
@@ -6152,6 +6611,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "shell": {
           "default": "bash",
           "description": "Shell in which to run the command.",
@@ -6228,6 +6703,17 @@
           "default": null,
           "description": "A description of what this stage does.",
           "title": "Description"
+        },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
         },
         "environment": {
           "description": "Name of the environment in which to run this stage.",
@@ -6339,6 +6825,22 @@
           "description": "Path to the shell script to run.",
           "title": "Script Path",
           "type": "string"
+        },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
         },
         "shell": {
           "default": "bash",
@@ -6556,6 +7058,22 @@
           "title": "Host",
           "type": "string"
         },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "title": "Inputs"
+        },
         "kind": {
           "const": "slurm",
           "default": "slurm",
@@ -6670,7 +7188,7 @@
       "type": "object"
     },
     "StageSchedulerOptions": {
-      "description": "Parameters for running a stage on a job scheduler (SLURM or PBS).\n\nThe environment-level ``default_options`` / ``default_setup`` are\napplied by ``calkit scheduler batch`` at submission time.\nThe mode for each list is controlled independently by\n``env_default_options`` and ``env_default_setup``:\n\n- ``replace`` (default): if the stage provides values, those are used\n  and env defaults are skipped; if the stage's list is empty, env\n  defaults fill in.\n- ``merge``: env defaults are prepended to whatever the stage\n  provides (the scheduler's last-occurrence-wins behavior keeps stage\n  values on top of any conflicts).\n- ``ignore``: env defaults are never applied, regardless of whether\n  the stage provided any values.",
+      "description": "Parameters for running a stage on a job scheduler (SLURM or PBS).\n\nThe environment-level ``default_options`` is applied by ``calkit\nscheduler batch`` at submission time, in the mode ``env_default_options``\nnames---see :class:`Stage`, which documents the same three modes for\nthe setup commands.\n\n``setup`` and ``env_default_setup`` were once written here too. They\nbelong to the stage, not to the scheduler: a stage on a ``system``\nenvironment has setup commands and no scheduler at all. They are still\naccepted here and hoisted onto the stage when it loads.",
       "properties": {
         "env_default_options": {
           "default": "replace",
@@ -6685,7 +7203,8 @@
         },
         "env_default_setup": {
           "default": "replace",
-          "description": "How to combine 'setup' with the environment's default_setup.",
+          "deprecated": true,
+          "description": "Deprecated; set 'env_default_setup' on the stage itself, alongside its 'setup'.",
           "enum": [
             "ignore",
             "replace",
@@ -6753,7 +7272,8 @@
             }
           ],
           "default": null,
-          "description": "Commands run at the start of the job script.",
+          "deprecated": true,
+          "description": "Deprecated; set 'setup' on the stage itself. Setup commands are not a scheduler concept, and a stage on a 'system' environment needs them too.",
           "title": "Setup"
         }
       },
@@ -6845,8 +7365,24 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``default_setup`` is what has to be *done* on this machine before a\nstage can run: sourcing a site setup script, loading modules, putting a\nhand-built toolchain on the ``PATH``. It runs in the same shell as the\nstage's own command, so what it exports is what the stage sees, which\nis why it can't be a ``setup`` requirement -- those run in a shell of\ntheir own and are cached, since they check whether something has been\ndone rather than doing it every time. It is recorded in the lock file\nfor the same reason a SLURM env's is: changing how a build is set up\nchanges what the build produces, so the stages that used it should\nrerun.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
+        "default_setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run in the same shell, before every stage that uses this environment, e.g. 'module load cuda' or a site setup script that exports compiler paths. Recorded in the environment's lock file, so changing them reruns those stages.",
+          "title": "Default Setup"
+        },
         "description": {
           "anyOf": [
             {
@@ -6865,6 +7401,22 @@
           "description": "Host on which to run. Reached over SSH unless it names this machine.",
           "title": "Host",
           "type": "string"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "title": "Inputs"
         },
         "kind": {
           "const": "system",
@@ -6954,6 +7506,17 @@
           },
           "title": "Requirements",
           "type": "array"
+        },
+        "shell": {
+          "default": "bash",
+          "description": "Shell in which 'default_setup' runs, together with the stage's own command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to set 'default_setup'. Ignored when there is no 'default_setup'.",
+          "enum": [
+            "sh",
+            "bash",
+            "zsh"
+          ],
+          "title": "Shell",
+          "type": "string"
         },
         "ssh_key": {
           "anyOf": [
@@ -7384,6 +7947,17 @@
           "description": "A description of what this stage does.",
           "title": "Description"
         },
+        "env_default_setup": {
+          "default": "replace",
+          "description": "How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.",
+          "enum": [
+            "ignore",
+            "replace",
+            "merge"
+          ],
+          "title": "Env Default Setup",
+          "type": "string"
+        },
         "environment": {
           "default": "_system",
           "title": "Environment",
@@ -7491,6 +8065,22 @@
           "default": null,
           "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
         },
+        "setup": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "title": "Setup"
+        },
         "slurm": {
           "anyOf": [
             {
@@ -7544,20 +8134,40 @@
           "description": "Path within that repo, if it isn't the whole thing.",
           "title": "Path"
         },
+        "ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Branch or tag to follow when refreshing this, e.g. 'main'. 'rev' still records the commit actually fetched, so the entry says both what it tracks and what it got; refreshing moves 'rev' to wherever this now points. Without it, refreshing re-fetches the pinned commit.",
+          "title": "Ref"
+        },
         "repo_url": {
           "description": "Clone URL of the repo the data came from.",
           "title": "Repo Url",
           "type": "string"
         },
         "rev": {
-          "description": "The commit hash it came from. A branch or tag would move, so the data behind this entry could change without the entry changing, which is the thing recording it is meant to prevent.",
-          "title": "Rev",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The commit hash the file actually came from, filled in by 'calkit import path' and 'calkit update path'. This is the answer, where 'ref' is the question: recording it is what makes the entry say which bytes are here, rather than naming something that moves. Optional only so an entry can be written by hand before anything has been fetched; editing it changes nothing, since fetching overwrites it.",
+          "title": "Rev"
         }
       },
       "required": [
-        "repo_url",
-        "rev"
+        "repo_url"
       ],
       "title": "_GitSource",
       "type": "object"

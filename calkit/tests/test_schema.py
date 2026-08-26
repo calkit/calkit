@@ -134,6 +134,23 @@ def test_validate_bad_projects() -> None:
     )
     # A system environment, which has nothing to build or verify
     assert not errors({"environments": {"sassy": {"kind": "system"}}})
+    # An environment's files are written as 'inputs'. 'deps' is the name
+    # Docker envs were published with, still accepted but no longer
+    # documented, so it must keep validating on every kind that takes one
+    for key in ["inputs", "deps"]:
+        assert not errors(
+            {
+                "environments": {
+                    "sys": {"kind": "system", key: ["scripts/setup.sh"]},
+                    "img": {
+                        "kind": "docker",
+                        "image": "img",
+                        key: ["src/solver.C"],
+                    },
+                    "hpc": {"kind": "slurm", key: ["scripts/setup.sh"]},
+                }
+            }
+        )
     # Evidence defines what it points at inline, discriminated by kind, so
     # none of these need a matching top-level declaration
     assert not errors(

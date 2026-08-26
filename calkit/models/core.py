@@ -10,6 +10,7 @@ from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
     ConfigDict,
     Discriminator,
@@ -85,27 +86,46 @@ class _GitSource(BaseModel):
     repo_url: str = Field(
         description="Clone URL of the repo the data came from."
     )
-    rev: str = Field(
+    rev: str | None = Field(
+        default=None,
         description=(
-            "The commit hash it came from. A branch or tag would move, so "
-            "the data behind this entry could change without the entry "
-            "changing, which is the thing recording it is meant to prevent."
-        )
+            "The commit hash the file actually came from, filled in by "
+            "'calkit import path' and 'calkit update path'. This is the "
+            "answer, where 'ref' is the question: recording it is what "
+            "makes the entry say which bytes are here, rather than naming "
+            "something that moves. Optional only so an entry can be "
+            "written by hand before anything has been fetched; editing it "
+            "changes nothing, since fetching overwrites it."
+        ),
     )
     path: str | None = Field(
         default=None,
         description="Path within that repo, if it isn't the whole thing.",
     )
+    ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch or tag to follow when refreshing this, e.g. 'main'. "
+            "'rev' still records the commit actually fetched, so the entry "
+            "says both what it tracks and what it got; refreshing moves "
+            "'rev' to wherever this now points. Without it, refreshing "
+            "re-fetches the pinned commit."
+        ),
+    )
 
     @field_validator("rev")
     @classmethod
-    def _check_rev_is_a_hash(cls, v: str) -> str:
+    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
         # Abbreviated hashes are fine -- Git resolves them -- but a name is
         # not a revision, and accepting one here would quietly make the
-        # import irreproducible.
+        # import irreproducible. A branch belongs in 'ref', which is where
+        # something that moves is meant to be written.
+        if v is None:
+            return v
         if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
             raise ValueError(
-                f"rev must be a commit hash, not a branch or tag (got {v!r})"
+                f"rev must be a commit hash, not a branch or tag (got {v!r}); "
+                "a branch or tag to follow goes in 'ref'"
             )
         return v
 
@@ -847,9 +867,13 @@ class DockerEnvironment(Environment):
         default=None,
         description="User to run the container as. Defaults to the host user.",
     )
-    deps: list[str] | None = Field(
+    inputs: list[str] | None = Field(
         default=None,
-        description="Files added to the container as dependencies.",
+        # See the note on the other environments that take this field
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files added to the container as dependencies. Their "
+        "checksums are recorded in the environment's lock file, so editing "
+        "one rebuilds the image and reruns the stages that use it.",
     )
     env_vars: dict[str, str] | None = Field(
         default=None,
@@ -915,6 +939,18 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
+    inputs: list[str] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them.",
+    )
     max_concurrent_jobs: int | None = Field(
         default=None,
         ge=1,
@@ -937,6 +973,18 @@ class PBSEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run at the start of every job script.",
+    )
+    inputs: list[str] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them.",
     )
     max_concurrent_jobs: int | None = Field(
         default=None,
@@ -997,6 +1045,17 @@ class SystemEnvironment(Environment):
     property that changes silently invalidates a cached result. One gates,
     the other pins, so a property that matters both ways is written in both
     places.
+
+    ``default_setup`` is what has to be *done* on this machine before a
+    stage can run: sourcing a site setup script, loading modules, putting a
+    hand-built toolchain on the ``PATH``. It runs in the same shell as the
+    stage's own command, so what it exports is what the stage sees, which
+    is why it can't be a ``setup`` requirement -- those run in a shell of
+    their own and are cached, since they check whether something has been
+    done rather than doing it every time. It is recorded in the lock file
+    for the same reason a SLURM env's is: changing how a build is set up
+    changes what the build produces, so the stages that used it should
+    rerun.
 
     ``host`` names the machine. SSH is how a machine is reached, not a kind
     of environment, so there is no separate ``ssh`` kind: a system env whose
@@ -1066,6 +1125,32 @@ class SystemEnvironment(Environment):
         description="The project's workspace on the host, in which stages "
         "run. A relative path is taken from the connecting user's home "
         "directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.",
+    )
+    default_setup: list[str] | None = Field(
+        default=None,
+        description="Commands run in the same shell, before every stage "
+        "that uses this environment, e.g. 'module load cuda' or a site "
+        "setup script that exports compiler paths. Recorded in the "
+        "environment's lock file, so changing them reruns those stages.",
+    )
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash",
+        description="Shell in which 'default_setup' runs, together with the "
+        "stage's own command. Defaults to bash, since 'source' is a bashism "
+        "and sourcing a setup script is the usual reason to set "
+        "'default_setup'. Ignored when there is no 'default_setup'.",
+    )
+    inputs: list[str] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them.",
     )
     lock: list[SystemLockProperty] = Field(
         default=[],

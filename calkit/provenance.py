@@ -1,5 +1,10 @@
 """Functionality for handling artifact provenance."""
 
+from __future__ import annotations
+
+import os
+import re
+
 # The artifact kinds whose provenance is checked. Each entry must say where
 # it came from: a pipeline stage, an import, or the person who created it,
 # e.g., by collecting or measuring the data or drawing the figure.
@@ -25,4 +30,281 @@ def has_provenance(artifact: dict) -> bool:
     return any(
         artifact.get(key) is not None
         for key in ["stage", "imported_from", "created_by"]
+    )
+
+
+# Hosts whose file URLs name a Git repo, a revision, and a path within it,
+# so a link copied out of the browser can be imported as the Git source it
+# actually is rather than as an HTML page that happens to contain the file.
+_GIT_FORGE_HOSTS = ("github.com", "gitlab.com", "raw.githubusercontent.com")
+# The segment that separates the ref from the path in a forge URL. GitLab
+# additionally puts '/-/' before it, since its group paths nest.
+_FORGE_REF_MARKERS = ("blob", "raw", "tree", "blame", "src")
+
+
+def _git_source_from_url(url: str) -> dict | None:
+    """Read a Git repo, revision, and path out of a forge URL.
+
+    Returns None for a URL that isn't one, which is then just a URL to
+    download. Guessing is confined to hosts whose layout is known: for
+    anything else, the bytes at the address are what was asked for.
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    host = parts.netloc.lower().removeprefix("www.")
+    if host not in _GIT_FORGE_HOSTS:
+        return None
+    segments = [s for s in parts.path.split("/") if s]
+    # GitLab separates the repo from what you're looking at inside it with
+    # '/-/', because its groups nest and there is otherwise no telling
+    # where the repo path ends
+    if "-" in segments:
+        split_at = segments.index("-")
+        repo_segments, rest = segments[:split_at], segments[split_at + 1 :]
+    elif host == "raw.githubusercontent.com":
+        # Always <owner>/<repo>/<ref>/<path>, with no marker segment
+        if len(segments) < 3:
+            return None
+        repo_segments, rest = segments[:2], ["raw"] + segments[2:]
+    else:
+        if len(segments) < 2:
+            return None
+        repo_segments, rest = segments[:2], segments[2:]
+    if not rest:
+        return None
+    ref: str | None = None
+    if rest[0] in _FORGE_REF_MARKERS and len(rest) >= 3:
+        ref, path_segments = rest[1], rest[2:]
+        # GitHub's raw URLs spell a branch as 'refs/heads/<name>'
+        if ref == "refs" and len(path_segments) >= 2:
+            if path_segments[0] in ("heads", "tags"):
+                ref, path_segments = path_segments[1], path_segments[2:]
+    else:
+        # No revision named, e.g. a path written out by hand. The default
+        # branch is what gets fetched, and the commit it resolves to is
+        # what gets recorded.
+        path_segments = rest
+    if not path_segments:
+        return None
+    scheme = parts.scheme or "https"
+    forge_host = "github.com" if host == "raw.githubusercontent.com" else host
+    repo = "/".join(repo_segments).removesuffix(".git")
+    source: dict = {
+        "repo_url": f"{scheme}://{forge_host}/{repo}.git",
+        "path": "/".join(path_segments),
+    }
+    # Recorded as a 'ref' whether it names a branch, a tag, or a commit.
+    # A commit is a thing to follow that happens never to move, which is
+    # what keeps a deliberate pin pinned when the import is refreshed.
+    if ref is not None:
+        source["ref"] = ref
+    return source
+
+
+def source_from_location(
+    location: str,
+    git_repo: str | None = None,
+    ref: str | None = None,
+) -> dict:
+    """Work out where a file is being imported from, from how it's written.
+
+    ``location`` is a path inside ``git_repo`` when that's given, and
+    otherwise a URL, a DOI, or a Calkit project path like
+    ``someone/some-project/scripts/setup.sh``. An explicit ``ref`` names
+    the branch, tag, or commit to follow, and overrides one read out of a
+    URL. Without one, the repo's default branch is what gets fetched, now
+    and whenever the import is refreshed.
+    """
+    if git_repo is not None:
+        source: dict = {"repo_url": git_repo, "path": location}
+        if ref is not None:
+            source["ref"] = ref
+        return {"git": source}
+    stripped = re.sub(
+        r"^(https?://(dx\.)?doi\.org/|doi:)", "", location.strip(), flags=re.I
+    )
+    if re.fullmatch(r"10\.\d{4,9}/\S+", stripped):
+        # Recognized rather than downloaded: a DOI resolves to a landing
+        # page, so treating it as a plain URL would save the HTML and call
+        # it the data. 'fetch' says what to use instead.
+        return {"doi": stripped}
+    if location.startswith(("http://", "https://")):
+        git_source = _git_source_from_url(location)
+        if git_source is not None:
+            if ref is not None:
+                git_source["ref"] = ref
+            return {"git": git_source}
+        return {"url": location}
+    segments = location.split("/")
+    if len(segments) < 3:
+        raise ValueError(
+            f"Cannot tell where '{location}' comes from; give a URL, a DOI, "
+            "a Calkit project path like someone/some-project/path/to/file, "
+            "or a path inside a repo named with --git-repo"
+        )
+    return {"project": "/".join(segments[:2]), "path": "/".join(segments[2:])}
+
+
+def default_dest_path(imported_from: dict) -> str:
+    """Where an import lands when no destination was given."""
+    if (git := imported_from.get("git")) is not None:
+        return os.path.basename(str(git.get("path") or ""))
+    if imported_from.get("project") is not None:
+        return str(imported_from.get("path") or "")
+    if (url := imported_from.get("url")) is not None:
+        from urllib.parse import urlsplit
+
+        return os.path.basename(urlsplit(str(url)).path)
+    return ""
+
+
+def describe_source(imported_from: dict) -> str:
+    """Name where an artifact came from, for a message to a person."""
+    if (git := imported_from.get("git")) is not None:
+        path = git.get("path")
+        where = str(git.get("repo_url") or "a Git repo")
+        return where + (f"/{path}" if path else "")
+    if (project := imported_from.get("project")) is not None:
+        path = imported_from.get("path")
+        return str(project) + (f"/{path}" if path else "")
+    if (url := imported_from.get("url")) is not None:
+        return str(url)
+    if (doi := imported_from.get("doi")) is not None:
+        return f"doi:{doi}"
+    return "an unrecorded source"
+
+
+def fetch(imported_from: dict, dest_path: str) -> dict:
+    """Download what an ``imported_from`` entry points at, to ``dest_path``.
+
+    Returns the entry as it should now be recorded. A Git source comes back
+    with ``rev`` set to the commit actually fetched, so an entry says which
+    commit it ended up on and re-reading it later gets the same bytes.
+
+    What gets fetched is the source's ``ref``---a branch, a tag, or a
+    commit---or the repo's default branch when it names none. ``rev`` is
+    the answer, never the question: refreshing an import is asking where
+    the thing it follows is now, and reading the last answer back would
+    make that a no-op.
+
+    Whatever is at ``dest_path`` is replaced. This is a one-way copy from
+    the source, not a merge: an import is a statement about where a file
+    came from, and a local edit that survived it would make that false.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+
+    imported_from = dict(imported_from)
+    os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
+    if (git := imported_from.get("git")) is not None:
+        git = dict(git)
+        repo_url = git.get("repo_url")
+        if not repo_url:
+            raise ValueError("Git source has no 'repo_url' to fetch from")
+        src_path = git.get("path")
+        if not src_path:
+            raise ValueError(
+                "Git source has no 'path'; importing a whole repo is what a "
+                "Git submodule is for"
+            )
+        # What to check out. Not 'rev': that records what a previous fetch
+        # returned, so using it here would make every refresh return the
+        # same thing it did last time. Nothing named means the repo's
+        # default branch.
+        target = git.get("ref")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            # Blobless and checkout-less, so a big repo costs about as
+            # little as fetching one file from it can
+            clone_cmd = [
+                "git",
+                "clone",
+                "--filter=blob:none",
+                "--no-checkout",
+                "--quiet",
+                repo_url,
+                tmp_dir,
+            ]
+            try:
+                subprocess.check_call(clone_cmd)
+                if target is not None:
+                    subprocess.check_call(
+                        ["git", "-C", tmp_dir, "checkout", "--quiet", target]
+                    )
+                else:
+                    subprocess.check_call(
+                        ["git", "-C", tmp_dir, "checkout", "--quiet", "HEAD"]
+                    )
+                rev = subprocess.check_output(
+                    ["git", "-C", tmp_dir, "rev-parse", "HEAD"], text=True
+                ).strip()
+            except subprocess.CalledProcessError as e:
+                raise ValueError(
+                    f"Failed to fetch {src_path} from {repo_url}: {e}"
+                )
+            full_src = os.path.join(tmp_dir, src_path)
+            if not os.path.exists(full_src):
+                raise ValueError(
+                    f"'{src_path}' does not exist in {repo_url} at "
+                    f"{target or rev}"
+                )
+            if os.path.isdir(full_src):
+                shutil.rmtree(dest_path, ignore_errors=True)
+                shutil.copytree(full_src, dest_path)
+            else:
+                shutil.copyfile(full_src, dest_path)
+        # Recorded as what was actually fetched, so the entry is
+        # reproducible even when it follows a moving branch
+        git["rev"] = rev
+        imported_from["git"] = git
+        return imported_from
+    if (url := imported_from.get("url")) is not None:
+        import requests
+
+        resp = requests.get(url, stream=True)
+        try:
+            resp.raise_for_status()
+        except Exception as e:
+            raise ValueError(f"Failed to download {url}: {e}")
+        with open(dest_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return imported_from
+    if (project := imported_from.get("project")) is not None:
+        import base64
+
+        import calkit
+
+        src_path = imported_from.get("path")
+        if not src_path:
+            raise ValueError("Project source has no 'path' to fetch")
+        try:
+            contents: dict = calkit.hub.get(
+                f"/projects/{project}/contents/{src_path}"
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to fetch {src_path} from {project}: {e}")
+        content = contents.get("content")
+        if content is not None:
+            with open(dest_path, "wb") as f:
+                f.write(base64.b64decode(content))
+            return imported_from
+        download_url = contents.get("url")
+        if download_url is None:
+            raise ValueError(f"Could not fetch {src_path} from {project}")
+        # Big files come back as a link to fetch rather than inline, so the
+        # URL branch above finishes the job. The entry still records the
+        # project, since that is where the file came from.
+        fetch({"url": download_url}, dest_path=dest_path)
+        return imported_from
+    if imported_from.get("doi") is not None:
+        raise ValueError(
+            "Fetching by DOI is not supported here, since a DOI resolves to "
+            "a record rather than to a file; use 'calkit import zenodo' for "
+            "a Zenodo record"
+        )
+    raise ValueError(
+        "Nothing to fetch from: expected one of 'git', 'url', 'project', or "
+        "'doi'"
     )

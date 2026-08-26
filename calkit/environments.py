@@ -613,10 +613,12 @@ def get_env_lock_fpath(
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind == "system":
-        # A system env's "lock" records the machine properties it declared it
-        # depends on. With nothing locked there is nothing to depend on, so
-        # no lock file and no DVC dep.
-        if not env.get("lock"):
+        # A system env's lock file records the machine properties it
+        # declared it depends on, plus its ``default_setup``, which is part
+        # of how the stage was run rather than a property of the machine.
+        # With neither there is nothing to depend on, so no lock file and no
+        # DVC dep.
+        if not env.get("lock") and not env.get("default_setup"):
             return None
         # Written by ``write_system_env_lock`` during environment checks, and
         # referenced as a DVC dep by stage compilation. Note this is the file
@@ -700,6 +702,22 @@ def write_scheduler_env_lock(
     return lock_fpath
 
 
+def env_input_paths(env: dict) -> list[str]:
+    """Read the files an environment declares it depends on.
+
+    Written as ``inputs``, and also accepted as ``deps``, which is the name
+    this was published under on Docker environments. Extra keys on an
+    environment are ignored rather than refused, so a project still
+    spelling it the old way would otherwise have its files go silently
+    untracked---which is the one failure the field exists to prevent.
+    ``inputs`` wins if somehow both are written.
+    """
+    paths = env.get("inputs")
+    if paths is None:
+        paths = env.get("deps")
+    return list(paths or [])
+
+
 def get_system_lock_data(
     lock: list[str], system_info: dict | None = None
 ) -> dict:
@@ -759,11 +777,17 @@ def write_system_env_lock(
     on, say, the Julia version should not reuse a cached result from a box
     with a different one.
 
+    ``default_setup`` is recorded alongside the machine properties. It
+    isn't one of them -- it says what was done to the shell before the
+    stage ran -- but it feeds the same question: a stage built against a
+    different toolchain should not reuse the old result.
+
     Returns the lock file path, already prefixed with ``wdir`` if provided,
     or None if the environment locks nothing.
     """
     lock = env.get("lock") or []
-    if not lock:
+    default_setup = env.get("default_setup") or []
+    if not lock and not default_setup:
         return None
     # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
@@ -774,14 +798,12 @@ def write_system_env_lock(
     # Read before anything is created: a misspelled property or a tool
     # that isn't installed raises here, and an env that failed to lock
     # shouldn't leave a directory behind suggesting it did
-    content = (
-        json.dumps(
-            get_system_lock_data(lock, system_info=system_info),
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
+    lock_data = get_system_lock_data(lock, system_info=system_info)
+    if default_setup:
+        # Namespaced so it can't collide with a locked property, now or
+        # when the set of them grows
+        lock_data["default_setup"] = list(default_setup)
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)

@@ -1393,3 +1393,89 @@ def update_dataset(
             + "; ".join(str(err["msg"]) for err in e.errors())
         )
     calkit.save_calkit_info(ck_info)
+
+
+@update_app.command(name="path")
+def update_path(
+    path: Annotated[
+        str,
+        typer.Argument(help="Path of the imported file to refresh."),
+    ],
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            help=(
+                "Branch, tag, or commit to follow from now on, for a file "
+                "imported from a Git repo. Recorded, so later refreshes "
+                "keep using it."
+            ),
+        ),
+    ] = None,
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Re-fetch an imported file from where it came from.
+
+    For a Git source this takes the latest on whatever the entry follows,
+    which is its 'ref' if it names one and the repo's default branch
+    otherwise, and records the commit it lands on. '--git-ref' changes
+    what it follows, from then on and not just this once, so switching to
+    a tag pins the import to that tag rather than quietly reverting to the
+    default branch next time.
+
+    This is a one-way copy from the source, not a merge: local changes to
+    the file are discarded. An import records that a file came from
+    somewhere else, so a local edit that survived a refresh would make the
+    entry a lie about what is on disk.
+    """
+    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, describe_source
+
+    ck_info = calkit.load_calkit_info()
+    # Searched across every kind, since a path is recorded in exactly one
+    # of them and which one is not something to have to remember
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        for entry in ck_info.get(kind, []):
+            if isinstance(entry, dict) and entry.get("path") == path:
+                break
+        else:
+            continue
+        break
+    else:
+        raise_error(
+            f"Nothing recorded at '{path}'; 'calkit import path' is what "
+            "records where a file came from"
+        )
+    imported_from = entry.get("imported_from")
+    if imported_from is None:
+        raise_error(
+            f"'{path}' is recorded in '{kind}' but doesn't say it was "
+            "imported, so there is nowhere to refresh it from"
+        )
+    if git_ref is not None:
+        if "git" not in imported_from:
+            raise_error(
+                f"'{path}' was not imported from a Git repo, so there is no "
+                "ref to follow"
+            )
+        imported_from["git"] = dict(imported_from["git"]) | {"ref": git_ref}
+    typer.echo(f"Fetching {describe_source(imported_from)}")
+    try:
+        entry["imported_from"] = calkit.provenance.fetch(
+            imported_from, dest_path=path
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    calkit.save_calkit_info(ck_info)
+    repo = calkit.git.get_repo()
+    repo.git.add(path)
+    repo.git.add("calkit.yaml")
+    if not repo.git.diff("--cached", "--name-only"):
+        typer.echo(f"{path} is already up-to-date")
+        return
+    typer.echo(f"Updated {path}")
+    if not no_commit:
+        typer.echo("Committing changes")
+        repo.git.commit(["-m", f"Update {path} from its source"])

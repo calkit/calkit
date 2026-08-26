@@ -1180,6 +1180,29 @@ def test_system_env_lock(tmp_dir):
     bare = {"kind": "system"}
     assert envs.get_env_lock_fpath(env=bare, env_name="sys") is None
     assert envs.write_system_env_lock(env_name="sys", env=bare) is None
+    # 'default_setup' is part of how a stage ran, so it's recorded even
+    # with no machine property locked, and changing it changes the file
+    setup_env = {"kind": "system", "default_setup": ["module load cuda"]}
+    setup_fpath = envs.write_system_env_lock(env_name="setup", env=setup_env)
+    assert setup_fpath == envs.get_env_lock_fpath(
+        env=setup_env, env_name="setup"
+    )
+    with open(setup_fpath) as f:
+        assert json.load(f) == {"default_setup": ["module load cuda"]}
+    envs.write_system_env_lock(
+        env_name="setup",
+        env={"kind": "system", "default_setup": ["module load cuda/12"]},
+    )
+    with open(setup_fpath) as f:
+        assert json.load(f)["default_setup"] == ["module load cuda/12"]
+    # It sits alongside the locked properties rather than replacing them
+    both = {
+        "kind": "system",
+        "lock": ["os"],
+        "default_setup": ["module load cuda"],
+    }
+    with open(envs.write_system_env_lock(env_name="both", env=both)) as f:
+        assert set(json.load(f)) == {"os", "default_setup"}
     # Locking something writes it, and the file is what stages depend on
     env = {"kind": "system", "lock": ["os", "python-version"]}
     lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)

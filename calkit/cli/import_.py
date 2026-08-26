@@ -227,6 +227,158 @@ def import_dataset(
             raise_error("Failed to pull from DVC")
 
 
+@import_app.command(name="path")
+def import_path(
+    src_path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Where to get the file: a URL, including a GitHub or GitLab "
+                "link to a file, a DOI, a Calkit project path like "
+                "someone/some-project/scripts/setup.sh, or a path inside "
+                "the repo named by --git-repo."
+            )
+        ),
+    ],
+    dest_path: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Path at which to save it in this project. Defaults to the "
+                "source path."
+            )
+        ),
+    ] = None,
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help=(
+                "Which list in calkit.yaml to record this in. Defaults to "
+                "'misc', which is where a path that isn't one of the typed "
+                "artifacts belongs."
+            ),
+        ),
+    ] = "misc",
+    git_repo: Annotated[
+        str | None,
+        typer.Option(
+            "--git-repo",
+            help=(
+                "Clone URL of a Git repo to take the file from, for a repo "
+                "that isn't a Calkit project."
+            ),
+        ),
+    ] = None,
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            help=(
+                "Branch, tag, or commit to follow, recorded so 'calkit "
+                "update path' knows where to look next time, and overriding "
+                "one read out of the URL. Defaults to the repo's default "
+                "branch."
+            ),
+        ),
+    ] = None,
+    title: Annotated[
+        str | None, typer.Option("--title", help="Title for the entry.")
+    ] = None,
+    description: Annotated[
+        str | None,
+        typer.Option("--description", help="Description for the entry."),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Replace an existing entry at this path.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Import a file from elsewhere, recording where it came from.
+
+    For a script or config maintained outside this project, e.g., a site
+    setup script shared between projects. The copy is committed here, so
+    the project stays self-contained and the pipeline can depend on it;
+    the entry records the source so it can be refreshed with 'calkit
+    update path' and so the file isn't one whose origin nobody knows.
+    """
+    from calkit.models.core import MiscArtifact
+    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES
+
+    if kind not in PROVENANCE_ARTIFACT_TYPES:
+        raise_error(
+            f"Invalid --kind '{kind}'; expected one of "
+            f"{', '.join(PROVENANCE_ARTIFACT_TYPES)}"
+        )
+    # Where it came from, in the shape the entry records it. 'rev' is
+    # filled in from what the fetch actually checked out, so a source
+    # naming a branch still ends up pinned to a commit.
+    try:
+        imported_from = calkit.provenance.source_from_location(
+            src_path, git_repo=git_repo, ref=git_ref
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    if dest_path is None:
+        dest_path = calkit.provenance.default_dest_path(imported_from)
+    if not dest_path:
+        raise_error(
+            f"Cannot tell what to call the file imported from '{src_path}'; "
+            "give a destination path"
+        )
+    ck_info = calkit.load_calkit_info()
+    entries = ck_info.get(kind, [])
+    existing = [e for e in entries if e.get("path") == dest_path]
+    if existing and not overwrite:
+        raise_error(
+            f"A {kind} entry already exists at '{dest_path}'; pass "
+            "--overwrite to replace it, or use 'calkit update path' to "
+            "refresh it from where it came from"
+        )
+    typer.echo(f"Fetching {calkit.provenance.describe_source(imported_from)}")
+    try:
+        imported_from = calkit.provenance.fetch(
+            imported_from, dest_path=dest_path
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    # Built through the model so the source is validated the same way it
+    # would be reading calkit.yaml back: a rev that isn't a commit hash, or
+    # a DOI that isn't one, is caught here rather than on the next load.
+    # MiscArtifact whatever the kind, since every list this can write to
+    # takes the same 'imported_from' forms.
+    try:
+        artifact = MiscArtifact(
+            path=dest_path,
+            title=title,
+            description=description,
+            imported_from=imported_from,  # type: ignore[arg-type]
+        )
+    except Exception as e:
+        raise_error(f"Failed to record where this came from: {e}")
+    entry = artifact.model_dump(exclude_none=True)
+    entries = [e for e in entries if e.get("path") != dest_path]
+    entries.append(entry)
+    ck_info[kind] = entries
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    repo = calkit.git.get_repo()
+    repo.git.add(dest_path)
+    repo.git.add("calkit.yaml")
+    typer.echo(f"Imported to {dest_path}")
+    if not no_commit:
+        typer.echo("Committing changes")
+        repo.git.commit(["-m", f"Import {dest_path}"])
+
+
 @import_app.command(name="environment")
 def import_environment(
     src: Annotated[

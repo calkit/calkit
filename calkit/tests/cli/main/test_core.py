@@ -585,6 +585,103 @@ def test_run_in_env_system(tmp_dir):
     assert "hi" in out
     with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
         assert set(json.load(f)) == {"os"}
+    # 'default_setup' runs in the same shell as the stage's command, so
+    # what it exports is visible there, and it runs in bash by default so
+    # 'source' works---the reason most of these exist
+    with open("setup_env.sh", "w") as f:
+        f.write("export CK_TEST_SETUP=from-setup\n")
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  sys2:\n"
+            "    kind: system\n"
+            "    default_setup:\n"
+            "      - source setup_env.sh\n"
+            "    deps:\n"
+            "      - setup_env.sh\n"
+        )
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_SETUP'])",
+        ],
+        text=True,
+    )
+    assert "from-setup" in out
+    # The setup commands are recorded even though nothing about the
+    # machine is locked, so changing them invalidates cached results
+    with open(os.path.join(".calkit", "env-locks", "sys2", "info.json")) as f:
+        assert json.load(f)["default_setup"] == ["source setup_env.sh"]
+    # A stage's own '--setup' combines with the env's default_setup the
+    # way a scheduler stage's does: 'replace' (the default) uses the env's
+    # only when the stage names none, 'merge' runs the env's first, and
+    # 'ignore' leaves them out
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  sys3:\n"
+            "    kind: system\n"
+            "    default_setup:\n"
+            "      - export CK_TEST_ORDER=env\n"
+        )
+    show = ["python", "-c", "import os; print(os.environ['CK_TEST_ORDER'])"]
+    base = ["calkit", "xenv", "-n", "sys3"]
+    assert (
+        subprocess.check_output(base + ["--"] + show, text=True).strip()
+        == "env"
+    )
+    stage_setup = ["--setup", "export CK_TEST_ORDER=stage"]
+    assert (
+        subprocess.check_output(
+            base + stage_setup + ["--"] + show, text=True
+        ).strip()
+        == "stage"
+    )
+    assert (
+        subprocess.check_output(
+            base + stage_setup + ["--env-default-setup", "merge", "--"] + show,
+            text=True,
+        ).strip()
+        == "stage"
+    )
+    res = subprocess.run(
+        base + ["--env-default-setup", "ignore", "--"] + show,
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "CK_TEST_ORDER" in res.stdout + res.stderr
+    # An unknown mode is reported rather than treated as the default
+    res = subprocess.run(
+        base + ["--env-default-setup", "nope", "--", "echo", "hi"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "Invalid --env-default-setup" in res.stdout + res.stderr
+    # A failing setup command stops the stage rather than running it
+    # without whatever the setup was meant to provide
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  bad:\n"
+            "    kind: system\n"
+            "    default_setup:\n"
+            "      - exit 3\n"
+        )
+    res = subprocess.run(
+        ["calkit", "xenv", "-n", "bad", "--", "python", "-c", "print('ran')"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "ran" not in res.stdout
     # A host naming this machine runs here rather than connecting to it
     with open("calkit.yaml", "w") as f:
         f.write(

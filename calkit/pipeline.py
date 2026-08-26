@@ -1494,7 +1494,7 @@ def to_dvc(
     """
     import calkit.dvc.zip
     import calkit.markdown
-    from calkit.environments import get_env_lock_fpath
+    from calkit.environments import env_input_paths, get_env_lock_fpath
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1658,6 +1658,20 @@ def to_dvc(
     for env_name, env in environments.items():
         if env_name not in used_envs:
             continue
+        # An env that runs setup commands can name the files they read---a
+        # setup script it sources, most often. Those are inputs to every
+        # stage using the env, in the same way its lock file is: editing
+        # how a build is set up changes what the build produces. Declared
+        # rather than parsed out of the commands, since a shell command
+        # doesn't reliably say which of its words is a path. Only the kinds
+        # with a ``default_setup``: a Docker env's ``inputs`` are files
+        # copied into the image, and their checksums already ride along in
+        # its lock file, which stages depend on.
+        if env.get("kind") in ("system", "slurm", "pbs"):
+            for env_input in env_input_paths(env):
+                env_lock_fpaths.setdefault(env_name, []).append(
+                    Path(env_input).as_posix()
+                )
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=True, for_dvc=True, wdir=wdir
         )

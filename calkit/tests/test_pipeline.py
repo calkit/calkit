@@ -784,6 +784,256 @@ def test_sbatch_stage_to_dvc(tmp_dir):
     assert slurm_lock in sh_stage["deps"]
 
 
+def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
+    """Cover stage-level ``setup`` and its legacy scheduler spelling.
+
+    Scenarios in one test (per AGENTS.md guidance):
+    - a system-env stage compiles its setup onto the 'calkit xenv' call,
+      while the env's own default_setup stays out of the compiled cmd,
+    - a non-default 'env_default_setup' is emitted, a default one isn't,
+    - the legacy 'scheduler.setup' spelling still reaches the compiled cmd,
+      for schedulers and system envs alike,
+    - writing it in both places is refused rather than silently picking,
+    - a stage whose env has no setup step is refused rather than having
+      its setup commands quietly dropped.
+    """
+    envs = {
+        "gpu": {
+            "kind": "system",
+            "default_setup": ["source scripts/env.sh"],
+        },
+        "cluster": {"kind": "slurm", "default_setup": ["module purge"]},
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+    }
+
+    def compile_stages(stages):
+        return calkit.pipeline.to_dvc(
+            ck_info={"environments": envs, "pipeline": {"stages": stages}},
+            write=False,
+        )
+
+    stages = compile_stages(
+        {
+            "build": {
+                "kind": "shell-command",
+                "command": "make",
+                "environment": "gpu",
+                "setup": ["module load cuda"],
+            },
+            "merged": {
+                "kind": "shell-command",
+                "command": "make check",
+                "environment": "gpu",
+                "setup": ["module load cuda"],
+                "env_default_setup": "merge",
+            },
+            "plain": {
+                "kind": "shell-command",
+                "command": "make plain",
+                "environment": "gpu",
+            },
+            # Written the old way, under the scheduler block
+            "legacy": {
+                "kind": "shell-command",
+                "command": "make legacy",
+                "environment": "gpu",
+                "scheduler": {"setup": ["module load gcc"]},
+            },
+        }
+    )
+    assert stages["build"]["cmd"].startswith(
+        "calkit xenv -n gpu --no-check --setup 'module load cuda' --"
+    )
+    # The env's own default_setup is merged when the stage runs, not baked
+    # into the compiled command, so editing it needs no recompile
+    assert "scripts/env.sh" not in stages["build"]["cmd"]
+    # The mode is only emitted when it isn't the default
+    assert "--env-default-setup" not in stages["build"]["cmd"]
+    assert "--env-default-setup merge" in stages["merged"]["cmd"]
+    # A stage with no setup of its own carries no flags at all
+    assert stages["plain"]["cmd"].startswith(
+        "calkit xenv -n gpu --no-check -- "
+    )
+    assert "--setup" not in stages["plain"]["cmd"]
+    # The legacy spelling is hoisted onto the stage on load
+    assert "--setup 'module load gcc'" in stages["legacy"]["cmd"]
+    # The even older 'slurm' block reaches the same place, and a scheduler
+    # block that held nothing but setup is not written back as an empty
+    # one, which would leave a reader wondering what belonged in it
+    from calkit.models.pipeline import ShellScriptStage, StageSchedulerOptions
+
+    loaded = ShellScriptStage.model_validate(
+        {
+            "kind": "shell-script",
+            "name": "job",
+            "script_path": "s.sh",
+            "environment": "cluster",
+            "slurm": {"setup": ["module load x"]},
+        }
+    )
+    assert loaded.setup == ["module load x"]
+    assert "scheduler" not in loaded.to_ck_dict()
+    # A block with something else in it keeps that, and only sheds setup
+    mixed = ShellScriptStage.model_validate(
+        {
+            "kind": "shell-script",
+            "name": "job",
+            "script_path": "s.sh",
+            "environment": "cluster",
+            "scheduler": {"setup": ["a"], "options": ["--time=1"]},
+        }
+    )
+    assert mixed.to_ck_dict()["scheduler"] == {"options": ["--time=1"]}
+    assert mixed.setup == ["a"]
+    # Built in Python rather than parsed, the options are hoisted too:
+    # nothing reads them where they were, so leaving them would drop them
+    built = ShellScriptStage(
+        kind="shell-script",
+        name="job",
+        script_path="s.sh",
+        environment="cluster",
+        scheduler=StageSchedulerOptions(setup=["module load x"]),
+    )
+    assert built.setup == ["module load x"]
+    # A scheduler stage still gets its setup, wherever it was written
+    sched = compile_stages(
+        {
+            "job": {
+                "kind": "shell-script",
+                "script_path": "scripts/job.sh",
+                "environment": "cluster",
+                "setup": ["module load julia"],
+                "env_default_setup": "merge",
+            },
+        }
+    )
+    assert "--setup 'module load julia'" in sched["job"]["cmd"]
+    assert "--env-default-setup merge" in sched["job"]["cmd"]
+    # Both places at once is a mistake, not a precedence question
+    with pytest.raises(ValueError, match="both on itself and under"):
+        compile_stages(
+            {
+                "clash": {
+                    "kind": "shell-command",
+                    "command": "make",
+                    "environment": "gpu",
+                    "setup": ["a"],
+                    "scheduler": {"setup": ["b"]},
+                },
+            }
+        )
+    # An env with nowhere to run setup says so rather than dropping it
+    with pytest.raises(ValueError, match="no setup step to run them in"):
+        compile_stages(
+            {
+                "nowhere": {
+                    "kind": "shell-command",
+                    "command": "make",
+                    "environment": "py",
+                    "setup": ["module load cuda"],
+                },
+            }
+        )
+    with pytest.raises(ValueError, match="built-in '_system' environment"):
+        compile_stages(
+            {
+                "bare": {
+                    "kind": "shell-command",
+                    "command": "make",
+                    "environment": "_system",
+                    "setup": ["module load cuda"],
+                },
+            }
+        )
+
+
+def test_env_inputs_become_stage_inputs(tmp_dir):
+    """Cover env-level ``inputs`` on the kinds that run setup commands.
+
+    Scenarios in one test (per AGENTS.md guidance):
+    - a system env's inputs reach every stage using it, and only those,
+    - they arrive alongside the env's lock file rather than instead of it,
+    - a system env with inputs but nothing else to lock still contributes
+      them, since it has no lock file to carry them,
+    - 'deps' is accepted as an alias, since extra keys on an environment
+      are ignored and the familiar name would otherwise go silently
+      nowhere,
+    - a scheduler env's inputs reach its stages too,
+    - a Docker env's deps are left alone, being files copied into the
+      image and already covered by the md5s in its lock.
+    """
+    envs = {
+        "gpu": {
+            "kind": "system",
+            "default_setup": ["source scripts/setup_env.sh"],
+            "inputs": ["scripts/setup_env.sh"],
+            "lock": ["os"],
+        },
+        "bare": {
+            "kind": "system",
+            "default_setup": ["source scripts/other_setup.sh"],
+            "inputs": ["scripts/other_setup.sh"],
+        },
+        "cluster": {
+            "kind": "slurm",
+            "default_setup": ["source scripts/cluster_setup.sh"],
+            # Spelled the Docker way, to check the alias is honored
+            "deps": ["scripts/cluster_setup.sh"],
+        },
+        "img": {
+            "kind": "docker",
+            "image": "some-image",
+            "deps": ["Dockerfile.extra"],
+        },
+    }
+    pipeline = {
+        "stages": {
+            "build": {
+                "kind": "shell-command",
+                "command": "make",
+                "environment": "gpu",
+                "outputs": ["data/built.txt"],
+            },
+            "test": {
+                "kind": "shell-command",
+                "command": "make test",
+                "environment": "gpu",
+            },
+            "other": {
+                "kind": "shell-command",
+                "command": "make other",
+                "environment": "bare",
+            },
+            "job": {
+                "kind": "shell-script",
+                "script_path": "scripts/run_job.sh",
+                "environment": "cluster",
+            },
+            "containerized": {
+                "kind": "shell-command",
+                "command": "make in-image",
+                "environment": "img",
+            },
+        },
+    }
+    stages = calkit.pipeline.to_dvc(
+        ck_info={"environments": envs, "pipeline": pipeline}, write=False
+    )
+    for name in ["build", "test"]:
+        assert "scripts/setup_env.sh" in stages[name]["deps"]
+        assert ".calkit/env-locks/gpu/info.json" in stages[name]["deps"]
+    # A stage in a different env doesn't pick up another env's setup
+    assert "scripts/setup_env.sh" not in stages["other"]["deps"]
+    # Nothing locked and no lock file, but the dep still lands
+    assert "scripts/other_setup.sh" in stages["other"]["deps"]
+    # A scheduler env passes its inputs along as --dep too, and reaches
+    # them under the 'deps' alias
+    assert "scripts/cluster_setup.sh" in stages["job"]["deps"]
+    assert "--dep scripts/cluster_setup.sh" in stages["job"]["cmd"]
+    # Docker deps are the image's, not the stage's
+    assert "Dockerfile.extra" not in stages["containerized"]["deps"]
+
+
 def test_slurm_env_validation_rules(tmp_dir):
     """Cover the SLURM env-validation and plain-env shortcut rules.
 

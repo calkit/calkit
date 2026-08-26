@@ -370,7 +370,7 @@ def check_environment(
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
             alt_lock_fpaths=alt_lock_fpaths,
             platform=env.get("platform"),
-            deps=env.get("deps", []),
+            deps=calkit.environments.env_input_paths(env),
             env_vars=env.get("env_vars", []),
             ports=env.get("ports", []),
             gpus=env.get("gpus"),
@@ -570,7 +570,9 @@ def check_environment(
                     system_info=system_info,
                     verbose=verbose,
                 )
-                if locks:
+                # ``default_setup`` is recorded too, and needs nothing
+                # read from the machine to record it
+                if locks or env.get("default_setup"):
                     write_system_env_lock(
                         env_name=env_name,
                         env=env,

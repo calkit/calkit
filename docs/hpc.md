@@ -96,6 +96,13 @@ level, and these can be ignored, replaced, or extended (via merging)
 for individual pipeline stages as shown
 in the example below.
 
+Note that `options` sit under `scheduler`, since they only mean something
+to a scheduler, while `setup` sits on the stage itself:
+a stage on a [`system` environment](environments.md#setup-commands) has
+setup commands and no scheduler at all.
+Setup commands written under `scheduler` are still read, so an existing
+project keeps working.
+
 ```yaml
 pipeline:
   stages:
@@ -109,10 +116,10 @@ pipeline:
           - --account=mylab
           - --gpus=2
           - --time=120
-        env_default_setup: replace # Default; can also be `ignore` or `merge`
-        setup:
-          - module purge
-          - module load something/else
+      env_default_setup: replace # Default; can also be `ignore` or `merge`
+      setup:
+        - module purge
+        - module load something/else
       inputs:
         - results/raw
       outputs:

@@ -8,6 +8,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import shlex
 import shutil
 import signal
 import subprocess
@@ -2942,6 +2943,29 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
+    setup_cmds: Annotated[
+        list[str],
+        typer.Option(
+            "--setup",
+            help=(
+                "Shell command to run before the command, in the same "
+                "shell (repeat for multiple). Combined with a 'system' "
+                "environment's 'default_setup' per --env-default-setup."
+            ),
+        ),
+    ] = [],
+    env_default_setup: Annotated[
+        str,
+        typer.Option(
+            "--env-default-setup",
+            help=(
+                "How to apply the environment's default setup commands: "
+                "'replace' (default) uses them only when no setup commands "
+                "were given here; 'merge' runs them first; 'ignore' never "
+                "runs them."
+            ),
+        ),
+    ] = "replace",
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -2950,6 +2974,13 @@ def run_in_env(
         env_from_name_and_or_path,
         get_env_lock_fpath,
     )
+
+    valid_modes = ("ignore", "replace", "merge")
+    if env_default_setup not in valid_modes:
+        raise_error(
+            f"Invalid --env-default-setup value '{env_default_setup}'; "
+            f"expected one of {', '.join(valid_modes)}"
+        )
 
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
@@ -2975,6 +3006,39 @@ def run_in_env(
         docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
+
+    def _with_system_env_setup(shell_cmd: str) -> str:
+        """Chain the setup commands before a stage's command.
+
+        The setup commands and the stage share one shell, so what the setup
+        exports is what the stage sees. That is the point of them: a site
+        script that puts a hand-built toolchain on the PATH is only useful
+        to the command that follows it.
+
+        The stage's own ``--setup`` commands and the environment's
+        ``default_setup`` are combined the way ``calkit scheduler batch``
+        combines a scheduler env's: ``replace`` falls back to the env's
+        only when the stage named none, ``merge`` runs the env's first, and
+        ``ignore`` leaves them out.
+
+        The chain is wrapped in the environment's shell rather than left to
+        the platform's. ``source`` is a bashism, and sourcing a setup script
+        is the case this exists for, so running the chain in ``/bin/sh``--or
+        in ``sh -c`` on the far end of an SSH connection--would fail on
+        exactly the thing it was added to do.
+        """
+        stage_setup = [c for c in setup_cmds if c.strip()]
+        env_setup = [c for c in (env.get("default_setup") or []) if c.strip()]
+        if env_default_setup == "merge":
+            setup = env_setup + stage_setup
+        elif env_default_setup == "replace" and not stage_setup:
+            setup = env_setup
+        else:
+            setup = stage_setup
+        if not setup:
+            return shell_cmd
+        chained = " && ".join([*setup, shell_cmd])
+        return f"{env.get('shell', 'bash')} -c {shlex.quote(chained)}"
 
     def save_env_check_cache() -> None:
         """Record a successful check so repeat calls can skip it."""
@@ -3025,7 +3089,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),
                 platform=env.get("platform"),
-                deps=env.get("deps", []),
+                deps=calkit.environments.env_input_paths(env),
                 env_vars=env.get("env_vars", []),
                 ports=env.get("ports", []),
                 gpus=env.get("gpus"),
@@ -3277,7 +3341,7 @@ def run_in_env(
             check_environment(env_name=env_name, verbose=verbose)
             save_env_check_cache()
         repo = calkit.git.get_repo()
-        remote_shell_cmd = _to_shell_cmd(cmd)
+        remote_shell_cmd = _with_system_env_setup(_to_shell_cmd(cmd))
         try:
             workspace.run_in_workspace(
                 workspace=ws,
@@ -3435,7 +3499,7 @@ def run_in_env(
         # tool-managed workspace instead would execute a different copy of
         # the project from the one DVC is about to hash. Only the stage's
         # own wdir, which is relative to the project root, applies.
-        shell_cmd = _to_shell_cmd(cmd)
+        shell_cmd = _with_system_env_setup(_to_shell_cmd(cmd))
         if verbose:
             typer.echo(f"Running command: {shell_cmd}")
         try:

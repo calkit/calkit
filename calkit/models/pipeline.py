@@ -171,19 +171,15 @@ EnvDefaultsMode = Literal["ignore", "replace", "merge"]
 class StageSchedulerOptions(BaseModel):
     """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
-    The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit scheduler batch`` at submission time.
-    The mode for each list is controlled independently by
-    ``env_default_options`` and ``env_default_setup``:
+    The environment-level ``default_options`` is applied by ``calkit
+    scheduler batch`` at submission time, in the mode ``env_default_options``
+    names---see :class:`Stage`, which documents the same three modes for
+    the setup commands.
 
-    - ``replace`` (default): if the stage provides values, those are used
-      and env defaults are skipped; if the stage's list is empty, env
-      defaults fill in.
-    - ``merge``: env defaults are prepended to whatever the stage
-      provides (the scheduler's last-occurrence-wins behavior keeps stage
-      values on top of any conflicts).
-    - ``ignore``: env defaults are never applied, regardless of whether
-      the stage provided any values.
+    ``setup`` and ``env_default_setup`` were once written here too. They
+    belong to the stage, not to the scheduler: a stage on a ``system``
+    environment has setup commands and no scheduler at all. They are still
+    accepted here and hoisted onto the stage when it loads.
     """
 
     options: list[str] | None = Field(
@@ -192,7 +188,10 @@ class StageSchedulerOptions(BaseModel):
     )
     setup: list[str] | None = Field(
         default=None,
-        description="Commands run at the start of the job script.",
+        deprecated=True,
+        description="Deprecated; set 'setup' on the stage itself. Setup "
+        "commands are not a scheduler concept, and a stage on a 'system' "
+        "environment needs them too.",
     )
     env_default_options: EnvDefaultsMode = Field(
         default="replace",
@@ -201,8 +200,9 @@ class StageSchedulerOptions(BaseModel):
     )
     env_default_setup: EnvDefaultsMode = Field(
         default="replace",
-        description="How to combine 'setup' with the environment's "
-        "default_setup.",
+        deprecated=True,
+        description="Deprecated; set 'env_default_setup' on the stage "
+        "itself, alongside its 'setup'.",
     )
     log_path: str | None = Field(
         default=None, description="Path at which to write the job log."
@@ -302,6 +302,22 @@ class Stage(BaseModel):
         description="Options for running this stage on a job scheduler "
         "(SLURM or PBS).",
     )
+    setup: list[str] | None = Field(
+        default=None,
+        description="Commands run before this stage's own command, in the "
+        "same shell, so what they export is what the stage sees. Combined "
+        "with the environment's 'default_setup' as 'env_default_setup' "
+        "says. Only for environments that have one: 'system', 'slurm', "
+        "and 'pbs'.",
+    )
+    env_default_setup: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'setup' with the environment's "
+        "'default_setup'. 'replace' (default) runs the environment's only "
+        "when the stage names none of its own; 'merge' runs the "
+        "environment's first, then the stage's; 'ignore' never runs the "
+        "environment's.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
@@ -353,6 +369,33 @@ class Stage(BaseModel):
         }
         if "slurm" in data:
             data["scheduler"] = data.pop("slurm")
+        # 'setup' and 'env_default_setup' used to be written under the
+        # scheduler block. They describe the stage, not the scheduler, so
+        # they are hoisted here. A caller that built the options in Python
+        # is handled the same way as parsed YAML: leaving those set on the
+        # object would drop them silently, since nothing reads them there
+        # any more. Either form is copied first, so the caller's own dict
+        # or model isn't rewritten underneath it.
+        scheduler = data.get("scheduler")
+        if isinstance(scheduler, StageSchedulerOptions):
+            scheduler = scheduler.model_dump(exclude_defaults=True)
+        if isinstance(scheduler, dict):
+            scheduler = dict(scheduler)
+            hoisted = False
+            for key in ("setup", "env_default_setup"):
+                if scheduler.get(key) is None:
+                    continue
+                if data.get(key) is not None:
+                    raise ValueError(
+                        f"Stage sets '{key}' both on itself and under "
+                        f"'scheduler'; keep the one on the stage"
+                    )
+                data[key] = scheduler.pop(key)
+                hoisted = True
+            # A block that held nothing but setup commands is now empty, and
+            # writing 'scheduler: {}' back to calkit.yaml would leave the
+            # reader wondering what was meant to be in it
+            data["scheduler"] = scheduler if scheduler or not hoisted else None
         return data
 
     def to_ck_dict(self) -> dict:
@@ -461,6 +504,17 @@ class Stage(BaseModel):
             # from the snapshot and from what the workspace says the run
             # produced, so it can't fall out of step with the pipeline
             cmd = f"calkit xenv -n {self._system_env} --no-check"
+            # Only the stage's own setup commands and the mode are baked
+            # in. The env's 'default_setup' is merged by 'calkit xenv' when
+            # the stage runs, the way 'calkit scheduler batch' merges a
+            # scheduler env's, so editing the env's defaults doesn't mean
+            # recompiling the pipeline. It still reruns the stage: the
+            # defaults are recorded in the env's lock file, which the stage
+            # depends on.
+            for setup_cmd in self.setup or []:
+                cmd += f" --setup {shlex.quote(setup_cmd)}"
+            if self.env_default_setup != "replace":
+                cmd += f" --env-default-setup {self.env_default_setup}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -502,8 +556,8 @@ class Stage(BaseModel):
         # (``replace``); this keeps the compiled cmd minimal.
         if opts.env_default_options != "replace":
             cmd += f" --env-default-options {opts.env_default_options}"
-        if opts.env_default_setup != "replace":
-            cmd += f" --env-default-setup {opts.env_default_setup}"
+        if self.env_default_setup != "replace":
+            cmd += f" --env-default-setup {self.env_default_setup}"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if opts.log_path is not None:
@@ -531,9 +585,8 @@ class Stage(BaseModel):
         if opts.options is not None:
             for opt in opts.options:
                 cmd += f" --option {opt}"
-        if opts.setup is not None:
-            for setup_cmd in opts.setup:
-                cmd += f" --setup {shlex.quote(setup_cmd)}"
+        for setup_cmd in self.setup or []:
+            cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
     @property
@@ -1951,6 +2004,29 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            # Setup commands are run by whatever dispatches the stage, and
+            # only these kinds dispatch one: the others hand the command to
+            # a runtime that has no shell of its own to prepare. Reported
+            # rather than ignored, since a stage whose setup silently never
+            # ran is a stage that ran against the wrong toolchain. The
+            # built-in '_system' env is included in that: it is compiled to
+            # a bare command with nothing wrapping it, and a project that
+            # needs setup is a project that should name its machine.
+            if (
+                stage.setup or stage.env_default_setup != "replace"
+            ) and kind not in ("system", "slurm", "pbs"):
+                described = (
+                    "the built-in '_system' environment"
+                    if env_name == "_system"
+                    else f"environment '{env_name}' of kind '{kind}'"
+                )
+                raise ValueError(
+                    f"Stage '{stage.name}' sets 'setup' commands but runs "
+                    f"in {described}, which has no setup step to run them "
+                    "in; use a 'system', 'slurm', or 'pbs' environment, "
+                    "either directly or as the outer half of a composite "
+                    "environment"
+                )
             if kind == "system":
                 # A system env names the machine, so it can wrap an inner
                 # runtime the same way a scheduler env does.
@@ -2025,16 +2101,19 @@ class Pipeline(BaseModel):
             if stage.log_storage != "git":
                 sched_opts["log_storage"] = stage.log_storage
             if stage.scheduler is not None:
-                if stage.scheduler.setup:
-                    sched_opts["setup"] = list(stage.scheduler.setup)
                 if stage.scheduler.env_default_options != "replace":
                     sched_opts["env_default_options"] = (
                         stage.scheduler.env_default_options
                     )
-                if stage.scheduler.env_default_setup != "replace":
-                    sched_opts["env_default_setup"] = (
-                        stage.scheduler.env_default_setup
-                    )
+            # Setup commands belong to the stage. A legacy stage that wrote
+            # them under 'scheduler' has already had them hoisted by
+            # normalize_legacy_keys, so this reads them from one place and
+            # writes them back to one place.
+            stage_setup: dict = {}
+            if stage.setup:
+                stage_setup["setup"] = list(stage.setup)
+            if stage.env_default_setup != "replace":
+                stage_setup["env_default_setup"] = stage.env_default_setup
             new_stage = ShellScriptStage(
                 kind="shell-script",
                 name=name,
@@ -2051,6 +2130,7 @@ class Pipeline(BaseModel):
                 scheduler=StageSchedulerOptions(**sched_opts)
                 if sched_opts
                 else StageSchedulerOptions(),
+                **stage_setup,
             )
             self.stages[name] = new_stage
             calkit_yaml_stage: dict = {
@@ -2076,6 +2156,7 @@ class Pipeline(BaseModel):
                 ]
             if sched_opts:
                 calkit_yaml_stage["scheduler"] = sched_opts
+            calkit_yaml_stage |= stage_setup
             if stage.wdir is not None:
                 calkit_yaml_stage["wdir"] = stage.wdir
             if stage.always_run:

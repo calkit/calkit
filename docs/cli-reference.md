@@ -405,14 +405,16 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                                      |
-| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
-| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
-| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                |
-| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                       |
-| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
-| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
+| Option                | Type    | Required | Default | Description                                                                                                                                                                          |
+| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`        | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                     |
+| `--env-path`, `-p`    | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                       |
+| `--wdir`              | text    | no       |         | Working directory. By default will run current working directory.                                                                                                                    |
+| `--no-check`          | boolean | no       | False   | Don't check the environment is valid before running in it.                                                                                                                           |
+| `--relaxed`           | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                               |
+| `--setup`             | text    | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). Combined with a 'system' environment's 'default_setup' per --env-default-setup.                    |
+| `--env-default-setup` | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses them only when no setup commands were given here; 'merge' runs them first; 'ignore' never runs them. |
+| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                                                                                |
 
 <a id="top-command-install"></a>
 
@@ -2242,11 +2244,12 @@ Options:
 
 Import objects.
 
-| Command                                         | Description                                 |
-| ----------------------------------------------- | ------------------------------------------- |
-| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                           |
-| [`environment`](#subcommand-import-environment) | Import an environment from another project. |
-| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.          |
+| Command                                         | Description                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------- |
+| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                           |
+| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from. |
+| [`environment`](#subcommand-import-environment) | Import an environment from another project.                 |
+| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                          |
 
 <a id="subcommand-import-dataset"></a>
 
@@ -2278,6 +2281,39 @@ Options:
 | `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.                                          |
 | `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists.                             |
 | `--http`            | boolean | no       | False   | Use the legacy HTTP URL for the imported project's DVC remote instead of ck://. |
+
+<a id="subcommand-import-path"></a>
+
+#### `calkit import path`
+
+Import a file from elsewhere, recording where it came from.
+
+For a script or config maintained outside this project, e.g., a site setup script shared between projects. The copy is committed here, so the project stays self-contained and the pipeline can depend on it; the entry records the source so it can be refreshed with 'calkit update path' and so the file isn't one whose origin nobody knows.
+
+Usage:
+
+```text
+calkit import path [OPTIONS] SRC-PATH [DEST-PATH]
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description                                                                                                                                                                                        |
+| ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src_path`  | text | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
+| `dest_path` | text | no       |         | Path at which to save it in this project. Defaults to the source path.                                                                                                                             |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                                      |
+| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind`            | text    | no       | misc    | Which list in calkit.yaml to record this in. Defaults to 'misc', which is where a path that isn't one of the typed artifacts belongs.                                            |
+| `--git-repo`        | text    | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                           |
+| `--git-ref`         | text    | no       |         | Branch, tag, or commit to follow, recorded so 'calkit update path' knows where to look next time, and overriding one read out of the URL. Defaults to the repo's default branch. |
+| `--title`           | text    | no       |         | Title for the entry.                                                                                                                                                             |
+| `--description`     | text    | no       |         | Description for the entry.                                                                                                                                                       |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing entry at this path.                                                                                                                                          |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                   |
 
 <a id="subcommand-import-environment"></a>
 
@@ -2422,6 +2458,7 @@ Update objects.
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
+| [`path`](#subcommand-update-path)                     | Re-fetch an imported file from where it came from.                                   |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2830,6 +2867,35 @@ Options:
 | `--imported-from-git-path` | text     | no       |         | Path within that repo, if it isn't the whole thing.                                 |
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
 | `--stage`                  | text     | no       |         | Name of the pipeline stage that produces this dataset.                              |
+
+<a id="subcommand-update-path"></a>
+
+#### `calkit update path`
+
+Re-fetch an imported file from where it came from.
+
+For a Git source this takes the latest on whatever the entry follows, which is its 'ref' if it names one and the repo's default branch otherwise, and records the commit it lands on. '--git-ref' changes what it follows, from then on and not just this once, so switching to a tag pins the import to that tag rather than quietly reverting to the default branch next time.
+
+This is a one-way copy from the source, not a merge: local changes to the file are discarded. An import records that a file came from somewhere else, so a local edit that survived a refresh would make the entry a lie about what is on disk.
+
+Usage:
+
+```text
+calkit update path [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                           |
+| -------- | ---- | -------- | ------- | ------------------------------------- |
+| `path`   | text | yes      |         | Path of the imported file to refresh. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                                                                                                                    |
+| ------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `--git-ref`   | text    | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo. Recorded, so later refreshes keep using it. |
+| `--no-commit` | boolean | no       | False   | Do not commit changes to repo.                                                                                                 |
 
 <a id="command-group-check"></a>
 

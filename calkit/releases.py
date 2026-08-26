@@ -471,8 +471,12 @@ def make_dvc_md5s(
     return resp
 
 
-def zip_paths(zip_path: str, paths: list[str]) -> None:
+def zip_paths(
+    zip_path: str, paths: list[str], overrides: dict[str, str] | None = None
+) -> None:
     """Create a compressed ZIP from a list of file or directory paths."""
+    if overrides is None:
+        overrides = {}
     with zipfile.ZipFile(
         zip_path,
         "w",
@@ -483,9 +487,21 @@ def zip_paths(zip_path: str, paths: list[str]) -> None:
                 for root, _, files in os.walk(path):
                     for filename in files:
                         fpath = os.path.join(root, filename)
-                        zipf.write(fpath)
-            elif os.path.isfile(path):
-                zipf.write(path)
+                        posix_path = Path(fpath).as_posix()
+                        if posix_path in overrides:
+                            zipf.writestr(posix_path, overrides[posix_path])
+                        else:
+                            zipf.write(fpath)
+            else:
+                posix_path = Path(path).as_posix()
+                if posix_path in overrides:
+                    zipf.writestr(posix_path, overrides[posix_path])
+                else:
+                    zipf.write(path)
+        # Also write any overrides that weren't in the paths list
+        for posix_path, content in overrides.items():
+            if posix_path not in paths:
+                zipf.writestr(posix_path, content)
 
 
 def populate_dvc_cache():
@@ -538,3 +554,113 @@ def check_project_release_archive(
                 "Released project archive failed pipeline checks: "
                 "`calkit run` failed."
             ) from e
+
+
+def prune_for_target(
+    ck_info: dict, target: str
+) -> tuple[dict[str, str], list[str]]:
+    """Prune ck_info and determine needed files for a target.
+
+    Returns (overrides, needed_files) where overrides is a mapping of file
+    paths to their rewritten contents (calkit.yaml, dvc.yaml, dvc.lock) and
+    needed_files is a list of POSIX paths to include in the release.
+    """
+    import os
+    from pathlib import Path
+
+    import calkit.pipeline
+
+    required_stages = calkit.pipeline.get_upstream_stages(target)
+    overrides = {}
+
+    # Prune ck_info
+    pipeline = ck_info.get("pipeline", {})
+    stages = pipeline.get("stages", {})
+    pruned_stages = {
+        k: v
+        for k, v in stages.items()
+        if k in required_stages or (k.split("@")[0] in required_stages)
+    }
+    if "pipeline" in ck_info:
+        ck_info["pipeline"]["stages"] = pruned_stages
+
+    used_envs = {v.get("environment") for v in pruned_stages.values()}
+    if "environments" in ck_info:
+        ck_info["environments"] = {
+            k: v for k, v in ck_info["environments"].items() if k in used_envs
+        }
+
+    import io
+
+    buf = io.StringIO()
+    calkit.ryaml.dump(ck_info, buf)
+    overrides["calkit.yaml"] = buf.getvalue()
+
+    dvc_yaml = {"stages": calkit.pipeline.to_dvc(ck_info=ck_info)}
+    buf2 = io.StringIO()
+    calkit.ryaml.dump(dvc_yaml, buf2)
+    overrides["dvc.yaml"] = buf2.getvalue()
+
+    # Prune dvc.lock
+    if os.path.exists("dvc.lock"):
+        with open("dvc.lock") as f:
+            dvc_lock = calkit.ryaml.load(f)
+        if isinstance(dvc_lock, dict) and "stages" in dvc_lock:
+            dvc_lock["stages"] = {
+                k: v
+                for k, v in dvc_lock["stages"].items()
+                if k in required_stages or (k.split("@")[0] in required_stages)
+            }
+            buf3 = io.StringIO()
+            calkit.ryaml.dump(dvc_lock, buf3)
+            overrides["dvc.lock"] = buf3.getvalue()
+
+    # Determine needed files
+    dvc_repo = calkit.dvc.get_dvc_repo()
+    needed_files = {
+        "calkit.yaml",
+        "dvc.yaml",
+        "dvc.lock",
+        "README.md",
+        "CITATION.cff",
+        "LICENSE",
+        ".gitignore",
+    }
+    for s in dvc_repo.index.stages:
+        name = getattr(s, "name", None)
+        if name in required_stages or (
+            name and name.split("@")[0] in required_stages
+        ):
+            for dep in s.deps:
+                try:
+                    needed_files.add(
+                        Path(dep.fs_path)
+                        .relative_to(dvc_repo.root_dir)
+                        .as_posix()
+                    )
+                except ValueError:
+                    pass
+            for out in s.outs:
+                try:
+                    needed_files.add(
+                        Path(out.fs_path)
+                        .relative_to(dvc_repo.root_dir)
+                        .as_posix()
+                    )
+                except ValueError:
+                    pass
+
+    # Filter ls_files based on needed_files
+    all_paths = ls_files()
+    pruned_paths = []
+    for p in all_paths:
+        p_posix = Path(p).as_posix()
+        is_needed = False
+        for needed in needed_files:
+            if p_posix == needed or p_posix.startswith(needed + "/"):
+                is_needed = True
+                break
+        if is_needed:
+            pruned_paths.append(p)
+
+    return overrides, pruned_paths

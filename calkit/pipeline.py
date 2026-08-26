@@ -2143,3 +2143,36 @@ def translate_run_targets(
             else:
                 parent_targets.append(f"{sp}/dvc.yaml")
     return parent_targets, isolated_sp_targets
+
+
+def get_upstream_stages(target: str, wdir: str | None = None) -> set[str]:
+    """Get all upstream stage names for a given target stage using the DVC graph."""
+    import networkx as nx
+
+    import calkit.dvc
+
+    repo = calkit.dvc.get_dvc_repo(wdir)
+    target_node = None
+    for s in repo.index.stages:
+        name = getattr(s, "name", None)
+        if (
+            name == target
+            or name == target + "@"
+            or (name and name.startswith(target + "@"))
+        ):
+            target_node = s
+            break
+
+    if target_node is None:
+        return set()
+
+    upstreams = nx.descendants(repo.index.graph, target_node)
+    result = {target}
+    for u in upstreams:
+        name = getattr(u, "name", None)
+        if name:
+            # If it's a matrix item like "stage@a", also include the base name "stage"
+            base_name = name.split("@")[0]
+            result.add(name)
+            result.add(base_name)
+    return result

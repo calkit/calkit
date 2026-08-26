@@ -3386,6 +3386,16 @@ def new_release(
         str | None,
         typer.Option("--date", help="Release date. Will default to today."),
     ] = None,
+    target: Annotated[
+        str | None,
+        typer.Option(
+            "--target",
+            help=(
+                "A pipeline target to release. If specified, only the target "
+                "and its dependencies will be included in the release."
+            ),
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -3591,10 +3601,31 @@ def new_release(
             typer.echo(f"Would {action} {path} to {stored_path_posix}")
         else:
             os.makedirs(release_dir, exist_ok=True)
+            overrides = {}
+            if target:
+                try:
+                    overrides, paths = calkit.releases.prune_for_target(
+                        ck_info, target
+                    )
+                except Exception as e:
+                    raise_error(f"Failed to prune for target '{target}': {e}")
+                if is_zip and path != ".":
+                    paths = [
+                        path
+                    ]  # Re-override if releasing a specific directory
+            else:
+                if is_zip:
+                    paths = (
+                        calkit.releases.ls_files() if path == "." else [path]
+                    )
+                else:
+                    paths = []
+
             if is_zip:
-                paths = calkit.releases.ls_files() if path == "." else [path]
                 typer.echo(f"Archiving {path} to {stored_path_posix}")
-                calkit.releases.zip_paths(stored_path, paths)
+                calkit.releases.zip_paths(
+                    stored_path, paths, overrides=overrides
+                )
             else:
                 typer.echo(f"Copying {path} to {stored_path_posix}")
                 shutil.copy2(path, stored_path)
@@ -3623,9 +3654,20 @@ def new_release(
             if release_kind is None:
                 release_kind = "project"
             zip_path = release_files_dir + "/archive.zip"
-            all_paths = calkit.releases.ls_files()
+
+            overrides = {}
+            if target:
+                try:
+                    overrides, all_paths = calkit.releases.prune_for_target(
+                        ck_info, target
+                    )
+                except Exception as e:
+                    raise_error(f"Failed to prune for target '{target}': {e}")
+            else:
+                all_paths = calkit.releases.ls_files()
+
             typer.echo(f"Adding files to {zip_path}")
-            calkit.releases.zip_paths(zip_path, all_paths)
+            calkit.releases.zip_paths(zip_path, all_paths, overrides=overrides)
             typer.echo("Checking extracted project release archive")
             try:
                 calkit.releases.check_project_release_archive(

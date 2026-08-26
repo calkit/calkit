@@ -385,16 +385,46 @@ environments:
 Building for multiple platforms requires a registry,
 since a multi-platform image can only be kept in one.
 
-#### Archiving images in a release
+#### How images are fetched
 
-A registry makes no promise to keep an image forever,
-so a project release archives its Docker images alongside its data,
-and records what it archived in
-`.calkit/releases/{name}/docker-images.yaml`.
-When an image is missing and no registry can serve it,
-the environment check finds it in a release by its layers and fetches it
-back from there.
-Pass `--no-docker-images` to `calkit new release` to skip this.
+The lock file for a Docker environment records the exact image its stages
+ran in: its layers, and the digests it can be pulled back by.
+Whenever an environment is checked, e.g., as part of `calkit run`,
+Calkit works from that record rather than assuming a rebuild will do,
+since building the same Dockerfile again produces a different image once
+the packages it installs have moved on.
+
+If the image named in `calkit.yaml` is already in the local Docker image
+store and its layers match the lock, there's nothing to do.
+Otherwise Calkit tries, in order:
+
+1. **Pull the digest in the lock**, from the environment's registry if it
+   has one, or from wherever the image came from originally. This is the
+   usual case for an image deleted by a `docker system prune`, or for a
+   collaborator who's never built it. The layers of whatever comes back are
+   checked against the lock, so a tag that's been moved out from under the
+   digest can't quietly substitute a different image.
+2. **Fetch it from a project release.** Releases record the images they
+   archived (see
+   [Archiving Docker images](releases.md#archiving-docker-images)), so if
+   no registry can serve the image, Calkit looks through the project's
+   releases for one whose layers match the lock, downloads it from Zenodo,
+   loads it into Docker, and checks its layers again. This is what keeps an
+   old version of a project reproducible after a registry has dropped the
+   image, or after the account that published it is gone.
+3. **Build it**, for an environment with a Dockerfile, or **pull it by
+   tag** for one named after an existing image. Only at this point does the
+   environment get an image that isn't the one the lock describes, and the
+   lock is rewritten to record what was actually built.
+
+The effect is that deleting an image locally costs a download rather than a
+rebuild, and doesn't invalidate any stage that used it, since the lock file
+doesn't change.
+
+A downloaded release image is cached under `.calkit/local/container-images`
+so it isn't fetched twice.
+Fetching from a release needs the release to have been published, since
+that's where the file is downloaded from.
 
 ### uv
 

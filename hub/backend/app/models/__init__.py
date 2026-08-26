@@ -1,3 +1,4 @@
+from .collab import *  # noqa: F403
 from .core import *  # noqa: F403
 from .releases import *  # noqa: F403
 

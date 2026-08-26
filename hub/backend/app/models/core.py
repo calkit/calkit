@@ -9,10 +9,12 @@ import sqlalchemy
 from app import utcnow
 
 if TYPE_CHECKING:
-    # Release lives in app.models.releases (imported into the app.models
-    # namespace via __init__); this guarded import resolves the "Release"
-    # forward reference in Project.releases for type checkers without creating
-    # a runtime circular import.
+    # Release and CollabRequest live in app.models.releases and
+    # app.models.collab (imported into the app.models namespace via
+    # __init__); these guarded imports resolve the forward references in
+    # Project.releases and Project.collab_requests for type checkers without
+    # creating a runtime circular import.
+    from app.models.collab import CollabRequest
     from app.models.releases import Release
 from pydantic import BaseModel, EmailStr, computed_field
 from sqlmodel import Field, Relationship, SQLModel
@@ -649,6 +651,9 @@ class Project(ProjectBase, table=True):
         back_populates="project", cascade_delete=True
     )
     releases: list["Release"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    collab_requests: list["CollabRequest"] = Relationship(
         back_populates="project", cascade_delete=True
     )
     onboarding_flags: list["UserOnboardingFlag"] = Relationship(

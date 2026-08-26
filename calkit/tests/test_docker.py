@@ -9,9 +9,11 @@ from calkit.docker import (
     get_lock_archs,
     get_lock_digest_refs,
     get_remote_image_ref,
+    is_auth_error,
     keep_only_repo_digests,
     lock_matches_image,
     lock_matches_spec,
+    login_to_registry,
     platform_to_arch_name,
     resolve_registry_prefix,
     split_image_ref,
@@ -267,3 +269,25 @@ def test_get_lock_archs():
     assert get_lock_archs({}) == ["amd64", "arm64"]
     archs = get_lock_archs({"platforms": ["linux/amd64", "linux/arm/v7"]})
     assert archs == ["amd64", "arm64", "arm-v7"]
+
+
+def test_is_auth_error():
+    # What GHCR says when the token lacks 'write:packages'
+    assert is_auth_error(
+        "error from registry: permission_denied: The token provided does "
+        "not match expected scopes."
+    )
+    assert is_auth_error("denied: requested access to the resource is denied")
+    assert is_auth_error("unauthorized: authentication required")
+    # Anything else has to be reported as-is rather than sending the user
+    # off to fix credentials that were fine
+    assert not is_auth_error("dial tcp: lookup ghcr.io: no such host")
+    assert not is_auth_error("manifest unknown")
+    assert not is_auth_error("")
+
+
+def test_login_to_registry_ignores_other_registries():
+    # Only GHCR has credentials Calkit can obtain; everything else relies
+    # on the user's own docker login
+    assert login_to_registry("docker.io/someone/img:v1") == (False, None)
+    assert login_to_registry("localhost:5000/proj/img:v1") == (False, None)

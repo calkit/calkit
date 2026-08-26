@@ -1050,8 +1050,10 @@ def check_docker_env(
             "explicitly, e.g., 'ghcr.io/someone/some-project', or set "
             "a GitHub remote"
         )
+    remote_repo = None
     if registry_prefix is not None and fpath is not None:
         remote_ref = ck_docker.get_remote_image_ref(tag, registry_prefix)
+        remote_repo = ck_docker.get_repo_from_ref(remote_ref)
     typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
@@ -1069,7 +1071,7 @@ def check_docker_env(
         if lock_fpath and os.path.exists(lock_fpath):
             os.remove(lock_fpath)
 
-    built = False
+    pulled_from_registry = False
     already_pushed = False
     if not up_to_date:
         obtained = False
@@ -1103,6 +1105,10 @@ def check_docker_env(
                     )
                     continue
                 obtained = True
+                pulled_from_registry = (
+                    remote_repo is not None
+                    and digest_ref.split("@", 1)[0] == remote_repo
+                )
                 break
         # Fall back to an image archived in a release, since a registry makes
         # no promise to keep an image forever, and rebuilding can't reproduce
@@ -1173,7 +1179,6 @@ def check_docker_env(
                 raise_error(
                     f"Failed to build Docker image with tag {tag} from {fpath}"
                 )
-            built = True
             if multi_platform:
                 assert remote_ref is not None
                 already_pushed = True
@@ -1190,42 +1195,86 @@ def check_docker_env(
             if not ck_docker.pull_image(tag, platform=platform):
                 delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
-    # Push newly built images so collaborators, CI, and this machine after a
-    # 'docker system prune' can pull them back instead of rebuilding
-    pushed = already_pushed
-    if built and not pushed and remote_ref is not None and not no_push:
-        typer.echo(f"Pushing image to {remote_ref}")
-        if ck_docker.tag_image(tag, remote_ref):
-            success, push_output = ck_docker.push_image(remote_ref)
-            if not success and ck_docker.login_to_registry(remote_ref):
-                typer.echo("Logged in to registry; retrying push")
-                success, push_output = ck_docker.push_image(remote_ref)
-            if success:
-                pushed = True
-            else:
-                warn(
-                    f"Failed to push image to {remote_ref}; it will need to "
-                    "be rebuilt elsewhere\n"
-                    + textwrap.indent(push_output.strip()[-500:], "    ")
-                )
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
         delete_lock_on_failure()
         raise_error(f"Failed to inspect image with tag {tag}")
     assert identity is not None
-    # Only a reference a registry can resolve tells us anything, which rules
-    # out an image built here and never pushed anywhere
+    # Push whenever the registry doesn't already have this image, rather than
+    # only when it was just built. An image that predates the registry being
+    # configured would otherwise never leave the machine without a needless
+    # rebuild. Docker records the digest it pushed to, so this settles down
+    # to a no-op once the image is there.
+    pushed = already_pushed
+    # An image is only known to be in the registry if this project recorded
+    # a digest for it there, which only happens after a push or pull that
+    # actually went through. The image's own digests can't answer this:
+    # tagging one for a registry gives it a digest under that repo whether
+    # or not anything was ever sent.
+    lock_remote_digests = []
+    if lock is not None and remote_repo is not None:
+        lock_remote_digests = [
+            d
+            for d in (lock.get("RepoDigests") or [])
+            if d.split("@", 1)[0] == remote_repo
+        ]
+    known_in_registry = bool(lock_remote_digests)
+    if remote_ref is not None and not pushed and not no_push:
+        if not known_in_registry:
+            typer.echo(f"Pushing image to {remote_ref}")
+            if ck_docker.tag_image(tag, remote_ref):
+                success, push_output = ck_docker.push_image_with_login(
+                    remote_ref
+                )
+                if success:
+                    pushed = True
+                    identity = (
+                        ck_docker.inspect_image_for_lock(tag) or identity
+                    )
+                else:
+                    # Leaving the tag would fake a registry digest on the
+                    # image, and put one in the lock for everyone else
+                    ck_docker.untag_image(remote_ref)
+                    message = (
+                        f"Failed to push image to {remote_ref}; it will "
+                        "need to be rebuilt elsewhere\n"
+                        + textwrap.indent(push_output.strip()[-500:], "    ")
+                    )
+                    # A pipeline run is no place to stop and ask for a
+                    # token, so point at the command that can
+                    if ck_docker.is_auth_error(push_output):
+                        message += (
+                            "\nRun 'calkit push' to set up credentials for "
+                            "this registry."
+                        )
+                    warn(message)
+    # A digest only belongs in the lock if it can actually be pulled, which
+    # means this run pushed it or fetched it from there. Anything else is
+    # just how the local image happens to be tagged, and recording it would
+    # send everyone who reads the lock on a failed pull.
+    if remote_ref is not None:
+        if pushed or pulled_from_registry:
+            remote_digests = ck_docker.keep_only_repo_digests(
+                identity, remote_ref
+            )["RepoDigests"]
+        elif lock is not None and ck_docker.lock_matches_image(lock, identity):
+            # Still the same image an earlier run verified, so what it
+            # recorded stands, and the lock doesn't churn
+            remote_digests = lock_remote_digests
+        else:
+            remote_digests = []
+        identity = dict(identity, RepoDigests=remote_digests)
+    elif fpath is None:
+        # An environment named after someone else's image is pullable by
+        # whatever digests it arrived with
+        identity = ck_docker.keep_only_repo_digests(identity, tag)
+    else:
+        identity = ck_docker.keep_only_repo_digests(identity, None)
     remote_source_ref = None
-    if pushed or (remote_ref is not None and not built):
+    if remote_ref is not None and identity["RepoDigests"]:
         remote_source_ref = remote_ref
     elif fpath is None:
         remote_source_ref = tag
-    # Which digests an image carries locally depends on how it was obtained:
-    # building assigns one under a repo no registry serves, and pulling by
-    # digest then tagging leaves both. Keeping only the ones the project's
-    # own repo can serve makes the lock the same either way, so that pulling
-    # an image back doesn't rewrite the lock and rerun every stage
-    identity = ck_docker.keep_only_repo_digests(identity, remote_source_ref)
     # Run configuration doesn't affect which image we need, but does affect
     # how stages run in it, so it belongs in the lock to invalidate them
     run_config: dict = {}

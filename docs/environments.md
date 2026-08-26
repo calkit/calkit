@@ -324,11 +324,21 @@ and Calkit checks the image's layers against the lock after pulling.
 <!-- prettier-ignore -->
 !!! note
 
-    Pushing to a registry requires being logged into it. For the GitHub
-    Container Registry, Calkit will log in for you using your GitHub
-    credentials. In GitHub Actions, the `calkit/calkit/actions/run` action
-    logs in automatically, so long as the workflow grants the
-    `packages: write` permission.
+    Pushing to a registry requires being logged into it. The first time
+    `calkit push` is refused by the GitHub Container Registry, it opens
+    GitHub to create a token with the `write:packages` scope, then saves
+    that token once a push has actually succeeded with it, so it only has
+    to be done once. The token Calkit uses for the GitHub API can't push
+    images: it comes from Calkit's GitHub App, whose permissions don't
+    reach the container registry. In GitHub Actions, the
+    `calkit/calkit/actions/run` action logs in automatically, so long as
+    the workflow grants the `packages: write` permission.
+
+`calkit push` sends the images of every environment with a `registry` set,
+alongside Git and DVC, skipping any the registry already has.
+An environment built before its registry was configured is pushed as-is,
+without being rebuilt first.
+Pass `--no-docker` to skip images.
 
 To rebuild or repull an image and write fresh lock files, e.g., after an
 image's tag has been moved out from under the digest in the lock, run:

@@ -419,7 +419,15 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
             "--registry",
             f"{registry}/proj",
         ]
-        subprocess.check_call(argv)
+        # An image built before a registry was configured must reach it
+        # without a rebuild, or an existing project could only publish what
+        # it already has by throwing it away first
+        subprocess.check_call(argv[:-2])
+        with open("lock.json") as f:
+            assert json.load(f)["RepoDigests"] == []
+        out = subprocess.check_output(argv, text=True)
+        assert "Pushing image" in out
+        assert "exporting layers" not in out
         with open("lock.json") as f:
             lock = json.load(f)
         # Having been pushed, the image is identified by a digest that can be
@@ -450,6 +458,122 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         subprocess.run(
             ["docker", "rmi", "-f", "calkit-registry-test"],
+            capture_output=True,
+        )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_push_sends_docker_images_to_their_registry(tmp_dir):
+    container = "calkit-test-registry-push"
+    registry = "localhost:5679"
+    subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            "5679:5000",
+            "registry:2",
+        ],
+        capture_output=True,
+    )
+    if started.returncode != 0:
+        pytest.skip("Could not start a local registry")
+    image = "calkit-push-test"
+    try:
+        subprocess.check_call(["calkit", "init"])
+        with open("Dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo pushed > /hi.txt\n")
+        subprocess.check_call(["docker", "build", "-t", image, "."])
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"] = {
+            "main": {
+                "kind": "docker",
+                "path": "Dockerfile",
+                "image": image,
+                "registry": f"{registry}/proj",
+            },
+            # An environment named after someone else's image is already
+            # somewhere it can be pulled back from, so it isn't pushed
+            "tex": {"kind": "docker", "image": "alpine:3.18"},
+        }
+        calkit.save_calkit_info(ck_info)
+        # Tagging an image for a registry gives it a digest under that repo
+        # locally, so a push that never happened must not look like one that
+        # did, or every later push is skipped
+        subprocess.check_call(
+            ["docker", "tag", image, f"{registry}/proj/{image}:latest"]
+        )
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        assert f"Pushing image for 'main' to {registry}/proj/" in out
+        assert "tex" not in out
+        # Once the registry really has it, pushing again sends nothing
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        assert "Pushing image" not in out
+        assert "already in the registry" in out
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_keeps_unpushed_digests_out_of_the_lock(tmp_dir):
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
+    argv = [
+        "calkit",
+        "check",
+        "docker-env",
+        "calkit-unpushed-test",
+        "-i",
+        "Dockerfile",
+        "-o",
+        "lock.json",
+        "--registry",
+        "localhost:5999/unreachable",
+    ]
+    try:
+        out = subprocess.check_output(
+            argv, text=True, stderr=subprocess.STDOUT
+        )
+        assert "Pushing image" in out
+        with open("lock.json") as f:
+            lock = json.load(f)
+        # Recording a digest nothing can serve would send everyone who reads
+        # this lock on a failed pull
+        assert lock["RepoDigests"] == []
+        # And the tag the failed push left behind has to go, since it would
+        # fake a registry digest on the image
+        info = json.loads(
+            subprocess.check_output(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "calkit-unpushed-test",
+                    "--format",
+                    "{{json .RepoDigests}}",
+                ],
+                text=True,
+            )
+        )
+        assert not [d for d in info if d.startswith("localhost:5999")]
+    finally:
+        subprocess.run(
+            ["docker", "rmi", "-f", "calkit-unpushed-test"],
             capture_output=True,
         )
 

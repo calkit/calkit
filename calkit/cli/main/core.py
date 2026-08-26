@@ -12,6 +12,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 import uuid
@@ -1447,11 +1448,18 @@ def push(
         list[str],
         typer.Option("--dvc-arg", help="Additional DVC args."),
     ] = [],
+    no_docker: Annotated[
+        bool,
+        typer.Option(
+            "--no-docker",
+            help="Do not push Docker images to their registries.",
+        ),
+    ] = False,
     no_recursive: Annotated[
         bool, typer.Option("--no-recursive", help="Do not push to submodules.")
     ] = False,
 ):
-    """Push with both Git and DVC."""
+    """Push to Git, DVC, and any Docker registries."""
     _warn_on_hub_mismatch()
     if not no_dvc:
         remotes = calkit.dvc.get_remotes()
@@ -1473,6 +1481,39 @@ def push(
                 raise_error("DVC push failed")
         else:
             warn("No DVC remotes configured; skipping DVC push")
+    if not no_docker:
+        images = calkit.docker.get_pushable_images()
+        for env_name, info in images.items():
+            remote_ref = info["remote_ref"]
+            identity = calkit.docker.inspect_image_for_lock(info["image"])
+            if identity is None:
+                warn(
+                    f"No local image for Docker environment '{env_name}' "
+                    "to push; run the pipeline first"
+                )
+                continue
+            # Ask the registry rather than trusting the image's own
+            # digests: tagging an image for a registry gives it one whether
+            # or not anything was ever pushed there
+            if calkit.docker.registry_has_image(remote_ref, identity):
+                typer.echo(
+                    f"Image for '{env_name}' is already in the registry"
+                )
+                continue
+            typer.echo(f"Pushing image for '{env_name}' to {remote_ref}")
+            if not calkit.docker.tag_image(info["image"], remote_ref):
+                warn(f"Failed to tag image as {remote_ref}")
+                continue
+            success, push_output = calkit.docker.push_image_with_login(
+                remote_ref, interactive=sys.stdin.isatty()
+            )
+            if not success:
+                # Leaving the tag would fake a registry digest on the image
+                calkit.docker.untag_image(remote_ref)
+                warn(
+                    f"Failed to push image to {remote_ref}\n"
+                    + textwrap.indent(push_output.strip()[-500:], "    ")
+                )
     if not no_git:
         typer.echo("Pushing to Git remote")
         try:

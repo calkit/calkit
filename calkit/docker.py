@@ -750,9 +750,7 @@ def get_lock_digest_refs(
     digests = [d for d in (lock.get("RepoDigests") or []) if "@" in d]
     if remote_ref is None:
         return digests
-    remote_repo = remote_ref.split("@", 1)[0]
-    if ":" in remote_repo.rsplit("/", 1)[-1]:
-        remote_repo = remote_repo[: remote_repo.rfind(":")]
+    remote_repo = get_repo_from_ref(remote_ref)
     preferred = [d for d in digests if d.split("@", 1)[0] == remote_repo]
     return preferred + [d for d in digests if d not in preferred]
 
@@ -810,6 +808,43 @@ def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
     return registry
 
 
+def get_repo_from_ref(ref: str) -> str:
+    """Return an image reference's repository, without its tag or digest."""
+    repo = ref.split("@", 1)[0]
+    if ":" in repo.rsplit("/", 1)[-1]:
+        repo = repo[: repo.rfind(":")]
+    return repo
+
+
+def untag_image(ref: str) -> bool:
+    """Remove one tag from an image, leaving the image itself alone."""
+    try:
+        subprocess.check_output(
+            ["docker", "rmi", "--no-prune", ref], stderr=subprocess.STDOUT
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return True
+
+
+def registry_has_image(remote_ref: str, identity: dict) -> bool:
+    """Return True if a registry already serves this exact image.
+
+    Tagging an image with a registry-qualified name is enough to give it a
+    digest under that repo locally, so an image's own digests say nothing
+    about whether anything was ever pushed. Only what the registry serves
+    does, so its layers are what get compared.
+    """
+    layers = (identity.get("RootFS") or {}).get("Layers")
+    if not layers:
+        return False
+    remote = get_remote_image_platform_locks(remote_ref)
+    return any(
+        (entry.get("RootFS") or {}).get("Layers") == layers
+        for entry in remote.values()
+    )
+
+
 def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
     """Drop digests from an image's identity that no registry can serve.
 
@@ -824,9 +859,7 @@ def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
     if ref is None:
         identity["RepoDigests"] = []
         return identity
-    repo = ref.split("@", 1)[0]
-    if ":" in repo.rsplit("/", 1)[-1]:
-        repo = repo[: repo.rfind(":")]
+    repo = get_repo_from_ref(ref)
     identity["RepoDigests"] = [
         d
         for d in (identity.get("RepoDigests") or [])
@@ -864,37 +897,219 @@ def image_exists(ref: str) -> bool:
     return True
 
 
-def login_to_registry(ref: str) -> bool:
-    """Log in to a registry with credentials Calkit can obtain itself.
+# What a registry says when the credentials it got aren't good enough, as
+# opposed to the network being down or the image not existing
+_AUTH_ERROR_MARKERS = [
+    "permission_denied",
+    "does not match expected scopes",
+    "insufficient_scope",
+    "unauthorized",
+    "authentication required",
+    "denied:",
+    "requested access to the resource is denied",
+]
+# Creating a classic token with exactly what pushing an image needs
+GITHUB_PACKAGES_TOKEN_URL = (
+    "https://github.com/settings/tokens/new"
+    "?scopes=write:packages,read:packages&description=Calkit"
+)
 
-    Only the GitHub Container Registry is handled, since that's the one
-    Calkit already has a path to credentials for. Anything else relies on
-    the user's own ``docker login``.
+
+def is_auth_error(output: str) -> bool:
+    """Return True if a registry refused the credentials it was given."""
+    lowered = output.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
+def get_github_token_scopes(token: str) -> set[str]:
+    """Return the OAuth scopes a GitHub token carries.
+
+    A GitHub App token and a fine-grained token both report none, so an
+    empty set means "can't tell from here", not "can't do anything".
     """
-    host = ref.split("/", 1)[0]
-    if host != "ghcr.io":
-        return False
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.headers.get("X-OAuth-Scopes") or ""
+    except (urllib.error.URLError, OSError):
+        return set()
+    return {scope.strip() for scope in raw.split(",") if scope.strip()}
+
+
+def get_github_username() -> str:
+    """Return the user's GitHub login, or a placeholder if unavailable.
+
+    The GitHub Container Registry authenticates on the token, so the
+    username only has to be non-empty.
+    """
     import calkit.github
 
     try:
-        token = calkit.github.get_token()
+        login = calkit.github.get("/user")["login"]
     except Exception:
-        return False
-    if not token:
-        return False
+        return "calkit"
+    return str(login) if login else "calkit"
+
+
+def prompt_for_packages_token() -> str | None:
+    """Walk the user through creating a token that can push packages.
+
+    The token Calkit holds for the GitHub API is issued by its GitHub App,
+    whose permissions don't extend to the container registry, so pushing
+    needs one the user creates themselves.
+    """
+    import webbrowser
+
+    import typer
+
+    typer.echo(
+        "\nPushing to the GitHub Container Registry needs a token with the "
+        "'write:packages' scope, which the one Calkit uses for the GitHub "
+        "API doesn't have.\n\nOpening GitHub to create one with the right "
+        "scopes already selected:\n"
+        f"  {GITHUB_PACKAGES_TOKEN_URL}\n"
+    )
     try:
-        username = calkit.github.get("/user")["login"]
+        webbrowser.open(GITHUB_PACKAGES_TOKEN_URL)
     except Exception:
-        # GHCR authenticates on the token, so a placeholder is enough when
-        # the username can't be looked up
-        username = "calkit"
+        pass
+    entered: str = typer.prompt(
+        "Paste the token here (input hidden)", hide_input=True, default=""
+    )
+    token = entered.strip()
+    if not token:
+        return None
+    scopes = get_github_token_scopes(token)
+    if scopes and "write:packages" not in scopes:
+        typer.echo(
+            "That token doesn't have the 'write:packages' scope; it has: "
+            + (", ".join(sorted(scopes)) or "none")
+        )
+        return None
+    return token
+
+
+def save_packages_token(token: str) -> None:
+    """Remember a token that can push packages, so this is a one-off."""
+    from calkit import config
+
+    cfg = config.read()
+    cfg = config.Settings.model_validate(
+        cfg.model_dump() | {"github_packages_token": token}
+    )
+    cfg.write()
+
+
+def login_to_registry(
+    ref: str, interactive: bool = False
+) -> tuple[bool, str | None]:
+    """Log in to a registry, reporting success and any new token to save.
+
+    Only the GitHub Container Registry is handled, since that's the one
+    Calkit has a path to credentials for. Anything else relies on the
+    user's own ``docker login``.
+    """
+    host = ref.split("/", 1)[0]
+    if host != "ghcr.io":
+        return False, None
+    import calkit
+
+    from_prompt = False
+    stored = calkit.config.read().github_packages_token
+    token: str | None = str(stored) if stored is not None else None
+    if token is None:
+        # The token Calkit already holds is worth a try, but only if it
+        # actually carries the scope, since logging in with one that
+        # doesn't just fails again at push time
+        try:
+            candidate = calkit.github.get_token()
+        except Exception:
+            candidate = None
+        if candidate and "write:packages" in get_github_token_scopes(
+            candidate
+        ):
+            token = candidate
+    if token is None and interactive:
+        token = prompt_for_packages_token()
+        from_prompt = token is not None
+    if not token:
+        return False, None
     try:
         subprocess.run(
-            ["docker", "login", host, "-u", username, "--password-stdin"],
-            input=token.encode(),
+            [
+                "docker",
+                "login",
+                host,
+                "-u",
+                get_github_username(),
+                "--password-stdin",
+            ],
+            input=str(token).encode(),
             check=True,
             capture_output=True,
         )
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-    return True
+        return False, None
+    return True, str(token) if from_prompt else None
+
+
+def push_image_with_login(
+    ref: str, interactive: bool = False
+) -> tuple[bool, str]:
+    """Push an image, sorting out registry credentials if it's refused.
+
+    A token is only remembered once a push has actually gone through with
+    it, since logging in succeeds with credentials that still can't push.
+    """
+    success, output = push_image(ref)
+    if success or not is_auth_error(output):
+        return success, output
+    logged_in, _ = login_to_registry(ref)
+    if logged_in:
+        success, output = push_image(ref)
+        if success or not is_auth_error(output):
+            return success, output
+    if not interactive:
+        return success, output
+    logged_in, new_token = login_to_registry(ref, interactive=True)
+    if not logged_in:
+        return success, output
+    success, output = push_image(ref)
+    if success and new_token is not None:
+        save_packages_token(new_token)
+    return success, output
+
+
+def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
+    """Return the images a project builds that belong in a registry.
+
+    Only environments built from the project's own Dockerfile are included:
+    an environment named after an image someone else publishes already lives
+    somewhere it can be pulled back from.
+    """
+    import calkit
+
+    ck_info = calkit.load_calkit_info(wdir=wdir)
+    resp = {}
+    for env_name, env in (ck_info.get("environments") or {}).items():
+        if not isinstance(env, dict) or env.get("kind") != "docker":
+            continue
+        image = env.get("image")
+        if not image or not env.get("path"):
+            continue
+        prefix = resolve_registry_prefix(env, wdir=wdir)
+        if prefix is None:
+            continue
+        resp[env_name] = dict(
+            image=image, remote_ref=get_remote_image_ref(image, prefix)
+        )
+    return resp

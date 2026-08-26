@@ -17,7 +17,7 @@
 | [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
-| [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
+| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
@@ -260,7 +260,7 @@ Options:
 
 ### `calkit push`
 
-Push with both Git and DVC.
+Push to Git, DVC, and any Docker registries.
 
 Usage:
 
@@ -270,14 +270,15 @@ calkit push [OPTIONS]
 
 Options:
 
-| Option            | Type    | Required | Default | Description                |
-| ----------------- | ------- | -------- | ------- | -------------------------- |
-| `--no-check-auth` | boolean | no       | False   |                            |
-| `--no-dvc`        | boolean | no       | False   |                            |
-| `--no-git`        | boolean | no       | False   |                            |
-| `--git-arg`       | text    | no       |         | Additional Git args.       |
-| `--dvc-arg`       | text    | no       |         | Additional DVC args.       |
-| `--no-recursive`  | boolean | no       | False   | Do not push to submodules. |
+| Option            | Type    | Required | Default | Description                                    |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------- |
+| `--no-check-auth` | boolean | no       | False   |                                                |
+| `--no-dvc`        | boolean | no       | False   |                                                |
+| `--no-git`        | boolean | no       | False   |                                                |
+| `--git-arg`       | text    | no       |         | Additional Git args.                           |
+| `--dvc-arg`       | text    | no       |         | Additional DVC args.                           |
+| `--no-docker`     | boolean | no       | False   | Do not push Docker images to their registries. |
+| `--no-recursive`  | boolean | no       | False   | Do not push to submodules.                     |
 
 <a id="top-command-ignore"></a>
 

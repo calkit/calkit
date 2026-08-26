@@ -580,17 +580,52 @@ def get_remote_image_ref(
     return f"{path}:{tag or 'latest'}"
 
 
+def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
+    """Run a command, showing its output as it happens and keeping it.
+
+    Pushing and pulling an image are the slowest things Calkit does, and
+    swallowing Docker's progress for minutes on end looks like a hang, so
+    the output goes to the terminal as it arrives. It's captured too, since
+    what a registry says on refusal decides what happens next.
+    """
+    lines: list[str] = []
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError:
+        return False, "Docker is not installed"
+    assert proc.stdout is not None
+    # Docker redraws each layer's status in place on a terminal, but writes
+    # every repeat as its own line through a pipe, so a slow push scrolls
+    # hundreds of identical 'Waiting' lines past. Only changes are worth
+    # showing; a real transfer changes its byte count and still comes
+    # through.
+    last_status: dict[str, str] = {}
+    for line in proc.stdout:
+        lines.append(line)
+        layer_id, sep, status = line.partition(": ")
+        if sep and " " not in layer_id:
+            if last_status.get(layer_id) == status:
+                continue
+            last_status[layer_id] = status
+        print(line, end="", flush=True)
+    proc.stdout.close()
+    return proc.wait() == 0, "".join(lines)
+
+
 def pull_image(ref: str, platform: str | None = None) -> bool:
     """Pull an image, returning True on success."""
     cmd = ["docker", "pull"]
     if platform is not None:
         cmd += ["--platform", platform]
     cmd.append(ref)
-    try:
-        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return False
-    return True
+    success, _ = _run_showing_output(cmd)
+    return success
 
 
 def tag_image(source: str, target: str) -> bool:
@@ -605,16 +640,8 @@ def tag_image(source: str, target: str) -> bool:
 
 
 def push_image(ref: str) -> tuple[bool, str]:
-    """Push an image, returning success and any output from failure."""
-    try:
-        subprocess.check_output(
-            ["docker", "push", ref], stderr=subprocess.STDOUT
-        )
-    except subprocess.CalledProcessError as e:
-        return False, (e.output or b"").decode(errors="replace")
-    except FileNotFoundError:
-        return False, "Docker is not installed"
-    return True, ""
+    """Push an image, returning success and its output."""
+    return _run_showing_output(["docker", "push", ref])
 
 
 def platform_to_arch_name(platform: dict | str) -> str | None:

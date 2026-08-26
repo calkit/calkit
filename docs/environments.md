@@ -334,6 +334,15 @@ and Calkit checks the image's layers against the lock after pulling.
     `calkit/calkit/actions/run` action logs in automatically, so long as
     the workflow grants the `packages: write` permission.
 
+<!-- prettier-ignore -->
+!!! note
+
+    The token is kept in the system keyring as
+    `github_packages_token`, not in `~/.calkit/config.yaml`. Read or replace
+    it with `calkit config get`/`set github_packages_token`. Logging in also
+    leaves a copy in Docker's own credential store, which
+    `docker logout ghcr.io` clears.
+
 `calkit push` sends the images of every environment with a `registry` set,
 alongside Git and DVC, skipping any the registry already has.
 An environment built before its registry was configured is pushed as-is,

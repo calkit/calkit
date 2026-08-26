@@ -1,5 +1,7 @@
 """Tests for ``calkit.docker``."""
 
+import sys
+
 from calkit.docker import (
     _image_name_without_tag_or_digest,
     _parse_docker_run_command,
@@ -291,3 +293,38 @@ def test_login_to_registry_ignores_other_registries():
     # on the user's own docker login
     assert login_to_registry("docker.io/someone/img:v1") == (False, None)
     assert login_to_registry("localhost:5000/proj/img:v1") == (False, None)
+
+
+def test_run_showing_output_collapses_repeated_layer_status(capfd):
+    from calkit.docker import _run_showing_output
+
+    script = (
+        "print('The push refers to repository [example]')\n"
+        "print('abc123: Waiting')\n"
+        "print('abc123: Waiting')\n"
+        "print('def456: Waiting')\n"
+        "print('abc123: Pushing [==>   ]  1.2GB')\n"
+        "print('abc123: Pushing [====> ]  2.4GB')\n"
+        "print('abc123: Pushed')\n"
+    )
+    success, output = _run_showing_output([sys.executable, "-c", script])
+    assert success
+    # Everything Docker said is kept, since what a registry says on refusal
+    # decides what happens next
+    assert output.count("abc123: Waiting") == 2
+    shown = capfd.readouterr().out
+    # ...but a repeat of the same status isn't worth showing twice
+    assert shown.count("abc123: Waiting") == 1
+    assert shown.count("def456: Waiting") == 1
+    # A transfer that's actually moving still comes through
+    assert "1.2GB" in shown
+    assert "2.4GB" in shown
+    assert "abc123: Pushed" in shown
+
+
+def test_run_showing_output_reports_a_missing_docker():
+    from calkit.docker import _run_showing_output
+
+    success, output = _run_showing_output(["definitely-not-a-real-binary"])
+    assert not success
+    assert "not installed" in output

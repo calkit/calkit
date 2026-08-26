@@ -68,26 +68,50 @@ ContribTargetKind = Literal[
     "path",
 ]
 
-# What the responder may do:
-#   ``review``  -- read and annotate only; nothing in the repo changes
-#   ``submit``  -- upload files to the one place ``target_path`` names, and
-#                  see nothing else; the bulk-contribution case, e.g., a
-#                  hundred authors each handing in a chapter
-#   ``suggest`` -- propose edits, which land as gated tasks the lead
-#                  accepts or rejects individually. The default: the
-#                  responder marks up the work without taking custody of it,
-#                  so nothing has to be handed back before the author can
-#                  keep writing
+# What the other party may do. The first four are a ladder, deliberately the
+# one people already know from Google Drive and Docs -- viewing, commenting,
+# suggesting, editing -- because the whole point is that a PI shouldn't have
+# to learn a new sharing model to read their student's paper.
+#   ``view``    -- read the target at the pinned revision. Nothing else.
+#   ``comment`` -- read and annotate. Nothing in the repo changes.
+#   ``suggest`` -- propose edits, which land as gated tasks the lead accepts
+#                  or rejects individually. The default: the responder marks
+#                  up the work without taking custody of it, so nothing has
+#                  to be handed back before the author can keep writing.
 #   ``edit``    -- commit directly to the project's default branch. The only
 #                  permission that can collide with another responder, and so
-#                  the only one locking applies to
-ContribPermission = Literal["review", "submit", "suggest", "edit"]
+#                  the only one locking applies to.
+# ``submit`` is not a rung on that ladder -- it's a different shape. It grants
+# upload to the one place ``target_path`` names and no visibility into
+# anything else, which is what the bulk case needs: a hundred authors each
+# handing in a chapter shouldn't be able to read each other's.
+ContribPermission = Literal["view", "comment", "suggest", "edit", "submit"]
 
-# Which way the ask points. ``outbound`` is a solicitation the project lead
-# sent ("please review this"); ``inbound`` is a proposal someone made to the
-# project ("may I change this?"), which is the gated stand-in for a pull
-# request from a stranger.
+# Ordered so grants can be compared. A lead approving an inbound request may
+# hand back less than was asked for -- "you asked to edit, you may suggest" --
+# and never more. ``submit`` is absent on purpose: it isn't a lesser edit, so
+# it has no place in the comparison.
+CONTRIB_PERMISSION_LEVELS = {"view": 0, "comment": 1, "suggest": 2, "edit": 3}
+
+# Which way the ask points, i.e., who started it.
+#
+# ``outbound`` is a solicitation the lead sent: "please review this." It is
+# live the moment it's created, because the person creating it is the person
+# with the authority to grant it.
+#
+# ``inbound`` is someone asking the project for something: "let me fix the
+# axes on this figure," or "comments are off here, may I have them?" -- the
+# Request access button, in other words. It grants nothing until a lead
+# approves it, which is what ``approval_status`` is for.
+#
+# The two converge once approved. An approved inbound request and an outbound
+# request are the same object doing the same job: this person may do this
+# thing to this target until it expires.
 ContribDirection = Literal["outbound", "inbound"]
+
+# Whether the request is live. Outbound requests are ``approved`` at
+# creation; inbound ones start ``pending`` and wait for a lead.
+ContribApprovalStatus = Literal["approved", "pending", "denied"]
 
 # How sure we need to be about who is responding:
 #   ``anonymous`` -- the link is the only credential
@@ -136,7 +160,13 @@ class ContribRequest(SQLModel, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     project_id: uuid.UUID = Field(foreign_key="project.id", index=True)
-    created_by_user_id: uuid.UUID = Field(foreign_key="user.id")
+    # Whoever created the row: a lead for an outbound request, the asker for
+    # an inbound one -- and None when an inbound request came from someone
+    # who isn't signed in, which is most of the people who will ever click
+    # "request access".
+    created_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
     token_hash: str = Field(index=True, unique=True, max_length=64)
     # Short label shown in the requests table and used as the email subject.
     title: str = Field(min_length=1, max_length=255)
@@ -172,11 +202,13 @@ class ContribRequest(SQLModel, table=True):
     supersedes_request_id: uuid.UUID | None = Field(
         default=None, foreign_key="contribrequest.id"
     )
-    # Intended recipient; None means "whoever has the link".
+    # The other party -- the one who isn't the project. For an outbound
+    # request that's the intended recipient; for an inbound one it's whoever
+    # is asking. None on an outbound request means "whoever has the link".
     email: str | None = Field(default=None, max_length=320)
-    # Display name for the recipient, so the UI can say "Review from Jane Doe"
-    # before they've ever responded.
-    recipient_name: str | None = Field(default=None, max_length=255)
+    # Their display name, so the UI can say "Review from Jane Doe" before
+    # they've ever responded.
+    contributor_name: str | None = Field(default=None, max_length=255)
     # An open call for contributions: listed on the project page, answerable
     # without a token. Targeted requests leave this False.
     public: bool = Field(default=False)
@@ -184,6 +216,14 @@ class ContribRequest(SQLModel, table=True):
     # Cap on submitted responses; None means unlimited. Useful for an open
     # call that should stop accepting once it has what it needs.
     max_responses: int | None = Field(default=None)
+    approval_status: str = Field(default="approved", max_length=16)
+    approved_by_user_id: uuid.UUID | None = Field(
+        default=None, foreign_key="user.id"
+    )
+    approved_at: datetime | None = Field(default=None)
+    # Why a lead turned an inbound request down, if they said. Shown to the
+    # asker, so "we don't take outside edits on this" beats silence.
+    denial_reason: str | None = Field(default=None, max_length=1024)
     closed_at: datetime | None = Field(default=None)
     revoked: bool = Field(default=False)
     # The GitHub issue this request is mirrored to, if the project is
@@ -225,6 +265,8 @@ class ContribRequest(SQLModel, table=True):
     @property
     def is_open(self) -> bool:
         """Whether the request can still take a new response."""
+        if self.approval_status != "approved":
+            return False
         if self.revoked or self.closed_at is not None or self.is_expired:
             return False
         if (
@@ -350,6 +392,8 @@ class ContribAttachment(SQLModel, table=True):
 class ContribRequestPost(SQLModel):
     title: str = Field(min_length=1, max_length=255)
     message: str | None = None
+    # Inbound requests -- someone asking the project for access -- stay
+    # pending until a lead approves them.
     direction: ContribDirection = "outbound"
     in_response_to_request_id: uuid.UUID | None = None
     target_kind: ContribTargetKind = "project"
@@ -363,7 +407,7 @@ class ContribRequestPost(SQLModel):
     # number is derived from it.
     supersedes_request_id: uuid.UUID | None = None
     email: str | None = None
-    recipient_name: str | None = None
+    contributor_name: str | None = None
     public: bool = False
     expires_days: int | None = Field(default=None, ge=1, le=365)
     max_responses: int | None = Field(default=None, ge=1)
@@ -406,7 +450,10 @@ class ContribRequestPublic(SQLModel):
     round: int
     supersedes_request_id: uuid.UUID | None
     email: str | None
-    recipient_name: str | None
+    contributor_name: str | None
+    approval_status: str
+    approved_at: datetime | None
+    denial_reason: str | None
     public: bool
     expires_at: datetime | None
     max_responses: int | None
@@ -447,6 +494,7 @@ class ContribRequestView(SQLModel):
     git_rev_abbrev: str | None
     permission: str
     identity_requirement: str
+    approval_status: str
     due_at: datetime | None
     round: int
     expires_at: datetime | None
@@ -505,6 +553,20 @@ class ContribResponsePublic(SQLModel):
     created: datetime
     tasks: list[TaskPublic] = Field(default_factory=list)
     attachments: list[ContribAttachmentPublic] = Field(default_factory=list)
+
+
+class ContribRequestApprovalPost(SQLModel):
+    """A lead's answer to an inbound request.
+
+    ``permission`` may be set to hand back less than was asked for -- "you
+    asked to edit, you may suggest" -- and is capped at the requested level by
+    the API. Left unset, the request is approved as asked.
+    """
+
+    approve: bool
+    permission: ContribPermission | None = None
+    expires_days: int | None = Field(default=None, ge=1, le=365)
+    denial_reason: str | None = None
 
 
 class ContribResponseDeclinePost(SQLModel):

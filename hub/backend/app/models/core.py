@@ -600,6 +600,14 @@ class ProjectBase(SQLModel):
         default=None, min_length=0, max_length=2048
     )
     is_public: bool = Field(default=False)
+    # Who may comment without asking first. "viewers" means anyone who can
+    # see the project, which is the sane default -- feedback is the point.
+    # "collaborators" restricts it to members, and turns the comment box on
+    # an artifact into a "request to comment" affordance for everyone else,
+    # which raises an inbound ContribRequest rather than a dead end.
+    comment_access: Literal["viewers", "collaborators"] = Field(
+        default="viewers", max_length=32
+    )
     created: datetime | None = Field(default_factory=utcnow)
     updated: datetime | None = Field(default_factory=utcnow)
     git_repo_url: str = Field(max_length=2048)

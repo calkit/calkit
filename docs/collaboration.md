@@ -120,19 +120,45 @@ much longer bet, and not one this feature is built on.
 
 ## Outbound and inbound requests
 
-Requests go both ways.
+Requests go both ways, and the difference is simply who started it.
 
 An **outbound** request is a solicitation:
 you're asking someone to review or contribute something.
 This is the "send the manuscript to my PI" case,
 and the one that has to be as close to frictionless as email.
+It's live the moment you create it, because the person creating it is the
+person with the authority to grant it.
 
-An **inbound** request is a proposal:
-someone is asking to contribute something to your project.
-This is the gated equivalent of a pull request from a stranger, e.g.,
-"can I tweak the hyperparameters for this stage?"
-Inbound requests can stand alone,
-or arrive as responses to an outbound one.
+An **inbound** request is someone asking the project for something.
+Mostly that means asking for the ability to do something they currently
+can't:
+a collaborator looking at a figure who wants to fix the axes,
+or a reader who finds comments turned off on a paper and wants them.
+It's the Request access button, and it grants nothing until a project
+lead approves it.
+
+<!-- prettier-ignore -->
+!!! note
+    The two converge the moment an inbound request is approved.
+    An approved inbound request and an outbound one are the same object
+    doing the same job--*this person may do this thing to this target
+    until it expires*--which is why there's one kind of request rather
+    than two.
+
+Whether there's anything to ask for depends on a project setting.
+By default anyone who can see a project can comment on it, because
+feedback is the entire point.
+A project that would rather keep comments to its members can say so, and
+the comment box then becomes a request-to-comment button for everyone
+else--an inbound request a lead can approve, rather than a dead end with
+no way to reach anybody.
+
+Approving doesn't have to mean granting what was asked.
+A lead can hand back less:
+someone who asked to edit a figure can be given suggest instead,
+so their change arrives as a proposal rather than a commit.
+Denying can carry a reason, which is worth doing--_"we don't take
+outside edits on this"_ is a better answer than silence.
 
 A project can also post a **public call for contributions**:
 an open request anyone can answer,
@@ -157,19 +183,30 @@ The request is pinned to the commit it was created from,
 so feedback stays attached to what the recipient actually saw,
 even if the project moves on while they have it.
 
-**What the responder may do.**
+**What the other party may do.**
+This is a ladder, and deliberately the one everybody already knows from
+Google Drive and Docs.
+A PI shouldn't have to learn a new sharing model to read their student's
+paper.
+
+| Permission | What it allows                                      |
+| ---------- | --------------------------------------------------- |
+| View       | Read the target at the pinned revision. That's all. |
+| Comment    | Read and annotate. Nothing in the project changes.  |
+| Suggest    | Propose edits, accepted or rejected one by one.     |
+| Edit       | Commit changes directly to the default branch.      |
+
 Most requests should be _suggest_:
 the responder marks up the work without taking it over,
 and you keep the pen.
 That's the mode that removes the coordination email entirely,
 because nothing has to be handed back before you can keep writing.
 
-| Permission | What it allows                                          |
-| ---------- | ------------------------------------------------------- |
-| Review     | Read and comment or annotate. Nothing changes.          |
-| Submit     | Upload files to one designated place, and nothing more. |
-| Suggest    | Propose edits, accepted or rejected one by one.         |
-| Edit       | Commit changes directly to the default branch.          |
+**Submit** is the exception, and isn't a rung on that ladder at all.
+It grants upload to one designated place and no visibility into anything
+else--which is precisely what the bulk case needs,
+since a hundred authors each handing in a chapter shouldn't be able to
+read each other's.
 
 **How sure we need to be about who they are.**
 

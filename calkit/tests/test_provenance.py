@@ -4,23 +4,14 @@ import pytest
 
 
 def test_source_from_location():
-    """Cover how a written-down location is read as an import source.
-
-    Scenarios in one test (per AGENTS.md guidance):
-    - a GitHub file link, with and without a revision in it,
-    - a full commit hash pins 'rev' rather than following a 'ref',
-    - GitHub's raw host, in both its plain and 'refs/heads' spellings,
-    - a GitLab link, whose nesting groups are separated by '/-/',
-    - an explicit ref overrides whatever the URL said,
-    - a DOI, however it's written, is recognized rather than downloaded,
-    - a URL on any other host is just a URL,
-    - a Calkit project path, and something too short to be one.
-    """
+    # Covers GitHub and GitLab file links with and without a revision,
+    # explicit refs, DOIs however written, plain URLs, and Calkit project
+    # paths
     from calkit.provenance import default_dest_path, source_from_location
 
     gh = "https://github.com/someone/repo.git"
     # Written out by hand, with no revision: the default branch is what
-    # gets fetched, and nothing is followed afterwards
+    # gets fetched, now and on every refresh
     assert source_from_location(
         "https://github.com/someone/repo/path/to/file"
     ) == {"git": {"repo_url": gh, "path": "path/to/file"}}
@@ -52,6 +43,23 @@ def test_source_from_location():
     assert source_from_location(
         f"https://github.com/someone/repo/blob/{sha}/a.sh", ref="main"
     ) == {"git": {"repo_url": gh, "path": "a.sh", "ref": "main"}}
+    # A branch name can contain slashes, and the URL doesn't say where it
+    # ends; an explicit ref settles it
+    assert source_from_location(
+        "https://github.com/someone/repo/blob/feature/foo/scripts/a.sh"
+    ) == {
+        "git": {"repo_url": gh, "path": "foo/scripts/a.sh", "ref": "feature"}
+    }
+    assert source_from_location(
+        "https://github.com/someone/repo/blob/feature/foo/scripts/a.sh",
+        ref="feature/foo",
+    ) == {
+        "git": {"repo_url": gh, "path": "scripts/a.sh", "ref": "feature/foo"}
+    }
+    # A browser writes a space as '%20', but the checkout doesn't
+    assert source_from_location(
+        "https://github.com/someone/repo/blob/main/a%20b.csv"
+    ) == {"git": {"repo_url": gh, "path": "a b.csv", "ref": "main"}}
     # A DOI resolves to a landing page, so recognizing it is what stops
     # the HTML from being saved and called the data
     for written in [
@@ -102,13 +110,7 @@ def test_fetch_rejects_doi():
 
 
 def test_hand_authored_git_source():
-    """An entry can be written by hand as intent, with no commit invented.
-
-    Scenarios in one test (per AGENTS.md guidance):
-    - repo, path, and ref alone is a complete, valid entry,
-    - a branch written into 'rev' is still refused and points at 'ref',
-    - a commit hash in 'rev' is accepted, abbreviated or full.
-    """
+    # An entry can be written by hand as intent, with no commit invented
     from pydantic import ValidationError
 
     from calkit.models.core import MiscArtifact

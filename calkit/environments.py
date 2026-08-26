@@ -614,11 +614,13 @@ def get_env_lock_fpath(
         lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind == "system":
         # A system env's lock file records the machine properties it
-        # declared it depends on, plus its ``default_setup``, which is part
-        # of how the stage was run rather than a property of the machine.
-        # With neither there is nothing to depend on, so no lock file and no
-        # DVC dep.
-        if not env.get("lock") and not env.get("default_setup"):
+        # declared it depends on, plus its ``default_setup`` and ``shell``,
+        # which are part of how the stage was run rather than properties of
+        # the machine. With none of them there is nothing to depend on, so
+        # no lock file and no DVC dep.
+        if not (
+            env.get("lock") or env.get("default_setup") or env.get("shell")
+        ):
             return None
         # Written by ``write_system_env_lock`` during environment checks, and
         # referenced as a DVC dep by stage compilation. Note this is the file
@@ -777,18 +779,15 @@ def write_system_env_lock(
     on, say, the Julia version should not reuse a cached result from a box
     with a different one.
 
-    ``default_setup`` is recorded alongside the machine properties. It
-    isn't one of them -- it says what was done to the shell before the
-    stage ran -- but it feeds the same question: a stage built against a
-    different toolchain should not reuse the old result.
+    ``default_setup`` and the ``shell`` it runs in are recorded alongside
+    the machine properties. They aren't properties of the machine -- they
+    say what was done to the shell before the stage ran -- but they feed
+    the same question: a stage built against a different toolchain should
+    not reuse the old result.
 
     Returns the lock file path, already prefixed with ``wdir`` if provided,
     or None if the environment locks nothing.
     """
-    lock = env.get("lock") or []
-    default_setup = env.get("default_setup") or []
-    if not lock and not default_setup:
-        return None
     # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
@@ -798,11 +797,17 @@ def write_system_env_lock(
     # Read before anything is created: a misspelled property or a tool
     # that isn't installed raises here, and an env that failed to lock
     # shouldn't leave a directory behind suggesting it did
-    lock_data = get_system_lock_data(lock, system_info=system_info)
-    if default_setup:
-        # Namespaced so it can't collide with a locked property, now or
-        # when the set of them grows
-        lock_data["default_setup"] = list(default_setup)
+    lock_data = get_system_lock_data(
+        env.get("lock") or [], system_info=system_info
+    )
+    # Named so they can't collide with a locked property, now or when the
+    # set of them grows. The shell matters to a stage's own setup commands
+    # too, so it's recorded whenever the env names one, not only when it
+    # has defaults.
+    if env.get("default_setup"):
+        lock_data["default_setup"] = list(env["default_setup"])
+    if env.get("default_setup") or env.get("shell"):
+        lock_data["shell"] = env.get("shell", "bash")
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     parent = os.path.dirname(lock_fpath)
     if parent:

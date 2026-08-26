@@ -90,12 +90,10 @@ class _GitSource(BaseModel):
         default=None,
         description=(
             "The commit hash the file actually came from, filled in by "
-            "'calkit import path' and 'calkit update path'. This is the "
-            "answer, where 'ref' is the question: recording it is what "
-            "makes the entry say which bytes are here, rather than naming "
-            "something that moves. Optional only so an entry can be "
-            "written by hand before anything has been fetched; editing it "
-            "changes nothing, since fetching overwrites it."
+            "'calkit import path' and 'calkit update path'. A branch or "
+            "tag would move, so this is what makes the entry say which "
+            "bytes are here. Optional only so an entry can be written by "
+            "hand before anything has been fetched."
         ),
     )
     path: str | None = Field(
@@ -105,11 +103,10 @@ class _GitSource(BaseModel):
     ref: str | None = Field(
         default=None,
         description=(
-            "Branch or tag to follow when refreshing this, e.g. 'main'. "
-            "'rev' still records the commit actually fetched, so the entry "
-            "says both what it tracks and what it got; refreshing moves "
-            "'rev' to wherever this now points. Without it, refreshing "
-            "re-fetches the pinned commit."
+            "Branch, tag, or commit to follow when refreshing this, e.g., "
+            "'main'. 'rev' still records the commit actually fetched, so "
+            "the entry says both what it tracks and what it got. Without "
+            "it, refreshing follows the repo's default branch."
         ),
     )
 
@@ -1135,10 +1132,11 @@ class SystemEnvironment(Environment):
     )
     shell: Literal["sh", "bash", "zsh"] = Field(
         default="bash",
-        description="Shell in which 'default_setup' runs, together with the "
-        "stage's own command. Defaults to bash, since 'source' is a bashism "
-        "and sourcing a setup script is the usual reason to set "
-        "'default_setup'. Ignored when there is no 'default_setup'.",
+        description="Shell in which setup commands run, both "
+        "'default_setup' and a stage's own 'setup', together with the "
+        "stage's command. Defaults to bash, since 'source' is a bashism "
+        "and sourcing a setup script is the usual reason to have setup "
+        "commands. Ignored when there are none.",
     )
     inputs: list[str] | None = Field(
         default=None,

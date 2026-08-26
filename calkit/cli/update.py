@@ -1431,28 +1431,29 @@ def update_path(
     somewhere else, so a local edit that survived a refresh would make the
     entry a lie about what is on disk.
     """
-    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, describe_source
+    from calkit.provenance import describe_source, find_artifact
 
     ck_info = calkit.load_calkit_info()
-    # Searched across every kind, since a path is recorded in exactly one
-    # of them and which one is not something to have to remember
-    for kind in PROVENANCE_ARTIFACT_TYPES:
-        for entry in ck_info.get(kind, []):
-            if isinstance(entry, dict) and entry.get("path") == path:
-                break
-        else:
-            continue
-        break
-    else:
+    found = find_artifact(ck_info, path)
+    if found is None:
         raise_error(
             f"Nothing recorded at '{path}'; 'calkit import path' is what "
             "records where a file came from"
         )
+    kind, entry = found
     imported_from = entry.get("imported_from")
     if imported_from is None:
         raise_error(
             f"'{path}' is recorded in '{kind}' but doesn't say it was "
             "imported, so there is nowhere to refresh it from"
+        )
+    # A dataset brought in with 'calkit import dataset' is tracked by DVC,
+    # and writing over the file would leave its .dvc file describing the
+    # old one
+    if os.path.isfile(path + ".dvc"):
+        raise_error(
+            f"'{path}' is tracked by DVC; re-import it with 'calkit import "
+            "dataset' to refresh it"
         )
     if git_ref is not None:
         if "git" not in imported_from:

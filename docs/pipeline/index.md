@@ -656,10 +656,11 @@ each sublist the length of `arg_name`.
 
 Parameters for running a stage on a job scheduler (SLURM or PBS).
 
-The environment-level `default_options` is applied by `calkit
+The environment-level `default_options` are applied by `calkit
 scheduler batch` at submission time, in the mode `env_default_options`
-names---see :class:`Stage`, which documents the same three modes for
-the setup commands.
+names: `replace` (the default) uses them only when the stage names
+none of its own, `merge` puts them before the stage's, and `ignore`
+never applies them.
 
 `setup` and `env_default_setup` were once written here too. They
 belong to the stage, not to the scheduler: a stage on a `system`

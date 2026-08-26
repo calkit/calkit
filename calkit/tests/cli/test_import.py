@@ -26,21 +26,8 @@ def test_import_zenodo(tmp_dir, monkeypatch):
 
 
 def test_import_and_update_path(tmp_dir):
-    """Cover importing a file from a Git repo and refreshing it.
-
-    Scenarios in one test (per AGENTS.md guidance):
-    - a Git source is fetched, recorded under 'misc' by default, and
-      pinned to the commit it actually came from even though a branch was
-      named,
-    - refreshing follows the recorded 'ref' to a newer commit and
-      re-pins,
-    - a local edit is discarded, since an import says the file came from
-      elsewhere,
-    - an entry with no 'ref' stays on its commit when the source moves,
-    - --kind puts the entry in another list,
-    - importing over an existing entry is refused without --overwrite,
-    - refreshing a path nothing records says so.
-    """
+    # Covers importing a file from a Git repo, refreshing it along its
+    # 'ref' or the default branch, and the ways that can go wrong
     import os
 
     import calkit
@@ -117,6 +104,26 @@ def test_import_and_update_path(tmp_dir):
     )
     assert res.returncode != 0
     assert "already exists" in res.stdout + res.stderr
+    # So does importing over a file nothing records
+    with open("unrecorded.sh", "w") as f:
+        f.write("mine\n")
+    res = subprocess.run(
+        [
+            "calkit",
+            "import",
+            "path",
+            "setups/setup.sh",
+            "unrecorded.sh",
+            "--git-repo",
+            src,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "already exists" in res.stdout + res.stderr
+    with open("unrecorded.sh") as f:
+        assert f.read() == "mine\n"
     # The source moves on, and a local edit is made that must not survive
     with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
         f.write("export FOO=2\n")
@@ -187,7 +194,8 @@ def test_import_and_update_path(tmp_dir):
     )
     assert res.returncode != 0
     assert "not imported from a Git repo" in res.stdout + res.stderr
-    # --kind chooses which list it lands in
+    # --kind chooses which list it lands in, and --overwrite moves an
+    # entry out of whichever list it was in
     subprocess.run(
         [
             "calkit",
@@ -206,24 +214,44 @@ def test_import_and_update_path(tmp_dir):
     assert [e["path"] for e in ck_info["figures"]] == ["figures/f.sh"]
     assert "scripts/setup.sh" in [e["path"] for e in ck_info["misc"]]
     assert "figures/f.sh" not in [e["path"] for e in ck_info["misc"]]
-    # An invalid kind is refused rather than creating a list nothing reads
-    res = subprocess.run(
+    subprocess.run(
         [
             "calkit",
             "import",
             "path",
             "setups/setup.sh",
-            "x.sh",
+            "figures/f.sh",
             "--git-repo",
             src,
             "--kind",
-            "widgets",
+            "misc",
+            "--overwrite",
         ],
-        capture_output=True,
-        text=True,
+        check=True,
     )
-    assert res.returncode != 0
-    assert "Invalid --kind" in res.stdout + res.stderr
+    ck_info = calkit.load_calkit_info()
+    assert "figures" not in ck_info or not ck_info["figures"]
+    assert "figures/f.sh" in [e["path"] for e in ck_info["misc"]]
+    # A kind whose entries can't say where they came from is refused, as
+    # is one that isn't a kind at all
+    for bad_kind in ["tables", "widgets"]:
+        res = subprocess.run(
+            [
+                "calkit",
+                "import",
+                "path",
+                "setups/setup.sh",
+                "x.sh",
+                "--git-repo",
+                src,
+                "--kind",
+                bad_kind,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert res.returncode != 0
+        assert "Invalid --kind" in res.stdout + res.stderr
     # Refreshing something nothing records
     res = subprocess.run(
         ["calkit", "update", "path", "nope.txt"],

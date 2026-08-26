@@ -254,9 +254,9 @@ def import_path(
         typer.Option(
             "--kind",
             help=(
-                "Which list in calkit.yaml to record this in. Defaults to "
-                "'misc', which is where a path that isn't one of the typed "
-                "artifacts belongs."
+                "Which list in calkit.yaml to record this in: 'datasets', "
+                "'figures', 'publications', or 'misc' (default), which is "
+                "where a path that isn't one of the typed artifacts belongs."
             ),
         ),
     ] = "misc",
@@ -277,7 +277,8 @@ def import_path(
             help=(
                 "Branch, tag, or commit to follow, recorded so 'calkit "
                 "update path' knows where to look next time, and overriding "
-                "one read out of the URL. Defaults to the repo's default "
+                "one read out of the URL. Needed for a URL whose branch "
+                "name contains a slash. Defaults to the repo's default "
                 "branch."
             ),
         ),
@@ -294,7 +295,7 @@ def import_path(
         typer.Option(
             "--overwrite",
             "-f",
-            help="Replace an existing entry at this path.",
+            help="Replace an existing file or entry at this path.",
         ),
     ] = False,
     no_commit: Annotated[
@@ -310,13 +311,15 @@ def import_path(
     the entry records the source so it can be refreshed with 'calkit
     update path' and so the file isn't one whose origin nobody knows.
     """
-    from calkit.models.core import MiscArtifact
-    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES
+    from pydantic import TypeAdapter
 
-    if kind not in PROVENANCE_ARTIFACT_TYPES:
+    from calkit.models.core import ImportedFromType
+    from calkit.provenance import IMPORTABLE_ARTIFACT_TYPES
+
+    if kind not in IMPORTABLE_ARTIFACT_TYPES:
         raise_error(
             f"Invalid --kind '{kind}'; expected one of "
-            f"{', '.join(PROVENANCE_ARTIFACT_TYPES)}"
+            f"{', '.join(IMPORTABLE_ARTIFACT_TYPES)}"
         )
     # Where it came from, in the shape the entry records it. 'rev' is
     # filled in from what the fetch actually checked out, so a source
@@ -335,13 +338,18 @@ def import_path(
             "give a destination path"
         )
     ck_info = calkit.load_calkit_info()
-    entries = ck_info.get(kind, [])
-    existing = [e for e in entries if e.get("path") == dest_path]
-    if existing and not overwrite:
+    # Checked across every list and on disk, since either would be
+    # clobbered
+    found = calkit.provenance.find_artifact(ck_info, dest_path)
+    if found is not None and not overwrite:
         raise_error(
-            f"A {kind} entry already exists at '{dest_path}'; pass "
+            f"A {found[0]} entry already exists at '{dest_path}'; pass "
             "--overwrite to replace it, or use 'calkit update path' to "
             "refresh it from where it came from"
+        )
+    if os.path.exists(dest_path) and not overwrite:
+        raise_error(
+            f"'{dest_path}' already exists; pass --overwrite to replace it"
         )
     typer.echo(f"Fetching {calkit.provenance.describe_source(imported_from)}")
     try:
@@ -350,24 +358,22 @@ def import_path(
         )
     except ValueError as e:
         raise_error(str(e))
-    # Built through the model so the source is validated the same way it
-    # would be reading calkit.yaml back: a rev that isn't a commit hash, or
-    # a DOI that isn't one, is caught here rather than on the next load.
-    # MiscArtifact whatever the kind, since every list this can write to
-    # takes the same 'imported_from' forms.
+    # Validated the same way it would be reading calkit.yaml back, so a
+    # rev that isn't a commit hash, or a DOI that isn't one, is caught
+    # here rather than on the next load
     try:
-        artifact = MiscArtifact(
-            path=dest_path,
-            title=title,
-            description=description,
-            imported_from=imported_from,  # type: ignore[arg-type]
-        )
+        source = TypeAdapter(ImportedFromType).validate_python(imported_from)
     except Exception as e:
         raise_error(f"Failed to record where this came from: {e}")
-    entry = artifact.model_dump(exclude_none=True)
-    entries = [e for e in entries if e.get("path") != dest_path]
-    entries.append(entry)
-    ck_info[kind] = entries
+    entry: dict = {"path": dest_path}
+    if title:
+        entry["title"] = title
+    if description:
+        entry["description"] = description
+    entry["imported_from"] = source.model_dump(exclude_none=True)
+    if found is not None:
+        ck_info[found[0]].remove(found[1])
+    ck_info.setdefault(kind, []).append(entry)
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo = calkit.git.get_repo()

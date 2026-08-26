@@ -570,14 +570,13 @@ def check_environment(
                     system_info=system_info,
                     verbose=verbose,
                 )
-                # ``default_setup`` is recorded too, and needs nothing
-                # read from the machine to record it
-                if locks or env.get("default_setup"):
-                    write_system_env_lock(
-                        env_name=env_name,
-                        env=env,
-                        system_info=system_info,
-                    )
+                # Returns None when the env locks nothing, so nothing is
+                # written for an env with nothing to record
+                write_system_env_lock(
+                    env_name=env_name,
+                    env=env,
+                    system_info=system_info,
+                )
             except ValueError as e:
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":

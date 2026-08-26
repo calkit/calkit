@@ -1187,8 +1187,12 @@ def test_system_env_lock(tmp_dir):
     assert setup_fpath == envs.get_env_lock_fpath(
         env=setup_env, env_name="setup"
     )
+    # The shell rides along, since it's part of how the commands ran
     with open(setup_fpath) as f:
-        assert json.load(f) == {"default_setup": ["module load cuda"]}
+        assert json.load(f) == {
+            "default_setup": ["module load cuda"],
+            "shell": "bash",
+        }
     envs.write_system_env_lock(
         env_name="setup",
         env={"kind": "system", "default_setup": ["module load cuda/12"]},
@@ -1202,7 +1206,12 @@ def test_system_env_lock(tmp_dir):
         "default_setup": ["module load cuda"],
     }
     with open(envs.write_system_env_lock(env_name="both", env=both)) as f:
-        assert set(json.load(f)) == {"os", "default_setup"}
+        assert set(json.load(f)) == {"os", "default_setup", "shell"}
+    # A shell named with no defaults is still recorded, for the sake of a
+    # stage's own setup commands, which run in it
+    shell_env = {"kind": "system", "shell": "zsh"}
+    with open(envs.write_system_env_lock(env_name="zsh", env=shell_env)) as f:
+        assert json.load(f) == {"shell": "zsh"}
     # Locking something writes it, and the file is what stages depend on
     env = {"kind": "system", "lock": ["os", "python-version"]}
     lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)

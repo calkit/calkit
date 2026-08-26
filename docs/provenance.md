@@ -90,6 +90,10 @@ calkit import path setups/setup.sh scripts/setup.sh \
   --git-repo https://github.com/myorg/setups.git --git-ref main
 ```
 
+`--git-ref` is also how to name a branch containing a slash, like
+`feature/foo`, since a URL doesn't say where such a branch ends and the
+path begins.
+
 Other addresses work too, and are read as what they are:
 
 | Written as                          | Recorded as                  |

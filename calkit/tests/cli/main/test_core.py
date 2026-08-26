@@ -665,6 +665,17 @@ def test_run_in_env_system(tmp_dir):
     )
     assert res.returncode != 0
     assert "Invalid --env-default-setup" in res.stdout + res.stderr
+    # Setup commands are refused for an env kind that has nowhere to run
+    # them, rather than silently dropped
+    with open("calkit.yaml", "w") as f:
+        f.write("environments:\n  img:\n    kind: docker\n    image: x\n")
+    res = subprocess.run(
+        ["calkit", "xenv", "-n", "img", "--setup", "true", "--", "echo", "hi"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "only apply to a 'system' environment" in res.stdout + res.stderr
     # A failing setup command stops the stage rather than running it
     # without whatever the setup was meant to provide
     with open("calkit.yaml", "w") as f:

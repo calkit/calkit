@@ -2981,7 +2981,6 @@ def run_in_env(
             f"Invalid --env-default-setup value '{env_default_setup}'; "
             f"expected one of {', '.join(valid_modes)}"
         )
-
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
@@ -2999,6 +2998,18 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = envs[env_name]
+    # Only a system env runs setup commands here; a scheduler env's go
+    # through 'calkit scheduler batch', and the other kinds hand the
+    # command to a runtime with no shell of its own to prepare. Refused
+    # rather than dropped, since a stage whose setup silently never ran is
+    # a stage that ran against the wrong toolchain.
+    if (setup_cmds or env_default_setup != "replace") and env.get(
+        "kind"
+    ) != "system":
+        raise_error(
+            "--setup and --env-default-setup only apply to a 'system' "
+            f"environment, and '{env_name}' is of kind '{env.get('kind')}'"
+        )
     image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
@@ -3011,21 +3022,12 @@ def run_in_env(
         """Chain the setup commands before a stage's command.
 
         The setup commands and the stage share one shell, so what the setup
-        exports is what the stage sees. That is the point of them: a site
-        script that puts a hand-built toolchain on the PATH is only useful
-        to the command that follows it.
-
-        The stage's own ``--setup`` commands and the environment's
-        ``default_setup`` are combined the way ``calkit scheduler batch``
-        combines a scheduler env's: ``replace`` falls back to the env's
-        only when the stage named none, ``merge`` runs the env's first, and
-        ``ignore`` leaves them out.
-
-        The chain is wrapped in the environment's shell rather than left to
-        the platform's. ``source`` is a bashism, and sourcing a setup script
-        is the case this exists for, so running the chain in ``/bin/sh``--or
-        in ``sh -c`` on the far end of an SSH connection--would fail on
-        exactly the thing it was added to do.
+        exports is what the stage sees. The stage's own ``--setup`` commands
+        and the environment's ``default_setup`` are combined the way
+        ``calkit scheduler batch`` combines a scheduler env's. The chain
+        runs in the environment's shell (bash by default) rather than the
+        platform's, since ``source`` is a bashism and sourcing a setup
+        script is the case this exists for.
         """
         stage_setup = [c for c in setup_cmds if c.strip()]
         env_setup = [c for c in (env.get("default_setup") or []) if c.strip()]

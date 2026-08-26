@@ -16,6 +16,9 @@ PROVENANCE_ARTIFACT_TYPES = [
     "presentations",
     "misc",
 ]
+# The kinds whose model takes ``imported_from``, so an import can be
+# recorded in them. Tables and presentations don't yet.
+IMPORTABLE_ARTIFACT_TYPES = ["datasets", "figures", "publications", "misc"]
 
 
 def has_provenance(artifact: dict) -> bool:
@@ -33,6 +36,19 @@ def has_provenance(artifact: dict) -> bool:
     )
 
 
+def find_artifact(ck_info: dict, path: str) -> tuple[str, dict] | None:
+    """Find the entry recorded at ``path``, whichever list it's in.
+
+    Returns the list's name and the entry, so the caller can edit it in
+    place.
+    """
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        for entry in ck_info.get(kind, []) or []:
+            if isinstance(entry, dict) and entry.get("path") == path:
+                return kind, entry
+    return None
+
+
 # Hosts whose file URLs name a Git repo, a revision, and a path within it,
 # so a link copied out of the browser can be imported as the Git source it
 # actually is rather than as an HTML page that happens to contain the file.
@@ -42,20 +58,26 @@ _GIT_FORGE_HOSTS = ("github.com", "gitlab.com", "raw.githubusercontent.com")
 _FORGE_REF_MARKERS = ("blob", "raw", "tree", "blame", "src")
 
 
-def _git_source_from_url(url: str) -> dict | None:
+def _git_source_from_url(url: str, ref: str | None = None) -> dict | None:
     """Read a Git repo, revision, and path out of a forge URL.
 
     Returns None for a URL that isn't one, which is then just a URL to
     download. Guessing is confined to hosts whose layout is known: for
     anything else, the bytes at the address are what was asked for.
+
+    A ref can contain slashes, and the URL doesn't say where it ends and
+    the path begins. It's taken to be one segment unless ``ref`` says
+    what it is, in which case the path is whatever follows it.
     """
-    from urllib.parse import urlsplit
+    from urllib.parse import unquote, urlsplit
 
     parts = urlsplit(url)
     host = parts.netloc.lower().removeprefix("www.")
     if host not in _GIT_FORGE_HOSTS:
         return None
-    segments = [s for s in parts.path.split("/") if s]
+    # Decoded, since a browser writes a space as '%20' and the checkout
+    # doesn't
+    segments = [unquote(s) for s in parts.path.split("/") if s]
     # GitLab separates the repo from what you're looking at inside it with
     # '/-/', because its groups nest and there is otherwise no telling
     # where the repo path ends
@@ -73,18 +95,25 @@ def _git_source_from_url(url: str) -> dict | None:
         repo_segments, rest = segments[:2], segments[2:]
     if not rest:
         return None
-    ref: str | None = None
+    url_ref: str | None = None
     if rest[0] in _FORGE_REF_MARKERS and len(rest) >= 3:
-        ref, path_segments = rest[1], rest[2:]
+        url_ref, path_segments = rest[1], rest[2:]
         # GitHub's raw URLs spell a branch as 'refs/heads/<name>'
-        if ref == "refs" and len(path_segments) >= 2:
+        if url_ref == "refs" and len(path_segments) >= 2:
             if path_segments[0] in ("heads", "tags"):
-                ref, path_segments = path_segments[1], path_segments[2:]
+                url_ref, path_segments = path_segments[1], path_segments[2:]
+        ref_segments = ref.split("/") if ref else []
+        if len(ref_segments) > 1 and rest[1 : 1 + len(ref_segments)] == (
+            ref_segments
+        ):
+            path_segments = rest[1 + len(ref_segments) :]
     else:
         # No revision named, e.g. a path written out by hand. The default
         # branch is what gets fetched, and the commit it resolves to is
         # what gets recorded.
         path_segments = rest
+    if ref is None:
+        ref = url_ref
     if not path_segments:
         return None
     scheme = parts.scheme or "https"
@@ -130,10 +159,8 @@ def source_from_location(
         # it the data. 'fetch' says what to use instead.
         return {"doi": stripped}
     if location.startswith(("http://", "https://")):
-        git_source = _git_source_from_url(location)
+        git_source = _git_source_from_url(location, ref=ref)
         if git_source is not None:
-            if ref is not None:
-                git_source["ref"] = ref
             return {"git": git_source}
         return {"url": location}
     segments = location.split("/")
@@ -228,14 +255,16 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
             ]
             try:
                 subprocess.check_call(clone_cmd)
-                if target is not None:
-                    subprocess.check_call(
-                        ["git", "-C", tmp_dir, "checkout", "--quiet", target]
-                    )
-                else:
-                    subprocess.check_call(
-                        ["git", "-C", tmp_dir, "checkout", "--quiet", "HEAD"]
-                    )
+                subprocess.check_call(
+                    [
+                        "git",
+                        "-C",
+                        tmp_dir,
+                        "checkout",
+                        "--quiet",
+                        target or "HEAD",
+                    ]
+                )
                 rev = subprocess.check_output(
                     ["git", "-C", tmp_dir, "rev-parse", "HEAD"], text=True
                 ).strip()
@@ -243,7 +272,12 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
                 raise ValueError(
                     f"Failed to fetch {src_path} from {repo_url}: {e}"
                 )
-            full_src = os.path.join(tmp_dir, src_path)
+            # Resolved, so neither a '..' in the path nor a symlink in the
+            # checkout can reach outside the clone
+            clone_root = os.path.realpath(tmp_dir)
+            full_src = os.path.realpath(os.path.join(clone_root, src_path))
+            if os.path.commonpath([clone_root, full_src]) != clone_root:
+                raise ValueError(f"'{src_path}' points outside of {repo_url}")
             if not os.path.exists(full_src):
                 raise ValueError(
                     f"'{src_path}' does not exist in {repo_url} at "
@@ -267,9 +301,17 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
             resp.raise_for_status()
         except Exception as e:
             raise ValueError(f"Failed to download {url}: {e}")
-        with open(dest_path, "wb") as f:
-            for chunk in resp.iter_content(chunk_size=8192):
-                f.write(chunk)
+        # Written beside the destination and moved over it once complete,
+        # so a download that dies partway leaves the old file intact
+        part_path = dest_path + ".part"
+        try:
+            with open(part_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    f.write(chunk)
+            os.replace(part_path, dest_path)
+        finally:
+            if os.path.exists(part_path):
+                os.remove(part_path)
         return imported_from
     if (project := imported_from.get("project")) is not None:
         import base64

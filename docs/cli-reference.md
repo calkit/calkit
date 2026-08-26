@@ -1031,7 +1031,7 @@ Options:
 | `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                              |
 | `--gpus`            | text    | no       |         |                                                                                                                             |
 | `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                    |
-| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                 |
+| `--input`, `--dep`  | text    | no       |         | Path to a file that gets added to the container, so editing it rebuilds the image.                                          |
 | `--wdir`            | text    | no       | /work   | Working directory.                                                                                                          |
 | `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint. |
 | `--user`            | text    | no       |         | User account to use to run the container.                                                                                   |
@@ -2305,15 +2305,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                                                                      |
-| ------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--kind`            | text    | no       | misc    | Which list in calkit.yaml to record this in. Defaults to 'misc', which is where a path that isn't one of the typed artifacts belongs.                                            |
-| `--git-repo`        | text    | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                           |
-| `--git-ref`         | text    | no       |         | Branch, tag, or commit to follow, recorded so 'calkit update path' knows where to look next time, and overriding one read out of the URL. Defaults to the repo's default branch. |
-| `--title`           | text    | no       |         | Title for the entry.                                                                                                                                                             |
-| `--description`     | text    | no       |         | Description for the entry.                                                                                                                                                       |
-| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing entry at this path.                                                                                                                                          |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                   |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                           |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind`            | text    | no       | misc    | Which list in calkit.yaml to record this in: 'datasets', 'figures', 'publications', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                         |
+| `--git-repo`        | text    | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                |
+| `--git-ref`         | text    | no       |         | Branch, tag, or commit to follow, recorded so 'calkit update path' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the repo's default branch. |
+| `--title`           | text    | no       |         | Title for the entry.                                                                                                                                                                                                                  |
+| `--description`     | text    | no       |         | Description for the entry.                                                                                                                                                                                                            |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                       |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                        |
 
 <a id="subcommand-import-environment"></a>
 

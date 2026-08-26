@@ -785,18 +785,7 @@ def test_sbatch_stage_to_dvc(tmp_dir):
 
 
 def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
-    """Cover stage-level ``setup`` and its legacy scheduler spelling.
-
-    Scenarios in one test (per AGENTS.md guidance):
-    - a system-env stage compiles its setup onto the 'calkit xenv' call,
-      while the env's own default_setup stays out of the compiled cmd,
-    - a non-default 'env_default_setup' is emitted, a default one isn't,
-    - the legacy 'scheduler.setup' spelling still reaches the compiled cmd,
-      for schedulers and system envs alike,
-    - writing it in both places is refused rather than silently picking,
-    - a stage whose env has no setup step is refused rather than having
-      its setup commands quietly dropped.
-    """
+    # Covers stage-level 'setup' and its legacy spelling under 'scheduler'
     envs = {
         "gpu": {
             "kind": "system",
@@ -948,20 +937,8 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
 
 
 def test_env_inputs_become_stage_inputs(tmp_dir):
-    """Cover env-level ``inputs`` on the kinds that run setup commands.
-
-    Scenarios in one test (per AGENTS.md guidance):
-    - a system env's inputs reach every stage using it, and only those,
-    - they arrive alongside the env's lock file rather than instead of it,
-    - a system env with inputs but nothing else to lock still contributes
-      them, since it has no lock file to carry them,
-    - 'deps' is accepted as an alias, since extra keys on an environment
-      are ignored and the familiar name would otherwise go silently
-      nowhere,
-    - a scheduler env's inputs reach its stages too,
-    - a Docker env's deps are left alone, being files copied into the
-      image and already covered by the md5s in its lock.
-    """
+    # Covers env-level 'inputs' on the kinds that run setup commands, and
+    # the 'deps' alias
     envs = {
         "gpu": {
             "kind": "system",

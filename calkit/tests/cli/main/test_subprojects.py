@@ -4,6 +4,7 @@ import os
 import subprocess
 
 import calkit
+import calkit.dvc
 import calkit.pipeline
 
 
@@ -373,6 +374,102 @@ def test_isolated_subproject_external_dep(tmp_dir):
         check_environments=False, compile_to_dvc=False
     )
     assert not status.is_stale
+
+
+def test_isolated_subproject_dir_dep(tmp_dir):
+    # A parent stage depending on a *directory* inside an isolated
+    # subproject: DVC prunes nested repos when walking, so without calkit's
+    # workaround the directory hashes as empty on status (but not always on
+    # repro), leaving the stage forever stale and blind to subproject changes.
+    def write_sub(b_content):
+        write_ck_info(
+            "sub/calkit.yaml",
+            {
+                "pipeline": {
+                    "stages": {
+                        "make-figs": make_stage(
+                            "mkdir -p figs && echo a > figs/a.txt && "
+                            f"echo {b_content} > figs/b.txt",
+                            outputs=[
+                                {"path": "figs/a.txt", "storage": "git"},
+                                {"path": "figs/b.txt", "storage": "git"},
+                            ],
+                        )
+                    }
+                }
+            },
+        )
+        calkit.pipeline.to_dvc(wdir="sub", write=True, manage_gitignore=False)
+
+    subprocess.check_call(["calkit", "init"])
+    init_isolated_subproject("sub", {})
+    write_sub("b")
+    write_ck_info(
+        "calkit.yaml",
+        {
+            "subprojects": [{"path": "sub"}],
+            "pipeline": {
+                "stages": {
+                    "consume": make_stage(
+                        "cat sub/figs/* > parent.txt",
+                        inputs=["sub/figs/"],
+                        outputs=[{"path": "parent.txt", "storage": "git"}],
+                    )
+                }
+            },
+        },
+    )
+    subprocess.check_call(["calkit", "run"])
+    with open("parent.txt") as f:
+        assert f.read() == "a\nb\n"
+    # The lock must record the directory's real contents, not an empty dir
+    with open("dvc.lock") as f:
+        lock = calkit.ryaml.load(f)
+    figs_dep = [
+        d
+        for d in lock["stages"]["consume"]["deps"]
+        if d["path"] == "sub/figs/"
+    ][0]
+    assert figs_dep["nfiles"] == 2
+    # And status must agree with the lock
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False
+    )
+    assert not status.is_stale
+    # Hashing must not depend on whether the index walk (which registers the
+    # subrepo in DVC's ignore trie) ran first
+    repo = calkit.dvc.get_dvc_repo()
+    list(repo.index.stages)
+    found = sorted(
+        os.path.relpath(p)
+        for p in repo.dvcignore.find(repo.fs, os.path.abspath("sub/figs"))
+    )
+    assert found == [
+        os.path.join("sub", "figs", "a.txt"),
+        os.path.join("sub", "figs", "b.txt"),
+    ]
+    # The index walk still keeps the subproject's own pipeline out of the
+    # parent's index
+    assert {s.addressing for s in repo.index.stages} == {"sub", "consume"}
+    # A change inside the subproject propagates to the parent stage
+    write_sub("c")
+    subprocess.check_call(["calkit", "run"])
+    with open("parent.txt") as f:
+        assert f.read() == "a\nc\n"
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False
+    )
+    assert not status.is_stale
+    # Editing a file in the directory makes the parent stage stale
+    with open("sub/figs/a.txt", "w") as f:
+        f.write("z\n")
+    status = calkit.pipeline.get_status(
+        check_environments=False, compile_to_dvc=False
+    )
+    assert status.is_stale
+    assert [
+        p.rstrip("/") for p in status.stale_stages["consume"].modified_inputs
+    ] == ["sub/figs"]
 
 
 def test_targeted_status_uses_full_subproject_status_for_stage_targets(

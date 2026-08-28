@@ -420,8 +420,9 @@ def test_isolated_subproject_dir_dep(tmp_dir):
         },
     )
     subprocess.check_call(["calkit", "run"])
+    # Windows' echo leaves trailing spaces, so compare tokens
     with open("parent.txt") as f:
-        assert f.read() == "a\nb\n"
+        assert f.read().split() == ["a", "b"]
     # The lock must record the directory's real contents, not an empty dir
     with open("dvc.lock") as f:
         lock = calkit.ryaml.load(f)
@@ -455,7 +456,7 @@ def test_isolated_subproject_dir_dep(tmp_dir):
     write_sub("c")
     subprocess.check_call(["calkit", "run"])
     with open("parent.txt") as f:
-        assert f.read() == "a\nc\n"
+        assert f.read().split() == ["a", "c"]
     status = calkit.pipeline.get_status(
         check_environments=False, compile_to_dvc=False
     )

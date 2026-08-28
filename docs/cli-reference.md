@@ -186,16 +186,24 @@ Commit a change to the repo.
 Usage:
 
 ```text
-calkit commit [OPTIONS]
+calkit commit [OPTIONS] [PATHS...]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                          |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to commit. If not provided, will default to any changed files that have been added previously. |
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------ |
-| `--all`, `-a`     | boolean | no       | False   | Automatically stage all changed files.     |
-| `--message`, `-m` | text    | no       |         | Commit message.                            |
-| `--push`          | boolean | no       | False   | Push to both Git and DVC after committing. |
+| Option                        | Type    | Required | Default | Description                                |
+| ----------------------------- | ------- | -------- | ------- | ------------------------------------------ |
+| `--all`, `-a`                 | boolean | no       | False   | Automatically stage all changed files.     |
+| `--message`, `-m`             | text    | no       |         | Commit message.                            |
+| `--auto-commit-message`, `-M` | boolean | no       | False   | Automatically generate a commit message.   |
+| `--push`                      | boolean | no       | False   | Push to both Git and DVC after committing. |
+| `--verbose`                   | boolean | no       | False   | Print verbose output.                      |
 
 <a id="top-command-save-sv"></a>
 

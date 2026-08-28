@@ -2505,3 +2505,15 @@ def test_project_dir_option(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist" in result.stderr
+
+
+def test_commit(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("test")
+    Path("test/yo.txt").touch()
+    Path("test/sup.txt").touch()
+    Path("hey.txt").touch()
+    subprocess.check_call(["calkit", "add", "hey.txt"])
+    subprocess.check_call(["calkit", "add", "test/sup.txt"])
+    subprocess.check_call(["calkit", "commit", "hey.txt", "-M"])
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]

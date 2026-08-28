@@ -1151,9 +1151,25 @@ def add(
             typer.echo("Would push to Git and DVC after committing")
 
 
+def _make_commit_message(paths: list[str] | None = None) -> str:
+    """Automatically generate commit message for the specified paths.
+
+    If no paths are provided, use the staged paths.
+    """
+
+
 @app.command(name="commit")
 def commit(
-    all: Annotated[
+    paths: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help=(
+                "Paths to commit. If not provided, will default to "
+                "any changed files that have been added previously."
+            ),
+        ),
+    ] = None,
+    all_changed: Annotated[
         Optional[bool],
         typer.Option(
             "--all", "-a", help="Automatically stage all changed files."
@@ -1162,26 +1178,82 @@ def commit(
     message: Annotated[
         Optional[str], typer.Option("--message", "-m", help="Commit message.")
     ] = None,
+    auto_commit_message: Annotated[
+        bool,
+        typer.Option(
+            "--auto-commit-message",
+            "-M",
+            help="Automatically generate a commit message.",
+        ),
+    ] = False,
     push_commit: Annotated[
         bool,
         typer.Option(
             "--push", help="Push to both Git and DVC after committing."
         ),
     ] = False,
-):
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="Print verbose output.")
+    ] = False,
+) -> bool:
     """Commit a change to the repo."""
+    import git
+
+    repo = git.Repo()
+    if all_changed:
+        repo.git.add(["-u"])
+    # Detect paths if not provided
+    staged_files_status = calkit.git.get_staged_files_with_status()
+    if paths is None:
+        paths = [f["path"] for f in staged_files_status]
+    if auto_commit_message and message is None:
+        if verbose:
+            typer.echo(f"Generating commit message for: {paths}")
+        if not paths:
+            typer.echo("No changes to commit; exiting")
+            raise typer.Exit(0)
+        if len(paths) != 1:
+            raise_error(
+                "Automatic commit messages can only be generated when "
+                f"changing one file (changed: {paths})"
+            )
+        dvc_paths = calkit.dvc.list_paths()
+        # See if this path is in the repo already
+        # Note that if paths[0] is a directory, staged paths could be longer
+        # than one item, so we need to check if any exist
+        message = f"Add {paths[0]}"
+        for staged_file_status in staged_files_status:
+            if (
+                staged_file_status["path"] in dvc_paths
+                or staged_file_status["status"] == "M"
+            ):
+                message = f"Update {paths[0]}"
+                break
     if message is None:
+        typer.echo("No message provided; entering interactive mode")
+        typer.echo("Creating a commit including the following paths:")
+        for path in calkit.git.get_staged_files():
+            typer.echo(f"- {path}")
         typer.echo("Please provide a message describing the changes.")
-        typer.echo("Example: Update y-label in scripts/plot-data.py")
+        typer.echo("Example: Add new data to data/raw")
         message = typer.prompt("Message")
-    cmd = ["git", "commit"]
-    if all:
-        cmd.append("-a")
-    if message:
-        cmd += ["-m", message]
-    subprocess.call(cmd)
+    # Figure out if we have any DVC files in this commit, and if not, we can
+    # skip pushing to DVC
+    staged_files = calkit.git.get_staged_files()
+    if not staged_files:
+        typer.echo("No changes to commit; exiting")
+        return False
+    any_dvc = any(
+        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
+    )
+    cmd = []
+    if paths is not None:
+        cmd += paths
+    cmd += ["-m", message]
+    repo.git.commit(cmd)
     if push_commit:
         push()
+    return any_dvc
 
 
 @app.command(name="save|sv")
@@ -1263,46 +1335,12 @@ def save(
         add(paths, to=to)
     elif save_all:
         add(paths=["."], to=to)
-    if auto_commit_message and message is None:
-        staged_files = calkit.git.get_staged_files_with_status()
-        if verbose:
-            typer.echo(
-                f"Generating commit message for staged files: {staged_files}"
-            )
-        if not staged_files:
-            typer.echo("No changes to commit; exiting")
-            raise typer.Exit(0)
-        if len(staged_files) != 1:
-            raise_error(
-                "Automatic commit messages can only be generated when "
-                f"changing one file (changed: {staged_files})"
-            )
-        dvc_paths = calkit.dvc.list_paths()
-        # See if this path is in the repo already
-        staged_file = staged_files[0]["path"]
-        status = staged_files[0]["status"]
-        if staged_file in dvc_paths or status == "M":
-            message = f"Update {staged_file}"
-        else:
-            message = f"Add {staged_file}"
-    if message is None:
-        typer.echo("No message provided; entering interactive mode")
-        typer.echo("Creating a commit including the following paths:")
-        for path in calkit.git.get_staged_files():
-            typer.echo(f"- {path}")
-        typer.echo("Please provide a message describing the changes.")
-        typer.echo("Example: Add new data to data/raw")
-        message = typer.prompt("Message")
-    # Figure out if we have any DVC files in this commit, and if not, we can
-    # skip pushing to DVC
-    staged_files = calkit.git.get_staged_files()
-    if not staged_files:
-        typer.echo("No changes to commit; exiting")
-        return
-    any_dvc = any(
-        [path == "dvc.lock" or path.endswith(".dvc") for path in staged_files]
+    any_dvc = commit(
+        paths=paths,
+        all_changed=True if paths is None else False,
+        message=message,
+        auto_commit_message=auto_commit_message,
     )
-    commit(all=True if paths is None else False, message=message)
     if not no_push:
         if verbose and not any_dvc:
             typer.echo("Not pushing to DVC since no DVC files were staged")

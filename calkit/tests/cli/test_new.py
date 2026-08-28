@@ -1143,6 +1143,14 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json(
         {"id": record_id, "pids": {"doi": {"identifier": doi}}}
     )
+    # POST /records/{id}/versions – create a new version of a record, and
+    # PUT /records/{id}/draft – set that new version's metadata
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/versions$"), method="POST"
+    ).respond_with_json({"id": record_id, "pids": {}})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/draft$"), method="PUT"
+    ).respond_with_json({"id": record_id, "pids": {}})
     # GET /records/{id} – fetch the published record for post-test assertions
     httpserver.expect_request(
         re.compile(rf"^/records/{record_id}$"), method="GET"
@@ -1267,7 +1275,6 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     git_tags = git.Repo().tags
     assert "v0.1.0" in [tag.name for tag in git_tags]
     # Check the license is correct
-    # TODO: It seems like we can't use multiple license IDs with the API
     record_id = release["record_id"]
     record = calkit.invenio.get(f"/records/{record_id}")
     metadata = record["metadata"]
@@ -1275,6 +1282,37 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert metadata["license"] == {"id": "cc-by-4.0"}
     related = metadata["related_identifiers"]
     assert related[0]["identifier"] == "https://github.com/calkit/test-project"
+
+    # Both licenses detected from the LICENSE file should have been sent as
+    # separate rights entries, not collapsed into one
+    def get_rights_sent() -> list[dict[str, str]] | None:
+        rights = None
+        for request, _ in httpserver.log:
+            body = request.get_json(silent=True)
+            if isinstance(body, dict) and "metadata" in body:
+                rights = body["metadata"]["rights"]
+        return rights
+
+    assert get_rights_sent() == [{"id": "mit"}, {"id": "cc-by-4.0"}]
+    # Issue #1582: SPDX IDs are case-insensitive, but the InvenioRDM license
+    # vocabulary rejects anything but the lowercase form, so they should be
+    # normalized before being sent
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.2.0",
+            "--license",
+            "MIT",
+            "--license",
+            "CC-BY-4.0",
+            "--draft",
+            "--no-github",
+        ]
+    )
+    assert get_rights_sent() == [{"id": "mit"}, {"id": "cc-by-4.0"}]
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(

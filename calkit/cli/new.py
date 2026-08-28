@@ -3710,6 +3710,9 @@ def new_release(
             f"'{project_name}'."
         )
         record_id = None
+        # SPDX IDs are case-insensitive, but the InvenioRDM license vocabulary
+        # used by Zenodo and CaltechDATA only accepts them lowercased
+        license_ids = [lid.strip().lower() for lid in license_ids]
         # Detect project license IDs if necessary
         if not license_ids:
             license_file = calkit.licenses.find_license_file()
@@ -3756,7 +3759,7 @@ def new_release(
             publication_date=release_date,
             version=name,
             publisher=publisher_name,
-            rights=[{"id": lid for lid in license_ids}],
+            rights=[{"id": lid} for lid in license_ids],
         )
         # Add related identifiers
         github_url = calkit.detect_project_github_url()

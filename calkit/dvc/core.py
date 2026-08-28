@@ -98,6 +98,60 @@ if sys.platform == "win32":
     _tolerate_lock_release_failures()
 
 
+def _hash_dirs_inside_nested_repos() -> None:
+    """Make DVC hash directories that live inside nested DVC repos.
+
+    DVC's ``DvcIgnoreFilter`` prunes nested DVC repos (e.g. isolated
+    subprojects) when walking, so the parent never indexes a subproject's
+    ``dvc.yaml`` and ``.dvc`` files as its own. The same walk hashes directory
+    deps and outs, though, and the subrepo check is order-dependent:
+    ``_get_trie_pattern`` hands the starting directory's ``dnames`` to every
+    ancestor it visits, so a walk that starts inside the nested repo never
+    registers it, while the root-level index walk does. Whichever touches the
+    ignore trie first wins for the rest of the process. In practice a parent
+    stage depending on a directory inside an isolated subproject hashes it as
+    *empty* on ``status`` but not always on ``repro``, so ``dvc.lock`` and
+    ``dvc status`` disagree and the stage is forever stale (or, worse, changes
+    in the subproject go unnoticed).
+
+    A walk that starts at or below a nested repo can only be a caller hashing
+    that path (the index walk always starts at the repo root), and the caller
+    named the path deliberately, so its contents must be hashed. Such walks
+    are routed through DVC's ``ignore_subrepos=False`` trie, which is built
+    separately, is deterministic, and still honors every ``.dvcignore`` on
+    the way down, including the nested repo's own.
+    """
+    from dvc.ignore import DvcIgnoreFilter
+    from dvc.repo import Repo
+
+    original_walk = DvcIgnoreFilter.walk
+
+    def in_nested_repo(dvcignore: Any, path: str) -> bool:
+        fs = dvcignore.fs
+        root_dir = dvcignore.root_dir
+        current = fs.abspath(path)
+        if not fs.isin(current, root_dir):
+            return False
+        while current != root_dir:
+            if fs.exists(fs.join(current, Repo.DVC_DIR)):
+                return True
+            parent = fs.parent(current)
+            if parent == current:
+                return False
+            current = parent
+        return False
+
+    def walk(self: Any, fs: Any, path: str, **kwargs: Any) -> Any:
+        if "ignore_subrepos" not in kwargs and in_nested_repo(self, path):
+            kwargs["ignore_subrepos"] = False
+        return original_walk(self, fs, path, **kwargs)
+
+    DvcIgnoreFilter.walk = walk
+
+
+_hash_dirs_inside_nested_repos()
+
+
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
 #
 # DVC's own default is only 3 seconds (``dvc.lock.DEFAULT_TIMEOUT``), after

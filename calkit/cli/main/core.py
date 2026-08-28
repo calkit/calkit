@@ -1151,13 +1151,6 @@ def add(
             typer.echo("Would push to Git and DVC after committing")
 
 
-def _make_commit_message(paths: list[str] | None = None) -> str:
-    """Automatically generate commit message for the specified paths.
-
-    If no paths are provided, use the staged paths.
-    """
-
-
 @app.command(name="commit")
 def commit(
     paths: Annotated[

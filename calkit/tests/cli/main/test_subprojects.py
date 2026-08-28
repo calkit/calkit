@@ -382,13 +382,16 @@ def test_isolated_subproject_dir_dep(tmp_dir):
     # workaround the directory hashes as empty on status (but not always on
     # repro), leaving the stage forever stale and blind to subproject changes.
     def write_sub(b_content):
+        # Create the output directory here, since mkdir -p doesn't work in
+        # cmd.exe on Windows
+        os.makedirs("sub/figs", exist_ok=True)
         write_ck_info(
             "sub/calkit.yaml",
             {
                 "pipeline": {
                     "stages": {
                         "make-figs": make_stage(
-                            "mkdir -p figs && echo a > figs/a.txt && "
+                            "echo a > figs/a.txt && "
                             f"echo {b_content} > figs/b.txt",
                             outputs=[
                                 {"path": "figs/a.txt", "storage": "git"},

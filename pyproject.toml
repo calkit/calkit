@@ -106,7 +106,7 @@ ck = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"
-calk9 = "calkit.cli:run"
+ck9 = "calkit.cli:run"
 ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]

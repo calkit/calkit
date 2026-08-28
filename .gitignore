@@ -17,7 +17,7 @@ node_modules
 calkit/labextension
 coverage
 junit.xml
-calk9
+ck9
 dist
 *.vsix
 vscode-ext/out

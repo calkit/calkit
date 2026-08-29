@@ -4,37 +4,19 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 
 import pytest
 
+import calkit
 from calkit.questions import (
     check_questions,
     format_status,
-    record_evidence_values,
+    placeholders,
+    render,
+    render_question,
     resolve_key,
-    values_match,
 )
-
-
-def test_values_match():
-    # Floating-point noise is ignored, visible changes are not
-    assert values_match(0.0125171247158, 0.01251712471587, None)
-    assert not values_match(8, 0, None)
-    assert not values_match(1.0, 1.001, None)
-    assert values_match(1.0, 1.001, tolerance=0.01)
-    assert values_match(0.0, 0.0, None)
-    assert not values_match(0.0, 1e-9, None)
-    # Booleans are exact and never equal to their integer twins
-    assert values_match(True, True, None)
-    assert not values_match(True, 1, None)
-    # Containers compare element-wise under the same rule
-    assert values_match([1.0, "a"], [1.0000000001, "a"], None)
-    assert not values_match(["a", "b"], ["a"], None)
-    assert values_match({"x": 2.0}, {"x": 2.0}, None)
-    assert not values_match({"x": 2.0}, {"y": 2.0}, None)
-    assert values_match(float("nan"), float("nan"), None)
-    assert values_match("clip-k-omega-gamma", "clip-k-omega-gamma", None)
-    assert not values_match("a", "b", None)
 
 
 def test_resolve_key():
@@ -50,15 +32,70 @@ def test_resolve_key():
         resolve_key(data, "a.list.x")
 
 
-def test_check_and_record(tmp_dir):
+def test_render():
+    values = {"ratio": 5.1014, "n": 8, "best": "clip", "a.b": 2.0}
+    assert render("about {ratio:.1f}x", values) == "about 5.1x"
+    assert render("{n} of {n}", values) == "8 of 8"
+    # Dotted names are names, not attribute access; braces can be escaped
+    assert render("{a.b:.0f}", values) == "2"
+    assert render("literal {{x}}", values) == "literal {x}"
+    assert render(None, values) is None
+    assert render("no placeholders", values) == "no placeholders"
+    assert placeholders("{ratio:.1f} and {best} but {{not}}") == [
+        "ratio",
+        "best",
+    ]
+    with pytest.raises(KeyError):
+        render("{missing}", values)
+    with pytest.raises(ValueError):
+        render("{best:.2f}", values)
+
+
+def _commit(msg: str) -> str:
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(
+        ["git", "commit", "-q", "-m", msg],
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@t",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@t",
+        },
+    )
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], text=True
+    ).strip()
+
+
+def _write_yaml(ck_info: dict) -> None:
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+
+
+def test_check_questions(tmp_dir):
+    subprocess.check_call(["git", "init", "-q"])
     os.makedirs("results")
     os.makedirs("paper")
+    os.makedirs("figures")
     with open("results/findings.json", "w") as f:
-        json.dump({"n_top": 8, "score": 0.5, "nested": {"best": "a"}}, f)
+        json.dump({"n_top": 8, "ratio": 5.1014, "nested": {"best": "a"}}, f)
     with open("paper/main.tex", "w") as f:
         f.write("\\section{Results}\\label{sec:results}\n")
     with open("paper/main.pdf", "w") as f:
         f.write("pdf")
+    with open("figures/plot.png", "w") as f:
+        f.write("png")
+    # A DVC-tracked output known only through dvc.lock
+    with open("dvc.lock", "w") as f:
+        f.write(
+            "stages:\n  fit:\n    outs:\n    - path: results/big.h5\n"
+            "      md5: aaa\n"
+        )
+    with open("results/big.h5", "w") as f:
+        f.write("h5")
+    with open(".gitignore", "w") as f:
+        f.write("results/big.h5\n")
     ck_info = {
         "pipeline": {
             "stages": {
@@ -78,25 +115,28 @@ def test_check_and_record(tmp_dir):
         },
         "questions": [
             "Is this a plain question?",
-            {
-                "question": "Unanswered?",
-                "hypothesis": "Maybe.",
-                "notes": "Needs a second dataset.",
-            },
+            {"question": "Unanswered?", "notes": "Needs a second dataset."},
             {"question": "Answered without evidence?", "answer": "Yes."},
             {
                 "question": "Do the top structures use the rectifier?",
-                "answer": "All eight do.",
+                "answer": "{n_top} of eight do, a {ratio:.1f}x gain.",
                 "evidence": [
                     {
-                        "kind": "result",
+                        "kind": "value",
                         "path": "results/findings.json",
                         "key": "n_top",
                     },
                     {
-                        "kind": "result",
+                        "kind": "value",
+                        "path": "results/findings.json",
+                        "key": "ratio",
+                    },
+                    {
+                        "kind": "value",
                         "path": "results/findings.json",
                         "key": "nested.best",
+                        "name": "best",
+                        "explanation": "The best is {best}.",
                     },
                     {
                         "kind": "publication",
@@ -104,82 +144,129 @@ def test_check_and_record(tmp_dir):
                         "section": "3",
                         "label": "sec:results",
                     },
-                    {"kind": "figure", "path": "figures/missing.png"},
+                    {"kind": "figure", "path": "figures/plot.png"},
+                    {"kind": "result", "path": "results/big.h5"},
                 ],
             },
         ],
     }
-    # Before anything is recorded: the figure is missing, so the question is
-    # in error; the keyed results are unrecorded; the label is found
+    _write_yaml(ck_info)
+    # Uncommitted: nothing to compare history against, but templates and
+    # references are checked, and the text renders
     status = check_questions(ck_info=ck_info, wdir=".")
     assert [q.status for q in status.questions] == [
         "unanswered",
         "unanswered",
         "no-evidence",
-        "error",
+        "ok",
     ]
     q4 = status.questions[3]
-    assert q4.evidence[0].status == "unrecorded"
+    assert q4.commit is None
+    assert "not yet committed" in (q4.message or "")
     assert q4.evidence[0].current == 8
     assert q4.evidence[0].stage == "summarize"
-    assert q4.evidence[2].status == "ok"
-    assert q4.evidence[3].status == "missing"
-    assert not status.ok
-    # Fix the missing figure and record the values for question 4 only
-    os.makedirs("figures")
-    with open("figures/missing.png", "w") as f:
-        f.write("png")
-    changed = record_evidence_values(ck_info, wdir=".", indices=[4])
-    assert [(n, k, new) for n, k, _, new in changed] == [
-        (4, "n_top", 8),
-        (4, "nested.best", "a"),
-    ]
-    assert ck_info["questions"][3]["evidence"][0]["value"] == 8
+    assert q4.evidence[3].status == "ok"
+    rendered = render_question(ck_info["questions"][3], ck_info, ".")
+    assert rendered["answer"] == "8 of eight do, a 5.1x gain."
+    assert rendered["evidence"][2]["explanation"] == "The best is a."
+    assert render_question("plain", ck_info, ".") == "plain"
+    # Committed: the question dates from this commit and nothing has changed
+    sha1 = _commit("Answer the question")
     status = check_questions(ck_info=ck_info, wdir=".")
     assert status.questions[3].status == "ok"
+    assert status.questions[3].commit == sha1
     assert status.ok
-    # Recording again changes nothing
-    assert record_evidence_values(ck_info, wdir=".") == []
-    # The pipeline produces a different number: the answer is stale, and the
-    # report says what moved. A tolerance on the entry can absorb it
+    # The pipeline changes a Git-tracked result in a later commit: stale,
+    # and the rendered text already shows the new number
     with open("results/findings.json", "w") as f:
-        json.dump({"n_top": 0, "score": 0.5, "nested": {"best": "a"}}, f)
+        json.dump({"n_top": 0, "ratio": 5.1014, "nested": {"best": "a"}}, f)
+    _commit("Re-run the pipeline")
     status = check_questions(ck_info=ck_info, wdir=".")
-    assert status.questions[3].status == "stale"
-    ev = status.questions[3].evidence[0]
-    assert ev.status == "stale"
-    assert ev.recorded == 8 and ev.current == 0
-    assert "changed from 8 to 0" in (ev.message or "")
+    q4 = status.questions[3]
+    assert q4.status == "stale"
+    assert q4.commit == sha1
+    assert q4.evidence[0].status == "changed"
+    assert "1 commit(s) since" in (q4.evidence[0].message or "")
+    assert q4.evidence[4].status == "ok"
+    assert not status.ok
     report = format_status(status)
     assert "[stale] Do the top structures use the rectifier?" in report
+    assert "set 'reviewed'" in report
     assert "1 stale" in report
     assert "1 answered without evidence" in report
     assert "2 unanswered" in report
-    assert not status.ok
-    # Re-recording accepts the new value; force re-records matching ones
-    changed = record_evidence_values(ck_info, wdir=".", indices=[4])
-    assert [(k, old, new) for _, k, old, new in changed] == [("n_top", 8, 0)]
+    assert (
+        render_question(ck_info["questions"][3], ck_info, ".")["answer"]
+        == "0 of eight do, a 5.1x gain."
+    )
+    # Reading it again and setting reviewed is an edit, which marks it
+    # current once committed; before the commit it is simply uncommitted
+    ck_info["questions"][3]["reviewed"] = "2026-08-29"
+    _write_yaml(ck_info)
+    ck_info = calkit.load_calkit_info()
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "ok"
+    assert status.questions[3].commit is None
+    sha3 = _commit("Review the answer")
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "ok"
+    assert status.questions[3].commit == sha3
+    # An uncommitted modification to Git-tracked evidence counts too
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 1, "ratio": 5.1014, "nested": {"best": "a"}}, f)
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "stale"
+    assert "working tree" in (status.questions[3].evidence[0].message or "")
+    _commit("Change it again")
+    ck_info["questions"][3]["reviewed"] = "2026-08-30"
+    _write_yaml(ck_info)
+    ck_info = calkit.load_calkit_info()
+    _commit("Review again")
     assert check_questions(ck_info=ck_info, wdir=".").ok
-    changed = record_evidence_values(ck_info, wdir=".", force=True)
-    assert len(changed) == 2
-    # A label that disappears from the source is an error, a bad key too
+    # A DVC-tracked output changes: seen through its hash in dvc.lock
+    with open("dvc.lock", "w") as f:
+        f.write(
+            "stages:\n  fit:\n    outs:\n    - path: results/big.h5\n"
+            "      md5: bbb\n"
+        )
+    _commit("Re-run fit")
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "stale"
+    assert "dvc.lock" in (status.questions[3].evidence[5].message or "")
+    # Broken references and templates are errors, not staleness
+    ck_info["questions"][3]["reviewed"] = "2026-08-31"
+    _write_yaml(ck_info)
+    ck_info = calkit.load_calkit_info()
+    _commit("Review once more")
+    assert check_questions(ck_info=ck_info, wdir=".").ok
+    ck_info["questions"][3]["answer"] = "{nope} of eight"
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "error"
+    assert "{nope} names no evidence" in (status.questions[3].message or "")
+    ck_info["questions"][3]["answer"] = "{best:.2f}"
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert "cannot render" in (status.questions[3].message or "")
+    ck_info["questions"][3]["answer"] = "fine"
+    ck_info["questions"][3]["evidence"][1]["key"] = "nope"
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].evidence[1].status == "error"
+    ck_info["questions"][3]["evidence"][1]["key"] = "ratio"
+    ck_info["questions"][3]["evidence"][2]["name"] = "n_top"
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert "duplicate evidence name" in (status.questions[3].message or "")
+    ck_info["questions"][3]["evidence"][2]["name"] = "best"
     with open("paper/main.tex", "w") as f:
         f.write("\\section{Results}\\label{sec:conclusions}\n")
     status = check_questions(ck_info=ck_info, wdir=".")
     assert status.questions[3].status == "error"
-    assert "not found" in (status.questions[3].evidence[2].message or "")
-    ck_info["questions"][3]["evidence"][1]["key"] = "nested.nope"
-    status = check_questions(ck_info=ck_info, wdir=".")
-    assert status.questions[3].evidence[1].status == "error"
-    # A publication with no LaTeX stage is skipped, not failed
+    assert "not found" in (status.questions[3].evidence[3].message or "")
+    # A publication with no LaTeX stage is skipped, and a result with a key
+    # still works but is told to become a value
     ck_info["pipeline"]["stages"].pop("build-paper")
-    ck_info["questions"][3]["evidence"][1]["key"] = "nested.best"
-    with open("paper/main.tex", "w") as f:
-        f.write("\\section{Results}\\label{sec:results}\n")
+    ck_info["questions"][3]["evidence"][0]["kind"] = "result"
     status = check_questions(ck_info=ck_info, wdir=".")
-    assert status.questions[3].evidence[2].status == "skipped"
-    assert status.questions[3].status == "ok"
-    # Verbose output lists everything
+    assert status.questions[3].evidence[3].status == "skipped"
+    assert "use kind: value" in (status.questions[3].evidence[0].message or "")
     assert "publication paper/main.pdf [skipped]" in format_status(
         status, verbose=True
     )

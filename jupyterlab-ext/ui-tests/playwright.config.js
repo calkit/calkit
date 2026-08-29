@@ -5,9 +5,11 @@ const baseConfig = require("@jupyterlab/galata/lib/playwright-config");
 
 module.exports = {
   ...baseConfig,
-  // These drive a real kernel and install real packages, so give a run that
-  // trips over the machine underneath it one more chance before failing CI
-  retries: process.env.CI ? 1 : 0,
+  // No retries: the test builds a Calkit project in the server's root
+  // directory, and the server outlives a retry, so a second attempt starts
+  // against a project that already has the environment and stage it means to
+  // create and fails on that instead of on whatever went wrong
+  retries: 0,
   use: {
     ...baseConfig.use,
     // Without this a wrong selector waits out the whole test budget, which

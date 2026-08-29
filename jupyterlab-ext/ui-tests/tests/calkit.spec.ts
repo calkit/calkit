@@ -144,6 +144,12 @@ test.describe("Notebook pipeline workflow", () => {
         { timeout: 180000 },
       )
       .toMatch(/\.analytics-env\|idle$/);
+    // The server has the new kernel running, but the browser's socket to it
+    // is opened while the old one is being torn down, and losing that race
+    // leaves the notebook with no channel and no retry: cells submit and
+    // nothing runs. Reloading rebinds to the kernel that's already up
+    await page.reload();
+    await expect(page.locator(".jp-NotebookPanel")).toBeVisible();
 
     // Step 2: put the notebook in the pipeline as a stage
     await openBadge("Not in pipeline");

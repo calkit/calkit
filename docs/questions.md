@@ -112,6 +112,12 @@ This is the weakest part of the mechanism, and it is being replaced. See
 a review record that says what was confirmed, by whom, rather than a commit
 that says something changed.
 
+## Into the publication
+
+The `questions-to-latex` stage injects the questions into a LaTeX
+document, with every placeholder rendered as a provenance-marked value;
+see [Provenance: documents](provenance.md#documents).
+
 ## Pointing at the publication
 
 The reasoning behind an answer belongs in the publication, not in

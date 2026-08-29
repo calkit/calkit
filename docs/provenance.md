@@ -335,3 +335,79 @@ beats an attestation whenever one exists. Prefer, in order:
 3. **A URL**, optionally with the date it was retrieved
 4. **An attestation** that someone collected or created it, when there's
    genuinely nothing to point at
+
+## Documents
+
+A paper is where provenance is easiest to lose. A number is copied from a
+results file into a sentence, a figure is dropped into a float, and from
+then on nothing connects the document to the pipeline that produced them.
+Calkit's `json-to-latex` and `questions-to-latex` stages inject that
+content instead of copying it, and `calkit.sty` marks each injection so
+that a reader of the TeX source or the PDF can see it came from elsewhere
+in the project and follow the trail.
+
+Set `provenance: true` on a `latex` stage:
+
+```yaml
+pipeline:
+  stages:
+    paper-numbers-to-latex:
+      kind: json-to-latex
+      command_name: result
+      inputs: [results/paper-numbers.json]
+      outputs:
+        - path: paper/generated-numbers.tex
+          storage: git
+    questions-to-latex:
+      kind: questions-to-latex
+      inputs: [results/findings.json]
+      outputs:
+        - path: paper/generated-questions.tex
+          storage: git
+    build-paper:
+      kind: latex
+      target_path: paper/main.tex
+      provenance: true
+      inputs: [paper/generated-numbers.tex, paper/generated-questions.tex]
+```
+
+and load the package in the document:
+
+```latex
+\usepackage[provenance]{calkit}
+\ckbaseurl{https://github.com/me/my-project/blob/main/}
+\input{generated-numbers}
+\input{generated-questions}
+...
+The error falls by \result[Improvement]x (Section~\ref{sec:bench}).
+\ckfigure[width=0.7\textwidth]{../figures/dissipation.pdf}
+\caption{Dissipation along the plate.\ckcaptionsource{../figures/dissipation.pdf}}
+...
+\appendix
+\section{Questions and answers}
+\ckfindings
+```
+
+With the `provenance` option, every injected value is colored and linked
+to its source file, figures link to theirs and can name the stage that
+made them, and generated question blocks link to `calkit.yaml`.
+Drop the option, or pass `final`, and the document renders as if the
+package were not there, so the markers cost nothing in the version that
+goes to a journal.
+
+Each build installs `calkit.sty` beside the document (commit it, so the
+paper builds on Overleaf and anywhere else without Calkit), writes a
+per-build artifact table `calkit-provenance.tex` (do not commit it), and
+turns the build's log of injections into `<document>.provenance.json`:
+every value, figure and text block the document took from the project,
+the pages it appears on, the stage that produced it, that stage's inputs,
+and the hash recorded in `dvc.lock`. That file is the trail in
+machine-readable form, for editors, the hub, and checks.
+
+The questions commands are `\ckquestion[n]`, `\ckhypothesis[n]`,
+`\ckanswer[n]`, `\cknotes[n]`, `\ckevidence[n]`, numbered as in
+`calkit list questions`, and `\ckfindings` for every answered question.
+A `{name}` placeholder in an answer becomes a marked value in the paper by
+the same rendering `calkit list questions` uses, so the two cannot
+disagree, and a publication evidence entry with a `label` becomes a
+`\ref` to that section.

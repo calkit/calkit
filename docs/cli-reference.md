@@ -3285,11 +3285,12 @@ Options:
 
 Work with LaTeX.
 
-| Command                                        | Description                                           |
-| ---------------------------------------------- | ----------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json) | Convert a JSON file to LaTeX.                         |
-| [`build`](#subcommand-latex-tex-build)         | Build a PDF of a LaTeX document with latexmk.         |
-| [`diff`](#subcommand-latex-tex-diff)           | Build a PDF showing what changed in a LaTeX document. |
+| Command                                                  | Description                                                  |
+| -------------------------------------------------------- | ------------------------------------------------------------ |
+| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                |
+| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as LaTeX commands. |
+| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                |
+| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.        |
 
 <a id="subcommand-latex-tex-from-json"></a>
 
@@ -3297,7 +3298,7 @@ Work with LaTeX.
 
 Convert a JSON file to LaTeX.
 
-This is useful for referencing calculated values in LaTeX documents.
+This is useful for referencing calculated values in LaTeX documents. Each value is wrapped in `\ckvalue` with the file and pipeline stage it came from, which calkit.sty can mark and log; without the package the values print as plain text.
 
 Usage:
 
@@ -3319,6 +3320,26 @@ Options:
 | `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                                            |
 | `--key`          | str  | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
 | `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
+
+<a id="subcommand-latex-tex-from-questions"></a>
+
+#### `calkit latex|tex from-questions`
+
+Write the project's questions and answers as LaTeX commands.
+
+Gives `\ckquestion[n]`, `\ckanswer[n]`, `\ckevidence[n]` and friends, plus `\ckfindings` for every answered question, with each `{name}` placeholder rendered as a provenance-marked value from the results file it points at.
+
+Usage:
+
+```text
+calkit latex|tex from-questions [OPTIONS]
+```
+
+Options:
+
+| Option           | Type | Required | Default                 | Description             |
+| ---------------- | ---- | -------- | ----------------------- | ----------------------- |
+| `--output`, `-o` | text | no       | generated-questions.tex | Output LaTeX file path. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3353,6 +3374,7 @@ Options:
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+| `--provenance`       | boolean | no       | False   | Install calkit.sty beside the document, generate its artifact table, and write <document>.provenance.json from the build's log of injected content. |
 
 <a id="subcommand-latex-tex-diff"></a>
 

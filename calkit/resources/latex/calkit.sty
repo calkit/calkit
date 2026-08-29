@@ -47,8 +47,8 @@
   \ifck@prov\href{\ck@baseurl\ck@projof{#2}}{\includegraphics[#1]{#2}}%
   \else\includegraphics[#1]{#2}\fi}
 % \ckcaptionsource{path}: a note for a caption naming the producing stage
-\newcommand\ckcaptionsource[1]{\ifck@prov\ \textcolor{ckprov}{%
-  \footnotesize[\texttt{#1}, stage \texttt{\ck@stageof{#1}}]}\fi}
+\newcommand\ckcaptionsource[1]{\ifck@prov\ \ck@link{\ck@projof{#1}}{%
+  \footnotesize[\texttt{\ck@projof{#1}}, stage \texttt{\ck@stageof{#1}}]}\fi}
 % \ckinput{path}: \input with provenance, for stage-generated text
 \newcommand\ckinput[1]{\ck@log{text}{#1}{}\ifck@prov
   \ck@link{\ck@projof{#1}}{\footnotesize[\texttt{#1}]}\par\fi\input{#1}}

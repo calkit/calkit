@@ -191,36 +191,23 @@ def test_lock_matching():
 
 
 def test_get_lock_digest_refs():
-    lock = {"RepoDigests": ["sha256:remote"]}
-    # A bare digest is only pullable once it's paired with a repo
-    assert get_lock_digest_refs(lock) == []
-    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest") == [
-        "ghcr.io/o/p/my-image@sha256:remote"
-    ]
-    # Locks written before digests were stored bare still work, and the
-    # project's own registry is tried first, since that's the copy it
-    # controls and keeps around
-    legacy = {
+    lock = {
         "RepoDigests": [
             "my-image@sha256:local",
             "ghcr.io/o/p/my-image@sha256:remote",
         ]
     }
-    assert get_lock_digest_refs(legacy) == [
+    assert get_lock_digest_refs(lock) == [
         "my-image@sha256:local",
         "ghcr.io/o/p/my-image@sha256:remote",
     ]
-    assert get_lock_digest_refs(legacy, "ghcr.io/o/p/my-image:latest")[0] == (
+    # The project's own registry is tried first, since that's the copy it
+    # controls and keeps around
+    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest")[0] == (
         "ghcr.io/o/p/my-image@sha256:remote"
     )
     assert get_lock_digest_refs({}) == []
     assert get_lock_digest_refs({"RepoDigests": ["no-digest-here"]}) == []
-    assert (
-        get_lock_digest_refs(
-            {"RepoDigests": ["no-digest-here"]}, "ghcr.io/o/p/my-image"
-        )
-        == []
-    )
 
 
 def test_keep_only_repo_digests():
@@ -231,16 +218,9 @@ def test_keep_only_repo_digests():
         ]
     }
     assert keep_only_repo_digests(identity, None)["RepoDigests"] == []
-    # Only the digest itself is kept, so a lock doesn't depend on which
-    # registry the machine that wrote it was pointed at
     assert keep_only_repo_digests(identity, "ghcr.io/o/p/my-image:latest")[
         "RepoDigests"
-    ] == ["sha256:remote"]
-    # Digests already stored bare pass through, so re-locking an unchanged
-    # image doesn't churn
-    assert keep_only_repo_digests({"RepoDigests": ["sha256:remote"]}, "any")[
-        "RepoDigests"
-    ] == ["sha256:remote"]
+    ] == ["ghcr.io/o/p/my-image@sha256:remote"]
     # The original is left alone so callers can keep using it
     assert len(identity["RepoDigests"]) == 2
 

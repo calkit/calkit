@@ -1061,10 +1061,6 @@ def check_docker_env(
     if registry_prefix is not None and fpath is not None:
         remote_ref = ck_docker.get_remote_image_ref(tag, registry_prefix)
         remote_repo = ck_docker.get_repo_from_ref(remote_ref)
-    # Where a digest the lock records can be pulled from, since the lock
-    # stores the digest alone: the project's registry for an image we build,
-    # or the image's own repo for one named directly
-    digest_source_ref = remote_ref if remote_ref is not None else tag
     typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
@@ -1090,9 +1086,7 @@ def check_docker_env(
         # can't reproduce it, and would silently pick up whatever its
         # undeclared upstream dependencies have become
         if lock is not None:
-            for digest_ref in ck_docker.get_lock_digest_refs(
-                lock, digest_source_ref
-            ):
+            for digest_ref in ck_docker.get_lock_digest_refs(lock, remote_ref):
                 typer.echo(f"Pulling image by digest: {digest_ref}")
                 if not ck_docker.pull_image(digest_ref, platform=platform):
                     # A private image needs credentials we may be able to get
@@ -1229,10 +1223,7 @@ def check_docker_env(
         lock_remote_digests = [
             d
             for d in (lock.get("RepoDigests") or [])
-            # A digest recorded bare is one this project put in its own
-            # registry, since that's the only kind it records; locks written
-            # before digests were stored bare name their repo outright
-            if "@" not in d or d.split("@", 1)[0] == remote_repo
+            if d.split("@", 1)[0] == remote_repo
         ]
     known_in_registry = bool(lock_remote_digests)
     if remote_ref is not None and not pushed and not no_push:

@@ -708,7 +708,9 @@ def get_remote_image_platform_locks(ref: str) -> dict[str, dict]:
         return {}
     manifest = resp.get("manifest") or {}
     digest = manifest.get("digest")
-    repo_digests = [digest] if digest else []
+    repo = ref.split("@", 1)[0]
+    repo = repo[: repo.rfind(":")] if ":" in repo.rsplit("/", 1)[-1] else repo
+    repo_digests = [f"{repo}@{digest}"] if digest else []
     images = resp.get("image") or {}
     # A single-platform reference yields one config object rather than a
     # mapping of platform to config
@@ -767,28 +769,17 @@ def lock_matches_image(lock: dict, image_info: dict) -> bool:
 def get_lock_digest_refs(
     lock: dict, remote_ref: str | None = None
 ) -> list[str]:
-    """Return references that pull the image a lock records, best first.
+    """Return the digest references recorded in a lock, best first.
 
-    A lock records a bare ``sha256:...`` digest, since where the image is
-    served from belongs to the environment definition rather than the lock.
-    ``remote_ref`` names the repo to pull it from, and a reference in that
-    repo is preferred, since that's the one the project controls and keeps
-    around. Locks written before digests were stored bare name their repo
-    outright, and are still honored.
+    A reference in the project's own registry is preferred, since that's the
+    one the project controls and keeps around.
     """
-    refs = []
-    remote_repo = (
-        get_repo_from_ref(remote_ref) if remote_ref is not None else None
-    )
-    for digest in lock.get("RepoDigests") or []:
-        if "@" in digest:
-            refs.append(digest)
-        elif remote_repo is not None and ":" in digest:
-            refs.append(f"{remote_repo}@{digest}")
-    if remote_repo is None:
-        return refs
-    preferred = [r for r in refs if r.split("@", 1)[0] == remote_repo]
-    return preferred + [r for r in refs if r not in preferred]
+    digests = [d for d in (lock.get("RepoDigests") or []) if "@" in d]
+    if remote_ref is None:
+        return digests
+    remote_repo = get_repo_from_ref(remote_ref)
+    preferred = [d for d in digests if d.split("@", 1)[0] == remote_repo]
+    return preferred + [d for d in digests if d not in preferred]
 
 
 def build_lock(
@@ -882,33 +873,25 @@ def registry_has_image(remote_ref: str, identity: dict) -> bool:
 
 
 def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
-    """Reduce an image's digests to the bare one a lock should record.
+    """Drop digests from an image's identity that no registry can serve.
 
     Which digests an image carries locally depends on how it was obtained:
     building assigns one under a repo name that doesn't exist anywhere, and
-    pulling by digest then tagging leaves both that and the real one. Only
-    the digest the given reference's repo serves is kept, and only its
-    ``sha256:...`` part, since the repo to pull it from is already in the
-    environment definition whereas the registry a particular machine
-    happens to name is not. That makes a lock file the same however the
-    image was obtained and wherever it's served from, so pulling an image
-    back doesn't rewrite the lock and rerun every stage that uses it.
+    pulling by digest then tagging leaves both that and the real one. Keeping
+    only the digests the given reference's repo can serve makes a lock file
+    the same either way, so pulling an image back doesn't rewrite the lock
+    and rerun every stage that uses it.
     """
     identity = dict(identity)
     if ref is None:
         identity["RepoDigests"] = []
         return identity
     repo = get_repo_from_ref(ref)
-    digests = []
-    for entry in identity.get("RepoDigests") or []:
-        entry_repo, _, digest = entry.rpartition("@")
-        if entry_repo and entry_repo != repo:
-            continue
-        # A digest is ``<algorithm>:<hex>``, so anything without a separator
-        # is not one, whatever else it might be
-        if ":" in digest and digest not in digests:
-            digests.append(digest)
-    identity["RepoDigests"] = digests
+    identity["RepoDigests"] = [
+        d
+        for d in (identity.get("RepoDigests") or [])
+        if d.split("@", 1)[0] == repo
+    ]
     return identity
 
 

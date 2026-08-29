@@ -424,6 +424,8 @@ calkit describe components paper/main.pdf
 ```text
 figure figures/dissipation.pdf
     ok · stage plot-dissipation · scripts/plot.py · p. 4
+figure figures/schematic.png
+    ok · NO PROVENANCE · p. 2
 value results/paper-numbers.json:Improvement
     STALE · stage benchmark · scripts/bench.py · p. 3 · changed-since-build · 2.1 -> 2.4
 ```
@@ -443,6 +445,32 @@ it doesn't matter which one a tool has in hand. Without a build there is
 no sidecar and no pages, but the question still has an answer: the
 generated `.tex` files say which results file and key each command came
 from, so the trail holds in a project that has never been built.
+
+### Components with nothing behind them
+
+Being current is not the only thing worth knowing about a component. The
+gap this page opens with -- a file that arrived some other way and had its
+origin written down nowhere -- reaches the page like anything else, and
+looks exactly like a figure the pipeline made. Every component carries
+where its source file came from:
+
+- **`pipeline`** -- a stage produces it, so the command, the inputs and
+  the environment are already recorded. This is the only one that is
+  checked rather than claimed.
+- **`imported`** -- declared with `imported_from`, so a reader can go and
+  fetch the original.
+- **`attested`** -- declared with `created_by`, so somebody answers for it.
+- **`undeclared`** -- nothing makes it, nobody claims it, and it is
+  recorded as coming from nowhere. Shown as `NO PROVENANCE`.
+
+An undeclared component is not stale and running the pipeline will not
+help; it needs a line in `calkit.yaml` saying where it came from, which is
+what the rest of this page is about. Flagging it here is the point: a
+schematic dropped into a paper is the one thing on the page no automated
+check can catch, because there is nothing to check.
+
+A question block reads as `project`, since its words are the project's
+own and there is no outside source to account for.
 
 ### Ways to be out of date
 

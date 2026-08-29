@@ -227,6 +227,48 @@ def test_staleness_after_build(tmp_dir):
     ].status == "missing"
 
 
+def test_provenance_of_a_component(tmp_dir):
+    import calkit.components as cc
+
+    ck_info = _project()
+    os.makedirs("img")
+    for name in ("schematic.pdf", "rig.pdf", "published.pdf"):
+        with open(os.path.join("img", name), "w") as f:
+            f.write("pdf")
+    ck_info["figures"] = [
+        {"path": "img/rig.pdf", "created_by": {"email": "me@myorg.edu"}},
+        {
+            "path": "img/published.pdf",
+            "imported_from": {"doi": "10.5281/zenodo.1234567"},
+        },
+    ]
+    with open("paper/main.tex") as f:
+        tex = f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            tex.replace(
+                "\\ckfigure[width=1in]{../figures/plot.pdf}\n",
+                "\\ckfigure[width=1in]{../figures/plot.pdf}\n"
+                "\\ckfigure{../img/schematic.pdf}\n"
+                "\\ckfigure{../img/rig.pdf}\n"
+                "\\ckfigure{../img/published.pdf}\n",
+            )
+        )
+    _generate(ck_info)
+    doc = cc.describe_document("paper/main.tex", check_stages=False)
+    by = {c.location: c for c in doc.components}
+    # A stage that makes it is the end of the question
+    assert by["figures/plot.pdf"].provenance == "pipeline"
+    assert by["results/findings.json:ratio"].provenance == "pipeline"
+    # Otherwise the file has to say for itself
+    assert by["img/rig.pdf"].provenance == "attested"
+    assert by["img/published.pdf"].provenance == "imported"
+    # Nothing makes it and nobody claims it: the gap worth flagging
+    assert by["img/schematic.pdf"].provenance == "undeclared"
+    # The project's own words are not an outside source
+    assert by["calkit.yaml:1"].provenance == "project"
+
+
 def test_component_helpers(tmp_dir):
     import calkit.components as cc
 

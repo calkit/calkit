@@ -126,11 +126,22 @@ def describe_schema(
 
 def _component_line(c) -> str:
     """One component as a line someone can read."""
-    marks = {"ok": "ok", "stale": "STALE", "missing": "MISSING"}
+    marks = {
+        "ok": "ok",
+        "stale": "STALE",
+        "missing": "MISSING",
+        "unknown": "unchecked",
+    }
     head = f"{c.kind} {c.location}"
-    bits = [marks.get(c.status, "?")]
+    bits = [marks[c.status]]
     if c.stage:
         bits.append(f"stage {c.stage}")
+    elif c.provenance == "undeclared":
+        # Nothing produced it and nobody has said where it came from,
+        # which is the one thing about a component no check can catch
+        bits.append("NO PROVENANCE")
+    elif c.provenance in ("imported", "attested"):
+        bits.append(c.provenance)
     if c.script:
         bits.append(c.script)
     if c.pages:

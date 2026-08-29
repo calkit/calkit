@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -1441,15 +1441,9 @@ class FigureEvidence(BaseModel):
 
 
 class ResultsEvidence(BaseModel):
-    """Evidence in the form of a result.
-
-    With a ``key``, the entry points at one value inside a JSON or YAML
-    results file, and can then also record the ``value`` the answer was
-    written against. That record is what lets ``calkit check questions``
-    tell that the pipeline has since produced a different number and the
-    answer needs re-reading; without it, the prose and the evidence can
-    drift apart silently, since the pipeline keeps the evidence current but
-    nothing keeps the prose current.
+    """Evidence in the form of a results file: a set of values, a table, a
+    map, whatever the pipeline wrote. For one value inside such a file, use
+    ``value`` evidence, which can be templated into the answer.
     """
 
     kind: Literal["result"] = "result"
@@ -1457,27 +1451,39 @@ class ResultsEvidence(BaseModel):
     key: str | None = Field(
         default=None,
         description=(
-            "Key of the value within the results file. A key present at the "
-            "top level is used as-is; otherwise it is split on dots and "
-            "walked into nested objects, with integers indexing lists."
+            "Deprecated: use 'value' evidence for a single value within a "
+            "results file."
         ),
     )
-    value: Any | None = Field(
+    explanation: str | None = None
+
+
+_KEY_DESCRIPTION = (
+    "Key of the value within the results file. A key present at the top "
+    "level is used as-is; otherwise it is split on dots and walked into "
+    "nested objects, with integers indexing lists."
+)
+
+
+class ValueEvidence(BaseModel):
+    """Evidence in the form of one value from a results file.
+
+    The value is never copied into ``calkit.yaml``: the pipeline owns it,
+    and the entry only points at it. Under its ``name`` it can be templated
+    into the question's prose with Python format syntax, e.g.,
+    ``"about {improvement:.1f}x"``, so a number in an answer is read from
+    the results file when the question is displayed and cannot go stale.
+    """
+
+    kind: Literal["value"] = "value"
+    path: str
+    key: str = Field(description=_KEY_DESCRIPTION)
+    name: str | None = Field(
         default=None,
         description=(
-            "The value the key held when the answer was written. Recorded "
-            "by 'calkit update questions' and compared with the current "
-            "value by 'calkit check questions', which reports the question "
-            "as stale when they differ."
-        ),
-    )
-    tolerance: float | None = Field(
-        default=None,
-        ge=0,
-        description=(
-            "Relative tolerance for comparing a numeric value with its "
-            "record, e.g., 0.01 to ignore changes under 1%. Defaults to "
-            "1e-6, which ignores floating-point noise and nothing else."
+            "Name under which the value can be templated into the "
+            "question's text, as in '{name:.2f}'. Defaults to the key. Must "
+            "be unique within the question."
         ),
     )
     explanation: str | None = None
@@ -1531,10 +1537,17 @@ class Question(BaseModel):
     annotating, not a registry that evidence has to be registered in.
 
     Keep the answer to the claim itself and let the evidence carry the
-    numbers: a keyed result with a recorded ``value`` can be checked for
-    drift, while a number retyped into the prose cannot. Longer reasoning
-    belongs in the publication, pointed at with a publication evidence entry
-    and its ``section``.
+    numbers: a ``value`` evidence entry can be templated into the text by
+    name, as in ``"about {improvement:.1f}x"``, so it is read from the
+    results file rather than retyped. Longer reasoning belongs in the
+    publication, pointed at with a publication evidence entry and its
+    ``section``.
+
+    An answer is a claim about the evidence as it was when the answer was
+    last edited, and Git records when that was. ``calkit check questions``
+    reports a question as stale when any of its evidence has changed since
+    that commit; setting ``reviewed`` after re-reading the answer against
+    the new evidence is how to say it still holds.
     """
 
     question: str
@@ -1549,10 +1562,20 @@ class Question(BaseModel):
             "rather than as an answer lacking evidence."
         ),
     )
+    reviewed: date_type | None = Field(
+        default=None,
+        description=(
+            "When the answer was last read against its evidence. Any edit "
+            "to the question, this field included, marks it current, so "
+            "this is the way to say an answer still holds after its "
+            "evidence changed without rewording it."
+        ),
+    )
     evidence: (
         list[
             FigureEvidence
             | ResultsEvidence
+            | ValueEvidence
             | TableEvidence
             | PublicationEvidence
         ]

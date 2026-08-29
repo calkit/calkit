@@ -11,14 +11,15 @@ Take this example:
 questions:
   - question: How does the system respond to increasing $x$?
     hypothesis: The value of $y$ increases linearly with $x$.
-    answer: $y$ increases quadratically with $x$, not linearly.
+    answer: $y$ increases quadratically with $x$, not linearly
+      ($R^2 = {r2:.3f}$ for the quadratic fit).
     evidence:
       - kind: figure
         path: figures/x-vs-y.png
-      - kind: result
+      - kind: value
         path: results/summary.json
         key: r_squared_quadratic
-        value: 0.987
+        name: r2
       - kind: publication
         path: paper/paper.pdf
         section: "3.2"
@@ -35,57 +36,67 @@ artifacts, e.g., raw data and code, to verify with zero ambiguity
 This also ties everything together and gives a structured summary
 of the project's findings.
 
-## Keeping answers honest
+## Evidence kinds
 
-An answer is a claim about what the pipeline produced when the answer was
-written.
-The pipeline keeps the evidence current, but nothing keeps the prose
-current: re-run a stage after fixing a bug or changing an environment,
-and a number the answer relies on can change while the sentence stays
-the same.
-Calkit closes that gap deterministically.
-
-A `result` evidence entry with a `key` points at one value inside a JSON or
-YAML results file.
-Recording the `value` the answer was written against, as in the example
-above, lets Calkit compare it with what the file holds now:
-
-```sh
-calkit check questions
-```
-
-reports every answered question whose recorded values no longer match
-(`stale`), whose evidence cannot be found or whose key does not resolve
-(`error`), or whose keyed evidence has no recorded value yet
-(`unrecorded`), and exits with an error if any answer is stale or broken.
-The same report appears in the Questions section of `calkit status`,
-and `--json` gives it in a form other tools can read.
-
-Numbers are compared with a relative tolerance of `1e-6`, which ignores
-floating-point noise from, e.g., a change of BLAS library, and nothing
-else.
-An entry can loosen that with its own `tolerance`, e.g., `0.01` for a
-quantity the answer only quotes to two figures.
-Strings, booleans, lists, and objects must match exactly.
-
-To record values after writing or re-reading an answer:
-
-```sh
-calkit update questions -q 3        # question 3, as numbered by 'calkit list questions'
-calkit update questions --all       # every answered question
-```
-
-Recording is the act of declaring an answer current, so it is done per
-question deliberately rather than for everything by habit.
-A stale question is not fixed by re-recording; it is fixed by reading the
-answer against the new values, changing it if it no longer holds, and
-_then_ recording.
-The `check-questions` [agent skill](ai-tools.md) walks through exactly
-that, using the check's report to know which questions to read.
+- `figure`, `table`, and `publication` point at an artifact by path.
+- `result` points at a whole results file: a set of values, a table, a
+  map, whatever a stage wrote.
+- `value` points at one value inside a JSON or YAML results file, by
+  `key`, and can be templated into the question's text under its `name`
+  (which defaults to the key).
 
 Keys are looked up literally at the top level first, then split on dots
 and walked into nested objects, with integers indexing lists,
 so `results.case-a.score` reaches into structured output.
+
+## Numbers are read, not retyped
+
+The value behind a `value` entry is never copied into `calkit.yaml`.
+The pipeline owns it, and the question only points at it.
+To quote it, put a placeholder in the `answer`, `hypothesis`, `notes`, or
+an evidence `explanation`, using Python format syntax:
+
+```yaml
+answer: The closure cuts the error by about {improvement:.1f}x.
+```
+
+`calkit list questions` renders placeholders from the results files
+(`--raw` shows the text as written), so a number in an answer is always
+the one the pipeline produced.
+A placeholder that names no evidence, or a format that its value cannot
+satisfy, is an error in `calkit check questions`.
+
+## Keeping answers honest
+
+An answer is a claim about the evidence as it was when the answer was
+last edited, and Git already records when that was: the commit at which
+the question's entry in `calkit.yaml` last changed.
+`calkit check questions` finds that commit and asks whether any of the
+question's evidence has changed since, in Git history for Git-tracked
+outputs and through the hash in `dvc.lock` for DVC-tracked ones.
+If it has, the question is reported as `stale`: the answer was written
+against evidence that no longer exists, and someone has to read it again.
+
+```sh
+calkit check questions            # exits with an error if any answer is stale or broken
+calkit check questions --json     # for tools
+```
+
+The same report appears in the Questions section of `calkit status`.
+
+A stale question is not fixed by re-running anything; it is fixed by
+reading the rendered answer against the new evidence.
+If it still holds, set `reviewed` to today's date:
+
+```yaml
+reviewed: 2026-08-29
+```
+
+Any edit to the question marks it current once committed, so this is the
+way to say an answer survived without rewording it.
+If it no longer holds, rewrite it.
+The `check-questions` [agent skill](ai-tools.md) walks through exactly
+that, using the check's report to know which questions to read.
 
 ## Pointing at the publication
 
@@ -97,7 +108,7 @@ a LaTeX `\label{sec:scaling}`.
 `calkit check questions` verifies the label still exists in the source of
 the LaTeX stage that builds the publication, so the reference cannot rot
 when the document is reorganized.
-This keeps answers short: state the claim, let keyed results carry the
+This keeps answers short: state the claim, let `value` evidence carry the
 numbers, and let the publication carry the argument.
 
 A question that is still open should have no `answer` at all;
@@ -106,8 +117,8 @@ since notes make no claim and so need no evidence.
 
 <!-- prettier-ignore -->
 !!! note
-    The evidence records here are designed to be compatible in spirit with
-    the [ASTRA](https://github.com/lightcone-research/astra) analysis
-    specification, whose evidence entries likewise carry a snapshot of
-    the artifact they cite and a selector locating the claim within a
-    document.
+    These records are designed to be compatible in spirit with the
+    [ASTRA](https://github.com/lightcone-research/astra) analysis
+    specification, whose evidence entries likewise cite an analysis
+    artifact by identifier, note the commit it came from, and carry a
+    selector locating the claim within a document.

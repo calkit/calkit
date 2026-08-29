@@ -8,72 +8,72 @@ description: Review a Calkit project's questions and answers against their
 
 # Check questions against evidence
 
-An answer in `calkit.yaml` is a claim about what the pipeline produced when
-the answer was written. The pipeline keeps the evidence current; nothing
-keeps the prose current. Calkit's deterministic check catches the numbers
-moving. This skill covers what a check cannot: whether the sentence still
-follows from the numbers.
+An answer in `calkit.yaml` is a claim about the evidence as it was when the
+answer was last edited. The pipeline keeps the evidence current; nothing
+keeps the prose current. Calkit's deterministic check catches evidence
+changing underneath an answer. This skill covers what a check cannot:
+whether the sentence still follows from the evidence.
 
 ## Division of labor
 
 Deterministic, done by `calkit check questions` — never re-derive by hand:
 
 - every evidence path exists and is a pipeline output;
-- every result `key` resolves in its file;
-- every recorded `value` still matches the file (relative tolerance 1e-6, or
-  the entry's own `tolerance`);
-- every publication `label` still exists in the LaTeX source.
+- every `value` key resolves in its file, and every `{name}` placeholder in
+  the prose resolves and formats;
+- every publication `label` still exists in the LaTeX source;
+- no evidence has changed (Git history for Git-tracked outputs, `dvc.lock`
+  for DVC-tracked ones) since the commit that last edited the question.
 
 Judgment, done here:
 
 - does the answer still follow from the evidence, given what changed;
-- do numbers or counts retyped into the prose agree with the evidence;
+- are numbers retyped into the prose that should be `{name}` placeholders;
 - is the answer concise, and does it point at the publication section that
   carries the argument rather than repeating it.
 
 ## Procedure
 
 1. Run `calkit check questions --json` and read the report. Questions with
-   status `stale`, `error`, or `unrecorded` need attention; `ok` ones do
-   not, unless the user asked for a full review.
-2. For each **stale** question, read the answer, the recorded and current
-   values (`recorded` and `current` on each evidence entry), and the results
-   file itself if the key is an aggregate. Decide:
-   - **The claim still holds** (the number moved within the sentence's
-     meaning): say so, then record the new value with
-     `calkit update questions -q N`.
+   status `stale` or `error` need attention; `ok` ones do not, unless the
+   user asked for a full review.
+2. For each **stale** question, the report names the evidence that changed
+   and the commit the answer dates from. Read the rendered answer
+   (`calkit list questions`) against the current evidence, and if it helps,
+   the old evidence (`git show <commit>:<path>`). Decide:
+   - **The claim still holds**: say so, and set `reviewed` on the question
+     to today's date. That edit is what marks it current.
    - **The claim no longer holds**: draft a corrected answer, show the user
      the old and new text side by side with the values that changed, and
-     only after they agree, edit `calkit.yaml` and record the values.
+     only after they agree, edit `calkit.yaml`.
    - **The evidence changed because a stage is not reproducible** (same
      inputs, different output): that is a pipeline defect, not an answer
      defect. Report it as such and do not rewrite the answer to match noise.
 3. For each **error**, fix the reference: a missing path means the pipeline
-   has not been run or pulled; a bad key means a results file was
-   restructured; a missing label means the publication was reorganized.
-   Do not delete evidence to make an error go away.
-4. For each **unrecorded** question, check the answer against the current
-   values by reading it, then record them. Do not record blindly:
-   recording is the act of declaring the answer current.
-5. For every question you touched, check that any number in the prose
-   matches an evidence value to the precision quoted. Prefer removing the
-   number from the prose and letting the evidence carry it.
+   has not been run or pulled; a bad key or placeholder means a results
+   file was restructured; a missing label means the publication was
+   reorganized. Do not delete evidence to make an error go away.
+4. For every question you touched, move any number in the prose that the
+   evidence carries into a `{name:...}` placeholder on a `value` entry, so
+   it is read from the results file rather than retyped.
 
-Never run `calkit update questions --all` as a shortcut. It declares every
-answer current, which is a claim the user has to be willing to make.
+Never set `reviewed` on a stale question without reading it. It is the act
+of declaring the answer current, which is a claim the user has to be
+willing to make.
 
 ## Writing answers
 
 - One claim per question, two to four sentences. Say what was found and
   what it means; leave the reasoning to the publication.
+- Numbers come from `value` evidence via placeholders, formatted to the
+  precision the claim needs: `{ratio:.1f}x`, `{error:.0%}`.
 - Point at the publication with a `publication` evidence entry carrying
   `section` (for the reader) and `label` (for the check), instead of an
   `explanation` that restates the argument.
-- Each keyed result should be one the answer actually depends on. Evidence
-  that would not change the answer if it changed is decoration.
-- Mark open questions with `answer: OPEN` only if the user's project uses
-  that convention; otherwise leave `answer` unset so the check reports them
-  as unanswered rather than as claims.
+- Each evidence entry should be one the answer actually depends on.
+  Evidence that would not change the answer if it changed is decoration.
+- An open question has no `answer`; `notes` says why it is open and what
+  would settle it.
 
 ## Reporting
 

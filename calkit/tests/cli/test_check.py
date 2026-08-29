@@ -411,6 +411,48 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
+    image = "calkit-legacy-lock-test"
+    subprocess.check_call(["calkit", "init"])
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo legacy > /hi.txt\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {"kind": "docker", "path": "Dockerfile", "image": image}
+    }
+    calkit.save_calkit_info(ck_info)
+    check_argv = ["calkit", "check", "environment", "-n", "main"]
+    arch = calkit.environments.get_docker_arch()
+    lock_fpath = f".calkit/env-locks/main/{arch}.json"
+    legacy_lock_fpath = ".calkit/env-locks/main.json"
+    try:
+        subprocess.check_call(check_argv)
+        with open(lock_fpath) as f:
+            built_lock = json.load(f)
+        # A project locked before locks were kept per architecture has a
+        # single lock file named after the environment, written by the
+        # machine that checked it, so it describes this architecture
+        os.replace(lock_fpath, legacy_lock_fpath)
+        # Something else leaving an image under this tag must not be taken
+        # for the one the lock describes and written into the migrated lock,
+        # which is what taking a legacy lock for another architecture's did:
+        # its image is never checked against the lock, since it isn't
+        # expected to be here
+        subprocess.check_call(["docker", "tag", "alpine:3.18", image])
+        subprocess.check_call(check_argv)
+        assert not os.path.isfile(legacy_lock_fpath)
+        with open(lock_fpath) as f:
+            migrated = json.load(f)
+        assert migrated["RootFS"]["Layers"] == built_lock["RootFS"]["Layers"]
+        assert migrated["DockerfileMD5"] == built_lock["DockerfileMD5"]
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
 def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     container = "calkit-test-registry"
     registry = "localhost:5678"

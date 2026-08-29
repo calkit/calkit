@@ -404,6 +404,10 @@ def test_archive_docker_images(tmp_dir):
                         "image": image,
                     },
                     "py": {"kind": "uv-venv", "path": "pyproject.toml"},
+                    # An environment named after someone else's image is
+                    # one anyone can pull, and archiving it would put
+                    # gigabytes no one owns into every release
+                    "tex": {"kind": "docker", "image": "alpine:3.18"},
                 },
                 "releases": {
                     "v1": {"kind": "project", "record_id": 12345},
@@ -412,8 +416,9 @@ def test_archive_docker_images(tmp_dir):
         )
         os.makedirs("files", exist_ok=True)
         images = save_docker_images("files")
-        # Only Docker environments are archived, and each carries enough to
-        # be matched back to a lock file
+        # Only Docker environments built from the project's own Dockerfile
+        # are archived, and each carries enough to be matched back to a lock
+        # file
         assert len(images) == 1
         image_id, entry = next(iter(images.items()))
         assert entry["environment"] == "main"

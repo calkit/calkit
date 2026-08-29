@@ -1017,6 +1017,13 @@ def check_docker_env(
             if os.path.isfile(alt_lock_fpath):
                 typer.echo(f"Reading alternative lock file: {alt_lock_fpath}")
                 lock = read_lock(alt_lock_fpath)
+                # A legacy lock was written before locks were kept per
+                # architecture, by the machine that checked the
+                # environment, so it describes this one. Taking it for
+                # another architecture's would skip checking the local image
+                # against it, and an image left under this tag by something
+                # else would be locked in as this environment's
+                lock_is_current_arch = lock is not None
                 os.remove(alt_lock_fpath)
                 break
         if lock is None:

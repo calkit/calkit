@@ -561,6 +561,11 @@ def save_docker_images(
     dependencies have moved on, so a release that's meant to stand on its own
     has to carry the image itself.
 
+    Only images built from the project's own Dockerfile are archived. An
+    environment named after someone else's image is one anyone can pull, and
+    images like TeX Live's run to gigabytes, which would bloat every release
+    a project makes for something it doesn't own.
+
     Returns breadcrumbs keyed by image ID, which the environment check reads
     to fetch an image back out of a release when no registry can serve it.
     """
@@ -568,6 +573,8 @@ def save_docker_images(
     resp = {}
     for env_name, env in (ck_info.get("environments") or {}).items():
         if not isinstance(env, dict) or env.get("kind") != "docker":
+            continue
+        if not env.get("path"):
             continue
         image = calkit.docker.get_image_name(env, env_name)
         if not image:

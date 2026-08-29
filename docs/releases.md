@@ -86,6 +86,10 @@ For each environment whose image is built in the project,
 Calkit exports the image with `docker save`
 and uploads it to the record alongside the project archive as
 `docker-image-{environment_name}.tar.gz`.
+An environment named after someone else's image is left out,
+since it can be pulled from wherever it came from,
+and images like TeX Live's would add gigabytes to every release
+for something the project doesn't own.
 The images are uploaded as their own files rather than being folded into
 `archive.zip`, so that a reader who only wants the data doesn't have to
 download several gigabytes of image, and vice versa.

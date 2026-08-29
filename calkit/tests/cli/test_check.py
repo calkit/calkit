@@ -1104,7 +1104,7 @@ def test_check_questions(tmp_dir):
         ["calkit", "check", "questions"], capture_output=True, text=True
     )
     assert proc.returncode == 1
-    assert "changed in 1 commit(s)" in proc.stdout
+    assert "n_top was 8 at" in proc.stdout
     proc = subprocess.run(
         ["calkit", "check", "questions", "--json"],
         capture_output=True,

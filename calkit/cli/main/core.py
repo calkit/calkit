@@ -1190,12 +1190,8 @@ def commit(
         bool, typer.Option("--verbose", help="Print verbose output.")
     ] = False,
 ) -> bool:
-    """Commit a change to the repo.
-
-    Returns whether or not any DVC files were part of the commit, so callers
-    know if the data needs to be pushed as well.
-    """
-    import git
+    """Commit a change to the repo."""
+    from git.exc import GitCommandError
 
     repo = calkit.git.get_repo()
     if all_changed:
@@ -1303,12 +1299,13 @@ def commit(
         cmd += ["--"] + commit_paths
     try:
         output = repo.git.commit(cmd)
-    except git.exc.GitCommandError as e:
+    except GitCommandError as e:
         raise_error(f"Git commit failed: {(e.stderr or str(e)).strip()}")
     if output:
         typer.echo(output)
     if push_commit:
         push()
+    # Callers use this to know whether the data needs to be pushed as well
     return any_dvc
 
 

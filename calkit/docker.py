@@ -438,7 +438,7 @@ def extract_docker_run_inner_command(
     parsed = _parse_docker_run_command(tokens)
     if parsed is None:
         return None
-    inner_command = parsed.get("command", [])
+    inner_command: list[str] = parsed.get("command", [])
     if not inner_command:
         return None
     return inner_command
@@ -708,9 +708,7 @@ def get_remote_image_platform_locks(ref: str) -> dict[str, dict]:
         return {}
     manifest = resp.get("manifest") or {}
     digest = manifest.get("digest")
-    repo = ref.split("@", 1)[0]
-    repo = repo[: repo.rfind(":")] if ":" in repo.rsplit("/", 1)[-1] else repo
-    repo_digests = [f"{repo}@{digest}"] if digest else []
+    repo_digests = [digest] if digest else []
     images = resp.get("image") or {}
     # A single-platform reference yields one config object rather than a
     # mapping of platform to config
@@ -769,17 +767,28 @@ def lock_matches_image(lock: dict, image_info: dict) -> bool:
 def get_lock_digest_refs(
     lock: dict, remote_ref: str | None = None
 ) -> list[str]:
-    """Return the digest references recorded in a lock, best first.
+    """Return references that pull the image a lock records, best first.
 
-    A reference in the project's own registry is preferred, since that's the
-    one the project controls and keeps around.
+    A lock records a bare ``sha256:...`` digest, since where the image is
+    served from belongs to the environment definition rather than the lock.
+    ``remote_ref`` names the repo to pull it from, and a reference in that
+    repo is preferred, since that's the one the project controls and keeps
+    around. Locks written before digests were stored bare name their repo
+    outright, and are still honored.
     """
-    digests = [d for d in (lock.get("RepoDigests") or []) if "@" in d]
-    if remote_ref is None:
-        return digests
-    remote_repo = get_repo_from_ref(remote_ref)
-    preferred = [d for d in digests if d.split("@", 1)[0] == remote_repo]
-    return preferred + [d for d in digests if d not in preferred]
+    refs = []
+    remote_repo = (
+        get_repo_from_ref(remote_ref) if remote_ref is not None else None
+    )
+    for digest in lock.get("RepoDigests") or []:
+        if "@" in digest:
+            refs.append(digest)
+        elif remote_repo is not None and ":" in digest:
+            refs.append(f"{remote_repo}@{digest}")
+    if remote_repo is None:
+        return refs
+    preferred = [r for r in refs if r.split("@", 1)[0] == remote_repo]
+    return preferred + [r for r in refs if r not in preferred]
 
 
 def build_lock(
@@ -873,25 +882,33 @@ def registry_has_image(remote_ref: str, identity: dict) -> bool:
 
 
 def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
-    """Drop digests from an image's identity that no registry can serve.
+    """Reduce an image's digests to the bare one a lock should record.
 
     Which digests an image carries locally depends on how it was obtained:
     building assigns one under a repo name that doesn't exist anywhere, and
-    pulling by digest then tagging leaves both that and the real one. Keeping
-    only the digests the given reference's repo can serve makes a lock file
-    the same either way, so pulling an image back doesn't rewrite the lock
-    and rerun every stage that uses it.
+    pulling by digest then tagging leaves both that and the real one. Only
+    the digest the given reference's repo serves is kept, and only its
+    ``sha256:...`` part, since the repo to pull it from is already in the
+    environment definition whereas the registry a particular machine
+    happens to name is not. That makes a lock file the same however the
+    image was obtained and wherever it's served from, so pulling an image
+    back doesn't rewrite the lock and rerun every stage that uses it.
     """
     identity = dict(identity)
     if ref is None:
         identity["RepoDigests"] = []
         return identity
     repo = get_repo_from_ref(ref)
-    identity["RepoDigests"] = [
-        d
-        for d in (identity.get("RepoDigests") or [])
-        if d.split("@", 1)[0] == repo
-    ]
+    digests = []
+    for entry in identity.get("RepoDigests") or []:
+        entry_repo, _, digest = entry.rpartition("@")
+        if entry_repo and entry_repo != repo:
+            continue
+        # A digest is ``<algorithm>:<hex>``, so anything without a separator
+        # is not one, whatever else it might be
+        if ":" in digest and digest not in digests:
+            digests.append(digest)
+    identity["RepoDigests"] = digests
     return identity
 
 
@@ -1044,6 +1061,10 @@ def login_to_registry(
     Only the GitHub Container Registry is handled, since that's the one
     Calkit has a path to credentials for. Anything else relies on the
     user's own ``docker login``.
+
+    ``interactive`` asks the user for a token instead of trying the ones
+    Calkit already holds. It's only reached once those have been tried and
+    the push was still refused, so retrying them would just fail again.
     """
     host = ref.split("/", 1)[0]
     if host != "ghcr.io":
@@ -1051,23 +1072,22 @@ def login_to_registry(
     import calkit
 
     from_prompt = False
-    stored = calkit.config.read().github_packages_token
-    token: str | None = str(stored) if stored is not None else None
-    if token is None:
-        # The token Calkit already holds is worth a try, but only if it
-        # actually carries the scope, since logging in with one that
-        # doesn't just fails again at push time
-        try:
-            candidate = calkit.github.get_token()
-        except Exception:
-            candidate = None
-        if candidate and "write:packages" in get_github_token_scopes(
-            candidate
-        ):
-            token = candidate
-    if token is None and interactive:
+    token: str | None = None
+    if interactive:
         token = prompt_for_packages_token()
         from_prompt = token is not None
+    else:
+        stored = calkit.config.read().github_packages_token
+        token = str(stored) if stored is not None else None
+    if token is None and not interactive:
+        # The token Calkit already holds is worth trying: its GitHub App can
+        # be granted permission to write packages, as can the token GitHub
+        # Actions provides, and neither reports any OAuth scope, so whether
+        # one can push is only settled by pushing with it
+        try:
+            token = calkit.github.get_token()
+        except Exception:
+            token = None
     if not token:
         return False, None
     try:

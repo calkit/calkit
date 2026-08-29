@@ -324,15 +324,15 @@ and Calkit checks the image's layers against the lock after pulling.
 <!-- prettier-ignore -->
 !!! note
 
-    Pushing to a registry requires being logged into it. The first time
-    `calkit push` is refused by the GitHub Container Registry, it opens
-    GitHub to create a token with the `write:packages` scope, then saves
-    that token once a push has actually succeeded with it, so it only has
-    to be done once. The token Calkit uses for the GitHub API can't push
-    images: it comes from Calkit's GitHub App, whose permissions don't
-    reach the container registry. In GitHub Actions, the
-    `calkit/calkit/actions/run` action logs in automatically, so long as
-    the workflow grants the `packages: write` permission.
+    Pushing to a registry requires being logged into it. When the GitHub
+    Container Registry refuses a push, Calkit logs in with the token it
+    already holds for the GitHub API and tries again, which is usually
+    enough: Calkit's GitHub App is granted permission to write packages.
+    Only if that push is refused too does it open GitHub to create a token
+    with the `write:packages` scope, saving that token once a push has
+    actually succeeded with it, so it only has to be done once. In GitHub
+    Actions, the `calkit/calkit/actions/run` action logs in automatically,
+    so long as the workflow grants the `packages: write` permission.
 
 <!-- prettier-ignore -->
 !!! note

@@ -19,16 +19,56 @@ and Prometheus/Loki/Grafana for monitoring.
 ## What you'll need
 
 - A host running Docker with a domain name pointed at it.
-- A GitHub App and OAuth credentials.
+- A GitHub App.
   The hub manages project repos through GitHub,
   and creating a project currently requires a linked GitHub account,
   so this is the main piece of bring-your-own configuration.
+  See [the section below](#the-github-app) for the permissions it needs.
 - Object storage: the bundled MinIO works out of the box,
   or an external provider (calkit.io uses Google Cloud Storage)
   can be configured.
 - Optionally, credentials for the outside integrations:
   Zenodo and Zotero apps, Stripe for paid plans, and Mixpanel for
   analytics. These can be left disabled for a lab-internal instance.
+
+## The GitHub App
+
+Users sign in through the App, and the hub acts on their behalf with the
+user-to-server tokens it issues, so what the hub can do is exactly what
+the App is granted.
+There are no OAuth scopes to request separately:
+a GitHub App's permissions are what its tokens carry.
+
+Set the callback URL to the hub's login page,
+e.g., `https://your-hub.example.edu/login`,
+which is where GitHub sends users back with their authorization code.
+There are no webhooks to configure.
+Grant these permissions:
+
+| Permission                 | Access       | Used for                                                       |
+| -------------------------- | ------------ | -------------------------------------------------------------- |
+| Repository: Metadata       | Read-only    | Required by GitHub for everything else                         |
+| Repository: Administration | Read & write | Creating project repos, and adding and removing collaborators  |
+| Repository: Contents       | Read & write | Reading and writing project files, branches, commits, releases |
+| Repository: Issues         | Read & write | Project discussions, which are kept as issues and comments     |
+| Repository: Pull requests  | Read-only    | Showing the state of a project's pull requests                 |
+| Repository: Packages       | Read & write | Pushing and pulling Docker environment images to GHCR          |
+| Organization: Members      | Read-only    | Checking which orgs a user belongs to                          |
+| Account: Email addresses   | Read-only    | Matching a GitHub account to a hub user                        |
+
+Set `GH_CLIENT_ID` and `GH_APP_PRIVATE_KEY` on the backend from the App's
+client ID and a generated private key.
+The two have to belong to the same App:
+a mismatch shows up as a 401 from GitHub when the hub tries to mint an
+installation token.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Packages access is what lets projects push Docker environment images to
+    the GitHub Container Registry alongside their code. An instance that
+    doesn't need that can leave it out, and image pushes will ask users for
+    their own token with the `write:packages` scope instead.
 
 ## Where to start
 

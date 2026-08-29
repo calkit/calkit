@@ -430,12 +430,13 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         assert "exporting layers" not in out
         with open("lock.json") as f:
             lock = json.load(f)
-        # Having been pushed, the image is identified by a digest that can be
-        # pulled back, which is what makes a rebuild unnecessary
-        assert lock["RepoDigests"] == [
-            f"{registry}/proj/calkit-registry-test@"
-            + lock["RepoDigests"][0].split("@")[1]
-        ]
+        # Having been pushed, the image is identified by a digest that can
+        # be pulled back, which is what makes a rebuild unnecessary. Only
+        # the digest itself is recorded, since where to pull it from is in
+        # the environment definition, so collaborators pointed at different
+        # registries get the same lock
+        assert len(lock["RepoDigests"]) == 1
+        assert lock["RepoDigests"][0].startswith("sha256:")
         with open("lock.json", "rb") as f:
             lock_bytes = f.read()
         subprocess.check_call(

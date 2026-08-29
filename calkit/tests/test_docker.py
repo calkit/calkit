@@ -1,6 +1,7 @@
 """Tests for ``calkit.docker``."""
 
 import sys
+from unittest.mock import Mock
 
 from calkit.docker import (
     _image_name_without_tag_or_digest,
@@ -190,23 +191,36 @@ def test_lock_matching():
 
 
 def test_get_lock_digest_refs():
-    lock = {
+    lock = {"RepoDigests": ["sha256:remote"]}
+    # A bare digest is only pullable once it's paired with a repo
+    assert get_lock_digest_refs(lock) == []
+    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest") == [
+        "ghcr.io/o/p/my-image@sha256:remote"
+    ]
+    # Locks written before digests were stored bare still work, and the
+    # project's own registry is tried first, since that's the copy it
+    # controls and keeps around
+    legacy = {
         "RepoDigests": [
             "my-image@sha256:local",
             "ghcr.io/o/p/my-image@sha256:remote",
         ]
     }
-    assert get_lock_digest_refs(lock) == [
+    assert get_lock_digest_refs(legacy) == [
         "my-image@sha256:local",
         "ghcr.io/o/p/my-image@sha256:remote",
     ]
-    # The project's own registry is tried first, since that's the copy it
-    # controls and keeps around
-    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest")[0] == (
+    assert get_lock_digest_refs(legacy, "ghcr.io/o/p/my-image:latest")[0] == (
         "ghcr.io/o/p/my-image@sha256:remote"
     )
     assert get_lock_digest_refs({}) == []
     assert get_lock_digest_refs({"RepoDigests": ["no-digest-here"]}) == []
+    assert (
+        get_lock_digest_refs(
+            {"RepoDigests": ["no-digest-here"]}, "ghcr.io/o/p/my-image"
+        )
+        == []
+    )
 
 
 def test_keep_only_repo_digests():
@@ -217,9 +231,16 @@ def test_keep_only_repo_digests():
         ]
     }
     assert keep_only_repo_digests(identity, None)["RepoDigests"] == []
+    # Only the digest itself is kept, so a lock doesn't depend on which
+    # registry the machine that wrote it was pointed at
     assert keep_only_repo_digests(identity, "ghcr.io/o/p/my-image:latest")[
         "RepoDigests"
-    ] == ["ghcr.io/o/p/my-image@sha256:remote"]
+    ] == ["sha256:remote"]
+    # Digests already stored bare pass through, so re-locking an unchanged
+    # image doesn't churn
+    assert keep_only_repo_digests({"RepoDigests": ["sha256:remote"]}, "any")[
+        "RepoDigests"
+    ] == ["sha256:remote"]
     # The original is left alone so callers can keep using it
     assert len(identity["RepoDigests"]) == 2
 
@@ -293,6 +314,57 @@ def test_login_to_registry_ignores_other_registries():
     # on the user's own docker login
     assert login_to_registry("docker.io/someone/img:v1") == (False, None)
     assert login_to_registry("localhost:5000/proj/img:v1") == (False, None)
+
+
+def test_login_to_registry_credentials(monkeypatch):
+    from unittest.mock import patch
+
+    import calkit.config
+    import calkit.docker
+    import calkit.github
+
+    ref = "ghcr.io/o/p/img:v1"
+    logins = []
+    monkeypatch.setattr(
+        calkit.docker, "get_github_username", lambda: "someone"
+    )
+    monkeypatch.setattr(
+        calkit.docker.subprocess,
+        "run",
+        lambda *args, **kwargs: logins.append(kwargs["input"].decode()),
+    )
+    monkeypatch.setattr(
+        calkit.github, "get_token", lambda: "app-token-with-no-scopes"
+    )
+    # A stored token is used as-is, without asking GitHub about its scopes
+    with patch.object(
+        calkit.config, "read", return_value=Mock(github_packages_token="pat")
+    ):
+        assert login_to_registry(ref) == (True, None)
+    assert logins == ["pat"]
+    # Without one, the token Calkit already holds is tried, even though a
+    # GitHub App token reports no scopes at all. Whether it can push is
+    # settled by pushing with it, not by asking beforehand
+    logins.clear()
+    with patch.object(
+        calkit.config, "read", return_value=Mock(github_packages_token=None)
+    ):
+        assert login_to_registry(ref) == (True, None)
+    assert logins == ["app-token-with-no-scopes"]
+    # Prompting is only reached once those have been refused, so it asks for
+    # a new token rather than trying the held ones over again
+    logins.clear()
+    monkeypatch.setattr(
+        calkit.docker, "prompt_for_packages_token", lambda: "pasted-token"
+    )
+    with patch.object(
+        calkit.config, "read", return_value=Mock(github_packages_token="pat")
+    ):
+        assert login_to_registry(ref, interactive=True) == (
+            True,
+            "pasted-token",
+        )
+    assert logins == ["pasted-token"]
 
 
 def test_run_showing_output_collapses_repeated_layer_status(capfd):

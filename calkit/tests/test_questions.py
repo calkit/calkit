@@ -176,8 +176,24 @@ def test_check_questions(tmp_dir):
     assert status.questions[3].status == "ok"
     assert status.questions[3].commit == sha1
     assert status.ok
-    # The pipeline changes a Git-tracked result in a later commit: stale,
-    # and the rendered text already shows the new number
+    # The results file gains an unrelated key and a cited float moves in
+    # its last bits: neither touches the answer
+    with open("results/findings.json", "w") as f:
+        json.dump(
+            {
+                "n_top": 8,
+                "ratio": 5.10140000001,
+                "nested": {"best": "a"},
+                "new_key": 1,
+            },
+            f,
+        )
+    _commit("Add an unrelated result")
+    status = check_questions(ck_info=ck_info, wdir=".")
+    assert status.questions[3].status == "ok"
+    # The pipeline changes a cited value in a later commit: stale, with
+    # the old and new values named, and the rendered text already shows
+    # the new number
     with open("results/findings.json", "w") as f:
         json.dump({"n_top": 0, "ratio": 5.1014, "nested": {"best": "a"}}, f)
     _commit("Re-run the pipeline")
@@ -186,7 +202,8 @@ def test_check_questions(tmp_dir):
     assert q4.status == "stale"
     assert q4.commit == sha1
     assert q4.evidence[0].status == "changed"
-    assert "1 commit(s) since" in (q4.evidence[0].message or "")
+    assert "n_top was 8 at" in (q4.evidence[0].message or "")
+    assert q4.evidence[1].status == "ok"
     assert q4.evidence[4].status == "ok"
     assert not status.ok
     report = format_status(status)
@@ -216,7 +233,7 @@ def test_check_questions(tmp_dir):
         json.dump({"n_top": 1, "ratio": 5.1014, "nested": {"best": "a"}}, f)
     status = check_questions(ck_info=ck_info, wdir=".")
     assert status.questions[3].status == "stale"
-    assert "working tree" in (status.questions[3].evidence[0].message or "")
+    assert "now 1" in (status.questions[3].evidence[0].message or "")
     _commit("Change it again")
     ck_info["questions"][3]["reviewed"] = "2026-08-30"
     _write_yaml(ck_info)

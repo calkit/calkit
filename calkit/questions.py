@@ -294,14 +294,48 @@ def _lock_hash(lock_text: str, path: str) -> str | None:
     return None
 
 
-def evidence_change(path: str, since: str, repo: Any, wdir: str) -> str | None:
+def _fmt(value: Any) -> str:
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return repr(value) if isinstance(value, str) else str(value)
+
+
+def _values_equal(a: Any, b: Any) -> bool:
+    """Equality that ignores the last bits of a float, so a change of BLAS
+    or accumulation order does not count as the evidence changing."""
+    if isinstance(a, bool) or isinstance(b, bool):
+        return a is b
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a == b or abs(a - b) <= 1e-9 * max(abs(a), abs(b))
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(
+            _values_equal(x, y) for x, y in zip(a, b)
+        )
+    if isinstance(a, dict) and isinstance(b, dict):
+        return a.keys() == b.keys() and all(
+            _values_equal(a[k], b[k]) for k in a
+        )
+    return bool(a == b)
+
+
+def evidence_change(
+    path: str,
+    since: str,
+    repo: Any,
+    wdir: str,
+    key: str | None = None,
+    current: Any = None,
+) -> str | None:
     """How ``path`` has changed since commit ``since``, or None if it has
     not.
 
-    Git-tracked paths are asked directly. DVC-tracked ones are compared by
-    the hash ``dvc.lock`` (or the path's ``.dvc`` file) recorded at that
-    commit and now, which is the only record there is of a file Git does
-    not hold.
+    For a value in a Git-tracked results file the comparison is made on
+    the value itself, read from the file as it was at ``since``: a results
+    file gains keys and moves other numbers all the time, and none of that
+    touches an answer that cites a different key. Other Git-tracked paths
+    are asked directly. DVC-tracked ones are compared by the hash
+    ``dvc.lock`` (or the path's ``.dvc`` file) recorded at that commit and
+    now, which is the only record there is of a file Git does not hold.
     """
     root = str(repo.working_dir)
     rel = os.path.relpath(os.path.join(wdir, path), root).replace(os.sep, "/")
@@ -310,6 +344,26 @@ def evidence_change(path: str, since: str, repo: Any, wdir: str) -> str | None:
         tracked = bool(str(repo.git.ls_files("--", rel)).strip())
     except Exception:
         tracked = False
+    if tracked and key is not None:
+        try:
+            old_text = str(repo.git.show(f"{since}:{rel}"))
+        except Exception:
+            return f"{rel} did not exist at {short}"
+        ext = os.path.splitext(rel)[1].lower()
+        try:
+            old_data = (
+                json.loads(old_text)
+                if ext == ".json"
+                else calkit.ryaml.load(io.StringIO(old_text))
+            )
+            old = resolve_key(old_data, key)
+        except KeyError:
+            return f"{key} did not exist in {rel} at {short}"
+        except Exception:
+            return f"{rel} could not be read at {short}"
+        if _values_equal(old, current):
+            return None
+        return f"{key} was {_fmt(old)} at {short}, now {_fmt(current)}"
     if tracked:
         commits = str(repo.git.rev_list(f"{since}..HEAD", "--", rel)).split()
         if commits:
@@ -440,7 +494,14 @@ def check_evidence(
         if kind == "result":
             out.message = "a result with a key is a value; use kind: value"
     if since is not None and repo is not None:
-        change = evidence_change(path, since, repo, wdir)
+        change = evidence_change(
+            path,
+            since,
+            repo,
+            wdir,
+            key=key if is_value_evidence(ev) else None,
+            current=out.current,
+        )
         if change:
             out.status = "changed"
             out.message = change

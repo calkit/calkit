@@ -550,6 +550,18 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
         )
         assert "Pushing image" not in out
         assert "already in the registry" in out
+        # Naming a target sends only that one, so an image can go out
+        # without a Git push, which is what makes it usable mid-work
+        out = subprocess.check_output(["calkit", "push", "docker"], text=True)
+        assert "already in the registry" in out
+        assert "Pushing to Git remote" not in out
+        assert "Pushing to DVC remote" not in out
+        # An unknown target is a typo, not a request to push everything
+        result = subprocess.run(
+            ["calkit", "push", "dockre"], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert "Invalid target to push" in result.stderr
     finally:
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
         subprocess.run(["docker", "rmi", "-f", image], capture_output=True)

@@ -273,16 +273,22 @@ Push to Git, DVC, and any Docker registries.
 Usage:
 
 ```text
-calkit push [OPTIONS]
+calkit push [OPTIONS] [TARGETS...]
 ```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                      |
+| --------- | ---- | -------- | ------- | ---------------------------------------------------------------- |
+| `targets` | text | no       |         | What to push: 'git', 'dvc', 'docker', or 'all'. Defaults to all. |
 
 Options:
 
 | Option            | Type    | Required | Default | Description                                    |
 | ----------------- | ------- | -------- | ------- | ---------------------------------------------- |
-| `--no-check-auth` | boolean | no       | False   |                                                |
-| `--no-dvc`        | boolean | no       | False   |                                                |
-| `--no-git`        | boolean | no       | False   |                                                |
+| `--no-check-auth` | boolean | no       | False   | Do not check DVC remote authentication.        |
+| `--no-dvc`        | boolean | no       | False   | Do not push to DVC remotes.                    |
+| `--no-git`        | boolean | no       | False   | Do not push to Git remote.                     |
 | `--git-arg`       | text    | no       |         | Additional Git args.                           |
 | `--dvc-arg`       | text    | no       |         | Additional DVC args.                           |
 | `--no-docker`     | boolean | no       | False   | Do not push Docker images to their registries. |

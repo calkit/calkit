@@ -353,7 +353,9 @@ and Calkit checks the image's layers against the lock after pulling.
 alongside Git and DVC, skipping any the registry already has.
 An environment built before its registry was configured is pushed as-is,
 without being rebuilt first.
-Pass `--no-docker` to skip images.
+Pass `--no-docker` to skip images, or name what to send:
+`calkit push docker` publishes the images and nothing else, which is
+handy mid-work when the code isn't ready to go out with them.
 Checking an environment never pushes: it builds or pulls whatever the
 project needs to run, and publishing is left to `calkit push`.
 Pushing is also what writes the image's digest into the lock file, since

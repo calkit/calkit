@@ -1527,11 +1527,33 @@ def pull(
                 calkit.dvc.zip.sync_all(direction="to-workspace", wdir=sp_path)
 
 
+# What ``calkit push`` can send, in the order it sends them
+PUSH_TARGETS = ["dvc", "docker", "git"]
+
+
 @app.command(name="push")
 def push(
-    no_check_auth: Annotated[bool, typer.Option("--no-check-auth")] = False,
-    no_dvc: Annotated[bool, typer.Option("--no-dvc")] = False,
-    no_git: Annotated[bool, typer.Option("--no-git")] = False,
+    targets: Annotated[
+        Optional[list[str]],
+        typer.Argument(
+            help=(
+                "What to push: 'git', 'dvc', 'docker', or 'all'. "
+                "Defaults to all."
+            ),
+        ),
+    ] = None,
+    no_check_auth: Annotated[
+        bool,
+        typer.Option(
+            "--no-check-auth", help="Do not check DVC remote authentication."
+        ),
+    ] = False,
+    no_dvc: Annotated[
+        bool, typer.Option("--no-dvc", help="Do not push to DVC remotes.")
+    ] = False,
+    no_git: Annotated[
+        bool, typer.Option("--no-git", help="Do not push to Git remote.")
+    ] = False,
     git_args: Annotated[
         list[str],
         typer.Option("--git-arg", help="Additional Git args."),
@@ -1552,8 +1574,30 @@ def push(
     ] = False,
 ) -> None:
     """Push to Git, DVC, and any Docker registries."""
+    selected = set(PUSH_TARGETS)
+    if targets:
+        selected = set()
+        for target in targets:
+            if target == "all":
+                selected.update(PUSH_TARGETS)
+            elif target in PUSH_TARGETS:
+                selected.add(target)
+            else:
+                raise_error(
+                    f"Invalid target to push: '{target}'; choose from "
+                    + ", ".join(PUSH_TARGETS + ["all"])
+                )
+    # The --no-* options subtract from what was asked for, so they keep
+    # working on their own and still mean something alongside a target
+    for target, excluded in [
+        ("dvc", no_dvc),
+        ("git", no_git),
+        ("docker", no_docker),
+    ]:
+        if excluded:
+            selected.discard(target)
     _warn_on_hub_mismatch()
-    if not no_dvc:
+    if "dvc" in selected:
         remotes = calkit.dvc.get_remotes()
         if not no_check_auth:
             # Check that our dvc remotes all have our DVC token set for them
@@ -1573,7 +1617,7 @@ def push(
                 raise_error("DVC push failed")
         else:
             warn("No DVC remotes configured; skipping DVC push")
-    if not no_docker:
+    if "docker" in selected:
         images = calkit.docker.get_pushable_images()
         for env_name, info in images.items():
             remote_ref = info["remote_ref"]
@@ -1617,7 +1661,7 @@ def push(
                 typer.echo(
                     f"Recorded digest for '{env_name}' in its lock file"
                 )
-    if not no_git:
+    if "git" in selected:
         typer.echo("Pushing to Git remote")
         try:
             git_cmd = ["git", "push"]

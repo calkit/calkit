@@ -1,0 +1,52 @@
+%% calkit.sty -- provenance markers for content injected from a Calkit
+%% project. Installed beside a document by `calkit latex build
+%% --provenance`; see https://docs.calkit.org/provenance.
+%%
+%% Every macro here is a no-op wrapper in the default (final) mode, so a
+%% document renders identically with or without provenance markers. With
+%% the `provenance` option, injected values, figures and text blocks are
+%% colored and hyperlinked to their source, and every use is logged to
+%% \jobname.ckprov, which Calkit turns into <document>.provenance.json.
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{calkit}[2026/08/29 v0.1 Calkit provenance markers]
+\RequirePackage{xcolor}
+\RequirePackage{hyperref}
+\newif\ifck@prov
+\DeclareOption{provenance}{\ck@provtrue}
+\DeclareOption{final}{\ck@provfalse}
+\ProcessOptions\relax
+\definecolor{ckprov}{HTML}{1F6FB2}
+% Where a source path links to, e.g., a repository or Calkit Hub URL with
+% a trailing slash. Empty means links are relative to the document.
+\def\ck@baseurl{}
+\newcommand\ckbaseurl[1]{\def\ck@baseurl{#1}}
+% Artifact -> stage table, generated per build into calkit-provenance.tex
+\newcommand\ckartifact[3]{\expandafter\gdef\csname ck@stage@#1\endcsname{#2}%
+  \expandafter\gdef\csname ck@hash@#1\endcsname{#3}}
+\newcommand\ck@stageof[1]{\ifcsname ck@stage@#1\endcsname
+  \csname ck@stage@#1\endcsname\else ?\fi}
+\InputIfFileExists{calkit-provenance.tex}{}{}
+% Log of every injection, one JSON object per line
+\newwrite\ck@provfile
+\AtBeginDocument{\immediate\openout\ck@provfile=\jobname.ckprov\relax}
+\AtEndDocument{\immediate\closeout\ck@provfile}
+\newcommand\ck@log[3]{\immediate\write\ck@provfile{%
+  {"kind": "#1", "path": "#2", "key": "#3", "page": \thepage}}}
+\newcommand\ck@link[2]{\ifck@prov
+  \href{\ck@baseurl#1}{\textcolor{ckprov}{#2}}\else#2\fi}
+% \ckvalue{key}{value}{path}{stage}: a number or string read from a
+% results file. Generated value commands expand to this.
+\newcommand\ckvalue[4]{\ck@log{value}{#3}{#1}\ck@link{#3}{#2}}
+% \ckfigure[graphics options]{path}: \includegraphics with provenance
+\newcommand\ckfigure[2][]{\ck@log{figure}{#2}{}%
+  \ifck@prov\href{\ck@baseurl#2}{\includegraphics[#1]{#2}}%
+  \else\includegraphics[#1]{#2}\fi}
+% \ckcaptionsource{path}: a note for a caption naming the producing stage
+\newcommand\ckcaptionsource[1]{\ifck@prov\ \textcolor{ckprov}{%
+  \footnotesize[\texttt{#1}, stage \texttt{\ck@stageof{#1}}]}\fi}
+% \ckinput{path}: \input with provenance, for stage-generated text
+\newcommand\ckinput[1]{\ck@log{text}{#1}{}\ifck@prov
+  \textcolor{ckprov}{\footnotesize[\texttt{#1}]}\par\fi\input{#1}}
+% \ckblock{n}{path}: marks a generated question block
+\newcommand\ckblock[2]{\ck@log{block}{#2}{#1}\ck@link{#2}{%
+  \footnotesize[question #1]}}

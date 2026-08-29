@@ -2200,12 +2200,13 @@ Options:
 
 Describe things.
 
-| Command                                                             | Description                                                        |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [`system`](#subcommand-describe-desc-system)                        | Describe the system.                                               |
-| [`environment\|env`](#subcommand-describe-desc-environment-env)     | Describe a single environment, including spec and lock file paths. |
-| [`environments\|envs`](#subcommand-describe-desc-environments-envs) | Describe all environments, including spec and lock file paths.     |
-| [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+| Command                                                                   | Description                                                        |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| [`system`](#subcommand-describe-desc-system)                              | Describe the system.                                               |
+| [`environment\|env`](#subcommand-describe-desc-environment-env)           | Describe a single environment, including spec and lock file paths. |
+| [`environments\|envs`](#subcommand-describe-desc-environments-envs)       | Describe all environments, including spec and lock file paths.     |
+| [`schema`](#subcommand-describe-desc-schema)                              | Print the JSON schema for calkit.yaml.                             |
+| [`components\|component`](#subcommand-describe-desc-components-component) | Describe the project content a document uses.                      |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2281,6 +2282,40 @@ Options:
 | Option           | Type | Required | Default | Description                                               |
 | ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
 | `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
+
+<a id="subcommand-describe-desc-components-component"></a>
+
+#### `calkit describe|desc components|component`
+
+Describe the project content a document uses.
+
+Every value, figure and generated block the document takes from the project, with the file it came from, the stage and script that produce it, the pages it lands on, and whether it is still current -- either because its stage needs a rerun, or because the project has moved on since the document was built.
+
+With --line (and optionally --column) this answers "what is under my cursor?", which is what an editor asks on hover or go-to-definition.
+
+Usage:
+
+```text
+calkit describe|desc components|component [OPTIONS] DOCUMENT
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                                                  |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| `document` | text | yes      |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                 |
+| ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--line`            | integer | no       |         | Describe only what is on this line of the source (1-based), rather than the whole document.                                                                 |
+| `--column`, `--col` | integer | no       |         | Narrow a --line to the component under this column.                                                                                                         |
+| `--source`          | text    | no       |         | File the --line refers to, if the cursor is in a file the document inputs rather than the document itself.                                                  |
+| `--page`            | integer | no       |         | Only components appearing on this page.                                                                                                                     |
+| `--stale`           | boolean | no       | False   | Only components known to be out of date or missing. A component nothing could be checked about is not one of them; it reads as unknown in the full listing. |
+| `--no-stage-check`  | boolean | no       | False   | Skip the pipeline status check, which is the slow part. Drift between the document and the project is still reported; a stage needing a rerun is not.       |
+| `--json`            | boolean | no       | False   | Output result as JSON.                                                                                                                                      |
 
 <a id="command-group-import"></a>
 

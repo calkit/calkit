@@ -377,10 +377,10 @@ def build(
         raise_error("latexmk failed")
     if provenance:
         sidecar = calkit.latex.collect_provenance(tex_file, ck_info)
-        n = len(sidecar["injections"])
+        n = len(sidecar["components"])
         typer.echo(
             f"Wrote {calkit.latex.provenance_sidecar_path(tex_file)} "
-            f"({n} injection(s))"
+            f"({n} component(s))"
         )
 
 

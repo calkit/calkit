@@ -496,10 +496,11 @@ def collect_provenance(
 ) -> dict:
     """Turn the build's ``.ckprov`` log into the document's provenance record.
 
-    Every injection the document made, with the pages it appears on and
-    the stage, inputs and hash of what it came from, so a reader or a tool
-    can follow any number or figure in the PDF back through the pipeline.
-    Written beside the PDF as ``<document>.provenance.json``.
+    Every component the document took from the project, with the pages it
+    appears on and the stage, inputs and hash of what it came from, so a
+    reader or a tool can follow any number or figure in the PDF back
+    through the pipeline. Written beside the PDF as
+    ``<document>.provenance.json``.
     """
     wdir = wdir or os.getcwd()
     tex_dir = os.path.dirname(target_path)
@@ -548,19 +549,27 @@ def collect_provenance(
             sorted({u["path"] for u in uses.values()}), ck_info, wdir
         )
     }
-    injections = []
+    components = []
     for use in uses.values():
         rec = records.get(use["path"], {})
-        injections.append(
-            {
-                **use,
-                "stage": rec.get("stage"),
-                "stage_inputs": rec.get("stage_inputs", []),
-                "hash": rec.get("hash"),
-            }
-        )
-    injections.sort(key=lambda u: (u["kind"], u["path"], u["key"] or ""))
-    sidecar = {"document": target_path, "injections": injections}
+        entry = {
+            **use,
+            "stage": rec.get("stage"),
+            "stage_inputs": rec.get("stage_inputs", []),
+            "hash": rec.get("hash"),
+        }
+        # What each value read as in this build. A results file can change
+        # in a key the document never cites, so its hash says nothing about
+        # whether the page is out of date; the value itself does. Recorded
+        # raw, since one value can be typeset several ways in one document
+        # and a difference in formatting is not a difference in the result.
+        if use["kind"] == "value":
+            from calkit.components import current_value
+
+            entry["value"] = current_value(use["path"], use["key"], wdir)
+        components.append(entry)
+    components.sort(key=lambda u: (u["kind"], u["path"], u["key"] or ""))
+    sidecar = {"document": target_path, "components": components}
     with open(
         os.path.join(wdir, provenance_sidecar_path(target_path)),
         "w",

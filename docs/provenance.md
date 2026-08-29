@@ -398,11 +398,11 @@ goes to a journal.
 Each build installs `calkit.sty` beside the document (commit it, so the
 paper builds on Overleaf and anywhere else without Calkit), writes a
 per-build artifact table `calkit-provenance.tex` (do not commit it), and
-turns the build's log of injections into `<document>.provenance.json`:
-every value, figure and text block the document took from the project,
-the pages it appears on, the stage that produced it, that stage's inputs,
-and the hash recorded in `dvc.lock`. That file is the trail in
-machine-readable form, for editors, the hub, and checks.
+turns the build's log into `<document>.provenance.json`: every value,
+figure and text block the document took from the project, the pages it
+appears on, the stage that produced it, that stage's inputs, the hash
+recorded in `dvc.lock`, and, for a value, the value itself. That file is
+the trail in machine-readable form, for editors, the hub, and checks.
 
 The questions commands are `\ckquestion[n]`, `\ckhypothesis[n]`,
 `\ckanswer[n]`, `\cknotes[n]`, `\ckevidence[n]`, numbered as in
@@ -411,3 +411,62 @@ A `{name}` placeholder in an answer becomes a marked value in the paper by
 the same rendering `calkit list questions` uses, so the two cannot
 disagree, and a publication evidence entry with a `label` becomes a
 `\ref` to that section.
+
+### Following a component back
+
+Ask about a document and you get its components -- every place project
+content lands on the page -- with what to open to change each one:
+
+```sh
+calkit describe components paper/main.pdf
+```
+
+```text
+figure figures/dissipation.pdf
+    ok · stage plot-dissipation · scripts/plot.py · p. 4
+value results/paper-numbers.json:Improvement
+    STALE · stage benchmark · scripts/bench.py · p. 3 · changed-since-build · 2.1 -> 2.4
+```
+
+Add `--json` for the same thing machine-readably, `--page 3` for what is
+on one page of the PDF, and `--stale` for only what is known to be out of
+date or missing. Give it a `--line` (and a `--column`) instead and it
+answers about one place in the source, which is what an editor asks when
+the cursor lands on a value or a figure:
+
+```sh
+calkit describe components paper/main.tex --line 42 --column 18
+```
+
+The source, the built PDF, and the sidecar all name the same document, so
+it doesn't matter which one a tool has in hand. Without a build there is
+no sidecar and no pages, but the question still has an answer: the
+generated `.tex` files say which results file and key each command came
+from, so the trail holds in a project that has never been built.
+
+### Ways to be out of date
+
+A component can be out of date in more than one way, and the ways are
+unrelated. The distinction matters because the fix differs:
+
+- **`stage-out-of-date`** -- the pipeline would rerun the stage that
+  produces it. The artifact itself is behind; rebuilding the document
+  first would only typeset the old one. Run the stage.
+- **`changed-since-build`** -- the project has moved on since the document
+  was built. The stage may be perfectly current; it is the PDF in front of
+  you that is showing a number or a figure the project no longer produces.
+  Rebuild the document.
+- **`answer-stale`** -- for a `\ckfindings` or `\ckanswer` block, the
+  answer no longer matches its evidence, which is what
+  [`calkit check questions`](questions.md) reports. Reread the answer.
+
+Values are compared value to value rather than by file hash: a results
+file changing in a key the document never cites says nothing about the
+page. The comparison uses the raw value, not the typeset text, so
+`{ratio:.1f}` and `{ratio}` in the same document don't disagree with each
+other.
+
+The stage check is the slow part, since it asks the pipeline for its
+status. Pass `--no-stage-check` to skip it -- drift between the document
+and the project is still reported -- and note that a component nothing
+could be checked about reads as `unknown`, never as current.

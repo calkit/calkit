@@ -142,7 +142,7 @@ def test_provenance(tmp_dir):
         )
     sidecar = collect_provenance("paper/main.tex", ck_info, ".")
     assert sidecar["document"] == "paper/main.tex"
-    by = {(i["kind"], i["path"]): i for i in sidecar["injections"]}
+    by = {(i["kind"], i["path"]): i for i in sidecar["components"]}
     fig = by[("figure", "figures/plot.pdf")]
     assert fig["stage"] == "plot"
     assert fig["hash"] == "abc"

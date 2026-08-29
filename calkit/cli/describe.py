@@ -122,3 +122,156 @@ def describe_schema(
     with open(output, "w", encoding="utf-8") as f:
         f.write(txt)
     typer.echo(f"Wrote schema to {output}")
+
+
+def _component_line(c) -> str:
+    """One component as a line someone can read."""
+    marks = {"ok": "ok", "stale": "STALE", "missing": "MISSING"}
+    head = f"{c.kind} {c.location}"
+    bits = [marks.get(c.status, "?")]
+    if c.stage:
+        bits.append(f"stage {c.stage}")
+    if c.script:
+        bits.append(c.script)
+    if c.pages:
+        bits.append("p. " + ", ".join(str(p) for p in c.pages))
+    if c.stale_reasons:
+        bits.append("; ".join(c.stale_reasons))
+    if c.kind == "value" and c.current_value is not None:
+        drifted = (
+            c.build_value is not None and c.build_value != c.current_value
+        )
+        bits.append(
+            f"{c.build_value} -> {c.current_value}"
+            if drifted
+            else f"= {c.current_value}"
+        )
+    return f"{head}\n    " + " · ".join(bits)
+
+
+@describe_app.command(name="components|component")
+def describe_components(
+    document: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Document to describe. The LaTeX source, the built PDF, or "
+                "the provenance sidecar all name the same document."
+            )
+        ),
+    ],
+    line: Annotated[
+        int | None,
+        typer.Option(
+            "--line",
+            help=(
+                "Describe only what is on this line of the source "
+                "(1-based), rather than the whole document."
+            ),
+        ),
+    ] = None,
+    column: Annotated[
+        int | None,
+        typer.Option(
+            "--column",
+            "--col",
+            help="Narrow a --line to the component under this column.",
+        ),
+    ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option(
+            "--source",
+            help=(
+                "File the --line refers to, if the cursor is in a file the "
+                "document inputs rather than the document itself."
+            ),
+        ),
+    ] = None,
+    page: Annotated[
+        int | None,
+        typer.Option("--page", help="Only components appearing on this page."),
+    ] = None,
+    stale_only: Annotated[
+        bool,
+        typer.Option(
+            "--stale",
+            help=(
+                "Only components known to be out of date or missing. A "
+                "component nothing could be checked about is not one of "
+                "them; it reads as unknown in the full listing."
+            ),
+        ),
+    ] = False,
+    no_stage_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-stage-check",
+            help=(
+                "Skip the pipeline status check, which is the slow part. "
+                "Drift between the document and the project is still "
+                "reported; a stage needing a rerun is not."
+            ),
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """Describe the project content a document uses.
+
+    Every value, figure and generated block the document takes from the
+    project, with the file it came from, the stage and script that produce
+    it, the pages it lands on, and whether it is still current -- either
+    because its stage needs a rerun, or because the project has moved on
+    since the document was built.
+
+    With --line (and optionally --column) this answers "what is under my
+    cursor?", which is what an editor asks on hover or go-to-definition.
+    """
+    import calkit.components
+
+    if column is not None and line is None:
+        raise_error("--column needs a --line")
+    if line is not None and page is not None:
+        raise_error("--page and --line select different things; use one")
+    check_stages = not no_stage_check
+    if line is not None:
+        components = calkit.components.resolve_position(
+            source=source or calkit.components.source_path(document),
+            line=line,
+            col=column,
+            document=document,
+            check_stages=check_stages,
+        )
+        result = {"document": document, "components": components}
+    else:
+        described = calkit.components.describe_document(
+            document, check_stages=check_stages
+        )
+        components = described.components
+        if page is not None:
+            components = [c for c in components if page in c.pages]
+        result = {
+            "document": described.document,
+            "built": described.built,
+            "components": components,
+        }
+    if stale_only:
+        components = [
+            c for c in components if c.status in ("stale", "missing")
+        ]
+        result["components"] = components
+    if json_output:
+        echo_json(
+            {
+                **result,
+                "components": [c.model_dump(mode="json") for c in components],
+            }
+        )
+        return
+    if not components:
+        typer.echo("No components found")
+        return
+    for c in components:
+        typer.echo(_component_line(c))

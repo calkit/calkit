@@ -310,7 +310,7 @@ environments:
     kind: docker
     path: Dockerfile
     image: foam2
-    registry: auto
+    registry: ghcr.io
 ```
 
 `image` can be left out when there's a `path` to build from,
@@ -319,10 +319,11 @@ e.g., `someone/some-project.foam2`,
 matching how the environment's Jupyter kernel is named.
 An environment defined purely by someone else's image has to name it.
 
-`auto` resolves to the project's namespace in the GitHub Container
-Registry, e.g., `ghcr.io/someone/some-project`,
+`ghcr.io` on its own resolves to the project's namespace in the GitHub
+Container Registry, e.g., `ghcr.io/someone/some-project`,
+naming the registry rather than leaving it to be worked out,
 but any registry prefix works,
-and `none` keeps images local.
+and leaving `registry` unset or null keeps images local.
 The lock file records the image's digest,
 so what gets pulled back is exactly what was built,
 and Calkit checks the image's layers against the lock after pulling.
@@ -402,8 +403,8 @@ environments:
     kind: docker
     path: Dockerfile
     image: foam2
-    registry: auto
-    platforms:
+    registry: ghcr.io
+    build_platforms:
       - linux/amd64
       - linux/arm64
 ```
@@ -1080,26 +1081,26 @@ Model class: `CondaEnvironment`
 
 Model class: `DockerEnvironment`
 
-| Parameter      | Type                           | Required | Description                                                                                                                                                                                                                                                    |
-| -------------- | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                                              |
-| path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                                 |
-| image          | str                            | no       | Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.                                     |
-| registry       | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. Images are kept local if this is unset or set to 'none'. |
-| platforms      | list[str]                      | no       | Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64']. Building for more than one requires a registry, since a multi-platform image can only be kept in one.                                                                                  |
-| layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                                                                                                                                          |
-| shell          | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                                                                                                                                       |
-| command_mode   | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                                                                                                                                |
-| platform       | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                                                                                                                                       |
-| wdir           | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                                                                                                                                   |
-| user           | str                            | no       | User to run the container as. Defaults to the host user.                                                                                                                                                                                                       |
-| deps           | list[str]                      | no       | Files added to the container as dependencies.                                                                                                                                                                                                                  |
-| env_vars       | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                                                                                                                               |
-| ports          | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                                                                                                                              |
-| gpus           | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                                                                                                                                         |
-| args           | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                                                                                                                                        |
-| jupyter_kernel | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.                                                                                                              |
-| description    | str                            | no       | A description of the environment.                                                                                                                                                                                                                              |
+| Parameter       | Type                           | Required | Description                                                                                                                                                                                                                                                         |
+| --------------- | ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind            | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                                                   |
+| path            | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                                      |
+| image           | str                            | no       | Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.                                          |
+| registry        | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null. |
+| build_platforms | list[str]                      | no       | Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64'], as opposed to 'platform', which is the one it's pulled and run as. Building for more than one requires a registry, since a multi-platform image can only be kept in one.                    |
+| layers          | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                                                                                                                                               |
+| shell           | Literal['bash'\|'sh']          | no       | Shell used to run commands in the image.                                                                                                                                                                                                                            |
+| command_mode    | Literal['shell'\|'entrypoint'] | no       | Whether commands run through a shell or the image's entrypoint.                                                                                                                                                                                                     |
+| platform        | str                            | no       | Platform to run as, e.g., 'linux/amd64'.                                                                                                                                                                                                                            |
+| wdir            | str                            | no       | Working directory inside the container. Defaults to '/work'.                                                                                                                                                                                                        |
+| user            | str                            | no       | User to run the container as. Defaults to the host user.                                                                                                                                                                                                            |
+| deps            | list[str]                      | no       | Files added to the container as dependencies.                                                                                                                                                                                                                       |
+| env_vars        | dict[str, str]                 | no       | Environmental variables to set in the container.                                                                                                                                                                                                                    |
+| ports           | list[str]                      | no       | Ports to expose, e.g., '8080:80'.                                                                                                                                                                                                                                   |
+| gpus            | str                            | no       | GPUs to make available, passed to 'docker run --gpus'.                                                                                                                                                                                                              |
+| args            | list[str]                      | no       | Extra arguments passed to 'docker run'.                                                                                                                                                                                                                             |
+| jupyter_kernel  | str                            | no       | Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.                                                                                                                   |
+| description     | str                            | no       | A description of the environment.                                                                                                                                                                                                                                   |
 
 #### `julia`
 

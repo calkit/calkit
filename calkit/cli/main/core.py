@@ -3227,7 +3227,7 @@ def run_in_env(
                 user=env.get("user"),
                 wdir=env.get("wdir"),
                 args=env.get("args", []),
-                platforms=env.get("platforms", []),
+                build_platforms=env.get("build_platforms", []),
                 registry=env.get("registry"),
                 lock_archs=calkit.docker.get_lock_archs(env),
                 quiet=not verbose,

@@ -284,7 +284,9 @@ def test_resolve_registry_prefix(tmp_dir):
 
 def test_get_lock_archs():
     assert get_lock_archs({}) == ["amd64", "arm64"]
-    archs = get_lock_archs({"platforms": ["linux/amd64", "linux/arm/v7"]})
+    archs = get_lock_archs(
+        {"build_platforms": ["linux/amd64", "linux/arm/v7"]}
+    )
     assert archs == ["amd64", "arm64", "arm-v7"]
 
 

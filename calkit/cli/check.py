@@ -382,7 +382,7 @@ def check_environment(
             user=env.get("user"),
             wdir=env.get("wdir"),
             args=env.get("args", []),
-            platforms=env.get("platforms", []),
+            build_platforms=env.get("build_platforms", []),
             registry=env.get("registry"),
             lock_archs=calkit.docker.get_lock_archs(env),
             quiet=not verbose,
@@ -932,7 +932,7 @@ def check_docker_env(
             help="Declare an explicit run argument for the container.",
         ),
     ] = [],
-    platforms: Annotated[
+    build_platforms: Annotated[
         list[str],
         typer.Option(
             "--platform-build",
@@ -1165,7 +1165,7 @@ def check_docker_env(
             # A multi-platform image can't live in the local image store, so
             # it's built straight into the registry and pulled back for the
             # platform we're on
-            multi_platform = len(platforms) > 1
+            multi_platform = len(build_platforms) > 1
             if multi_platform and remote_ref is None:
                 raise_error(
                     "Building for multiple platforms requires a registry; "
@@ -1178,7 +1178,7 @@ def check_docker_env(
                     "buildx",
                     "build",
                     "--platform",
-                    ",".join(platforms),
+                    ",".join(build_platforms),
                     "-t",
                     remote_ref,
                     "--push",
@@ -1188,7 +1188,9 @@ def check_docker_env(
                 ]
             else:
                 cmd = ["docker", "build", "-t", tag, "-f", dockerfile_name]
-                build_platform = platforms[0] if platforms else platform
+                build_platform = (
+                    build_platforms[0] if build_platforms else platform
+                )
                 if build_platform is not None:
                     cmd += ["--platform", build_platform]
                 cmd.append(".")

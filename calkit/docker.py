@@ -818,9 +818,11 @@ def build_lock(
     return lock
 
 
-# Values of an environment's ``registry`` that mean "work it out from the
-# project's Git remote" rather than naming a registry outright
-AUTO_REGISTRY_VALUES = ["auto", "ghcr", "ghcr.io", "github", "true"]
+# Values of an environment's ``registry`` that name the GitHub Container
+# Registry without saying which namespace, leaving that to be worked out
+# from the project's Git remote. ``ghcr.io`` is the documented one, since a
+# registry Calkit runs itself someday would have as much claim to 'auto'
+AUTO_REGISTRY_VALUES = ["ghcr.io", "ghcr", "github", "auto", "true"]
 
 
 def registry_is_auto(registry: str | None) -> bool:
@@ -834,9 +836,12 @@ def resolve_registry_prefix(env: dict, wdir: str | None = None) -> str | None:
     """Return the registry prefix used for an environment's images.
 
     Registries are opt-in, since pushing an image publishes it somewhere the
-    project doesn't necessarily control. ``auto`` (or ``ghcr``) resolves to
-    the GitHub Container Registry namespace beside the project's repo, which
-    is the one namespace we can name on the user's behalf.
+    project doesn't necessarily control, so images are kept local when
+    ``registry`` is unset or null. ``ghcr.io`` on its own resolves to the
+    GitHub Container Registry namespace beside the project's repo, which is
+    the one namespace we can name on the user's behalf. The strings a shell
+    has to use in place of null are read as null too, since ``--registry
+    none`` is the only way to say it on the command line.
     """
     registry = env.get("registry")
     if registry is None or registry is False:
@@ -942,7 +947,7 @@ def get_lock_archs(env: dict) -> list[str]:
     from calkit.environments import DEFAULT_DOCKER_LOCK_ARCHS
 
     archs = list(DEFAULT_DOCKER_LOCK_ARCHS)
-    for platform in env.get("platforms") or []:
+    for platform in env.get("build_platforms") or []:
         arch = platform_to_arch_name(platform)
         if arch is not None and arch not in archs:
             archs.append(arch)

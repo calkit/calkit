@@ -268,7 +268,7 @@ runs:
       if: ${{ steps.detect.outputs.needs_docker == 'true' }}
       uses: docker/setup-buildx-action@v3
 
-    # Logging in lets an environment with `registry: auto` push what it
+    # Logging in lets an environment with `registry: ghcr.io` push what it
     # builds here, so that later runs and everyone's laptops pull the image
     # instead of rebuilding it. Harmless when no environment uses a registry.
     - name: Log in to the GitHub Container Registry

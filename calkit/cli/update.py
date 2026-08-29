@@ -878,8 +878,8 @@ def update_docker_env(
             "--registry",
             help=(
                 "Registry prefix to push images to and pull them from, or "
-                "'auto' for the project's GitHub Container Registry "
-                "namespace, or 'none' to keep images local."
+                "'ghcr.io' for the project's own namespace in the GitHub "
+                "Container Registry, or 'none' to keep images local."
             ),
         ),
     ] = None,
@@ -911,7 +911,9 @@ def update_docker_env(
         env["image"] = image
     if registry is not None:
         if registry.lower() in ["none", "false"]:
-            env["registry"] = "none"
+            # A shell can't pass YAML's null, so this is how it's asked for,
+            # but what belongs in calkit.yaml is the null itself
+            env["registry"] = None
         else:
             env["registry"] = registry
     if image is not None or registry is not None:

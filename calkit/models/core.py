@@ -845,16 +845,17 @@ class DockerEnvironment(Environment):
         description=(
             "Registry prefix images built from this environment's Dockerfile "
             "are pushed to and pulled from, e.g., "
-            "'ghcr.io/someone/some-project', or 'auto' for the project's "
-            "GitHub Container Registry namespace. Images are kept local if "
-            "this is unset or set to 'none'."
+            "'ghcr.io/someone/some-project', or 'ghcr.io' for the "
+            "project's own namespace in the GitHub Container Registry. "
+            "Images are kept local if this is unset or null."
         ),
     )
-    platforms: list[str] | None = Field(
+    build_platforms: list[str] | None = Field(
         default=None,
         description=(
             "Platforms to build the image for, e.g., "
-            "['linux/amd64', 'linux/arm64']. Building for more than one "
+            "['linux/amd64', 'linux/arm64'], as opposed to 'platform', which "
+            "is the one it's pulled and run as. Building for more than one "
             "requires a registry, since a multi-platform image can only be "
             "kept in one."
         ),

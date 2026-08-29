@@ -1063,12 +1063,12 @@ def new_docker_env(
             help=(
                 "Registry prefix to push built images to and pull them from "
                 "instead of rebuilding, e.g., 'ghcr.io/someone/some-project', "
-                "or 'auto' for the project's GitHub Container Registry "
-                "namespace."
+                "or 'ghcr.io' for the project's own namespace in the GitHub "
+                "Container Registry."
             ),
         ),
     ] = None,
-    platforms: Annotated[
+    build_platforms: Annotated[
         list[str],
         typer.Option(
             "--platform-build",
@@ -1168,8 +1168,8 @@ def new_docker_env(
         env["platform"] = platform
     if registry:
         env["registry"] = registry
-    if platforms:
-        env["platforms"] = platforms  # type: ignore
+    if build_platforms:
+        env["build_platforms"] = build_platforms  # type: ignore
     if user:
         env["user"] = user
     if gpus:

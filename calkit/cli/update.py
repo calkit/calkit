@@ -1448,3 +1448,70 @@ def update_dataset(
             + "; ".join(str(err["msg"]) for err in e.errors())
         )
     calkit.save_calkit_info(ck_info)
+
+
+@update_app.command(name="questions")
+def update_questions(
+    question: Annotated[
+        list[int] | None,
+        typer.Option(
+            "--question",
+            "-q",
+            help="1-based index of a question whose evidence values to "
+            "record (see 'calkit list questions'). Repeatable.",
+        ),
+    ] = None,
+    all_questions: Annotated[
+        bool,
+        typer.Option(
+            "--all",
+            help="Record the evidence values of every answered question.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-record values that already match, e.g., to refresh "
+            "their precision.",
+        ),
+    ] = False,
+    commit: Annotated[
+        bool, typer.Option("--commit", help="Commit calkit.yaml afterwards.")
+    ] = False,
+) -> None:
+    """Record the current evidence values that answers were written against.
+
+    Run this after writing or re-reading an answer. It sets ``value`` on each
+    keyed result evidence entry of the chosen questions to what the results
+    file holds now, which is what 'calkit check questions' later compares
+    against. Recording a question declares its answer current, so choose the
+    questions deliberately rather than recording everything by habit.
+    """
+    from calkit.questions import record_evidence_values
+
+    if not question and not all_questions:
+        raise_error("Specify --question N (repeatable) or --all")
+    ck_info = calkit.load_calkit_info()
+    if not ck_info.get("questions"):
+        raise_error("No questions are defined in calkit.yaml")
+    try:
+        changed = record_evidence_values(
+            ck_info,
+            indices=question if not all_questions else None,
+            force=force,
+        )
+    except (FileNotFoundError, KeyError, ValueError) as e:
+        raise_error(f"Cannot record evidence: {e.__class__.__name__}: {e}")
+    if not changed:
+        typer.echo("All recorded evidence values already match; nothing to do")
+        return
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    for n, key, old, new in changed:
+        arrow = f"{old!r} -> {new!r}" if old is not None else f"{new!r}"
+        typer.echo(f"Question {n}: recorded {key} = {arrow}")
+    if commit:
+        repo = calkit.git.get_repo()
+        repo.git.add("calkit.yaml")
+        repo.git.commit(["-m", "Record evidence values for questions"])

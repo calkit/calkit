@@ -1059,3 +1059,67 @@ def test_check_repro_literals(tmp_dir):
         f["value"] for f in json.loads(result.stdout)["untraceable_literals"]
     ]
     assert values == ["3.14"]
+
+
+def test_check_questions(tmp_dir):
+    import json
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 8}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "question": "Do the top structures use the rectifier?",
+            "answer": "All eight do.",
+            "evidence": [
+                {
+                    "kind": "result",
+                    "path": "results/findings.json",
+                    "key": "n_top",
+                }
+            ],
+        }
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # Unrecorded evidence is reported but is not a failure
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "[unrecorded]" in out
+    # Recording requires choosing questions, then writes the value
+    assert subprocess.call(["calkit", "update", "questions"]) != 0
+    out = subprocess.check_output(
+        ["calkit", "update", "questions", "-q", "1"], text=True
+    )
+    assert "recorded n_top = 8" in out
+    assert (
+        calkit.load_calkit_info()["questions"][0]["evidence"][0]["value"] == 8
+    )
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "1 consistent" in out
+    # The pipeline changes the number: check fails, status warns, JSON shows
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 0}, f)
+    proc = subprocess.run(
+        ["calkit", "check", "questions"], capture_output=True, text=True
+    )
+    assert proc.returncode == 1
+    assert "changed from 8 to 0" in proc.stdout
+    proc = subprocess.run(
+        ["calkit", "check", "questions", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert json.loads(proc.stdout)["questions"][0]["status"] == "stale"
+    out = subprocess.check_output(
+        ["calkit", "status", "--category", "questions"], text=True
+    )
+    assert "Questions" in out
+    assert "1 stale" in out
+    out = subprocess.check_output(["calkit", "status", "--json"], text=True)
+    assert json.loads(out)["questions"]["questions"][0]["status"] == "stale"
+    # Accepting the new value clears it
+    subprocess.check_call(["calkit", "update", "questions", "--all"])
+    subprocess.check_call(["calkit", "check", "questions"])

@@ -2440,6 +2440,7 @@ Update objects.
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
+| [`questions`](#subcommand-update-questions)           | Record the current evidence values that answers were written against.                |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2851,6 +2852,29 @@ Options:
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
 | `--stage`                  | text     | no       |         | Name of the pipeline stage that produces this dataset.                              |
 
+<a id="subcommand-update-questions"></a>
+
+#### `calkit update questions`
+
+Record the current evidence values that answers were written against.
+
+Run this after writing or re-reading an answer. It sets `value` on each keyed result evidence entry of the chosen questions to what the results file holds now, which is what 'calkit check questions' later compares against. Recording a question declares its answer current, so choose the questions deliberately rather than recording everything by habit.
+
+Usage:
+
+```text
+calkit update questions [OPTIONS]
+```
+
+Options:
+
+| Option             | Type    | Required | Default | Description                                                                                            |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
+| `--question`, `-q` | integer | no       |         | 1-based index of a question whose evidence values to record (see 'calkit list questions'). Repeatable. |
+| `--all`            | boolean | no       | False   | Record the evidence values of every answered question.                                                 |
+| `--force`          | boolean | no       | False   | Re-record values that already match, e.g., to refresh their precision.                                 |
+| `--commit`         | boolean | no       | False   | Commit calkit.yaml afterwards.                                                                         |
+
 <a id="command-group-check"></a>
 
 ### `calkit check`
@@ -2873,6 +2897,7 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
+| [`questions`](#subcommand-check-questions)                  | Check that answered questions are consistent with their evidence.                                            |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3186,6 +3211,27 @@ Options:
 | Option       | Type | Required | Default | Description                          |
 | ------------ | ---- | -------- | ------- | ------------------------------------ |
 | `--if-error` | text | yes      |         | Command to run if there is an error. |
+
+<a id="subcommand-check-questions"></a>
+
+#### `calkit check questions`
+
+Check that answered questions are consistent with their evidence.
+
+Every keyed result evidence entry that records the value its answer was written against is compared with the value the results file holds now, so an answer whose numbers the pipeline has since changed is reported as stale. Evidence paths must exist, keys must resolve, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+
+Usage:
+
+```text
+calkit check questions [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                         |
+| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention. |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                          |
 
 <a id="command-group-latex-tex"></a>
 

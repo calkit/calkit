@@ -1933,3 +1933,39 @@ def check_call(
             typer.echo("Fallback call succeeded")
         except subprocess.CalledProcessError:
             raise_error("Fallback call failed")
+
+
+@check_app.command(name="questions")
+def check_questions(
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List every answered question and its evidence, not only "
+            "the ones needing attention.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output the report as JSON.")
+    ] = False,
+) -> None:
+    """Check that answered questions are consistent with their evidence.
+
+    Every keyed result evidence entry that records the value its answer was
+    written against is compared with the value the results file holds now,
+    so an answer whose numbers the pipeline has since changed is reported as
+    stale. Evidence paths must exist, keys must resolve, and a publication
+    label must still be present in the LaTeX source. Exits with an error if
+    any answered question is stale or broken.
+    """
+    from calkit.questions import check_questions as _check_questions
+    from calkit.questions import format_status
+
+    status = _check_questions()
+    if json_output:
+        typer.echo(json.dumps(status.model_dump(mode="json"), indent=2))
+    else:
+        typer.echo(format_status(status, verbose=verbose))
+    if not status.ok:
+        raise typer.Exit(1)

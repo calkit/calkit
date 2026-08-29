@@ -98,7 +98,7 @@ def test_provenance(tmp_dir):
     assert r"Section~\ref{sec:results} (Results)" in tex
     assert r"The model is \ckvalue{name}" in tex
     assert r"\newcommand\ckfindings{" in tex
-    assert r"\paragraph{Q2. \ckquestion[2]}" in tex
+    assert r"\textbf{Q2. \ckquestion[2]}" in tex
     assert r"\ckquestion[1]" not in tex.split(r"\newcommand\ckfindings")[1]
     ck_info["questions"][1]["answer"] = "{nope}"
     with pytest.raises(KeyError):

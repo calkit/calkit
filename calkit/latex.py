@@ -669,12 +669,16 @@ def questions_tex(ck_info: dict, wdir: str | None = None) -> str:
     ):
         out.append(keyed_command(name, fields[f]))
     # Every answered question, as a paragraph the document can drop in
+    # Plain paragraphs rather than \\paragraph, which not every document
+    # class defines
     body = []
     for n in answered:
         body.append(
-            f"\\paragraph{{Q{n}. \\ckquestion[{n}]}}\\ckblock{{{n}}}"
-            f"{{calkit.yaml}} \\ckanswer[{n}]"
+            f"\\par\\noindent\\textbf{{Q{n}. \\ckquestion[{n}]}}"
+            f"\\ckblock{{{n}}}{{calkit.yaml}}\\par\\noindent"
+            f"\\ckanswer[{n}]"
             + (f"\\ckevidence[{n}]" if str(n) in fields["evidence"] else "")
+            + "\\par"
         )
     out.append("\\newcommand\\ckfindings{" + "\n".join(body) + "}%\n")
     return "".join(out)

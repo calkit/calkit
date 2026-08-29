@@ -4467,7 +4467,7 @@
       "type": "object"
     },
     "PublicationEvidence": {
-      "description": "Evidence in the form of a publication.",
+      "description": "Evidence in the form of a publication.\n\nThe pointer to *where* in the publication the evidence lives is split in\ntwo, in the spirit of a W3C selector: ``section`` is for the reader, and\n``label`` is an anchor in the source (e.g., a LaTeX ``\\label``) that\n``calkit check questions`` can verify still exists, so the reference\ncannot rot when the document is reorganized.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -4487,9 +4487,35 @@
           "title": "Kind",
           "type": "string"
         },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Anchor for the section in the publication's source, e.g., a LaTeX label such as 'sec:results'. Checked against the source of the LaTeX stage that builds the publication.",
+          "title": "Label"
+        },
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Section or subsection of the publication where the evidence is presented, as a reader would find it, e.g., '4.2' or 'Results'.",
+          "title": "Section"
         }
       },
       "required": [
@@ -4867,7 +4893,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a keyed result with a recorded ``value`` can be checked for\ndrift, while a number retyped into the prose cannot. Longer reasoning\nbelongs in the publication, pointed at with a publication evidence entry\nand its ``section``.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -5703,7 +5729,7 @@
       "type": "object"
     },
     "ResultsEvidence": {
-      "description": "Evidence in the form of a result.",
+      "description": "Evidence in the form of a result.\n\nWith a ``key``, the entry points at one value inside a JSON or YAML\nresults file, and can then also record the ``value`` the answer was\nwritten against. That record is what lets ``calkit check questions``\ntell that the pipeline has since produced a different number and the\nanswer needs re-reading; without it, the prose and the evidence can\ndrift apart silently, since the pipeline keeps the evidence current but\nnothing keeps the prose current.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -5727,6 +5753,7 @@
             }
           ],
           "default": null,
+          "description": "Key of the value within the results file. A key present at the top level is used as-is; otherwise it is split on dots and walked into nested objects, with integers indexing lists.",
           "title": "Key"
         },
         "kind": {
@@ -5738,6 +5765,31 @@
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "tolerance": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Relative tolerance for comparing a numeric value with its record, e.g., 0.01 to ignore changes under 1%. Defaults to 1e-6, which ignores floating-point noise and nothing else.",
+          "title": "Tolerance"
+        },
+        "value": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The value the key held when the answer was written. Recorded by 'calkit update questions' and compared with the current value by 'calkit check questions', which reports the question as stale when they differ.",
+          "title": "Value"
         }
       },
       "required": [

@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -1441,11 +1441,45 @@ class FigureEvidence(BaseModel):
 
 
 class ResultsEvidence(BaseModel):
-    """Evidence in the form of a result."""
+    """Evidence in the form of a result.
+
+    With a ``key``, the entry points at one value inside a JSON or YAML
+    results file, and can then also record the ``value`` the answer was
+    written against. That record is what lets ``calkit check questions``
+    tell that the pipeline has since produced a different number and the
+    answer needs re-reading; without it, the prose and the evidence can
+    drift apart silently, since the pipeline keeps the evidence current but
+    nothing keeps the prose current.
+    """
 
     kind: Literal["result"] = "result"
     path: str
-    key: str | None = None
+    key: str | None = Field(
+        default=None,
+        description=(
+            "Key of the value within the results file. A key present at the "
+            "top level is used as-is; otherwise it is split on dots and "
+            "walked into nested objects, with integers indexing lists."
+        ),
+    )
+    value: Any | None = Field(
+        default=None,
+        description=(
+            "The value the key held when the answer was written. Recorded "
+            "by 'calkit update questions' and compared with the current "
+            "value by 'calkit check questions', which reports the question "
+            "as stale when they differ."
+        ),
+    )
+    tolerance: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Relative tolerance for comparing a numeric value with its "
+            "record, e.g., 0.01 to ignore changes under 1%. Defaults to "
+            "1e-6, which ignores floating-point noise and nothing else."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1458,10 +1492,33 @@ class TableEvidence(BaseModel):
 
 
 class PublicationEvidence(BaseModel):
-    """Evidence in the form of a publication."""
+    """Evidence in the form of a publication.
+
+    The pointer to *where* in the publication the evidence lives is split in
+    two, in the spirit of a W3C selector: ``section`` is for the reader, and
+    ``label`` is an anchor in the source (e.g., a LaTeX ``\\label``) that
+    ``calkit check questions`` can verify still exists, so the reference
+    cannot rot when the document is reorganized.
+    """
 
     kind: Literal["publication"] = "publication"
     path: str
+    section: str | None = Field(
+        default=None,
+        description=(
+            "Section or subsection of the publication where the evidence "
+            "is presented, as a reader would find it, e.g., '4.2' or "
+            "'Results'."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        description=(
+            "Anchor for the section in the publication's source, e.g., a "
+            "LaTeX label such as 'sec:results'. Checked against the "
+            "source of the LaTeX stage that builds the publication."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1472,6 +1529,12 @@ class Question(BaseModel):
     ``kind``, so citing something doesn't require declaring it at the top
     level first. The top-level collections are for the things worth naming or
     annotating, not a registry that evidence has to be registered in.
+
+    Keep the answer to the claim itself and let the evidence carry the
+    numbers: a keyed result with a recorded ``value`` can be checked for
+    drift, while a number retyped into the prose cannot. Longer reasoning
+    belongs in the publication, pointed at with a publication evidence entry
+    and its ``section``.
     """
 
     question: str

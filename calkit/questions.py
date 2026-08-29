@@ -36,7 +36,7 @@ import re
 import string
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import calkit
 
@@ -71,13 +71,13 @@ class QuestionCheck(BaseModel):
     #: Commit at which the question was last edited, if committed
     commit: str | None = None
     message: str | None = None
-    evidence: list[EvidenceCheck] = []
+    evidence: list[EvidenceCheck] = Field(default_factory=list)
 
 
 class QuestionsStatus(BaseModel):
     """The result of checking every question in a project."""
 
-    questions: list[QuestionCheck] = []
+    questions: list[QuestionCheck] = Field(default_factory=list)
 
     @property
     def stale(self) -> list[QuestionCheck]:
@@ -129,7 +129,12 @@ def resolve_key(data: Any, key: str) -> Any:
         if isinstance(node, dict) and part in node:
             node = node[part]
         elif isinstance(node, list) and re.fullmatch(r"-?\d+", part):
-            node = node[int(part)]
+            try:
+                node = node[int(part)]
+            except IndexError:
+                # An index past the end of a list is a key that isn't
+                # there, and callers handle a missing key
+                raise KeyError(key)
         else:
             raise KeyError(key)
     return node

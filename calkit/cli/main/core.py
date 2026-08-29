@@ -545,7 +545,7 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
-    valid_categories = ["project", "git", "dvc", "pipeline"]
+    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -593,6 +593,12 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
+        if "questions" in categories and ck_info.get("questions"):
+            from calkit.questions import check_questions
+
+            status_dict["questions"] = check_questions(
+                ck_info=ck_info
+            ).model_dump(mode="json")
         if "git" in categories:
             try:
                 repo = calkit.git.get_repo()
@@ -674,6 +680,20 @@ def get_status(
             typer.echo(
                 'Project status not set. Use "calkit new status" to update.'
             )
+        typer.echo()
+    # Questions come right after the project's own status: they are what the
+    # rest of the project exists to answer, and an answer the pipeline has
+    # since contradicted is the first thing a reader should hear about
+    if "questions" in categories and ck_info.get("questions"):
+        from calkit.questions import check_questions, format_status
+
+        print_sep("Questions")
+        qstatus = check_questions(ck_info=ck_info)
+        report = format_status(qstatus)
+        if not qstatus.ok:
+            warn(report, prefix="")
+        else:
+            typer.echo(report)
         typer.echo()
     if "git" in categories:
         print_sep("Git")

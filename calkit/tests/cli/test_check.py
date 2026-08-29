@@ -14,6 +14,23 @@ import calkit
 import calkit.environments
 
 
+def engine_records_build_digests() -> bool:
+    # The containerd image store writes a manifest when an image is built,
+    # so the image carries the digest it will have in a registry before it
+    # is pushed anywhere. The classic store writes none: a manifest names
+    # the compressed layers, and nothing compresses them until a push, so a
+    # digest only exists once the image has been sent somewhere.
+    try:
+        out = subprocess.check_output(
+            ["docker", "info", "--format", "{{json .DriverStatus}}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return "io.containerd.snapshotter" in out
+
+
 def test_check_venv(tmp_dir):
     with open("reqs.txt", "w") as f:
         f.write("requests")
@@ -237,7 +254,7 @@ def test_check_docker_env(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM python:3.9-slim\n")
     # Now check the environment
-    subprocess.check_call(
+    out = subprocess.check_output(
         [
             "calkit",
             "check",
@@ -247,7 +264,9 @@ def test_check_docker_env(tmp_dir):
             "Dockerfile",
             "-o",
             "Dockerfile-lock.json",
-        ]
+        ],
+        text=True,
+        stderr=subprocess.STDOUT,
     )
     with open("Dockerfile-lock.json") as f:
         lock = json.load(f)
@@ -257,6 +276,11 @@ def test_check_docker_env(tmp_dir):
     # An image built here and never pushed anywhere has a digest no registry
     # can serve, which would send anyone reading the lock on a failed pull
     assert lock["RepoDigests"] == []
+    # Where the image store gives a build no digest at all, there is nothing
+    # to record even once a registry is configured without a push, so say so
+    # while the build that prompted it is still on screen
+    if not engine_records_build_digests():
+        assert "set 'registry' on the environment" in out
     # Checking again with nothing changed must not rebuild, and must leave
     # the lock byte-identical so no stage using it reruns
     with open("Dockerfile-lock.json", "rb") as f:
@@ -391,6 +415,21 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     container = "calkit-test-registry"
     registry = "localhost:5678"
     subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+    # An image left in the daemon by an earlier run still carries a digest
+    # under this registry, and a rebuild lands on it, since it has the same
+    # content, which would make an image that was never sent to this
+    # registry look like one that was. A '--filter reference=' doesn't match
+    # an image whose only reference is a digest, which is the kind left
+    # behind here, so the listing is scanned instead
+    listed = subprocess.check_output(
+        ["docker", "images", "-a", "--format", "{{.Repository}} {{.ID}}"],
+        text=True,
+    ).splitlines()
+    stale = [
+        line.split()[-1] for line in listed if line.startswith(f"{registry}/")
+    ]
+    if stale:
+        subprocess.run(["docker", "rmi", "-f"] + stale, capture_output=True)
     started = subprocess.run(
         [
             "docker",
@@ -431,11 +470,18 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         check_argv = ["calkit", "check", "environment", "-n", "main"]
         arch = calkit.environments.get_docker_arch()
         lock_fpath = f".calkit/env-locks/main/{arch}.json"
-        # Checking builds the image and leaves publishing alone, but still
-        # records the digest, since that's what the image will have in the
-        # registry once someone pushes it
+        # Checking builds the image and records the digest it will have in
+        # the registry. Where the image store keeps a manifest that digest
+        # is the build's own, and publishing is left to 'calkit push';
+        # where it doesn't, only a push can say what the digest is, so
+        # checking sends the image rather than leave the lock naming
+        # nothing to pull
+        digests_at_build = engine_records_build_digests()
         out = subprocess.check_output(check_argv, text=True)
-        assert "Pushing image" not in out
+        if digests_at_build:
+            assert "Pushing image" not in out
+        else:
+            assert "Pushing image" in out
         with open(lock_fpath, "rb") as f:
             built_lock_bytes = f.read()
         built_lock = json.loads(built_lock_bytes)
@@ -447,7 +493,12 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         out = subprocess.check_output(
             ["calkit", "push", "--no-git", "--no-dvc"], text=True
         )
-        assert "Pushing image for 'main'" in out
+        if digests_at_build:
+            assert "Pushing image for 'main'" in out
+        else:
+            # Checking already sent it, and pushing asks the registry rather
+            # than sending it a second time
+            assert "already in the registry" in out
         assert "exporting layers" not in out
         with open(lock_fpath) as f:
             lock = json.load(f)
@@ -590,12 +641,20 @@ def test_check_docker_env_does_not_push(tmp_dir):
         out = subprocess.check_output(
             argv, text=True, stderr=subprocess.STDOUT
         )
+        with open("lock.json") as f:
+            lock = json.load(f)
+        if not engine_records_build_digests():
+            # This image store gives a build no digest, so the only way to
+            # learn one is to push, and the registry isn't there. The lock
+            # still describes the image; it just can't say where to pull it
+            # from, which is reported rather than passed off as locked
+            assert "Failed to push image" in out
+            assert lock["RepoDigests"] == []
+            return
         # Publishing an image is 'calkit push', not something that happens
         # on the way to running a stage, so an unreachable registry is not
         # even contacted here
         assert "Pushing image" not in out
-        with open("lock.json") as f:
-            lock = json.load(f)
         # A manifest is content-addressed, so the digest this build has is
         # the one it will have once pushed. Recording it without contacting
         # the registry is what lets a clone pull rather than rebuild as soon

@@ -356,11 +356,24 @@ without being rebuilt first.
 Pass `--no-docker` to skip images, or name what to send:
 `calkit push docker` publishes the images and nothing else, which is
 handy mid-work when the code isn't ready to go out with them.
-Checking an environment never pushes: it builds or pulls whatever the
-project needs to run, and publishing is left to `calkit push`.
-Pushing is also what writes the image's digest into the lock file, since
-that's the point at which the digest becomes something anyone else can
-pull, so a push leaves a lock file change to commit.
+Checking an environment builds or pulls whatever the project needs to
+run, and leaves publishing to `calkit push`.
+The digest goes into the lock file as soon as the image is built, since a
+manifest is content-addressed: the digest an image is built with is the
+one it has once it's pushed, so pushing it leaves the lock alone.
+
+<!-- prettier-ignore -->
+!!! note
+
+    That holds where the Docker daemon uses the containerd image store,
+    which writes a manifest for an image as it builds it. The older image
+    store writes none until the image is pushed, so there's no digest to
+    record before then, and checking pushes the image itself to get one.
+    With no registry set there's nowhere to push and nothing to record:
+    the lock file names no image to pull, so everyone else rebuilds it,
+    which Calkit warns about after building. `docker info` reports which
+    store is in use, the containerd one as a driver type of
+    `io.containerd.snapshotter.v1`.
 
 To rebuild or repull an image and write fresh lock files, e.g., after an
 image's tag has been moved out from under the digest in the lock, run:

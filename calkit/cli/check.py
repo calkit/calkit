@@ -8,6 +8,7 @@ import os
 import platform as _platform
 import shutil
 import subprocess
+import textwrap
 from typing import Annotated, Callable
 
 import dotenv
@@ -1082,6 +1083,7 @@ def check_docker_env(
 
     pulled_from_registry = False
     already_pushed = False
+    built = False
     if not up_to_date:
         obtained = False
         # Prefer pulling the exact image the lock identifies, since a rebuild
@@ -1190,6 +1192,7 @@ def check_docker_env(
                 raise_error(
                     f"Failed to build Docker image with tag {tag} from {fpath}"
                 )
+            built = True
             if multi_platform:
                 assert remote_ref is not None
                 already_pushed = True
@@ -1230,10 +1233,10 @@ def check_docker_env(
             if "@" not in d or d.split("@", 1)[0] == remote_repo
         ]
     # A digest belongs in the lock whenever there's a registry to pull it
-    # from, since a manifest is content-addressed: the digest an image is
-    # built with is the one it has once pushed. Recording it before the push
-    # means a clone pulls the image as soon as anyone sends it, rather than
-    # rebuilding because the lock never learned what to ask for.
+    # from. An image store that keeps a manifest gives a build the digest it
+    # will have once pushed, since a manifest is content-addressed, so it
+    # can be recorded before the push and a clone pulls the image as soon as
+    # anyone sends it. One that doesn't has to be pushed to learn it.
     if remote_ref is not None:
         if pushed or pulled_from_registry:
             remote_digests = ck_docker.keep_only_repo_digests(
@@ -1250,12 +1253,58 @@ def check_docker_env(
             )
         else:
             remote_digests = ck_docker.get_content_digests(identity)
+        # An image store that keeps no manifest gives a build no digest of
+        # its own: a manifest names the compressed layers, and nothing
+        # compresses them until a push. Pushing is then the only way to
+        # learn the digest, and a lock without one sends everyone else back
+        # to rebuilding an image that's sitting in the registry.
+        if not remote_digests and fpath is not None:
+            typer.echo(
+                f"Pushing image to {remote_ref} to record its digest, since "
+                "this Docker engine only assigns one on a push"
+            )
+            if not ck_docker.tag_image(tag, remote_ref):
+                warn(f"Failed to tag image as {remote_ref}")
+            else:
+                # Checks run inside pipelines, so a missing credential is
+                # reported rather than prompted for
+                pushed_ok, push_output = ck_docker.push_image_with_login(
+                    remote_ref
+                )
+                if pushed_ok:
+                    pushed_identity = ck_docker.inspect_image_for_lock(tag)
+                    if pushed_identity is not None:
+                        identity = pushed_identity
+                    remote_digests = ck_docker.keep_only_repo_digests(
+                        identity, remote_ref
+                    )["RepoDigests"]
+                else:
+                    # Leaving the tag would fake a registry digest on the
+                    # image, making every later push look unnecessary
+                    ck_docker.untag_image(remote_ref)
+                    warn(
+                        f"Failed to push image to {remote_ref}; its lock "
+                        "file will record no digest, so anyone else who "
+                        "uses this project will rebuild this image rather "
+                        "than pull it\n"
+                        + textwrap.indent(push_output.strip()[-500:], "    ")
+                    )
         identity = dict(identity, RepoDigests=remote_digests)
     elif fpath is None:
         # An environment named after someone else's image is pullable by
         # whatever digests it arrived with
         identity = ck_docker.keep_only_repo_digests(identity, tag)
     else:
+        # An image built where the store assigns no digest, with no registry
+        # to send it to, leaves nothing in the lock that anyone could pull
+        if built and not ck_docker.get_content_digests(identity):
+            warn(
+                "This Docker engine only assigns an image a digest when "
+                "it's pushed, so this environment's lock file will record "
+                "none, and anyone else who uses this project will rebuild "
+                "the image rather than pull it; set 'registry' on the "
+                "environment to publish it and record its digest"
+            )
         identity = ck_docker.keep_only_repo_digests(identity, None)
     # Read the other platforms from the exact image this one locked, rather
     # than from the tag. A tag moves, and asking it again would lock the

@@ -440,9 +440,10 @@ def write_provenance_tex(
 ) -> str:
     """Write the artifact table calkit.sty reads, beside the document.
 
-    One ``\\ckartifact{path}{stage}{hash}`` per project file the document
-    references (as TeX sees the path, relative to the document), so a
-    caption can name the stage that produced a figure.
+    One ``\\ckartifact{path}{stage}{hash}{project path}`` per project file
+    the document references, keyed by the path as TeX sees it (relative to
+    the document), so a caption can name the stage that produced a figure
+    and a link can point at the file's place in the project.
     """
     wdir = wdir or os.getcwd()
     tex_dir = os.path.dirname(target_path)
@@ -454,7 +455,7 @@ def write_provenance_tex(
         as_written = Path(os.path.relpath(rel, tex_dir or ".")).as_posix()
         lines.append(
             f"\\ckartifact{{{as_written}}}{{{rec['stage']}}}"
-            f"{{{rec['hash'] or ''}}}"
+            f"{{{rec['hash'] or ''}}}{{{rel}}}"
         )
     out_path = os.path.join(wdir, tex_dir, PROVENANCE_TEX_FNAME)
     with open(out_path, "w", encoding="utf-8") as f:
@@ -520,7 +521,7 @@ def collect_provenance(
                 # Generated value commands carry project-relative paths;
                 # figures and inputs are written as TeX resolves them,
                 # relative to the document
-                if entry.get("kind") == "value":
+                if entry.get("kind") in ("value", "block"):
                     rel = Path(os.path.normpath(path_as_written)).as_posix()
                 else:
                     rel = Path(

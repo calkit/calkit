@@ -117,7 +117,10 @@ def test_provenance(tmp_dir):
     write_provenance_tex("paper/main.tex", ck_info, ".")
     with open("paper/calkit-provenance.tex") as f:
         table = f.read()
-    assert r"\ckartifact{../figures/plot.pdf}{plot}{abc}" in table
+    assert (
+        r"\ckartifact{../figures/plot.pdf}{plot}{abc}{figures/plot.pdf}"
+        in table
+    )
     assert calkit.latex.detect_inputs("paper/main.tex", ".") == [
         "figures/plot.pdf",
         "paper/generated-numbers.tex",

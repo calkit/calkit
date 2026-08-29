@@ -20,11 +20,16 @@
 % a trailing slash. Empty means links are relative to the document.
 \def\ck@baseurl{}
 \newcommand\ckbaseurl[1]{\def\ck@baseurl{#1}}
-% Artifact -> stage table, generated per build into calkit-provenance.tex
-\newcommand\ckartifact[3]{\expandafter\gdef\csname ck@stage@#1\endcsname{#2}%
-  \expandafter\gdef\csname ck@hash@#1\endcsname{#3}}
+% Artifact table, generated per build into calkit-provenance.tex:
+% \ckartifact{path as the document writes it}{stage}{hash}{project path}
+\newcommand\ckartifact[4]{\expandafter\gdef\csname ck@stage@#1\endcsname{#2}%
+  \expandafter\gdef\csname ck@hash@#1\endcsname{#3}%
+  \expandafter\gdef\csname ck@proj@#1\endcsname{#4}}
 \newcommand\ck@stageof[1]{\ifcsname ck@stage@#1\endcsname
   \csname ck@stage@#1\endcsname\else ?\fi}
+% The project-relative path, for links, when the table knows it
+\newcommand\ck@projof[1]{\ifcsname ck@proj@#1\endcsname
+  \csname ck@proj@#1\endcsname\else#1\fi}
 \InputIfFileExists{calkit-provenance.tex}{}{}
 % Log of every injection, one JSON object per line
 \newwrite\ck@provfile
@@ -39,14 +44,14 @@
 \newcommand\ckvalue[4]{\ck@log{value}{#3}{#1}\ck@link{#3}{#2}}
 % \ckfigure[graphics options]{path}: \includegraphics with provenance
 \newcommand\ckfigure[2][]{\ck@log{figure}{#2}{}%
-  \ifck@prov\href{\ck@baseurl#2}{\includegraphics[#1]{#2}}%
+  \ifck@prov\href{\ck@baseurl\ck@projof{#2}}{\includegraphics[#1]{#2}}%
   \else\includegraphics[#1]{#2}\fi}
 % \ckcaptionsource{path}: a note for a caption naming the producing stage
 \newcommand\ckcaptionsource[1]{\ifck@prov\ \textcolor{ckprov}{%
   \footnotesize[\texttt{#1}, stage \texttt{\ck@stageof{#1}}]}\fi}
 % \ckinput{path}: \input with provenance, for stage-generated text
 \newcommand\ckinput[1]{\ck@log{text}{#1}{}\ifck@prov
-  \textcolor{ckprov}{\footnotesize[\texttt{#1}]}\par\fi\input{#1}}
+  \ck@link{\ck@projof{#1}}{\footnotesize[\texttt{#1}]}\par\fi\input{#1}}
 % \ckblock{n}{path}: marks a generated question block
 \newcommand\ckblock[2]{\ck@log{block}{#2}{#1}\ck@link{#2}{%
   \footnotesize[question #1]}}

@@ -34,7 +34,13 @@ def get_value(tex: str, key: str) -> str:
         flags=re.DOTALL,
     )
     assert match is not None, f"No definition found for '{key}'"
-    return match.group(1).strip()
+    # Values are wrapped in \\ckvalue{key}{value}{path}{stage}
+    wrapped = re.match(
+        r"\\ckvalue\{[^}]*\}\{(.*)\}\{[^}]*\}\{[^}]*\}$",
+        match.group(1).strip(),
+    )
+    assert wrapped is not None, match.group(1)
+    return wrapped.group(1)
 
 
 def test_from_json(tmp_dir):

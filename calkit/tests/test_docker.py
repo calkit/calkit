@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
+import calkit.docker
 from calkit.docker import (
     _image_name_without_tag_or_digest,
     _parse_docker_run_command,
@@ -290,6 +291,50 @@ def test_get_lock_archs():
     assert archs == ["amd64", "arm64", "arm-v7"]
 
 
+def test_pull_image_with_login(monkeypatch):
+    logins = []
+    pulls = []
+
+    def fake_login(ref, interactive=False):
+        logins.append(ref)
+        return True, None
+
+    def make_pull(results):
+        def fake_pull(ref, platform=None):
+            pulls.append(ref)
+            return results.pop(0)
+
+        return fake_pull
+
+    monkeypatch.setattr(calkit.docker, "login_to_registry", fake_login)
+    # A pull that works needs no credentials, and logging in would replace
+    # whatever the machine already holds for that registry
+    monkeypatch.setattr(calkit.docker, "pull_image", make_pull([(True, "")]))
+    assert calkit.docker.pull_image_with_login("ghcr.io/o/p:latest")
+    assert logins == []
+    # Neither does one that failed for a reason credentials can't fix
+    monkeypatch.setattr(
+        calkit.docker,
+        "pull_image",
+        make_pull([(False, "manifest unknown")]),
+    )
+    assert not calkit.docker.pull_image_with_login("ghcr.io/o/p@sha256:abc")
+    assert logins == []
+    # Only a registry that actually refused us is worth logging in to
+    monkeypatch.setattr(
+        calkit.docker,
+        "pull_image",
+        make_pull(
+            [
+                (False, "denied: requested access to the resource is denied"),
+                (True, ""),
+            ]
+        ),
+    )
+    assert calkit.docker.pull_image_with_login("ghcr.io/o/p:latest")
+    assert logins == ["ghcr.io/o/p:latest"]
+
+
 def test_is_auth_error():
     # What GHCR says when the token lacks 'write:packages'
     assert is_auth_error(
@@ -430,4 +475,18 @@ def test_get_image_name(tmp_dir):
             {"kind": "docker", "path": "Dockerfile", "image": "mine"}, "env"
         )
         == "mine"
+    )
+    # A project that isn't published anywhere yet still names itself if
+    # calkit.yaml says what it's called
+    calkit.save_calkit_info({"name": "Some-Project", "environments": {}})
+    assert (
+        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env")
+        == "some-project.env"
+    )
+    # With nothing to be named after, there's nothing to guess from: the
+    # directory a project sits in is not a name, since renaming it would
+    # rename the image, and every project called 'analysis' would collide
+    calkit.save_calkit_info({"environments": {}})
+    assert (
+        get_image_name({"kind": "docker", "path": "Dockerfile"}, "env") is None
     )

@@ -1618,20 +1618,36 @@ def push(
         else:
             warn("No DVC remotes configured; skipping DVC push")
     if "docker" in selected:
+        # Everything that can be settled locally is settled before the
+        # network: a project with no image to publish must not reach a
+        # registry at all, since that means a round-trip, and credentials
+        # asked for or replaced, on behalf of a push that was never on
         images = calkit.docker.get_pushable_images()
+        asked_for_docker = "docker" in (targets or [])
+        pushable = {}
         for env_name, info in images.items():
-            remote_ref = info["remote_ref"]
             identity = calkit.docker.inspect_image_for_lock(info["image"])
             if identity is None:
-                warn(
-                    f"No local image for Docker environment '{env_name}' "
-                    "to push; run the pipeline first"
-                )
+                # Not an error: an environment whose image was never built
+                # here is one this machine has nothing to publish for
+                if asked_for_docker:
+                    warn(
+                        "No local image for Docker environment "
+                        f"'{env_name}' to push; run the pipeline first"
+                    )
                 continue
+            pushable[env_name] = dict(info, identity=identity)
+        if not images and asked_for_docker:
+            typer.echo(
+                "No Docker environments are set up to be pushed; set "
+                "'registry' on one built from a Dockerfile to publish it"
+            )
+        for env_name, info in pushable.items():
+            remote_ref = info["remote_ref"]
             # Ask the registry rather than trusting the image's own
             # digests: tagging an image for a registry gives it one whether
             # or not anything was ever pushed there
-            if calkit.docker.registry_has_image(remote_ref, identity):
+            if calkit.docker.registry_has_image(remote_ref, info["identity"]):
                 typer.echo(
                     f"Image for '{env_name}' is already in the registry"
                 )
@@ -1649,17 +1665,6 @@ def push(
                 warn(
                     f"Failed to push image to {remote_ref}\n"
                     + textwrap.indent(push_output.strip()[-500:], "    ")
-                )
-            elif calkit.docker.record_pushed_digest(
-                env=info["env"],
-                env_name=env_name,
-                image=info["image"],
-                remote_ref=remote_ref,
-            ):
-                # The digest is what lets everyone else pull this image
-                # instead of rebuilding it, so it needs committing
-                typer.echo(
-                    f"Recorded digest for '{env_name}' in its lock file"
                 )
     if "git" in selected:
         typer.echo("Pushing to Git remote")
@@ -3202,9 +3207,15 @@ def run_in_env(
     if env["kind"] == "docker":
         image_name = calkit.docker.get_image_name(env, env_name)
         if image_name is None:
+            if not env.get("path"):
+                raise_error(
+                    f"Environment '{env_name}' must define an image, since "
+                    "it has no Dockerfile to build one from"
+                )
             raise_error(
-                f"Environment '{env_name}' must define an image, since it "
-                "has no Dockerfile to build one from"
+                f"Cannot work out what to call the image for environment "
+                f"'{env_name}': set 'image' on it, or set 'owner' and "
+                "'name' in calkit.yaml"
             )
         command_mode = env.get("command_mode", "shell")
         if command_mode not in ["shell", "entrypoint"]:

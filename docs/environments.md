@@ -319,6 +319,13 @@ e.g., `someone/some-project.foam2`,
 matching how the environment's Jupyter kernel is named.
 An environment defined purely by someone else's image has to name it.
 
+That name comes from `owner` and `name` in `calkit.yaml`,
+or from the Git remote if they're not set.
+A project with neither says nothing about what it's called,
+and Calkit asks for `image`, or for `owner` and `name`, rather than
+naming the image after the directory the project happens to sit in,
+which would rename the image whenever the directory moved.
+
 `ghcr.io` on its own resolves to the project's namespace in the GitHub
 Container Registry, e.g., `ghcr.io/someone/some-project`,
 naming the registry rather than leaving it to be worked out,
@@ -354,6 +361,12 @@ and Calkit checks the image's layers against the lock after pulling.
 alongside Git and DVC, skipping any the registry already has.
 An environment built before its registry was configured is pushed as-is,
 without being rebuilt first.
+A project with no image to send never reaches a registry at all:
+an environment with no `registry`, or one whose image was never built on
+this machine, is settled locally rather than with a round-trip and a
+request for credentials.
+Writing digests into lock files is a check's job, not a push's,
+so a push leaves the lock files alone.
 Pass `--no-docker` to skip images, or name what to send:
 `calkit push docker` publishes the images and nothing else, which is
 handy mid-work when the code isn't ready to go out with them.

@@ -588,6 +588,116 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
+def test_push_does_not_reach_a_registry_with_nothing_to_send(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    # An environment with no registry is kept local, and one named after
+    # someone else's image already lives where it can be pulled from, so
+    # neither is anything to publish
+    ck_info["environments"] = {
+        "local": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": "calkit-nothing-to-push",
+        },
+        "tex": {"kind": "docker", "image": "alpine:3.18"},
+    }
+    calkit.save_calkit_info(ck_info)
+    out = subprocess.check_output(["calkit", "push", "docker"], text=True)
+    assert "No Docker environments are set up to be pushed" in out
+    assert "Pushing image" not in out
+    # An environment that is set up, but whose image was never built here,
+    # is nothing this machine can publish either. Reaching an unreachable
+    # registry would mean a round-trip, and credentials asked for or
+    # replaced, for a push that was never going to happen
+    ck_info["environments"]["local"]["registry"] = "localhost:5999/nope"
+    calkit.save_calkit_info(ck_info)
+    result = subprocess.run(
+        ["calkit", "push", "docker"], capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    output = result.stdout + result.stderr
+    assert "No local image" in output
+    assert "Pushing image" not in output
+    assert "localhost:5999" not in output
+    # Pushing everything doesn't nag about an image nobody asked to send
+    result = subprocess.run(
+        ["calkit", "push", "--no-git", "--no-dvc"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "No local image" not in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
+    image = "calkit-unreachable-registry-test"
+    subprocess.check_call(["calkit", "init"])
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo unreachable > /hi.txt\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": image,
+            "registry": "localhost:5999/unreachable",
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    arch = calkit.environments.get_docker_arch()
+    other_arch = "amd64" if arch == "arm64" else "arm64"
+    other_lock_fpath = f".calkit/env-locks/main/{other_arch}.json"
+    try:
+        subprocess.check_output(
+            ["calkit", "check", "environment", "-n", "main"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        # A lock for a platform this machine can't run, describing an image
+        # the registry can't be asked about
+        os.makedirs(os.path.dirname(other_lock_fpath), exist_ok=True)
+        with open(other_lock_fpath, "w") as f:
+            json.dump(
+                {
+                    "RepoDigests": ["sha256:" + "0" * 64],
+                    "Architecture": other_arch,
+                    "Os": "linux",
+                    "RootFS": {"Type": "layers", "Layers": ["sha256:nope"]},
+                    "DockerfileMD5": calkit.get_md5("Dockerfile"),
+                    "DepsMD5s": {},
+                },
+                f,
+                indent=4,
+            )
+        with open(other_lock_fpath, "rb") as f:
+            other_lock_bytes = f.read()
+        # Rebuilding asks the registry which platforms it serves, and it
+        # can't answer. Being unable to ask is not the registry saying the
+        # platform is gone, so the lock has to survive it, or a teammate on
+        # that architecture rebuilds for nothing
+        with open("Dockerfile", "a") as f:
+            f.write("RUN echo again > /again.txt\n")
+        subprocess.check_output(
+            ["calkit", "check", "environment", "-n", "main"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        assert os.path.isfile(other_lock_fpath)
+        with open(other_lock_fpath, "rb") as f:
+            assert f.read() == other_lock_bytes
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
 def test_push_sends_docker_images_to_their_registry(tmp_dir):
     container = "calkit-test-registry-push"
     registry = "localhost:5679"

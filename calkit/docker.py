@@ -618,13 +618,31 @@ def _run_showing_output(cmd: list[str]) -> tuple[bool, str]:
     return proc.wait() == 0, "".join(lines)
 
 
-def pull_image(ref: str, platform: str | None = None) -> bool:
-    """Pull an image, returning True on success."""
+def pull_image(ref: str, platform: str | None = None) -> tuple[bool, str]:
+    """Pull an image, returning success and its output."""
     cmd = ["docker", "pull"]
     if platform is not None:
         cmd += ["--platform", platform]
     cmd.append(ref)
-    success, _ = _run_showing_output(cmd)
+    return _run_showing_output(cmd)
+
+
+def pull_image_with_login(ref: str, platform: str | None = None) -> bool:
+    """Pull an image, sorting out registry credentials if it's refused.
+
+    Logging in replaces whatever credentials the machine already holds for
+    that registry, which in CI are the ones the workflow logged in with, so
+    it's only done when the registry actually refused this pull. An image
+    that isn't there, or a registry that can't be reached, is not something
+    a different set of credentials would fix.
+    """
+    success, output = pull_image(ref, platform=platform)
+    if success or not is_auth_error(output):
+        return success
+    logged_in, _ = login_to_registry(ref)
+    if not logged_in:
+        return False
+    success, _ = pull_image(ref, platform=platform)
     return success
 
 
@@ -696,16 +714,21 @@ def inspect_remote_image(ref: str) -> dict | None:
     return resp if isinstance(resp, dict) else None
 
 
-def get_remote_image_platform_locks(ref: str) -> dict[str, dict]:
+def get_remote_image_platform_locks(ref: str) -> dict[str, dict] | None:
     """Read the identity of every platform behind a remote image reference.
 
     Returns a mapping of Calkit architecture name to the same identifying
     fields ``docker inspect`` provides, so lock files can be written for
     platforms this machine can't run.
+
+    None means the registry couldn't be asked---it's unreachable, the image
+    isn't there, or this machine has no buildx plugin---as opposed to an
+    empty mapping, which is the registry answering that it serves no
+    platform we can lock. Only an answer can make a lock file stale.
     """
     resp = inspect_remote_image(ref)
     if resp is None:
-        return {}
+        return None
     manifest = resp.get("manifest") or {}
     digest = manifest.get("digest")
     repo_digests = [digest] if digest else []
@@ -885,6 +908,8 @@ def registry_has_image(remote_ref: str, identity: dict) -> bool:
     if not layers:
         return False
     remote = get_remote_image_platform_locks(remote_ref)
+    if remote is None:
+        return False
     return any(
         (entry.get("RootFS") or {}).get("Layers") == layers
         for entry in remote.values()
@@ -1171,6 +1196,13 @@ def get_image_name(
     it unambiguously, by the same convention its Jupyter kernel is named
     by. One defined purely by an image has to name it, since it's someone
     else's, so there's nothing to work out and None comes back.
+
+    None also comes back for a project with nothing to be named after: no
+    ``owner`` or ``name`` in ``calkit.yaml`` and no Git remote to read them
+    from. The directory a project happens to sit in is not a name---moving
+    or renaming it would rename the image, and every image built by every
+    project called ``analysis`` would collide---so this is for the project
+    to say rather than for Calkit to guess.
     """
     import calkit
 
@@ -1179,12 +1211,15 @@ def get_image_name(
         return image
     if not env.get("path"):
         return None
+    project: str | None
     try:
         project = calkit.detect_project_name(wdir=wdir)
     except ValueError:
-        # Nothing to take an owner from, which is where a project that
-        # isn't published anywhere yet ends up
-        project = calkit.detect_project_name(wdir=wdir, prepend_owner=False)
+        # A project that isn't published anywhere yet still names itself if
+        # calkit.yaml says what it's called
+        project = calkit.load_calkit_info(wdir=wdir).get("name")
+        if not project:
+            return None
     # Repository names must be lowercase, unlike tags
     return f"{project}.{env_name}".lower()
 
@@ -1217,43 +1252,3 @@ def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
             remote_ref=get_remote_image_ref(image, prefix),
         )
     return resp
-
-
-def record_pushed_digest(
-    env: dict,
-    env_name: str,
-    image: str,
-    remote_ref: str,
-    wdir: str | None = None,
-) -> bool:
-    """Note in an environment's lock that its image is in the registry.
-
-    Pushing is what makes a digest pullable, so pushing is what puts one in
-    the lock. Only the digests are touched: the rest of the lock describes
-    the image and the inputs it was built from, which checking worked out
-    and pushing hasn't changed.
-    """
-    from calkit.environments import get_env_lock_fpath
-
-    lock_fpath = get_env_lock_fpath(
-        env=env, env_name=env_name, wdir=wdir, as_posix=False
-    )
-    if lock_fpath is None or not os.path.isfile(lock_fpath):
-        return False
-    identity = inspect_image_for_lock(image)
-    if identity is None:
-        return False
-    digests = keep_only_repo_digests(identity, remote_ref)["RepoDigests"]
-    if not digests:
-        return False
-    try:
-        with open(lock_fpath) as f:
-            lock = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(lock, dict) or lock.get("RepoDigests") == digests:
-        return False
-    lock["RepoDigests"] = digests
-    with open(lock_fpath, "w") as f:
-        json.dump(lock, f, indent=4)
-    return True

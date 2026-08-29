@@ -364,9 +364,15 @@ def check_environment(
         )
         image = calkit.docker.get_image_name(env, env_name)
         if image is None:
+            if not env.get("path"):
+                raise_error(
+                    f"Environment '{env_name}' must define an image, since "
+                    "it has no Dockerfile to build one from"
+                )
             raise_error(
-                f"Environment '{env_name}' must define an image, since it "
-                "has no Dockerfile to build one from"
+                f"Cannot work out what to call the image for environment "
+                f"'{env_name}': set 'image' on it, or set 'owner' and "
+                "'name' in calkit.yaml"
             )
         check_docker_env(
             tag=image,
@@ -1075,13 +1081,15 @@ def check_docker_env(
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
         typer.echo(f"No image with tag {tag} found locally", file=outfile)
+    # Only a lock for this architecture can say whether the image here is
+    # the one it describes: another architecture's layers never match, so
+    # its lock is taken as an instruction to fetch the image it names rather
+    # than as a blessing for whatever happens to carry this tag
     up_to_date = (
         identity is not None
         and lock is not None
-        and (
-            not lock_is_current_arch
-            or ck_docker.lock_matches_image(lock, identity)
-        )
+        and lock_is_current_arch
+        and ck_docker.lock_matches_image(lock, identity)
     )
 
     def delete_lock_on_failure() -> None:
@@ -1101,15 +1109,13 @@ def check_docker_env(
                 lock, digest_source_ref
             ):
                 typer.echo(f"Pulling image by digest: {digest_ref}")
-                if not ck_docker.pull_image(digest_ref, platform=platform):
-                    # A private image needs credentials we may be able to get
-                    if not ck_docker.login_to_registry(
-                        digest_ref
-                    ) or not ck_docker.pull_image(
-                        digest_ref, platform=platform
-                    ):
-                        warn(f"Failed to pull image by digest: {digest_ref}")
-                        continue
+                # A private image needs credentials we may be able to get,
+                # but only a registry that refused us is worth logging in to
+                if not ck_docker.pull_image_with_login(
+                    digest_ref, platform=platform
+                ):
+                    warn(f"Failed to pull image by digest: {digest_ref}")
+                    continue
                 if not ck_docker.tag_image(digest_ref, tag):
                     warn(f"Failed to tag pulled image as {tag}")
                     continue
@@ -1130,6 +1136,17 @@ def check_docker_env(
                     and digest_ref.split("@", 1)[0] == remote_repo
                 )
                 break
+        # A lock from another architecture named an image we've now tried
+        # to pull. Failing that, an image already here was built from this
+        # same spec, so it stands rather than being rebuilt for a lock that
+        # was never able to describe it
+        if (
+            not obtained
+            and identity is not None
+            and lock is not None
+            and not lock_is_current_arch
+        ):
+            obtained = True
         # Fall back to an image archived in a release, since a registry makes
         # no promise to keep an image forever, and rebuilding can't reproduce
         # one whose upstream dependencies have moved on
@@ -1205,7 +1222,7 @@ def check_docker_env(
             if multi_platform:
                 assert remote_ref is not None
                 already_pushed = True
-                if not ck_docker.pull_image(
+                if not ck_docker.pull_image_with_login(
                     remote_ref, platform=platform
                 ) or not ck_docker.tag_image(remote_ref, tag):
                     delete_lock_on_failure()
@@ -1215,7 +1232,7 @@ def check_docker_env(
                     )
         elif not obtained:
             typer.echo(f"Pulling image: {tag}")
-            if not ck_docker.pull_image(tag, platform=platform):
+            if not ck_docker.pull_image_with_login(tag, platform=platform):
                 delete_lock_on_failure()
                 raise_error(f"Failed to pull image: {tag}")
     identity = ck_docker.inspect_image_for_lock(tag)
@@ -1412,14 +1429,23 @@ def check_docker_env(
         remote_locks = ck_docker.get_remote_image_platform_locks(
             remote_source_ref
         )
-        for arch in stale_archs:
-            arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-            if arch in remote_locks:
-                write_lock(arch, remote_locks[arch])
-            elif os.path.isfile(arch_lock_fpath):
-                # A lock left behind for a platform this image no longer has
-                # would describe an image built from something else entirely
-                os.remove(arch_lock_fpath)
+        if remote_locks is None:
+            # Being unable to ask says nothing about what the registry
+            # serves, and a lock can only be judged stale against an answer
+            # we actually have, so the other platforms' locks stand
+            typer.echo(
+                f"Could not read platforms available for {remote_source_ref}",
+                file=outfile,
+            )
+        else:
+            for arch in stale_archs:
+                arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
+                if arch in remote_locks:
+                    write_lock(arch, remote_locks[arch])
+                elif os.path.isfile(arch_lock_fpath):
+                    # A lock left behind for a platform this image no longer
+                    # has would describe an image built from something else
+                    os.remove(arch_lock_fpath)
 
 
 @check_app.command(

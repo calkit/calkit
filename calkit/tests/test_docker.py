@@ -160,31 +160,19 @@ def test_platform_to_arch_name():
 
 def test_lock_matching():
     lock = {
-        "RepoTags": ["my-image"],
         "RootFS": {"Type": "layers", "Layers": ["sha256:a", "sha256:b"]},
         "DockerfileMD5": "abc",
         "DepsMD5s": {"reqs.txt": "def"},
     }
-    kwargs = dict(
-        image="my-image", dockerfile_md5="abc", deps_md5s={"reqs.txt": "def"}
-    )
+    kwargs = dict(dockerfile_md5="abc", deps_md5s={"reqs.txt": "def"})
     assert lock_matches_spec(lock, **kwargs)  # type: ignore[arg-type]
-    # A renamed image must not reuse a lock recorded for the old one
+    # Inputs that decide what gets built are what make a lock stale
     assert not lock_matches_spec(
         lock,
-        image="other",
-        dockerfile_md5="abc",
-        deps_md5s={"reqs.txt": "def"},
-    )
-    assert not lock_matches_spec(
-        lock,
-        image="my-image",
         dockerfile_md5="changed",
         deps_md5s={"reqs.txt": "def"},
     )
-    assert not lock_matches_spec(
-        lock, image="my-image", dockerfile_md5="abc", deps_md5s={}
-    )
+    assert not lock_matches_spec(lock, dockerfile_md5="abc", deps_md5s={})
     assert lock_matches_image(
         lock, {"RootFS": {"Layers": ["sha256:a", "sha256:b"]}}
     )
@@ -194,23 +182,40 @@ def test_lock_matching():
 
 
 def test_get_lock_digest_refs():
-    lock = {
+    lock = {"RepoDigests": ["sha256:remote"]}
+    # A bare digest is only pullable once paired with a repo, and the repo
+    # comes from the environment as it is now, so a digest left over from a
+    # different image is asked for somewhere it cannot resolve
+    assert get_lock_digest_refs(lock) == []
+    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest") == [
+        "ghcr.io/o/p/my-image@sha256:remote"
+    ]
+    assert get_lock_digest_refs(lock, "other/image:latest") == [
+        "other/image@sha256:remote"
+    ]
+    # Locks written before digests were stored bare still work, and the
+    # project's own registry is preferred, since that's the copy it controls
+    legacy = {
         "RepoDigests": [
             "my-image@sha256:local",
             "ghcr.io/o/p/my-image@sha256:remote",
         ]
     }
-    assert get_lock_digest_refs(lock) == [
+    assert get_lock_digest_refs(legacy) == [
         "my-image@sha256:local",
         "ghcr.io/o/p/my-image@sha256:remote",
     ]
-    # The project's own registry is tried first, since that's the copy it
-    # controls and keeps around
-    assert get_lock_digest_refs(lock, "ghcr.io/o/p/my-image:latest")[0] == (
+    assert get_lock_digest_refs(legacy, "ghcr.io/o/p/my-image:latest")[0] == (
         "ghcr.io/o/p/my-image@sha256:remote"
     )
     assert get_lock_digest_refs({}) == []
     assert get_lock_digest_refs({"RepoDigests": ["no-digest-here"]}) == []
+    assert (
+        get_lock_digest_refs(
+            {"RepoDigests": ["no-digest-here"]}, "ghcr.io/o/p/img"
+        )
+        == []
+    )
 
 
 def test_keep_only_repo_digests():
@@ -221,9 +226,16 @@ def test_keep_only_repo_digests():
         ]
     }
     assert keep_only_repo_digests(identity, None)["RepoDigests"] == []
+    # Only the digest itself is kept, so moving the environment to another
+    # registry doesn't rewrite the lock and rerun every stage in it
     assert keep_only_repo_digests(identity, "ghcr.io/o/p/my-image:latest")[
         "RepoDigests"
-    ] == ["ghcr.io/o/p/my-image@sha256:remote"]
+    ] == ["sha256:remote"]
+    # Digests already stored bare pass through, so re-locking an unchanged
+    # image doesn't churn
+    assert keep_only_repo_digests({"RepoDigests": ["sha256:remote"]}, "any")[
+        "RepoDigests"
+    ] == ["sha256:remote"]
     # The original is left alone so callers can keep using it
     assert len(identity["RepoDigests"]) == 2
 
@@ -231,28 +243,27 @@ def test_keep_only_repo_digests():
 def test_build_lock():
     identity = {
         "RepoTags": ["something-else:latest"],
-        "RepoDigests": ["my-image@sha256:abc"],
+        "RepoDigests": ["sha256:abc"],
         "Architecture": "amd64",
         "Os": "linux",
         "RootFS": {"Type": "layers", "Layers": ["sha256:a"]},
     }
     lock = build_lock(
         identity=identity,
-        image="my-image",
         dockerfile_md5="abc",
         deps_md5s={},
         run_config={"WorkDir": "/work"},
     )
-    # Only the tag asked for is recorded, so that pulling by digest and
-    # tagging doesn't rewrite the lock and rerun every stage
-    assert lock["RepoTags"] == ["my-image"]
+    # What an image is called says nothing about what it is, and a lock
+    # already belongs to the environment whose directory it sits in, so
+    # renaming an image doesn't rerun every stage in it
+    assert "RepoTags" not in lock
     assert lock["WorkDir"] == "/work"
     assert lock["DockerfileMD5"] == "abc"
     # Key order has to be stable, since a lock written for another platform
     # must match what that platform would write for itself
     other = build_lock(
         identity=dict(reversed(list(identity.items()))),
-        image="my-image",
         dockerfile_md5="abc",
         deps_md5s={},
         run_config={"WorkDir": "/work"},

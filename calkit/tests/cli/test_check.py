@@ -251,7 +251,9 @@ def test_check_docker_env(tmp_dir):
     )
     with open("Dockerfile-lock.json") as f:
         lock = json.load(f)
-    assert lock["RepoTags"] == ["python-3.9-slim"]
+    # What an image is called is in calkit.yaml, not in the lock, so
+    # renaming it doesn't rerun every stage in the environment
+    assert "RepoTags" not in lock
     # An image built here and never pushed anywhere has a digest no registry
     # can serve, which would send anyone reading the lock on a failed pull
     assert lock["RepoDigests"] == []
@@ -293,8 +295,11 @@ def test_check_docker_env(tmp_dir):
         new_lock = json.load(f)
     assert new_lock["DockerfileMD5"] != lock["DockerfileMD5"]
     assert new_lock["RootFS"]["Layers"] != lock["RootFS"]["Layers"]
-    # Renaming the image must do the same, since the lock's digest identifies
-    # the image built for the old name
+    with open("Dockerfile-lock.json", "rb") as f:
+        renamed_lock_bytes = f.read()
+    # Renaming the image leaves the lock alone: it describes the same
+    # content, and a rename that reran every stage would be reporting a
+    # change to software that didn't change
     subprocess.check_call(
         [
             "calkit",
@@ -307,9 +312,8 @@ def test_check_docker_env(tmp_dir):
             "Dockerfile-lock.json",
         ]
     )
-    with open("Dockerfile-lock.json") as f:
-        renamed_lock = json.load(f)
-    assert renamed_lock["RepoTags"] == ["python-3.9-slim-renamed"]
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == renamed_lock_bytes
     # Now modify the image to fail to build and ensure the lock file is deleted
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
@@ -427,12 +431,16 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         check_argv = ["calkit", "check", "environment", "-n", "main"]
         arch = calkit.environments.get_docker_arch()
         lock_fpath = f".calkit/env-locks/main/{arch}.json"
-        # Checking builds the image but leaves publishing alone, so there's
-        # nothing in the lock anyone else could pull yet
+        # Checking builds the image and leaves publishing alone, but still
+        # records the digest, since that's what the image will have in the
+        # registry once someone pushes it
         out = subprocess.check_output(check_argv, text=True)
         assert "Pushing image" not in out
-        with open(lock_fpath) as f:
-            assert json.load(f)["RepoDigests"] == []
+        with open(lock_fpath, "rb") as f:
+            built_lock_bytes = f.read()
+        built_lock = json.loads(built_lock_bytes)
+        assert len(built_lock["RepoDigests"]) == 1
+        assert built_lock["RepoDigests"][0].startswith("sha256:")
         # An image built before a registry was configured must reach it
         # without a rebuild, or an existing project could only publish what
         # it already has by throwing it away first
@@ -443,11 +451,12 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
         assert "exporting layers" not in out
         with open(lock_fpath) as f:
             lock = json.load(f)
-        # Pushing is what makes the digest pullable, so pushing is what puts
-        # it in the lock, which is what makes a rebuild unnecessary
-        assert lock["RepoDigests"] == [
-            f"{registry}/proj/{image}@" + lock["RepoDigests"][0].split("@")[1]
-        ]
+        # Pushing sends exactly the digest the build already recorded, so
+        # the lock is left alone rather than rewritten, and no stage reruns
+        # for having published an image that didn't change
+        assert lock["RepoDigests"] == built_lock["RepoDigests"]
+        with open(lock_fpath, "rb") as f:
+            assert f.read() == built_lock_bytes
         with open(lock_fpath, "rb") as f:
             lock_bytes = f.read()
         subprocess.check_call(
@@ -575,9 +584,23 @@ def test_check_docker_env_does_not_push(tmp_dir):
         assert "Pushing image" not in out
         with open("lock.json") as f:
             lock = json.load(f)
-        # Recording a digest nothing can serve would send everyone who reads
-        # this lock on a failed pull
-        assert lock["RepoDigests"] == []
+        # A manifest is content-addressed, so the digest this build has is
+        # the one it will have once pushed. Recording it without contacting
+        # the registry is what lets a clone pull rather than rebuild as soon
+        # as anyone sends the image
+        assert len(lock["RepoDigests"]) == 1
+        assert lock["RepoDigests"][0].startswith("sha256:")
+        # A lock written before digests were taken from the build has none,
+        # and the image it describes is still the one here, so the digest
+        # gets filled in rather than left missing until a rebuild
+        lock["RepoDigests"] = []
+        with open("lock.json", "w") as f:
+            json.dump(lock, f, indent=4)
+        subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT)
+        with open("lock.json") as f:
+            backfilled = json.load(f)
+        assert backfilled["RepoDigests"][0].startswith("sha256:")
+        assert backfilled["RootFS"] == lock["RootFS"]
         # And nothing should have tagged the image for the registry, since
         # that would fake a registry digest on it
         info = json.loads(

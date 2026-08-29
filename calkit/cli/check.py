@@ -1029,10 +1029,10 @@ def check_docker_env(
                         break
     # A lock that doesn't describe the current spec is stale, not merely
     # out-of-date with the local image: the image it identifies was built
-    # from a different Dockerfile, dependencies, or name, so it must not be
-    # pulled in place of the one asked for
+    # from a different Dockerfile or dependencies, so it must not be pulled
+    # in place of the one asked for
     if lock is not None and not ck_docker.lock_matches_spec(
-        lock, image=tag, dockerfile_md5=dockerfile_md5, deps_md5s=deps_md5s
+        lock, dockerfile_md5=dockerfile_md5, deps_md5s=deps_md5s
     ):
         typer.echo(
             "Lock file does not match the current environment", file=outfile
@@ -1057,6 +1057,12 @@ def check_docker_env(
     if registry_prefix is not None and fpath is not None:
         remote_ref = ck_docker.get_remote_image_ref(tag, registry_prefix)
         remote_repo = ck_docker.get_repo_from_ref(remote_ref)
+    # Where a digest the lock records can be pulled from, since the lock
+    # names the digest alone: the project's registry for an image we build,
+    # or the image's own repo for one named directly. Working this out from
+    # the environment definition rather than the lock is what stops a digest
+    # left over from a different image resolving to anything
+    digest_source_ref = remote_ref if remote_ref is not None else tag
     typer.echo(f"Checking for existing image with tag {tag}", file=outfile)
     identity = ck_docker.inspect_image_for_lock(tag)
     if identity is None:
@@ -1082,7 +1088,9 @@ def check_docker_env(
         # can't reproduce it, and would silently pick up whatever its
         # undeclared upstream dependencies have become
         if lock is not None:
-            for digest_ref in ck_docker.get_lock_digest_refs(lock, remote_ref):
+            for digest_ref in ck_docker.get_lock_digest_refs(
+                lock, digest_source_ref
+            ):
                 typer.echo(f"Pulling image by digest: {digest_ref}")
                 if not ck_docker.pull_image(digest_ref, platform=platform):
                     # A private image needs credentials we may be able to get
@@ -1216,12 +1224,16 @@ def check_docker_env(
         lock_remote_digests = [
             d
             for d in (lock.get("RepoDigests") or [])
-            if d.split("@", 1)[0] == remote_repo
+            # A digest recorded bare is one this project put in its own
+            # registry, since that's the only kind it records; locks written
+            # before digests were stored bare name their repo outright
+            if "@" not in d or d.split("@", 1)[0] == remote_repo
         ]
-    # A digest only belongs in the lock if it can actually be pulled, which
-    # means this run pushed it or fetched it from there. Anything else is
-    # just how the local image happens to be tagged, and recording it would
-    # send everyone who reads the lock on a failed pull.
+    # A digest belongs in the lock whenever there's a registry to pull it
+    # from, since a manifest is content-addressed: the digest an image is
+    # built with is the one it has once pushed. Recording it before the push
+    # means a clone pulls the image as soon as anyone sends it, rather than
+    # rebuilding because the lock never learned what to ask for.
     if remote_ref is not None:
         if pushed or pulled_from_registry:
             remote_digests = ck_docker.keep_only_repo_digests(
@@ -1229,10 +1241,15 @@ def check_docker_env(
             )["RepoDigests"]
         elif lock is not None and ck_docker.lock_matches_image(lock, identity):
             # Still the same image an earlier run verified, so what it
-            # recorded stands, and the lock doesn't churn
-            remote_digests = lock_remote_digests
+            # recorded stands and the lock doesn't churn. A lock written
+            # before digests were taken from the build recorded none, and
+            # keeping that would leave the gap in place for as long as the
+            # image goes unrebuilt, so the image's own digest fills it
+            remote_digests = (
+                lock_remote_digests or ck_docker.get_content_digests(identity)
+            )
         else:
-            remote_digests = []
+            remote_digests = ck_docker.get_content_digests(identity)
         identity = dict(identity, RepoDigests=remote_digests)
     elif fpath is None:
         # An environment named after someone else's image is pullable by
@@ -1247,7 +1264,9 @@ def check_docker_env(
     # platform the same image and its own layers within it.
     remote_source_ref = None
     if identity["RepoDigests"]:
-        remote_source_ref = identity["RepoDigests"][0]
+        remote_source_ref = ck_docker.get_lock_digest_refs(
+            identity, digest_source_ref
+        )[0]
     elif fpath is None:
         remote_source_ref = tag
     # Run configuration doesn't affect which image we need, but does affect
@@ -1275,7 +1294,6 @@ def check_docker_env(
             arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
         arch_lock = ck_docker.build_lock(
             identity=arch_identity,
-            image=tag,
             dockerfile_md5=dockerfile_md5,
             deps_md5s=deps_md5s,
             run_config=run_config,
@@ -1293,6 +1311,7 @@ def check_docker_env(
     # existing lock that still describes this spec is reused rather than
     # re-read from the registry, which keeps checks working offline
     stale_archs = []
+    contradicted = False
     for arch in [a for a in lock_archs if a != current_arch]:
         arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
         existing = (
@@ -1300,14 +1319,22 @@ def check_docker_env(
             if os.path.isfile(arch_lock_fpath)
             else None
         )
-        if existing is not None and ck_docker.lock_matches_spec(
-            existing,
-            image=tag,
-            dockerfile_md5=dockerfile_md5,
-            deps_md5s=deps_md5s,
+        if (
+            existing is not None
+            and ck_docker.lock_matches_spec(
+                existing,
+                dockerfile_md5=dockerfile_md5,
+                deps_md5s=deps_md5s,
+            )
+            and ck_docker.get_content_digests(existing)
+            == ck_docker.get_content_digests(identity)
         ):
             write_lock(arch, existing)
         else:
+            # A lock naming a different image than this platform's describes
+            # another build entirely, and leaving one set of lock files
+            # saying two things is worse than the round-trip to settle it
+            contradicted = contradicted or existing is not None
             stale_archs.append(arch)
     # Asking the registry which platforms it serves costs a round-trip, and
     # the answer only changes when the image does. An image that's still the
@@ -1315,7 +1342,11 @@ def check_docker_env(
     # it, so a platform the registry doesn't publish isn't asked about again
     # on every check from then on. Nothing is removed either, since a lock
     # can only be judged stale against an answer we actually have.
-    if stale_archs and remote_source_ref is not None and not up_to_date:
+    if (
+        stale_archs
+        and remote_source_ref is not None
+        and (not up_to_date or contradicted)
+    ):
         typer.echo(
             f"Reading platforms available for {remote_source_ref}",
             file=outfile,

@@ -474,7 +474,7 @@ def infer_xr_docker_environment(
 
 # Keys from ``docker inspect`` that identify an image's content, as opposed
 # to metadata like creation time, which changes on every build
-LOCK_INSPECT_KEYS = ["RepoTags", "RepoDigests", "Architecture", "Os", "RootFS"]
+LOCK_INSPECT_KEYS = ["RepoDigests", "Architecture", "Os", "RootFS"]
 # The registry used when an image reference has no registry component
 DEFAULT_REGISTRY = "docker.io"
 
@@ -708,9 +708,7 @@ def get_remote_image_platform_locks(ref: str) -> dict[str, dict]:
         return {}
     manifest = resp.get("manifest") or {}
     digest = manifest.get("digest")
-    repo = ref.split("@", 1)[0]
-    repo = repo[: repo.rfind(":")] if ":" in repo.rsplit("/", 1)[-1] else repo
-    repo_digests = [f"{repo}@{digest}"] if digest else []
+    repo_digests = [digest] if digest else []
     images = resp.get("image") or {}
     # A single-platform reference yields one config object rather than a
     # mapping of platform to config
@@ -740,7 +738,6 @@ def get_remote_image_platform_locks(ref: str) -> dict[str, dict]:
 
 def lock_matches_spec(
     lock: dict,
-    image: str,
     dockerfile_md5: str | None,
     deps_md5s: dict[str, str],
 ) -> bool:
@@ -749,9 +746,14 @@ def lock_matches_spec(
     A lock that doesn't match is stale rather than merely out-of-date with
     the local image: its recorded digest identifies an image built from
     different inputs, so it can't be used to pull.
+
+    What the image is called isn't part of this. A lock belongs to the
+    environment whose directory it sits in, the name comes from calkit.yaml,
+    and the digest names the content, so renaming an image would only rerun
+    every stage in it for software that didn't change. A digest left over
+    from a different image can't resolve either, since the repo it's asked
+    for comes from the current definition.
     """
-    if lock.get("RepoTags") != [image]:
-        return False
     if lock.get("DockerfileMD5") != dockerfile_md5:
         return False
     if (lock.get("DepsMD5s") or {}) != (deps_md5s or {}):
@@ -769,22 +771,33 @@ def lock_matches_image(lock: dict, image_info: dict) -> bool:
 def get_lock_digest_refs(
     lock: dict, remote_ref: str | None = None
 ) -> list[str]:
-    """Return the digest references recorded in a lock, best first.
+    """Return references that pull the image a lock records, best first.
 
-    A reference in the project's own registry is preferred, since that's the
-    one the project controls and keeps around.
+    A lock records the digest alone, since a digest names the image's
+    content while a repository only says where a copy of it lives. The repo
+    to pull from comes from ``remote_ref``, worked out from the environment
+    definition at the time of asking, so an environment that changes which
+    image it uses can't resolve a digest left over from the old one. Locks
+    written before digests were stored bare name their repo outright and
+    are still honored.
     """
-    digests = [d for d in (lock.get("RepoDigests") or []) if "@" in d]
-    if remote_ref is None:
-        return digests
-    remote_repo = get_repo_from_ref(remote_ref)
-    preferred = [d for d in digests if d.split("@", 1)[0] == remote_repo]
-    return preferred + [d for d in digests if d not in preferred]
+    refs = []
+    remote_repo = (
+        get_repo_from_ref(remote_ref) if remote_ref is not None else None
+    )
+    for digest in lock.get("RepoDigests") or []:
+        if "@" in digest:
+            refs.append(digest)
+        elif remote_repo is not None and ":" in digest:
+            refs.append(f"{remote_repo}@{digest}")
+    if remote_repo is None:
+        return refs
+    preferred = [r for r in refs if r.split("@", 1)[0] == remote_repo]
+    return preferred + [r for r in refs if r not in preferred]
 
 
 def build_lock(
     identity: dict,
-    image: str,
     dockerfile_md5: str | None,
     deps_md5s: dict[str, str],
     run_config: dict,
@@ -795,9 +808,10 @@ def build_lock(
     matches byte-for-byte the one that platform would write for itself.
     """
     lock = {key: identity.get(key) for key in LOCK_INSPECT_KEYS}
-    # Keep only the tag we asked for, not any digest, so that pulling by
-    # digest doesn't change the lock and rerun every stage in the environment
-    lock["RepoTags"] = [image]
+    # Normalize here rather than at each call site, so that a lock carried
+    # over from an earlier run, in whatever form that run wrote it, comes
+    # out in the same form as one written from scratch
+    lock["RepoDigests"] = get_content_digests(lock)
     lock["DockerfileMD5"] = dockerfile_md5
     lock["DepsMD5s"] = deps_md5s
     lock.update(run_config)
@@ -872,26 +886,49 @@ def registry_has_image(remote_ref: str, identity: dict) -> bool:
     )
 
 
+def get_content_digests(identity: dict) -> list[str]:
+    """Return the digests an image carries, without their repositories.
+
+    A manifest is content-addressed, so an image built here already carries
+    the digest it will have in a registry: pushing transfers those bytes
+    rather than recomputing them. That makes a local build's digest worth
+    recording before it has been pushed anywhere.
+    """
+    digests = []
+    for entry in identity.get("RepoDigests") or []:
+        _, _, digest = entry.rpartition("@")
+        if ":" in digest and digest not in digests:
+            digests.append(digest)
+    return digests
+
+
 def keep_only_repo_digests(identity: dict, ref: str | None) -> dict:
-    """Drop digests from an image's identity that no registry can serve.
+    """Reduce an image's digests to the bare one a lock should record.
 
     Which digests an image carries locally depends on how it was obtained:
     building assigns one under a repo name that doesn't exist anywhere, and
-    pulling by digest then tagging leaves both that and the real one. Keeping
-    only the digests the given reference's repo can serve makes a lock file
-    the same either way, so pulling an image back doesn't rewrite the lock
-    and rerun every stage that uses it.
+    pulling by digest then tagging leaves both that and the real one. Only
+    the digest the given reference's repo serves is kept, and only the
+    ``sha256:...`` itself, since that names the image's content while the
+    repository only says where a copy of it lives. Moving an environment to
+    a different registry then leaves the lock alone, rather than rerunning
+    every stage in it for software that didn't change.
     """
     identity = dict(identity)
     if ref is None:
         identity["RepoDigests"] = []
         return identity
     repo = get_repo_from_ref(ref)
-    identity["RepoDigests"] = [
-        d
-        for d in (identity.get("RepoDigests") or [])
-        if d.split("@", 1)[0] == repo
-    ]
+    digests = []
+    for entry in identity.get("RepoDigests") or []:
+        entry_repo, _, digest = entry.rpartition("@")
+        if entry_repo and entry_repo != repo:
+            continue
+        # A digest is ``<algorithm>:<hex>``, so anything without a separator
+        # is not one, whatever else it might be
+        if ":" in digest and digest not in digests:
+            digests.append(digest)
+    identity["RepoDigests"] = digests
     return identity
 
 

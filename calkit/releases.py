@@ -569,7 +569,7 @@ def save_docker_images(
     for env_name, env in (ck_info.get("environments") or {}).items():
         if not isinstance(env, dict) or env.get("kind") != "docker":
             continue
-        image = env.get("image")
+        image = calkit.docker.get_image_name(env, env_name)
         if not image:
             continue
         info = calkit.docker.inspect_image(image)

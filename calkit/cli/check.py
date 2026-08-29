@@ -8,7 +8,6 @@ import os
 import platform as _platform
 import shutil
 import subprocess
-import textwrap
 from typing import Annotated, Callable
 
 import dotenv
@@ -352,8 +351,6 @@ def check_environment(
         raise_error(f"Environment '{env_name}' does not exist")
     env = envs[env_name]
     if env["kind"] == "docker":
-        if "image" not in env:
-            raise_error("Image must be defined for Docker environments")
         lock_fpath = get_env_lock_fpath(
             env=env, env_name=env_name, as_posix=False
         )
@@ -364,8 +361,14 @@ def check_environment(
         alt_lock_fpaths = get_all_docker_lock_fpaths(
             env_name=env_name, as_posix=False
         )
+        image = calkit.docker.get_image_name(env, env_name)
+        if image is None:
+            raise_error(
+                f"Environment '{env_name}' must define an image, since it "
+                "has no Dockerfile to build one from"
+            )
         check_docker_env(
-            tag=env["image"],
+            tag=image,
             fpath=env.get("path"),
             lock_fpath=lock_fpath,
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
@@ -949,13 +952,6 @@ def check_docker_env(
             ),
         ),
     ] = None,
-    no_push: Annotated[
-        bool,
-        typer.Option(
-            "--no-push",
-            help="Do not push newly built images to the registry.",
-        ),
-    ] = False,
     lock_archs: Annotated[
         list[str],
         typer.Option(
@@ -1207,17 +1203,14 @@ def check_docker_env(
         delete_lock_on_failure()
         raise_error(f"Failed to inspect image with tag {tag}")
     assert identity is not None
-    # Push whenever the registry doesn't already have this image, rather than
-    # only when it was just built. An image that predates the registry being
-    # configured would otherwise never leave the machine without a needless
-    # rebuild. Docker records the digest it pushed to, so this settles down
-    # to a no-op once the image is there.
+    # Checking an environment doesn't publish it: that's what 'calkit push'
+    # is for. A multi-platform build is the exception, since buildx has
+    # nowhere but the registry to put the image it assembles.
     pushed = already_pushed
-    # An image is only known to be in the registry if this project recorded
-    # a digest for it there, which only happens after a push or pull that
-    # actually went through. The image's own digests can't answer this:
-    # tagging one for a registry gives it a digest under that repo whether
-    # or not anything was ever sent.
+    # A digest already recorded for the project's own registry stands, since
+    # it says the image got there on some earlier push or pull. The image's
+    # own digests can't answer this: tagging one for a registry gives it a
+    # digest under that repo whether or not anything was ever sent.
     lock_remote_digests = []
     if lock is not None and remote_repo is not None:
         lock_remote_digests = [
@@ -1225,36 +1218,6 @@ def check_docker_env(
             for d in (lock.get("RepoDigests") or [])
             if d.split("@", 1)[0] == remote_repo
         ]
-    known_in_registry = bool(lock_remote_digests)
-    if remote_ref is not None and not pushed and not no_push:
-        if not known_in_registry:
-            typer.echo(f"Pushing image to {remote_ref}")
-            if ck_docker.tag_image(tag, remote_ref):
-                success, push_output = ck_docker.push_image_with_login(
-                    remote_ref
-                )
-                if success:
-                    pushed = True
-                    identity = (
-                        ck_docker.inspect_image_for_lock(tag) or identity
-                    )
-                else:
-                    # Leaving the tag would fake a registry digest on the
-                    # image, and put one in the lock for everyone else
-                    ck_docker.untag_image(remote_ref)
-                    message = (
-                        f"Failed to push image to {remote_ref}; it will "
-                        "need to be rebuilt elsewhere\n"
-                        + textwrap.indent(push_output.strip()[-500:], "    ")
-                    )
-                    # A pipeline run is no place to stop and ask for a
-                    # token, so point at the command that can
-                    if ck_docker.is_auth_error(push_output):
-                        message += (
-                            "\nRun 'calkit push' to set up credentials for "
-                            "this registry."
-                        )
-                    warn(message)
     # A digest only belongs in the lock if it can actually be pulled, which
     # means this run pushed it or fetched it from there. Anything else is
     # just how the local image happens to be tagged, and recording it would
@@ -1277,9 +1240,14 @@ def check_docker_env(
         identity = ck_docker.keep_only_repo_digests(identity, tag)
     else:
         identity = ck_docker.keep_only_repo_digests(identity, None)
+    # Read the other platforms from the exact image this one locked, rather
+    # than from the tag. A tag moves, and asking it again would lock the
+    # other platforms to whatever it points at now, leaving one set of lock
+    # files describing two different builds. Going by digest gives every
+    # platform the same image and its own layers within it.
     remote_source_ref = None
-    if remote_ref is not None and identity["RepoDigests"]:
-        remote_source_ref = remote_ref
+    if identity["RepoDigests"]:
+        remote_source_ref = identity["RepoDigests"][0]
     elif fpath is None:
         remote_source_ref = tag
     # Run configuration doesn't affect which image we need, but does affect
@@ -1341,7 +1309,13 @@ def check_docker_env(
             write_lock(arch, existing)
         else:
             stale_archs.append(arch)
-    if stale_archs and remote_source_ref is not None:
+    # Asking the registry which platforms it serves costs a round-trip, and
+    # the answer only changes when the image does. An image that's still the
+    # one the lock describes was already asked about on the run that locked
+    # it, so a platform the registry doesn't publish isn't asked about again
+    # on every check from then on. Nothing is removed either, since a lock
+    # can only be judged stale against an answer we actually have.
+    if stale_archs and remote_source_ref is not None and not up_to_date:
         typer.echo(
             f"Reading platforms available for {remote_source_ref}",
             file=outfile,
@@ -1349,16 +1323,14 @@ def check_docker_env(
         remote_locks = ck_docker.get_remote_image_platform_locks(
             remote_source_ref
         )
-    else:
-        remote_locks = {}
-    for arch in stale_archs:
-        arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
-        if arch in remote_locks:
-            write_lock(arch, remote_locks[arch])
-        elif os.path.isfile(arch_lock_fpath):
-            # A lock left behind for a platform this image no longer has
-            # would describe an image built from something else entirely
-            os.remove(arch_lock_fpath)
+        for arch in stale_archs:
+            arch_lock_fpath = os.path.join(lock_dir, arch + ".json")
+            if arch in remote_locks:
+                write_lock(arch, remote_locks[arch])
+            elif os.path.isfile(arch_lock_fpath):
+                # A lock left behind for a platform this image no longer has
+                # would describe an image built from something else entirely
+                os.remove(arch_lock_fpath)
 
 
 @check_app.command(

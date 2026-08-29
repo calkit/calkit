@@ -3024,7 +3024,6 @@ Options:
 | `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                               |
 | `--platform-build` | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry. |
 | `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
-| `--no-push`        | boolean | no       | False   | Do not push newly built images to the registry.                                                                                                                   |
 | `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
 | `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
 

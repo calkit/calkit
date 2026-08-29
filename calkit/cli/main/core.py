@@ -1606,6 +1606,17 @@ def push(
                     f"Failed to push image to {remote_ref}\n"
                     + textwrap.indent(push_output.strip()[-500:], "    ")
                 )
+            elif calkit.docker.record_pushed_digest(
+                env=info["env"],
+                env_name=env_name,
+                image=info["image"],
+                remote_ref=remote_ref,
+            ):
+                # The digest is what lets everyone else pull this image
+                # instead of rebuilding it, so it needs committing
+                typer.echo(
+                    f"Recorded digest for '{env_name}' in its lock file"
+                )
     if not no_git:
         typer.echo("Pushing to Git remote")
         try:
@@ -3105,7 +3116,6 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = envs[env_name]
-    image_name = env.get("image", env_name)
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
@@ -3146,8 +3156,12 @@ def run_in_env(
             )
         no_check = True
     if env["kind"] == "docker":
-        if "image" not in env:
-            raise_error("Image must be defined for Docker environments")
+        image_name = calkit.docker.get_image_name(env, env_name)
+        if image_name is None:
+            raise_error(
+                f"Environment '{env_name}' must define an image, since it "
+                "has no Dockerfile to build one from"
+            )
         command_mode = env.get("command_mode", "shell")
         if command_mode not in ["shell", "entrypoint"]:
             raise_error(
@@ -3156,7 +3170,7 @@ def run_in_env(
             )
         if not no_check:
             check_docker_env(
-                tag=env["image"],
+                tag=image_name,
                 fpath=env.get("path"),
                 lock_fpath=get_env_lock_fpath(
                     env=env, env_name=env_name, as_posix=False

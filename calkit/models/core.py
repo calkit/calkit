@@ -814,6 +814,15 @@ class NixEnvironment(Environment):
 
 
 class DockerEnvironment(Environment):
+    # A Docker environment has to say either what image to use or what to
+    # build one from. With neither there is nothing to run in, so the schema
+    # says so rather than leaving it to fail at run time
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "anyOf": [{"required": ["image"]}, {"required": ["path"]}]
+        },
+    )
     kind: Literal["docker"] = "docker"
     path: str | None = Field(
         default=None,
@@ -822,7 +831,15 @@ class DockerEnvironment(Environment):
             "be defined purely by an image."
         ),
     )
-    image: str = Field(description="Name of the Docker image.")
+    image: str | None = Field(
+        default=None,
+        description=(
+            "Name of the Docker image. Optional for an environment with a "
+            "Dockerfile, which is named after the project and environment "
+            "it belongs to, e.g., 'someone/some-project.my-env'. Required "
+            "for one defined purely by an image."
+        ),
+    )
     registry: str | None = Field(
         default=None,
         description=(

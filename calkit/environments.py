@@ -936,10 +936,11 @@ def check_cache(
     # A Docker environment's image can be deleted without anything the cache
     # hashes changing, and the pipeline can't run in an image that isn't
     # there, so its absence has to invalidate the check
-    if env.get("kind") == "docker" and env.get("image"):
-        from calkit.docker import image_exists
+    if env.get("kind") == "docker":
+        from calkit.docker import get_image_name, image_exists
 
-        if not image_exists(env["image"]):
+        image = get_image_name(env, env_name, wdir=wdir)
+        if image and not image_exists(image):
             return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)

@@ -630,6 +630,18 @@
       "type": "object"
     },
     "DockerEnvironment": {
+      "anyOf": [
+        {
+          "required": [
+            "image"
+          ]
+        },
+        {
+          "required": [
+            "path"
+          ]
+        }
+      ],
       "properties": {
         "args": {
           "anyOf": [
@@ -716,9 +728,17 @@
           "title": "Gpus"
         },
         "image": {
-          "description": "Name of the Docker image.",
-          "title": "Image",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.",
+          "title": "Image"
         },
         "jupyter_kernel": {
           "anyOf": [
@@ -863,9 +883,6 @@
           "title": "Wdir"
         }
       },
-      "required": [
-        "image"
-      ],
       "title": "DockerEnvironment",
       "type": "object"
     },

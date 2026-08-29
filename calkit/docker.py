@@ -1119,6 +1119,34 @@ def push_image_with_login(
     return success, output
 
 
+def get_image_name(
+    env: dict, env_name: str, wdir: str | None = None
+) -> str | None:
+    """Return the name of the image an environment uses.
+
+    An environment that builds from a Dockerfile doesn't have to be told
+    what to call its image: the project and environment it belongs to name
+    it unambiguously, by the same convention its Jupyter kernel is named
+    by. One defined purely by an image has to name it, since it's someone
+    else's, so there's nothing to work out and None comes back.
+    """
+    import calkit
+
+    image: str | None = env.get("image")
+    if image:
+        return image
+    if not env.get("path"):
+        return None
+    try:
+        project = calkit.detect_project_name(wdir=wdir)
+    except ValueError:
+        # Nothing to take an owner from, which is where a project that
+        # isn't published anywhere yet ends up
+        project = calkit.detect_project_name(wdir=wdir, prepend_owner=False)
+    # Repository names must be lowercase, unlike tags
+    return f"{project}.{env_name}".lower()
+
+
 def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
     """Return the images a project builds that belong in a registry.
 
@@ -1133,13 +1161,57 @@ def get_pushable_images(wdir: str | None = None) -> dict[str, dict]:
     for env_name, env in (ck_info.get("environments") or {}).items():
         if not isinstance(env, dict) or env.get("kind") != "docker":
             continue
-        image = env.get("image")
-        if not image or not env.get("path"):
+        if not env.get("path"):
+            continue
+        image = get_image_name(env, env_name, wdir=wdir)
+        if not image:
             continue
         prefix = resolve_registry_prefix(env, wdir=wdir)
         if prefix is None:
             continue
         resp[env_name] = dict(
-            image=image, remote_ref=get_remote_image_ref(image, prefix)
+            env=env,
+            image=image,
+            remote_ref=get_remote_image_ref(image, prefix),
         )
     return resp
+
+
+def record_pushed_digest(
+    env: dict,
+    env_name: str,
+    image: str,
+    remote_ref: str,
+    wdir: str | None = None,
+) -> bool:
+    """Note in an environment's lock that its image is in the registry.
+
+    Pushing is what makes a digest pullable, so pushing is what puts one in
+    the lock. Only the digests are touched: the rest of the lock describes
+    the image and the inputs it was built from, which checking worked out
+    and pushing hasn't changed.
+    """
+    from calkit.environments import get_env_lock_fpath
+
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=False
+    )
+    if lock_fpath is None or not os.path.isfile(lock_fpath):
+        return False
+    identity = inspect_image_for_lock(image)
+    if identity is None:
+        return False
+    digests = keep_only_repo_digests(identity, remote_ref)["RepoDigests"]
+    if not digests:
+        return False
+    try:
+        with open(lock_fpath) as f:
+            lock = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(lock, dict) or lock.get("RepoDigests") == digests:
+        return False
+    lock["RepoDigests"] = digests
+    with open(lock_fpath, "w") as f:
+        json.dump(lock, f, indent=4)
+    return True

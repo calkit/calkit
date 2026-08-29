@@ -299,8 +299,8 @@ rebuilding it is the only way to get it back.
 Worse, a rebuild isn't guaranteed to produce the same image,
 since the packages the Dockerfile installs move on over time.
 
-Setting `registry` on the environment makes Calkit push each image it
-builds, and pull it back by digest whenever it's missing,
+Setting `registry` on the environment lets `calkit push` publish the
+image, so that Calkit can pull it back by digest whenever it's missing
 rather than rebuilding it:
 
 ```yaml
@@ -312,6 +312,12 @@ environments:
     image: foam2
     registry: auto
 ```
+
+`image` can be left out when there's a `path` to build from,
+in which case the image is named after the project and the environment,
+e.g., `someone/some-project.foam2`,
+matching how the environment's Jupyter kernel is named.
+An environment defined purely by someone else's image has to name it.
 
 `auto` resolves to the project's namespace in the GitHub Container
 Registry, e.g., `ghcr.io/someone/some-project`,
@@ -348,6 +354,11 @@ alongside Git and DVC, skipping any the registry already has.
 An environment built before its registry was configured is pushed as-is,
 without being rebuilt first.
 Pass `--no-docker` to skip images.
+Checking an environment never pushes: it builds or pulls whatever the
+project needs to run, and publishing is left to `calkit push`.
+Pushing is also what writes the image's digest into the lock file, since
+that's the point at which the digest becomes something anyone else can
+pull, so a push leaves a lock file change to commit.
 
 To rebuild or repull an image and write fresh lock files, e.g., after an
 image's tag has been moved out from under the digest in the lock, run:
@@ -1058,7 +1069,7 @@ Model class: `DockerEnvironment`
 | -------------- | ------------------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | kind           | Literal['docker']              | yes      | What kind of environment this is.                                                                                                                                                                                                                              |
 | path           | str                            | no       | Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.                                                                                                                                                                 |
-| image          | str                            | yes      | Name of the Docker image.                                                                                                                                                                                                                                      |
+| image          | str                            | no       | Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.                                     |
 | registry       | str                            | no       | Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'auto' for the project's GitHub Container Registry namespace. Images are kept local if this is unset or set to 'none'. |
 | platforms      | list[str]                      | no       | Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64']. Building for more than one requires a registry, since a multi-platform image can only be kept in one.                                                                                  |
 | layers         | list[str]                      | no       | Predefined layers to add to the generated Dockerfile.                                                                                                                                                                                                          |

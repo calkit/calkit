@@ -11,6 +11,7 @@ import time
 import pytest
 
 import calkit
+import calkit.environments
 
 
 def test_check_venv(tmp_dir):
@@ -349,7 +350,11 @@ def test_check_docker_env_locks_every_platform(tmp_dir):
         "--lock-arch",
         "arm64",
     ]
-    subprocess.check_call(argv)
+    out = subprocess.check_output(argv, text=True)
+    # The other platforms are read from the exact image this one locked, not
+    # from the tag, which can move onto a different build between checks and
+    # leave one set of lock files describing two of them
+    assert "Reading platforms available for alpine@sha256:" in out
     # Both platforms get locked from this one machine, so moving the project
     # to the other doesn't invalidate every stage in the environment
     with open(f"locks/{arch}.json") as f:
@@ -405,54 +410,69 @@ def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
             if up.returncode == 0:
                 break
             time.sleep(1)
+        image = "calkit-registry-test"
+        subprocess.check_call(["calkit", "init"])
         with open("Dockerfile", "w") as f:
             f.write("FROM alpine:3.18\nRUN echo hi > /hi.txt\n")
-        argv = [
-            "calkit",
-            "check",
-            "docker-env",
-            "calkit-registry-test",
-            "-i",
-            "Dockerfile",
-            "-o",
-            "lock.json",
-            "--registry",
-            f"{registry}/proj",
-        ]
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"] = {
+            "main": {
+                "kind": "docker",
+                "path": "Dockerfile",
+                "image": image,
+                "registry": f"{registry}/proj",
+            }
+        }
+        calkit.save_calkit_info(ck_info)
+        check_argv = ["calkit", "check", "environment", "-n", "main"]
+        arch = calkit.environments.get_docker_arch()
+        lock_fpath = f".calkit/env-locks/main/{arch}.json"
+        # Checking builds the image but leaves publishing alone, so there's
+        # nothing in the lock anyone else could pull yet
+        out = subprocess.check_output(check_argv, text=True)
+        assert "Pushing image" not in out
+        with open(lock_fpath) as f:
+            assert json.load(f)["RepoDigests"] == []
         # An image built before a registry was configured must reach it
         # without a rebuild, or an existing project could only publish what
         # it already has by throwing it away first
-        subprocess.check_call(argv[:-2])
-        with open("lock.json") as f:
-            assert json.load(f)["RepoDigests"] == []
-        out = subprocess.check_output(argv, text=True)
-        assert "Pushing image" in out
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        assert "Pushing image for 'main'" in out
         assert "exporting layers" not in out
-        with open("lock.json") as f:
+        with open(lock_fpath) as f:
             lock = json.load(f)
-        # Having been pushed, the image is identified by a digest that can be
-        # pulled back, which is what makes a rebuild unnecessary
+        # Pushing is what makes the digest pullable, so pushing is what puts
+        # it in the lock, which is what makes a rebuild unnecessary
         assert lock["RepoDigests"] == [
-            f"{registry}/proj/calkit-registry-test@"
-            + lock["RepoDigests"][0].split("@")[1]
+            f"{registry}/proj/{image}@" + lock["RepoDigests"][0].split("@")[1]
         ]
-        with open("lock.json", "rb") as f:
+        with open(lock_fpath, "rb") as f:
             lock_bytes = f.read()
         subprocess.check_call(
             [
                 "docker",
                 "rmi",
                 "-f",
-                "calkit-registry-test",
-                f"{registry}/proj/calkit-registry-test:latest",
+                image,
+                f"{registry}/proj/{image}:latest",
             ]
         )
-        out = subprocess.check_output(argv, text=True)
+        out = subprocess.check_output(check_argv, text=True)
         assert "Pulling image by digest" in out
         assert "Pushing image" not in out
         # Coming back from the registry has to leave the lock exactly as it
         # was, or every stage in the environment reruns for nothing
-        with open("lock.json", "rb") as f:
+        with open(lock_fpath, "rb") as f:
+            assert f.read() == lock_bytes
+        # Checking an image that hasn't changed must not go back to the
+        # registry to ask which platforms it has. The answer can't have
+        # changed, and asking put a network round-trip in front of every
+        # check for any project whose image isn't published for both
+        out = subprocess.check_output(check_argv, text=True)
+        assert "Reading platforms available" not in out
+        with open(lock_fpath, "rb") as f:
             assert f.read() == lock_bytes
     finally:
         subprocess.run(["docker", "rm", "-f", container], capture_output=True)
@@ -530,7 +550,7 @@ def test_push_sends_docker_images_to_their_registry(tmp_dir):
     sys.platform == "win32",
     reason="TODO: Docker daemon not available on windows-latest GHA runners",
 )
-def test_check_docker_env_keeps_unpushed_digests_out_of_the_lock(tmp_dir):
+def test_check_docker_env_does_not_push(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
     argv = [
@@ -549,14 +569,17 @@ def test_check_docker_env_keeps_unpushed_digests_out_of_the_lock(tmp_dir):
         out = subprocess.check_output(
             argv, text=True, stderr=subprocess.STDOUT
         )
-        assert "Pushing image" in out
+        # Publishing an image is 'calkit push', not something that happens
+        # on the way to running a stage, so an unreachable registry is not
+        # even contacted here
+        assert "Pushing image" not in out
         with open("lock.json") as f:
             lock = json.load(f)
         # Recording a digest nothing can serve would send everyone who reads
         # this lock on a failed pull
         assert lock["RepoDigests"] == []
-        # And the tag the failed push left behind has to go, since it would
-        # fake a registry digest on the image
+        # And nothing should have tagged the image for the registry, since
+        # that would fake a registry digest on it
         info = json.loads(
             subprocess.check_output(
                 [

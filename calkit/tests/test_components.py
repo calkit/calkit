@@ -227,6 +227,58 @@ def test_staleness_after_build(tmp_dir):
     ].status == "missing"
 
 
+def test_source_locations(tmp_dir):
+    import calkit.components as cc
+
+    ck_info = _project()
+    _generate(ck_info)
+    doc = cc.describe_document("paper/main.tex", check_stages=False)
+    by = {c.location: c for c in doc.components}
+    # An editor needs the line to put a marker on, and a value cited twice
+    # is written in two places
+    ratio = by["results/findings.json:ratio"]
+    assert [(loc.source, loc.line) for loc in ratio.locations] == [
+        ("paper/main.tex", 6),
+        ("paper/main.tex", 8),
+    ]
+    # The column points at the command, so a cursor test can find it again
+    line = open("paper/main.tex").read().splitlines()[5]
+    column = ratio.locations[0].column
+    assert line[column - 1 :].startswith("\\result[ratio]")
+    assert (
+        cc.resolve_position(
+            "paper/main.tex", 6, col=column, check_stages=False
+        )[0].key
+        == "ratio"
+    )
+    assert [
+        (loc.source, loc.line) for loc in by["figures/plot.pdf"].locations
+    ] == [("paper/main.tex", 7)]
+    # A document builds, then stops citing a value anywhere: the build
+    # still shows it, and there is nowhere in the source left to point at
+    with open("paper/main.ckprov", "w") as f:
+        f.write(
+            '{"kind": "value", "path": "results/findings.json", '
+            '"key": "ratio", "page": 1}\n'
+        )
+    import calkit.latex
+
+    calkit.latex.collect_provenance("paper/main.tex", ck_info, ".")
+    with open("paper/main.tex") as f:
+        tex = f.read()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            tex.replace(
+                "Ratio \\result[ratio] for \\result[name].", ""
+            ).replace("\\ckfindings", "")
+        )
+    doc = cc.describe_document("paper/main.pdf", check_stages=False)
+    assert doc.built
+    assert {c.location: c for c in doc.components}[
+        "results/findings.json:ratio"
+    ].locations == []
+
+
 def test_provenance_of_a_component(tmp_dir):
     import calkit.components as cc
 

@@ -163,14 +163,16 @@ def _component_line(c) -> str:
 @describe_app.command(name="components|component")
 def describe_components(
     document: Annotated[
-        str,
+        str | None,
         typer.Argument(
             help=(
                 "Document to describe. The LaTeX source, the built PDF, or "
-                "the provenance sidecar all name the same document."
+                "the provenance sidecar all name the same document. Left "
+                "out, it is worked out from --source, or from the project "
+                "if it builds only one document."
             )
         ),
-    ],
+    ] = None,
     line: Annotated[
         int | None,
         typer.Option(
@@ -246,6 +248,23 @@ def describe_components(
         raise_error("--column needs a --line")
     if line is not None and page is not None:
         raise_error("--page and --line select different things; use one")
+    if document is None:
+        ck_info = calkit.load_calkit_info()
+        documents = calkit.components.latex_documents(ck_info)
+        if source:
+            document = calkit.components.document_for_source(source, ck_info)
+        elif len(documents) == 1:
+            document = documents[0]
+        if document is None:
+            raise_error(
+                "No document given, and the project builds none. "
+                "Name the document to describe."
+                if not documents
+                else (
+                    "Could not tell which document to describe; the project "
+                    "builds " + ", ".join(sorted(documents)) + ". Name one."
+                )
+            )
     check_stages = not no_stage_check
     if line is not None:
         components = calkit.components.resolve_position(

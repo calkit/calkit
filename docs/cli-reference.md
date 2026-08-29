@@ -2296,14 +2296,14 @@ With --line (and optionally --column) this answers "what is under my cursor?", w
 Usage:
 
 ```text
-calkit describe|desc components|component [OPTIONS] DOCUMENT
+calkit describe|desc components|component [OPTIONS] [DOCUMENT]
 ```
 
 Arguments:
 
-| Argument   | Type | Required | Default | Description                                                                                                  |
-| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `document` | text | yes      |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. |
+| Argument   | Type | Required | Default | Description                                                                                                                                                                                                |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `document` | text | no       |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. Left out, it is worked out from --source, or from the project if it builds only one document. |
 
 Options:
 

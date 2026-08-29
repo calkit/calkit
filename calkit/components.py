@@ -119,11 +119,24 @@ class Component(BaseModel):
     current_hash: str | None = None
     status: ComponentStatus = "unknown"
     stale_reasons: list[StaleReason] = Field(default_factory=list)
+    #: Every place in the source this component is written. Empty for one
+    #: the built document used and the source no longer names.
+    locations: list[Location] = Field(default_factory=list)
 
     @property
     def location(self) -> str:
         """How to name this component to a person."""
         return self.path + (f":{self.key}" if self.key else "")
+
+
+class Location(BaseModel):
+    """Where a component is written in a document's source."""
+
+    #: Project-relative path of the file it is written in
+    source: str
+    #: 1-based, as editors count
+    line: int
+    column: int
 
 
 class DocumentComponents(BaseModel):
@@ -491,6 +504,7 @@ def enrich(
             document_value=rec.get("document_value"),
             build_value=rec.get("value"),
             build_hash=rec.get("hash"),
+            locations=rec.get("locations") or [],
         )
         component.current_hash = _current_hash(path, wdir, lock)
         if component.kind == "value":
@@ -564,6 +578,42 @@ def source_path(document: str) -> str:
     return document
 
 
+def latex_documents(ck_info: dict) -> list[str]:
+    """Every LaTeX document the pipeline builds."""
+    stages = ck_info.get("pipeline", {}).get("stages", {}) or {}
+    return [
+        stage["target_path"]
+        for stage in stages.values()
+        if isinstance(stage, dict)
+        and stage.get("kind") == "latex"
+        and isinstance(stage.get("target_path"), str)
+    ]
+
+
+def document_for_source(
+    source: str, ck_info: dict, wdir: str | None = None
+) -> str | None:
+    """The document a source file belongs to.
+
+    A paper split across files means the cursor is often somewhere the
+    sidecar and the generated commands can only be found through the root
+    document, and an editor shouldn't have to work that out. A file that
+    is itself a document is its own answer; otherwise it is whichever
+    document reads it.
+    """
+    from calkit.latex import detect_inputs
+
+    wdir = wdir or os.getcwd()
+    source = Path(source).as_posix()
+    documents = latex_documents(ck_info)
+    if source in documents:
+        return source
+    for document in documents:
+        if source in detect_inputs(document, wdir):
+            return document
+    return documents[0] if len(documents) == 1 else None
+
+
 def describe_document(
     document: str,
     ck_info: dict | None = None,
@@ -583,12 +633,28 @@ def describe_document(
     sidecar = read_sidecar(document, wdir)
     stale_stages = _stale_stage_names(ck_info, wdir, check_stages)
     if sidecar is not None:
+        target = sidecar.get("document", source_path(document))
+        # The build says what the document shows; only the source says
+        # where it is written, which is what an editor needs to put a
+        # marker on the right line. A component with no location is one
+        # the source stopped naming after the build.
+        locations = {
+            (rec["kind"], rec["path"], rec.get("key")): rec["locations"]
+            for rec in _source_components(target, wdir)
+        }
+        components = [
+            {
+                **rec,
+                "locations": locations.get(
+                    (rec.get("kind"), rec.get("path"), rec.get("key")), []
+                ),
+            }
+            for rec in sidecar.get("components", [])
+        ]
         return DocumentComponents(
-            document=sidecar.get("document", document),
+            document=target,
             built=True,
-            components=enrich(
-                sidecar.get("components", []), ck_info, wdir, stale_stages
-            ),
+            components=enrich(components, ck_info, wdir, stale_stages),
         )
     target = source_path(document)
     return DocumentComponents(
@@ -609,25 +675,40 @@ def _is_generated(path: str, wdir: str) -> bool:
         return False
 
 
+def _line_col(line_starts: list[int], offset: int) -> tuple[int, int]:
+    """A character offset as a 1-based line and column, as editors count."""
+    import bisect
+
+    index = bisect.bisect_right(line_starts, offset) - 1
+    return index + 1, offset - line_starts[index] + 1
+
+
 def _source_components(target: str, wdir: str) -> list[dict]:
-    """What a document's source uses, when there is no build to read.
+    """What a document's source uses, and where each of it is written.
 
     Only what the source actually calls: a generated file typically
     defines every value in a results file, and a document that cites three
-    of them uses three. This is the same set the build would log, minus
-    the pages.
+    of them uses three. This is the same set the build would log, plus the
+    places in the source and minus the pages.
     """
     from calkit.latex import _strip_comments, detect_inputs
 
     commands = generated_commands(target, wdir)
     out: list[dict] = []
-    seen: set[tuple] = set()
+    by_key: dict[tuple, dict] = {}
 
-    def add(rec: dict) -> None:
+    def add(rec: dict, source: str, offset: int, starts: list[int]) -> None:
         key = (rec["kind"], rec["path"], rec.get("key"))
-        if key not in seen:
-            seen.add(key)
-            out.append(rec)
+        existing = by_key.get(key)
+        if existing is None:
+            existing = dict(rec)
+            existing["locations"] = []
+            by_key[key] = existing
+            out.append(existing)
+        line, column = _line_col(starts, offset)
+        location = Location(source=source, line=line, column=column)
+        if location not in existing["locations"]:
+            existing["locations"].append(location)
 
     for rel in [target] + detect_inputs(target, wdir):
         # A generated file's own contents are reached by expanding the
@@ -635,6 +716,8 @@ def _source_components(target: str, wdir: str) -> list[dict]:
         if not rel.endswith(".tex") or _is_generated(rel, wdir):
             continue
         try:
+            # Comments are blanked in place rather than removed, so an
+            # offset still names the same line and column it did
             tex = _strip_comments(
                 (Path(wdir) / rel).read_text(
                     encoding="utf-8", errors="replace"
@@ -642,20 +725,21 @@ def _source_components(target: str, wdir: str) -> list[dict]:
             )
         except OSError:
             continue
+        starts = [0] + [i + 1 for i, c in enumerate(tex) if c == "\n"]
         for match in _COMMAND_RE.finditer(tex):
             entries = commands.get(match.group(1))
             if entries is None:
                 continue
             for body in _bodies(entries, match.group(2)):
                 for rec in expand_components(body, commands):
-                    add(rec)
-        for _, rec in _path_commands(tex, target, rel, wdir):
+                    add(rec, rel, match.start(), starts)
+        for span, rec in _path_commands(tex, target, rel, wdir):
             # Pulling in a generated file is the mechanism, not a
             # component: what it carries is already listed as the values
             # and blocks the document shows
             if rec["kind"] == "text" and _is_generated(rec["path"], wdir):
                 continue
-            add(rec)
+            add(rec, rel, span[0], starts)
     return out
 
 

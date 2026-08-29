@@ -1952,12 +1952,12 @@ def check_questions(
 ) -> None:
     """Check that answered questions are consistent with their evidence.
 
-    Every keyed result evidence entry that records the value its answer was
-    written against is compared with the value the results file holds now,
-    so an answer whose numbers the pipeline has since changed is reported as
-    stale. Evidence paths must exist, keys must resolve, and a publication
-    label must still be present in the LaTeX source. Exits with an error if
-    any answered question is stale or broken.
+    A question is stale if any of its evidence changed after the commit
+    that last edited the question, in Git history for Git-tracked outputs
+    or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value
+    keys must resolve, every placeholder in the text must render, and a
+    publication label must still be present in the LaTeX source. Exits
+    with an error if any answered question is stale or broken.
     """
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status

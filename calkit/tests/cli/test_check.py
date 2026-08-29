@@ -1072,10 +1072,10 @@ def test_check_questions(tmp_dir):
     ck_info["questions"] = [
         {
             "question": "Do the top structures use the rectifier?",
-            "answer": "All eight do.",
+            "answer": "{n_top} of eight do.",
             "evidence": [
                 {
-                    "kind": "result",
+                    "kind": "value",
                     "path": "results/findings.json",
                     "key": "n_top",
                 }
@@ -1084,28 +1084,27 @@ def test_check_questions(tmp_dir):
     ]
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
-    # Unrecorded evidence is reported but is not a failure
-    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
-    assert "[unrecorded]" in out
-    # Recording requires choosing questions, then writes the value
-    assert subprocess.call(["calkit", "update", "questions"]) != 0
-    out = subprocess.check_output(
-        ["calkit", "update", "questions", "-q", "1"], text=True
-    )
-    assert "recorded n_top = 8" in out
-    assert (
-        calkit.load_calkit_info()["questions"][0]["evidence"][0]["value"] == 8
-    )
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "1 consistent" in out
-    # The pipeline changes the number: check fails, status warns, JSON shows
+    # Listing renders the placeholder from the results file
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 8 of eight do." in out
+    out = subprocess.check_output(
+        ["calkit", "list", "questions", "--raw"], text=True
+    )
+    assert "answer: {n_top} of eight do." in out
+    # The pipeline changes the number in a later commit: the check fails,
+    # status warns, JSON says stale, and the listing already shows 0
     with open("results/findings.json", "w") as f:
         json.dump({"n_top": 0}, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Re-run"])
     proc = subprocess.run(
         ["calkit", "check", "questions"], capture_output=True, text=True
     )
     assert proc.returncode == 1
-    assert "changed from 8 to 0" in proc.stdout
+    assert "changed in 1 commit(s)" in proc.stdout
     proc = subprocess.run(
         ["calkit", "check", "questions", "--json"],
         capture_output=True,
@@ -1120,6 +1119,12 @@ def test_check_questions(tmp_dir):
     assert "1 stale" in out
     out = subprocess.check_output(["calkit", "status", "--json"], text=True)
     assert json.loads(out)["questions"]["questions"][0]["status"] == "stale"
-    # Accepting the new value clears it
-    subprocess.check_call(["calkit", "update", "questions", "--all"])
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 0 of eight do." in out
+    # Reviewing the answer is an edit to the question, which clears it
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["reviewed"] = "2026-08-29"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Review"])
     subprocess.check_call(["calkit", "check", "questions"])

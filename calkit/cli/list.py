@@ -222,9 +222,27 @@ def list_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Show the text as written, with its {name} placeholders, "
+            "instead of rendered from the evidence.",
+        ),
+    ] = False,
 ):
-    """List the project's questions (1-indexed)."""
-    questions = calkit.load_calkit_info().get("questions", []) or []
+    """List the project's questions (1-indexed).
+
+    Placeholders in the text, such as ``{improvement:.1f}``, are filled from
+    the question's value evidence, so numbers shown are read from the
+    results files rather than retyped into ``calkit.yaml``.
+    """
+    from calkit.questions import render_question
+
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions", []) or []
+    if not raw:
+        questions = [render_question(q, ck_info) for q in questions]
     if json_output:
         echo_json(questions)
         return

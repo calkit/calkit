@@ -46,6 +46,15 @@ project in a plain folder.
   that references a pipeline output; right-click also offers **Go to Figure
   Source**. (From a compiled PDF, LaTeX Workshop's reverse-SyncTeX takes you to
   the `\includegraphics` line, where these actions take over.)
+- **Document components**: In a LaTeX document that injects project content
+  (`\result[…]`, `\ckfigure{…}`, `\ckfindings`), hover any of it to see the
+  value, the file and key it came from, the stage and script behind it, the
+  pages it lands on, and whether it is still current. **Go to Definition**
+  (F12) opens the results file at that key or the figure itself; **Go to
+  Declaration** opens the producing script, so the loop is: hover a number,
+  jump to the script, tweak, come back. A CodeLens flags a line whose content
+  needs a rerun, has drifted from the project since the document was built, or
+  came from nowhere at all, and offers to run the stage.
 - **Stale-output awareness**: Outputs whose stage needs re-running are flagged
   in the sidebar and in the file explorer.
 - **File history**: View a tracked file's history from the sidebar or explorer.

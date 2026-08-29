@@ -153,6 +153,11 @@
         "icon": "$(play)"
       },
       {
+        "command": "calkit-vscode.runComponentStage",
+        "title": "Calkit: Run the Stage Behind This Component",
+        "icon": "$(play)"
+      },
+      {
         "command": "calkit-vscode.openStagePdf",
         "title": "Open Rendered PDF",
         "category": "Calkit",
@@ -757,6 +762,10 @@
         },
         {
           "command": "calkit-vscode.runMarkdownStage",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.runComponentStage",
           "when": "false"
         }
       ]

@@ -51,6 +51,8 @@ import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
 } from "./figures/view";
+import { ComponentsProvider } from "./components/view";
+import type { DocumentComponents } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -91,6 +93,7 @@ const COMMAND_PREVIEW_PLOTLY_TO_SIDE =
 const COMMAND_OPEN_PLOTLY_SOURCE = "calkit-vscode.openPlotlyAsSource";
 const COMMAND_OPEN_STAGE_PDF = "calkit-vscode.openStagePdf";
 const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
+const COMMAND_RUN_COMPONENT_STAGE = "calkit-vscode.runComponentStage";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
@@ -1351,6 +1354,48 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // Hover, go-to-definition/declaration and CodeLenses over the project
+  // content a LaTeX document injects: where a value or figure came from, the
+  // stage and script behind it, and whether the project has moved on since.
+  const componentsProvider = new ComponentsProvider({
+    getWorkspaceRoot,
+    describeComponents,
+    runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
+    log,
+  });
+  const texSelector: vscode.DocumentSelector = [
+    { scheme: "file", language: "latex" },
+    { scheme: "file", pattern: "**/*.tex" },
+  ];
+  context.subscriptions.push(
+    vscode.languages.registerHoverProvider(texSelector, componentsProvider),
+    vscode.languages.registerDefinitionProvider(
+      texSelector,
+      componentsProvider,
+    ),
+    vscode.languages.registerDeclarationProvider(
+      texSelector,
+      componentsProvider,
+    ),
+    vscode.languages.registerCodeLensProvider(texSelector, componentsProvider),
+    vscode.commands.registerCommand(
+      COMMAND_RUN_COMPONENT_STAGE,
+      (stageName?: string) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (workspaceRoot && stageName) {
+          runStageInTerminal(workspaceRoot, stageName);
+        }
+      },
+    ),
+    // A saved document can inject something new, and a finished run changes
+    // what is current, so both invalidate what the provider last read
+    vscode.workspace.onDidSaveTextDocument((document) => {
+      if (document.uri.fsPath.toLowerCase().endsWith(".tex")) {
+        componentsProvider.refresh();
+      }
+    }),
+  );
+
   // Puts a "Run stage" action above each stage a Markdown file declares
   const markdownStageCodeLensProvider = new MarkdownStageCodeLensProvider({
     getWorkspaceRoot,
@@ -1375,6 +1420,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
     figureCodeLensProvider.refresh();
+    componentsProvider.refresh();
     // A file only gets stage lenses once calkit.yaml declares it, so these
     // have to be recomputed when that changes
     markdownStageCodeLensProvider.refresh();
@@ -1802,6 +1848,30 @@ async function getSubmodulePaths(workspaceRoot: string): Promise<string[]> {
 // artifacts reserved so they aren't listed twice) and flags auto-detected
 // entries with `detected: true`; we keep only those, since declared artifacts
 // already come from calkit.yaml.
+// Ask calkit what project content a document uses. One call for the whole
+// document, or one for a position in it; the resolver is the same either way,
+// and it is the same one the hub and the browser extension read, so nothing
+// here has to understand LaTeX.
+async function describeComponents(
+  workspaceRoot: string,
+  args: string[],
+): Promise<DocumentComponents | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["describe", "components", ...args],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    return JSON.parse(stdout) as DocumentComponents;
+  } catch (error) {
+    // A document the resolver can't place, a project without a pipeline, or
+    // no calkit on PATH: all of them mean there is nothing to show, and none
+    // of them is worth interrupting someone writing a paper
+    log(`describe components ${args.join(" ")} failed: ${String(error)}`);
+    return undefined;
+  }
+}
+
 async function listDetectedArtifacts(
   workspaceRoot: string,
   kind: "figures" | "datasets" | "results" | "presentations",

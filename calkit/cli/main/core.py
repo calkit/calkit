@@ -3283,7 +3283,16 @@ def run_in_env(
             docker_cmd += ["--user", docker_user]
         docker_cmd += env.get("args", [])
         docker_cmd += [
-            "-it" if sys.stdin.isatty() else "-i",
+            # A pipeline stage is nobody's terminal session: asking for a
+            # TTY there puts the user's terminal into raw mode for the
+            # duration, and the container's own line discipline stops
+            # translating newlines, so everything the stage prints
+            # staircases down the screen. DVC sets DVC_STAGE for the
+            # commands it runs, which is how a stage is told apart from
+            # someone running 'calkit xenv' themselves
+            "-it"
+            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
+            else "-i",
             "--rm",
             "-w",
             docker_wdir,
@@ -3608,7 +3617,16 @@ def run_in_env(
             "run",
             "--platform",
             "linux/amd64",  # Ensure compatibility with MATLAB
-            "-it" if sys.stdin.isatty() else "-i",
+            # A pipeline stage is nobody's terminal session: asking for a
+            # TTY there puts the user's terminal into raw mode for the
+            # duration, and the container's own line discipline stops
+            # translating newlines, so everything the stage prints
+            # staircases down the screen. DVC sets DVC_STAGE for the
+            # commands it runs, which is how a stage is told apart from
+            # someone running 'calkit xenv' themselves
+            "-it"
+            if sys.stdin.isatty() and not os.getenv("DVC_STAGE")
+            else "-i",
             "--rm",
             "-w",
             "/work",

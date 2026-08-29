@@ -4,31 +4,27 @@
 %%
 %% Every macro here is a no-op wrapper in the default (final) mode, so a
 %% document renders identically with or without provenance markers. With
-%% the `provenance` option, injected values, figures and text blocks are
-%% colored and hyperlinked to their source, and every use is logged to
-%% \jobname.ckprov, which Calkit turns into <document>.provenance.json.
+%% the `provenance` option, injected values are colored so a reader can see
+%% they came from elsewhere, and every injection -- value, figure, text
+%% block -- is logged to \jobname.ckprov, which Calkit turns into
+%% <document>.provenance.json for editors and the hub to follow back to the
+%% file and the stage that produced it. Nothing else is added to the page.
 \NeedsTeXFormat{LaTeX2e}
-\ProvidesPackage{calkit}[2026/08/29 v0.1 Calkit provenance markers]
+\ProvidesPackage{calkit}[2026/08/29 v0.2 Calkit provenance markers]
 \RequirePackage{xcolor}
-\RequirePackage{hyperref}
 \newif\ifck@prov
 \DeclareOption{provenance}{\ck@provtrue}
 \DeclareOption{final}{\ck@provfalse}
 \ProcessOptions\relax
 \definecolor{ckprov}{HTML}{1F6FB2}
-% Where a source path links to, e.g., a repository or Calkit Hub URL with
-% a trailing slash. Empty means links are relative to the document.
-\def\ck@baseurl{}
-\newcommand\ckbaseurl[1]{\def\ck@baseurl{#1}}
 % Artifact table, generated per build into calkit-provenance.tex:
 % \ckartifact{path as the document writes it}{stage}{hash}{project path}
 \newcommand\ckartifact[4]{\expandafter\gdef\csname ck@stage@#1\endcsname{#2}%
   \expandafter\gdef\csname ck@hash@#1\endcsname{#3}%
   \expandafter\gdef\csname ck@proj@#1\endcsname{#4}}
-\newcommand\ck@stageof[1]{\ifcsname ck@stage@#1\endcsname
+\newcommand\ckstageof[1]{\ifcsname ck@stage@#1\endcsname
   \csname ck@stage@#1\endcsname\else ?\fi}
-% The project-relative path, for links, when the table knows it
-\newcommand\ck@projof[1]{\ifcsname ck@proj@#1\endcsname
+\newcommand\ckprojectpath[1]{\ifcsname ck@proj@#1\endcsname
   \csname ck@proj@#1\endcsname\else#1\fi}
 \InputIfFileExists{calkit-provenance.tex}{}{}
 % Log of every injection, one JSON object per line
@@ -37,21 +33,13 @@
 \AtEndDocument{\immediate\closeout\ck@provfile}
 \newcommand\ck@log[3]{\immediate\write\ck@provfile{%
   {"kind": "#1", "path": "#2", "key": "#3", "page": \thepage}}}
-\newcommand\ck@link[2]{\ifck@prov
-  \href{\ck@baseurl#1}{\textcolor{ckprov}{#2}}\else#2\fi}
+\newcommand\ck@mark[1]{\ifck@prov\textcolor{ckprov}{#1}\else#1\fi}
 % \ckvalue{key}{value}{path}{stage}: a number or string read from a
 % results file. Generated value commands expand to this.
-\newcommand\ckvalue[4]{\ck@log{value}{#3}{#1}\ck@link{#3}{#2}}
-% \ckfigure[graphics options]{path}: \includegraphics with provenance
-\newcommand\ckfigure[2][]{\ck@log{figure}{#2}{}%
-  \ifck@prov\href{\ck@baseurl\ck@projof{#2}}{\includegraphics[#1]{#2}}%
-  \else\includegraphics[#1]{#2}\fi}
-% \ckcaptionsource{path}: a note for a caption naming the producing stage
-\newcommand\ckcaptionsource[1]{\ifck@prov\ \ck@link{\ck@projof{#1}}{%
-  \footnotesize[\texttt{\ck@projof{#1}}, stage \texttt{\ck@stageof{#1}}]}\fi}
-% \ckinput{path}: \input with provenance, for stage-generated text
-\newcommand\ckinput[1]{\ck@log{text}{#1}{}\ifck@prov
-  \ck@link{\ck@projof{#1}}{\footnotesize[\texttt{#1}]}\par\fi\input{#1}}
-% \ckblock{n}{path}: marks a generated question block
-\newcommand\ckblock[2]{\ck@log{block}{#2}{#1}\ck@link{#2}{%
-  \footnotesize[question #1]}}
+\newcommand\ckvalue[4]{\ck@log{value}{#3}{#1}\ck@mark{#2}}
+% \ckfigure[graphics options]{path}: \includegraphics, logged
+\newcommand\ckfigure[2][]{\ck@log{figure}{#2}{}\includegraphics[#1]{#2}}
+% \ckinput{path}: \input, logged, for stage-generated text
+\newcommand\ckinput[1]{\ck@log{text}{#1}{}\input{#1}}
+% \ckblock{n}{path}: marks a generated question block, logged
+\newcommand\ckblock[2]{\ck@log{block}{#2}{#1}}

@@ -375,23 +375,23 @@ and load the package in the document:
 
 ```latex
 \usepackage[provenance]{calkit}
-\ckbaseurl{https://github.com/me/my-project/blob/main/}
 \input{generated-numbers}
 \input{generated-questions}
 ...
 The error falls by \result[Improvement]x (Section~\ref{sec:bench}).
 \ckfigure[width=0.7\textwidth]{../figures/dissipation.pdf}
-\caption{Dissipation along the plate.\ckcaptionsource{../figures/dissipation.pdf}}
 ...
 \appendix
 \section{Questions and answers}
 \ckfindings
 ```
 
-With the `provenance` option, every injected value is colored and linked
-to its source file, figures link to theirs and can name the stage that
-made them, and generated question blocks link to `calkit.yaml`.
-Drop the option, or pass `final`, and the document renders as if the
+With the `provenance` option, every injected value is colored so a reader
+can see it came from elsewhere, and nothing else is added to the page:
+the trail itself lives in the provenance record described below, which
+is what the VS Code extension and the hub use to open the file behind a
+value or figure, and from there the stage and the script that produced
+it. Drop the option, or pass `final`, and the document renders as if the
 package were not there, so the markers cost nothing in the version that
 goes to a journal.
 

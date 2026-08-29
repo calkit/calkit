@@ -1540,6 +1540,15 @@ class Question(BaseModel):
     question: str
     hypothesis: str | None = None
     answer: str | None = None
+    notes: str | None = Field(
+        default=None,
+        description=(
+            "Free-form notes, e.g., why a question is still open and what "
+            "would answer it. Unlike an answer, notes make no claim, so a "
+            "question with notes and no answer is reported as unanswered "
+            "rather than as an answer lacking evidence."
+        ),
+    )
     evidence: (
         list[
             FigureEvidence

@@ -4947,6 +4947,19 @@
           "default": null,
           "title": "Hypothesis"
         },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-form notes, e.g., why a question is still open and what would answer it. Unlike an answer, notes make no claim, so a question with notes and no answer is reported as unanswered rather than as an answer lacking evidence.",
+          "title": "Notes"
+        },
         "question": {
           "title": "Question",
           "type": "string"

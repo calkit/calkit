@@ -100,6 +100,10 @@ when the document is reorganized.
 This keeps answers short: state the claim, let keyed results carry the
 numbers, and let the publication carry the argument.
 
+A question that is still open should have no `answer` at all;
+`notes` is the place to say why it is open and what would settle it,
+since notes make no claim and so need no evidence.
+
 <!-- prettier-ignore -->
 !!! note
     The evidence records here are designed to be compatible in spirit with

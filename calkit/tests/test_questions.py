@@ -78,7 +78,11 @@ def test_check_and_record(tmp_dir):
         },
         "questions": [
             "Is this a plain question?",
-            {"question": "Unanswered?", "hypothesis": "Maybe."},
+            {
+                "question": "Unanswered?",
+                "hypothesis": "Maybe.",
+                "notes": "Needs a second dataset.",
+            },
             {"question": "Answered without evidence?", "answer": "Yes."},
             {
                 "question": "Do the top structures use the rectifier?",

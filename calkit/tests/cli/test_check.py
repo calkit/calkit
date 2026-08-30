@@ -1023,13 +1023,38 @@ def test_check_repro_literals(tmp_dir):
     )
     # 3.14 is not in any results file, so nothing accounts for it
     assert "Untraceable literals: 1" in result.stdout
-    assert "Untraceable Literals" in result.stdout
+    # The summary stays a summary: the findings themselves would bury the
+    # line that says what to do next, so it points at them instead
+    assert "3.14" not in result.stdout
+    assert "calkit check repro -c" in result.stdout
+    assert "literals" in result.stdout.rsplit("\n", 2)[-2]
+    result = subprocess.run(
+        ["calkit", "check", "repro", "-c", "literals"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "Untraceable literals (1)" in result.stdout
     assert "3.14" in result.stdout
+    assert "main.tex:6" in result.stdout
     # 0.42 is in the results file, so it reads as traceable even though it
     # was typed here. The check under-flags on purpose: a value the project
     # computes is not evidence of a mistake, and a false positive on a real
     # number costs more than a missed one.
-    assert "0.42" not in result.stdout.split("Untraceable Literals")[1]
+    assert "0.42" not in result.stdout
+    # A category with nothing behind it says so rather than printing an
+    # empty table, and one that isn't a category is an error
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "provenance"], text=True
+    )
+    assert "provenance: nothing to report" in out
+    bad = subprocess.run(
+        ["calkit", "check", "repro", "-c", "nope"],
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
     result_json = subprocess.run(
         ["calkit", "check", "repro", "--json"],
         capture_output=True,

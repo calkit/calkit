@@ -97,6 +97,17 @@ def _bool_to_check_x(val: bool | int) -> str:
         return "❌"
 
 
+#: Parts of the check that carry per-item detail, and the attribute
+#: holding it. The summary counts them; asking for a category lists them,
+#: since a wall of findings buries the one line that says what to do next.
+DETAIL_CATEGORIES = {
+    "literals": "untraceable_literals",
+    "scripts": "scripts_not_in_pipeline",
+    "environments": "stages_without_env",
+    "provenance": "misc_needing_provenance",
+}
+
+
 class ReproCheck(BaseModel):
     has_pipeline: bool
     has_readme: bool
@@ -322,6 +333,15 @@ class ReproCheck(BaseModel):
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
+
+    def details(self, category: str) -> list:
+        """The items behind one summary line."""
+        return getattr(self, DETAIL_CATEGORIES[category], []) or []
+
+    @property
+    def categories_with_detail(self) -> list[str]:
+        """Categories that have something to show, in reporting order."""
+        return [c for c in DETAIL_CATEGORIES if self.details(c)]
 
 
 def _strings_in(obj: object) -> list[str]:

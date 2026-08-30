@@ -111,7 +111,8 @@ calkit describe components paper/main.tex
 
 `check repro` reads the manuscript back and reports any number in it that
 isn't traceable to a pipeline output --- which catches a hole closed by
-typing rather than by building. `check questions` tells you whether each
+typing rather than by building. It summarizes; run
+`calkit check repro -c literals` to see the numbers it found. `check questions` tells you whether each
 answer still follows from its evidence. `describe components` lists every
 value and figure the document takes from the project, with the stage behind
 it and whether it is current --- see [provenance](../provenance.md).

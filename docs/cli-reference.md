@@ -2884,6 +2884,8 @@ Check things.
 
 Check the reproducibility of a project.
 
+Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c literals' for the numbers in a manuscript that no pipeline output accounts for.
+
 Usage:
 
 ```text
@@ -2892,10 +2894,11 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description                |
-| -------- | ------- | -------- | ------- | -------------------------- |
-| `--wdir` | text    | no       | .       | Project working directory. |
-| `--json` | boolean | no       | False   | Output result as JSON.     |
+| Option             | Type    | Required | Default | Description                                                                                        |
+| ------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `--wdir`           | text    | no       | .       | Project working directory.                                                                         |
+| `--category`, `-c` | text    | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times. |
+| `--json`           | boolean | no       | False   | Output result as JSON.                                                                             |
 
 <a id="subcommand-check-environment"></a>
 

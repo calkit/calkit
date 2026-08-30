@@ -307,50 +307,100 @@ def check_repro(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
+    categories: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--category",
+            "-c",
+            help=(
+                "Show the findings behind one summary line instead of the "
+                "summary. Can be specified multiple times."
+            ),
+        ),
+    ] = None,
     as_json: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ) -> None:
-    """Check the reproducibility of a project."""
-    from calkit.reproducibility import check_reproducibility
+    """Check the reproducibility of a project.
 
+    Reports one line per check. Where a line counts something, ask for
+    that category to see what it counted, e.g., 'calkit check repro -c
+    literals' for the numbers in a manuscript that no pipeline output
+    accounts for.
+    """
+    from calkit.reproducibility import DETAIL_CATEGORIES, check_reproducibility
+
+    valid = list(DETAIL_CATEGORIES)
+    for category in categories or []:
+        if category not in valid:
+            raise_error(
+                f"Invalid category: {category}. Valid categories are: {valid}"
+            )
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
         return
-    calkit.echo(res.to_pretty())
-    if res.untraceable_literals:
-        try:
-            from rich.console import Console
-            from rich.table import Table
-
-            console = Console()
-            table = Table(
-                title="Untraceable Literals",
-                title_justify="left",
-                show_header=True,
-                header_style="bold",
+    if not categories:
+        calkit.echo(res.to_pretty())
+        # The findings themselves are a page of their own, and printing
+        # them here buries the one line that says what to do next
+        available = res.categories_with_detail
+        if available:
+            calkit.echo(
+                "For the findings behind a line above, run 'calkit check "
+                "repro -c' with any of: " + ", ".join(available)
             )
-            table.add_column("File", style="cyan")
-            table.add_column("Line", justify="right")
-            table.add_column("Col", justify="right")
-            table.add_column("Value", style="red")
-            table.add_column("Context")
-            table.add_column("Suggestion")
-            # One row per finding, in the order the checker sorted them
-            for finding in res.untraceable_literals:
-                table.add_row(
-                    finding["file"],
-                    str(finding["line"]),
-                    str(finding["column"]),
-                    finding["value"],
-                    finding["context"],
-                    finding["suggestion"],
-                )
-            calkit.echo("")
-            console.print(table)
-        except ImportError:
-            pass
+        return
+    for category in categories:
+        items = res.details(category)
+        if not items:
+            calkit.echo(f"{category}: nothing to report")
+            continue
+        if category == "literals":
+            _echo_literals(items)
+        else:
+            calkit.echo(f"{category} ({len(items)}):")
+            for item in items:
+                calkit.echo(f"  {item}")
+
+
+def _echo_literals(findings: list[dict]) -> None:
+    """List numbers in a manuscript that no pipeline output accounts for.
+
+    The fix is the same for every one of them, so it is said once rather
+    than repeated down a column, which is what left no room for the
+    context that tells you whether a finding is really a result.
+    """
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(
+        title=f"Untraceable literals ({len(findings)})",
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+    )
+    # file:line:column in one column, which most terminals make clickable
+    table.add_column("Where", style="cyan", no_wrap=True)
+    table.add_column("Value", style="red", no_wrap=True)
+    table.add_column("Context")
+    for finding in findings:
+        table.add_row(
+            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            finding["value"],
+            finding["context"],
+        )
+    Console().print(table)
+    calkit.echo(
+        "\nEach of these is a number typed into the document. If it is a "
+        "result, compute it in a pipeline stage, write it to a results "
+        "JSON file, add a 'json-to-latex' stage over that file, and "
+        "reference the generated command instead. If it is a constant, a "
+        "tolerance, or a quantity that belongs in the text as written, "
+        "leave it: the check under-flags on purpose and still catches "
+        "things that are not results."
+    )
 
 
 @check_app.command(

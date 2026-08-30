@@ -34,7 +34,9 @@ Judgment, done here:
 
 ## Procedure
 
-1. Run `calkit check repro --json` and read the report.
+1. Run `calkit check repro --json` and read the report. The plain output
+   is a summary; `--json` carries every finding, and a person looking for
+   themselves gets them from `calkit check repro -c <category>`.
 
 2. **Pipeline and environment findings** come first: a value can't be made
    traceable until there is a pipeline to make it. See the

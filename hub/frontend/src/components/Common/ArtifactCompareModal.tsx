@@ -58,6 +58,7 @@ import { declaredInputs, matchDepsToDatasets } from "../../lib/provenance"
 import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
+import ArtifactUsagesRow from "./ArtifactUsagesRow"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
 } from "./CommentsPanel"
@@ -317,6 +318,7 @@ function FigureInfo({
   // Typed as plain string so the router's typed `to` prop accepts them.
   const filesTo: string = `/${ownerName}/${projectName}/files`
   const pipelineTo: string = `/${ownerName}/${projectName}/pipeline`
+  const publicationsTo: string = `/${ownerName}/${projectName}/publications`
   const datasetsTo: string = `/${ownerName}/${projectName}/datasets`
   // What the figure was made from: its stage's concrete inputs in dvc.yaml,
   // matched against the project's declared datasets.
@@ -445,6 +447,14 @@ function FigureInfo({
         )}
       </Text>
       <InputsRow label="Data" items={dataLinks} />
+      {/* Forward from here: which papers actually show this, and where */}
+      <ArtifactUsagesRow
+        ownerName={ownerName}
+        projectName={projectName}
+        path={figure.path}
+        gitRef={gitRef}
+        publicationsTo={publicationsTo}
+      />
       {/* Back into the code that made it, when there is some: last, after
           the facts, and set off from them */}
       <FigureEditLauncher

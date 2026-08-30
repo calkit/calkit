@@ -44,6 +44,62 @@ export const AccountPublicSchema = {
   title: "AccountPublic",
 } as const
 
+export const ArtifactUsageSchema = {
+  properties: {
+    document: {
+      type: "string",
+      title: "Document",
+    },
+    kind: {
+      type: "string",
+      enum: ["value", "figure", "text", "block"],
+      title: "Kind",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    pages: {
+      items: {
+        type: "integer",
+      },
+      type: "array",
+      title: "Pages",
+    },
+  },
+  type: "object",
+  required: ["document", "kind"],
+  title: "ArtifactUsage",
+  description:
+    "One place an artifact appears in one of the project's documents.",
+} as const
+
+export const ArtifactUsagesSchema = {
+  properties: {
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    items: {
+      items: {
+        $ref: "#/components/schemas/ArtifactUsage",
+      },
+      type: "array",
+      title: "Items",
+    },
+  },
+  type: "object",
+  required: ["path"],
+  title: "ArtifactUsages",
+} as const
+
 export const Body_login_login_access_tokenSchema = {
   properties: {
     grant_type: {
@@ -1718,6 +1774,151 @@ export const DiscountCodePublicSchema = {
   type: "object",
   required: ["id"],
   title: "DiscountCodePublic",
+} as const
+
+export const DocumentComponentSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      enum: ["value", "figure", "text", "block"],
+      title: "Kind",
+    },
+    path: {
+      type: "string",
+      title: "Path",
+    },
+    key: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Key",
+    },
+    pages: {
+      items: {
+        type: "integer",
+      },
+      type: "array",
+      title: "Pages",
+    },
+    stage: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Stage",
+    },
+    stage_inputs: {
+      items: {
+        type: "string",
+      },
+      type: "array",
+      title: "Stage Inputs",
+    },
+    script: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Script",
+    },
+    provenance: {
+      type: "string",
+      enum: ["pipeline", "imported", "attested", "project", "undeclared"],
+      title: "Provenance",
+    },
+    build_value: {
+      title: "Build Value",
+    },
+    current_value: {
+      title: "Current Value",
+    },
+    build_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Build Hash",
+    },
+    current_hash: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Current Hash",
+    },
+    status: {
+      type: "string",
+      enum: ["ok", "stale", "missing", "unknown"],
+      title: "Status",
+    },
+    stale_reasons: {
+      items: {
+        type: "string",
+        enum: ["stage-out-of-date", "changed-since-build", "answer-stale"],
+      },
+      type: "array",
+      title: "Stale Reasons",
+    },
+  },
+  type: "object",
+  required: ["kind", "path", "provenance", "status"],
+  title: "DocumentComponent",
+  description:
+    "One piece of project content a document shows on the page.\n\nA publication's *components* in the file sense (see\n:class:`PublicationComponent`) are the files its folder is made of.\nThese are the other half: the values, figures and generated blocks the\ndocument took from the project and typeset, each with where it came\nfrom and whether the reader is looking at something the project still\nproduces.",
+} as const
+
+export const DocumentComponentsSchema = {
+  properties: {
+    document: {
+      type: "string",
+      title: "Document",
+    },
+    built: {
+      type: "boolean",
+      title: "Built",
+    },
+    items: {
+      items: {
+        $ref: "#/components/schemas/DocumentComponent",
+      },
+      type: "array",
+      title: "Items",
+    },
+    n_stale: {
+      type: "integer",
+      title: "N Stale",
+      default: 0,
+    },
+    n_undeclared: {
+      type: "integer",
+      title: "N Undeclared",
+      default: 0,
+    },
+  },
+  type: "object",
+  required: ["document", "built"],
+  title: "DocumentComponents",
 } as const
 
 export const DvcForeachStageSchema = {

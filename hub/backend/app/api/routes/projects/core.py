@@ -51,6 +51,7 @@ from pydantic import (
 from sqlmodel import Session, and_, col, func, not_, or_, select
 from TexSoup import TexSoup
 
+import app.components
 import app.imports
 import app.projects
 import app.tasks
@@ -113,10 +114,14 @@ from app.git import (
 )
 from app.models import (
     Account,
+    ArtifactUsage,
+    ArtifactUsages,
     ContentsItem,
     Dataset,
     DatasetForImport,
     DatasetPublic,
+    DocumentComponent,
+    DocumentComponents,
     Figure,
     FileLock,
     GitRef,
@@ -5433,6 +5438,175 @@ def get_project_publication_components(
         folder=folder,
         items=items,
         n_unknown=sum(1 for item in items if item.kind == "unknown"),
+    )
+
+
+@router.get(
+    "/projects/{owner_name}/{project_name}/publications/document-components"
+)
+def get_project_document_components(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str,
+    ref: str | None = None,
+) -> DocumentComponents:
+    """What a document takes from the project, and whether it is current.
+
+    The other half of ``publications/components``: that lists the files a
+    publication's folder is made of, this lists the values, figures and
+    generated blocks the document typeset on the page, each with the file
+    it came from, the stage and script that produce it, the pages it lands
+    on, and its state.
+
+    A component is out of date for reasons that are not the same and are
+    not fixed the same way:
+
+    - ``stage-out-of-date``: the pipeline would rerun the stage that makes
+      it, so the artifact itself is behind. Run the stage.
+    - ``changed-since-build``: the project has moved on since the document
+      was built, so the PDF shows something the project no longer
+      produces, whatever the pipeline's state. Rebuild the document.
+
+    ``answer-stale`` is judged from Git history and so is not reported
+    here; a generated question block reads as ``unknown`` rather than as
+    current. ``provenance`` says where the source file came from, and
+    ``undeclared`` means nothing produces it and nobody has said where it
+    came from, which running the pipeline will not fix.
+
+    ``built`` is false when no build has left a provenance record, in
+    which case there is nothing to report and nothing is wrong: the
+    document may simply never have been built with provenance turned on.
+    """
+    document = _normalize_artifact_file_path(path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref, read_only=True
+    )
+    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    # Staleness is best-effort: a pipeline status that can't be computed
+    # leaves components reading as unchecked, which is honest, rather than
+    # failing the whole listing
+    stale_stage_names: set[str] | None = None
+    try:
+        dvc_yaml: dict[str, Any] = {}
+        if tree.is_file("dvc.yaml"):
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
+        dvc_lock: dict[str, Any] = {}
+        if tree.is_file("dvc.lock"):
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+        stale_stage_names = app.components.stale_stage_base_names(
+            compute_stage_statuses(
+                dvc_yaml=dvc_yaml,
+                dvc_lock=dvc_lock,
+                tree=tree,
+                owner_name=project.owner_account_name,
+                project_name=project.name,
+                fs=get_object_fs(),
+                cache_token=resolve_commit_sha(repo, ref),
+            )
+        )
+    except Exception as e:
+        logger.warning(
+            f"Failed to compute pipeline status for {document}: {e}"
+        )
+
+    def read_file(file_path: str, max_bytes: int) -> bytes:
+        return app.projects.read_project_file(
+            project=project,
+            tree=tree,
+            path=file_path,
+            max_bytes=max_bytes,
+            session=session,
+            current_user=current_user,
+        )
+
+    components, built = app.components.components_for_document(
+        document=document,
+        tree=tree,
+        ck_info=ck_info,
+        dvc_outs=dvc_outs,
+        stale_stage_names=stale_stage_names,
+        read_file=read_file,
+    )
+    items = [
+        DocumentComponent.model_validate(
+            component.model_dump(mode="json"),
+        )
+        for component in components
+    ]
+    return DocumentComponents(
+        document=document,
+        built=built,
+        items=items,
+        n_stale=sum(
+            1 for item in items if item.status in ("stale", "missing")
+        ),
+        n_undeclared=sum(
+            1 for item in items if item.provenance == "undeclared"
+        ),
+    )
+
+
+@router.get("/projects/{owner_name}/{project_name}/artifacts/usages")
+def get_project_artifact_usages(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUserOptional,
+    session: SessionDep,
+    path: str,
+    ref: str | None = None,
+) -> ArtifactUsages:
+    """Which of the project's documents show this artifact, and where.
+
+    The reverse of ``publications/document-components``: given a figure or
+    a results file, the papers that typeset it and the pages it lands on,
+    so a change to a result shows what it touches. Read from the documents'
+    provenance records, so a document that has never been built with
+    provenance on contributes nothing.
+    """
+    artifact_path = _normalize_artifact_file_path(path)
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="read",
+    )
+    repo = get_repo(
+        project=project,
+        user=current_user,
+        session=session,
+        ttl=DEFAULT_REPO_TTL,
+        ref=ref,
+    )
+    tree = get_repo_tree_for_ref(repo, ref)
+    ck_info = app.projects.get_ck_info_for_ref(
+        project=project, repo=repo, ref=ref, read_only=True
+    )
+    return ArtifactUsages(
+        path=artifact_path,
+        items=[
+            ArtifactUsage.model_validate(usage)
+            for usage in app.components.usages_of(
+                artifact_path=artifact_path, tree=tree, ck_info=ck_info
+            )
+        ],
     )
 
 

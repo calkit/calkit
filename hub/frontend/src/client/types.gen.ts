@@ -31,6 +31,44 @@ export type AccountPublic = {
 }
 
 /**
+ * ArtifactUsage
+ *
+ * One place an artifact appears in one of the project's documents.
+ */
+export type ArtifactUsage = {
+  /**
+   * Document
+   */
+  document: string
+  /**
+   * Kind
+   */
+  kind: "value" | "figure" | "text" | "block"
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Pages
+   */
+  pages?: Array<number>
+}
+
+/**
+ * ArtifactUsages
+ */
+export type ArtifactUsages = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Items
+   */
+  items?: Array<ArtifactUsage>
+}
+
+/**
  * Body_login-login_access_token
  */
 export type BodyLoginLoginAccessToken = {
@@ -949,6 +987,105 @@ export type DiscountCodePublic = {
    * Plan Name
    */
   plan_name?: string | null
+}
+
+/**
+ * DocumentComponent
+ *
+ * One piece of project content a document shows on the page.
+ *
+ * A publication's *components* in the file sense (see
+ * :class:`PublicationComponent`) are the files its folder is made of.
+ * These are the other half: the values, figures and generated blocks the
+ * document took from the project and typeset, each with where it came
+ * from and whether the reader is looking at something the project still
+ * produces.
+ */
+export type DocumentComponent = {
+  /**
+   * Kind
+   */
+  kind: "value" | "figure" | "text" | "block"
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Pages
+   */
+  pages?: Array<number>
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Inputs
+   */
+  stage_inputs?: Array<string>
+  /**
+   * Script
+   */
+  script?: string | null
+  /**
+   * Provenance
+   */
+  provenance: "pipeline" | "imported" | "attested" | "project" | "undeclared"
+  /**
+   * Build Value
+   */
+  build_value?: unknown
+  /**
+   * Current Value
+   */
+  current_value?: unknown
+  /**
+   * Build Hash
+   */
+  build_hash?: string | null
+  /**
+   * Current Hash
+   */
+  current_hash?: string | null
+  /**
+   * Status
+   */
+  status: "ok" | "stale" | "missing" | "unknown"
+  /**
+   * Stale Reasons
+   */
+  stale_reasons?: Array<
+    "stage-out-of-date" | "changed-since-build" | "answer-stale"
+  >
+}
+
+/**
+ * DocumentComponents
+ */
+export type DocumentComponents = {
+  /**
+   * Document
+   */
+  document: string
+  /**
+   * Built
+   */
+  built: boolean
+  /**
+   * Items
+   */
+  items?: Array<DocumentComponent>
+  /**
+   * N Stale
+   */
+  n_stale?: number
+  /**
+   * N Undeclared
+   */
+  n_undeclared?: number
 }
 
 /**
@@ -10046,6 +10183,96 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type GetProjectDocumentComponentsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/publications/document-components"
+}
+
+export type GetProjectDocumentComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDocumentComponentsError =
+  GetProjectDocumentComponentsErrors[keyof GetProjectDocumentComponentsErrors]
+
+export type GetProjectDocumentComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: DocumentComponents
+}
+
+export type GetProjectDocumentComponentsResponse =
+  GetProjectDocumentComponentsResponses[keyof GetProjectDocumentComponentsResponses]
+
+export type GetProjectArtifactUsagesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/artifacts/usages"
+}
+
+export type GetProjectArtifactUsagesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectArtifactUsagesError =
+  GetProjectArtifactUsagesErrors[keyof GetProjectArtifactUsagesErrors]
+
+export type GetProjectArtifactUsagesResponses = {
+  /**
+   * Successful Response
+   */
+  200: ArtifactUsages
+}
+
+export type GetProjectArtifactUsagesResponse =
+  GetProjectArtifactUsagesResponses[keyof GetProjectArtifactUsagesResponses]
 
 export type PostProjectMiscData = {
   body: MiscArtifactPost

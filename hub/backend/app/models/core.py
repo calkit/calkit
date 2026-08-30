@@ -1461,6 +1461,69 @@ class PublicationComponents(BaseModel):
     n_unknown: int
 
 
+class DocumentComponent(BaseModel):
+    """One piece of project content a document shows on the page.
+
+    A publication's *components* in the file sense (see
+    :class:`PublicationComponent`) are the files its folder is made of.
+    These are the other half: the values, figures and generated blocks the
+    document took from the project and typeset, each with where it came
+    from and whether the reader is looking at something the project still
+    produces.
+    """
+
+    kind: Literal["value", "figure", "text", "block"]
+    # Repo-relative path of the file the content came from
+    path: str
+    # Results key for a value, question number for a block
+    key: str | None = None
+    # Pages of the built document it appears on
+    pages: list[int] = Field(default_factory=list)
+    stage: str | None = None
+    stage_inputs: list[str] = Field(default_factory=list)
+    # The stage's script or notebook, i.e., what to open to change it
+    script: str | None = None
+    # Where the source file came from. "pipeline" is the only one that is
+    # checked rather than claimed; "undeclared" is the gap.
+    provenance: Literal[
+        "pipeline", "imported", "attested", "project", "undeclared"
+    ]
+    # The raw value behind it when the document was built, and now
+    build_value: Any = None
+    current_value: Any = None
+    build_hash: str | None = None
+    current_hash: str | None = None
+    status: Literal["ok", "stale", "missing", "unknown"]
+    stale_reasons: list[
+        Literal["stage-out-of-date", "changed-since-build", "answer-stale"]
+    ] = Field(default_factory=list)
+
+
+class DocumentComponents(BaseModel):
+    document: str
+    # Whether a build left a provenance record to read. Without one there
+    # is nothing to show, and nothing is wrong: the document may simply
+    # never have been built with provenance turned on.
+    built: bool
+    items: list[DocumentComponent] = Field(default_factory=list)
+    n_stale: int = 0
+    n_undeclared: int = 0
+
+
+class ArtifactUsage(BaseModel):
+    """One place an artifact appears in one of the project's documents."""
+
+    document: str
+    kind: Literal["value", "figure", "text", "block"]
+    key: str | None = None
+    pages: list[int] = Field(default_factory=list)
+
+
+class ArtifactUsages(BaseModel):
+    path: str
+    items: list[ArtifactUsage] = Field(default_factory=list)
+
+
 class MiscArtifact(BaseModel):
     """A calkit.yaml ``misc`` entry: a path attributed to someone or to
     somewhere, without being a figure, dataset, or publication.

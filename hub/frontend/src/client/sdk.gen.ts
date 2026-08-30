@@ -113,6 +113,8 @@ import type {
   GetProjectAppResponses,
   GetProjectAppsErrors,
   GetProjectAppsResponses,
+  GetProjectArtifactUsagesErrors,
+  GetProjectArtifactUsagesResponses,
   GetProjectCollaboratorsErrors,
   GetProjectCollaboratorsResponses,
   GetProjectCommentsErrors,
@@ -133,6 +135,8 @@ import type {
   GetProjectDatasetResponses,
   GetProjectDatasetsErrors,
   GetProjectDatasetsResponses,
+  GetProjectDocumentComponentsErrors,
+  GetProjectDocumentComponentsResponses,
   GetProjectDvcFileErrors,
   GetProjectDvcFileResponses,
   GetProjectDvcOutputsErrors,
@@ -4439,6 +4443,127 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/publications/components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Document Components
+   *
+   * What a document takes from the project, and whether it is current.
+   *
+   * The other half of ``publications/components``: that lists the files a
+   * publication's folder is made of, this lists the values, figures and
+   * generated blocks the document typeset on the page, each with the file
+   * it came from, the stage and script that produce it, the pages it lands
+   * on, and its state.
+   *
+   * A component is out of date for reasons that are not the same and are
+   * not fixed the same way:
+   *
+   * - ``stage-out-of-date``: the pipeline would rerun the stage that makes
+   * it, so the artifact itself is behind. Run the stage.
+   * - ``changed-since-build``: the project has moved on since the document
+   * was built, so the PDF shows something the project no longer
+   * produces, whatever the pipeline's state. Rebuild the document.
+   *
+   * ``answer-stale`` is judged from Git history and so is not reported
+   * here; a generated question block reads as ``unknown`` rather than as
+   * current. ``provenance`` says where the source file came from, and
+   * ``undeclared`` means nothing produces it and nobody has said where it
+   * came from, which running the pipeline will not fix.
+   *
+   * ``built`` is false when no build has left a provenance record, in
+   * which case there is nothing to report and nothing is wrong: the
+   * document may simply never have been built with provenance turned on.
+   */
+  public static getProjectDocumentComponents<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDocumentComponentsResponses,
+    GetProjectDocumentComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDocumentComponentsResponses,
+      GetProjectDocumentComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/publications/document-components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Artifact Usages
+   *
+   * Which of the project's documents show this artifact, and where.
+   *
+   * The reverse of ``publications/document-components``: given a figure or
+   * a results file, the papers that typeset it and the pages it lands on,
+   * so a change to a result shows what it touches. Read from the documents'
+   * provenance records, so a document that has never been built with
+   * provenance on contributes nothing.
+   */
+  public static getProjectArtifactUsages<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectArtifactUsagesResponses,
+    GetProjectArtifactUsagesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectArtifactUsagesResponses,
+      GetProjectArtifactUsagesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/artifacts/usages",
       ...options,
       ...params,
     })

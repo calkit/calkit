@@ -413,9 +413,14 @@ class ProjectView:
         """
         return None
 
-    def stale_answers(self) -> set[str]:
-        """Question numbers whose answers no longer match their evidence."""
-        return set()
+    def stale_answers(self) -> set[str] | None:
+        """Question numbers whose answers no longer match their evidence.
+
+        None if nothing looked, for the same reason as
+        :meth:`stale_stages`: a block shouldn't read as current on the
+        strength of a check that never ran.
+        """
+        return None
 
     def current_value(self, path: str, key: str | None) -> Any:
         """What the project says a value is now, raw, or None if unreadable.
@@ -450,6 +455,7 @@ class LocalProject(ProjectView):
         self._stale_stages: set[str] | None = None
         self._looked_for_stale_stages = False
         self._stale_answers: set[str] | None = None
+        self._looked_for_stale_answers = False
 
     def exists(self, path: str) -> bool:
         full = os.path.join(self.wdir, path)
@@ -503,22 +509,24 @@ class LocalProject(ProjectView):
         }
         return self._stale_stages
 
-    def stale_answers(self) -> set[str]:
-        if self._stale_answers is not None:
+    def stale_answers(self) -> set[str] | None:
+        if self._looked_for_stale_answers:
             return self._stale_answers
-        self._stale_answers = set()
-        if self.ck_info.get("questions"):
-            from calkit.questions import check_questions
+        self._looked_for_stale_answers = True
+        if not self.ck_info.get("questions"):
+            self._stale_answers = set()
+            return self._stale_answers
+        from calkit.questions import check_questions
 
-            try:
-                status = check_questions(ck_info=self.ck_info, wdir=self.wdir)
-                self._stale_answers = {
-                    str(q.index)
-                    for q in status.questions
-                    if q.status in ("stale", "error")
-                }
-            except Exception:
-                pass
+        try:
+            status = check_questions(ck_info=self.ck_info, wdir=self.wdir)
+        except Exception:
+            return None
+        self._stale_answers = {
+            str(q.index)
+            for q in status.questions
+            if q.status in ("stale", "error")
+        }
         return self._stale_answers
 
 
@@ -536,7 +544,7 @@ def enrich(raw: list[dict], view: ProjectView) -> list[Component]:
     stale_answers = (
         view.stale_answers()
         if any(r.get("kind") == "block" for r in raw)
-        else set()
+        else None
     )
     out: list[Component] = []
     for rec in raw:
@@ -570,15 +578,21 @@ def enrich(raw: list[dict], view: ProjectView) -> list[Component]:
             component.current_value = view.current_value(path, component.key)
         reasons: list[StaleReason] = []
         # Calling something current means something was actually checked,
-        # so each check that could run says so; a component nothing could
-        # be said about reads as unknown rather than as fine
-        checked = stale_stages is not None
-        if stale_stages is not None and stage_name in stale_stages:
-            reasons.append("stage-out-of-date")
-        if kind == "block":
+        # and a check only counts for a component it could have found
+        # something wrong with. The pipeline's status says nothing about a
+        # file no stage produces; an unread question says nothing about
+        # the block that typesets its answer. A component nothing could be
+        # said about reads as unknown rather than as fine.
+        checked = False
+        if stale_stages is not None and stage_name is not None:
             checked = True
-            if component.key in stale_answers:
-                reasons.append("answer-stale")
+            if stage_name in stale_stages:
+                reasons.append("stage-out-of-date")
+        if kind == "block":
+            if stale_answers is not None:
+                checked = True
+                if component.key in stale_answers:
+                    reasons.append("answer-stale")
         elif kind == "value":
             # A value is compared value to value: a results file changing
             # in a key the document never cites says nothing about the

@@ -61,7 +61,10 @@ class _ThreadLocalYAML(threading.local):
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
-        self.yaml.width = 70
+        # 80 rather than ruamel's default so prose wrapped at the usual
+        # 79-80 columns is written back as it was; at 70, lines of 71-80
+        # characters were re-folded with a stray word on the next line
+        self.yaml.width = 80
 
 
 _yaml_local = _ThreadLocalYAML()

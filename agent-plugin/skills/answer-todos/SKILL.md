@@ -30,16 +30,16 @@ number into the sentence.
 
 **Never type a computed value into the manuscript.** A number you typed is
 a number nobody can check, and it goes stale the moment a stage reruns. The
-number reaches the page through the pipeline:
+number reaches the page through the pipeline: a stage computes it and
+writes it to a results file, a `json-to-latex` stage turns that file into
+LaTeX commands, and the manuscript says `\result[Speedup]`. The same
+applies to figures (`\ckfigure{...}` over a pipeline output) and to the
+answers in `calkit.yaml` (`{name}` placeholders over `value` evidence).
 
-1. a stage computes it and writes it to a results file;
-2. a `json-to-latex` stage turns that file into LaTeX commands;
-3. the manuscript says `\result[Speedup]`.
-
-The same applies to figures (`\ckfigure{...}` over a pipeline output) and
-to the answers in `calkit.yaml` (`{name}` placeholders over `value`
-evidence). If you find yourself about to write `2.4x` into a `.tex` file,
-stop: that is the hole, not the fix.
+If you find yourself about to write `2.4x` into a `.tex` file, stop: that
+is the hole, not the fix. The `check-reproducibility` skill covers finding
+and fixing a typed literal that is already in a manuscript; this one is
+about not putting one there.
 
 See the `conventions` skill for `calkit.yaml` structure and stage kinds,
 `add-pipeline-stage` for adding one stage, and `create-pipeline` for
@@ -86,10 +86,13 @@ building a pipeline from scratch.
    publication section that carries the argument. Run
    `calkit check questions` and fix what it reports.
 
-6. **Run the pipeline and stop.** Run `calkit run`, then show the user the
-   rendered sentences (`calkit list questions`) and the built document.
-   Never commit a derived output yourself, and never edit a results file by
-   hand.
+6. **Run the pipeline, then check your own work.** Run `calkit run`, then
+   `calkit check repro`, which reads the manuscript back and reports any
+   number in it that is not traceable to a pipeline output. A finding there
+   is a hole you closed by typing rather than by building, so go back to
+   step 3 for it. Show the user the rendered sentences
+   (`calkit list questions`) and the built document. Never commit a derived
+   output yourself, and never edit a results file by hand.
 
 ## Data a person has to collect
 

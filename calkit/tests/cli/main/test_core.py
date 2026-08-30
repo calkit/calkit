@@ -2505,3 +2505,93 @@ def test_project_dir_option(tmp_dir):
     )
     assert result.returncode != 0
     assert "does not exist" in result.stderr
+
+
+def test_commit(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("test")
+    Path("test/yo.txt").touch()
+    Path("test/sup.txt").touch()
+    Path("hey.txt").touch()
+    subprocess.check_call(["calkit", "add", "hey.txt"])
+    subprocess.check_call(["calkit", "add", "test/sup.txt"])
+    subprocess.check_call(["calkit", "commit", "hey.txt", "-M"])
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    # Test committing to DVC, where the path itself is kept out of Git, so
+    # only its pointer and ignore rule can be committed for it
+    Path("data.csv").write_text("data\n")
+    subprocess.check_call(
+        ["calkit", "save", "data.csv", "-t", "dvc", "-M", "--no-push"]
+    )
+    repo = calkit.git.get_repo()
+    assert repo.head.commit.message.strip() == "Add data.csv"
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split("\n")
+    assert "data.csv.dvc" in committed
+    assert ".gitignore" in committed
+    assert "data.csv" not in committed
+    # Paths that weren't asked for are left alone
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    assert calkit.git.get_untracked_files() == ["test/yo.txt"]
+    # Changing a DVC-tracked path is an update, not an add
+    Path("data.csv").write_text("more data\n")
+    subprocess.check_call(["calkit", "save", "data.csv", "-M", "--no-push"])
+    assert (
+        calkit.git.get_repo().head.commit.message.strip() == "Update data.csv"
+    )
+    # Paths are interpreted relative to the working directory
+    Path("test/deep.txt").write_text("deep\n")
+    subprocess.check_call(
+        ["calkit", "save", "deep.txt", "-M", "--no-push"], cwd="test"
+    )
+    assert (
+        calkit.git.get_repo().head.commit.message.strip()
+        == "Add test/deep.txt"
+    )
+    # A path with nothing staged for it is called out, and nothing else gets
+    # committed in its place
+    Path("hey.txt").write_text("changed\n")
+    result = subprocess.run(
+        ["calkit", "commit", "hey.txt", "-m", "Update hey.txt"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "No changes staged" in result.stdout
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    # Committing without paths commits what was staged, not what's in the
+    # working tree
+    Path("partial.txt").write_text("staged\n")
+    subprocess.check_call(["calkit", "add", "partial.txt"])
+    Path("partial.txt").write_text("unstaged\n")
+    subprocess.check_call(["calkit", "commit", "-m", "Add partial.txt"])
+    repo = calkit.git.get_repo()
+    assert repo.git.show("HEAD:partial.txt") == "staged"
+    # Resolving a merge is still possible, though Git refuses to commit only
+    # some paths while one is in progress
+    subprocess.check_call(["git", "checkout", "--", "."])
+    default_branch = repo.active_branch.name
+    repo.git.checkout("-b", "other", "HEAD~1")
+    Path("conflict.txt").write_text("other\n")
+    subprocess.check_call(
+        ["calkit", "save", "conflict.txt", "-m", "Add conflict", "--no-push"]
+    )
+    repo.git.checkout(default_branch)
+    Path("conflict.txt").write_text("main\n")
+    subprocess.check_call(
+        ["calkit", "save", "conflict.txt", "-m", "Add conflict", "--no-push"]
+    )
+    subprocess.run(["git", "merge", "other"], capture_output=True)
+    Path("conflict.txt").write_text("resolved\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "conflict.txt",
+            "-m",
+            "Resolve conflict",
+            "--no-push",
+        ]
+    )
+    repo = calkit.git.get_repo()
+    assert repo.head.commit.message.strip() == "Resolve conflict"
+    assert not repo.is_dirty()

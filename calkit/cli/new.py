@@ -1049,8 +1049,36 @@ def new_docker_env(
     ] = None,
     platform: Annotated[
         str | None,
-        typer.Option("--platform", help="Which platform(s) to build for."),
+        typer.Option(
+            "--platform",
+            help=(
+                "Platform to pull and run the image as, e.g., 'linux/amd64'."
+            ),
+        ),
     ] = None,
+    registry: Annotated[
+        str | None,
+        typer.Option(
+            "--registry",
+            help=(
+                "Registry prefix to push built images to and pull them from "
+                "instead of rebuilding, e.g., 'ghcr.io/someone/some-project', "
+                "or 'ghcr.io' for the project's own namespace in the GitHub "
+                "Container Registry."
+            ),
+        ),
+    ] = None,
+    build_platforms: Annotated[
+        list[str],
+        typer.Option(
+            "--platform-build",
+            help=(
+                "Platform to build the image for, as opposed to --platform, "
+                "which is the one it's pulled and run as. Repeat for a "
+                "multi-platform image, which requires a registry."
+            ),
+        ),
+    ] = [],
     ports: Annotated[
         list[str],
         typer.Option(
@@ -1138,6 +1166,10 @@ def new_docker_env(
         env["layers"] = layers  # type: ignore
     if platform:
         env["platform"] = platform
+    if registry:
+        env["registry"] = registry
+    if build_platforms:
+        env["build_platforms"] = build_platforms  # type: ignore
     if user:
         env["user"] = user
     if gpus:
@@ -3386,6 +3418,15 @@ def new_release(
         str | None,
         typer.Option("--date", help="Release date. Will default to today."),
     ] = None,
+    no_docker_images: Annotated[
+        bool,
+        typer.Option(
+            "--no-docker-images",
+            help=(
+                "Do not archive the project's Docker images in the release."
+            ),
+        ),
+    ] = False,
     dry_run: Annotated[
         bool,
         typer.Option(
@@ -3678,6 +3719,23 @@ def new_release(
             calkit.ryaml.dump(dvc_md5s, f)
         if not dry_run:
             repo.git.add(dvc_md5s_path)
+        # Archive the project's Docker images, so reproducing it doesn't
+        # depend on a registry keeping them around, and leave breadcrumbs
+        # behind so the environment check can fetch them back
+        if path == "." and not no_docker_images:
+            typer.echo("Archiving Docker images")
+            docker_images = calkit.releases.save_docker_images(
+                release_files_dir
+            )
+            if docker_images:
+                docker_images_path = os.path.join(
+                    release_dir, calkit.releases.DOCKER_IMAGES_FNAME
+                )
+                typer.echo(f"Saving Docker image info to {docker_images_path}")
+                with open(docker_images_path, "w") as f:
+                    calkit.ryaml.dump(docker_images, f)
+                if not dry_run:
+                    repo.git.add(docker_images_path)
         # Create a README for the Zenodo release
         readme_txt = f"# {title}\n"
         git_rev = repo.git.rev_parse(["--short", "HEAD"])

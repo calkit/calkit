@@ -814,6 +814,28 @@ class NixEnvironment(Environment):
 
 
 class DockerEnvironment(Environment):
+    # A Docker environment has to say either what image to use or what to
+    # build one from. With neither there is nothing to run in, so the schema
+    # says so rather than leaving it to fail at run time
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            # Both fields are nullable, and 'required' only asks that the
+            # key is there, so each branch asks for a string as well:
+            # 'image: null' says no more about what to run in than leaving
+            # it out does
+            "anyOf": [
+                {
+                    "required": ["image"],
+                    "properties": {"image": {"type": "string"}},
+                },
+                {
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+            ]
+        },
+    )
     kind: Literal["docker"] = "docker"
     path: str | None = Field(
         default=None,
@@ -822,7 +844,35 @@ class DockerEnvironment(Environment):
             "be defined purely by an image."
         ),
     )
-    image: str = Field(description="Name of the Docker image.")
+    image: str | None = Field(
+        default=None,
+        description=(
+            "Name of the Docker image. Optional for an environment with a "
+            "Dockerfile, which is named after the project and environment "
+            "it belongs to, e.g., 'someone/some-project.my-env'. Required "
+            "for one defined purely by an image."
+        ),
+    )
+    registry: str | None = Field(
+        default=None,
+        description=(
+            "Registry prefix images built from this environment's Dockerfile "
+            "are pushed to and pulled from, e.g., "
+            "'ghcr.io/someone/some-project', or 'ghcr.io' for the "
+            "project's own namespace in the GitHub Container Registry. "
+            "Images are kept local if this is unset or null."
+        ),
+    )
+    build_platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "Platforms to build the image for, e.g., "
+            "['linux/amd64', 'linux/arm64'], as opposed to 'platform', which "
+            "is the one it's pulled and run as. Building for more than one "
+            "requires a registry, since a multi-platform image can only be "
+            "kept in one."
+        ),
+    )
     layers: list[str] | None = Field(
         default=None,
         description="Predefined layers to add to the generated Dockerfile.",
@@ -873,6 +923,15 @@ class DockerEnvironment(Environment):
             "'ir' for R images."
         ),
     )
+
+    @model_validator(mode="after")
+    def check_image_or_path(self) -> "DockerEnvironment":
+        if not self.image and not self.path:
+            raise ValueError(
+                "A Docker environment must define 'image', naming an image "
+                "to run in, or 'path', naming a Dockerfile to build one from"
+            )
+        return self
 
 
 class REnvironment(Environment):

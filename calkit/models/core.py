@@ -1562,13 +1562,15 @@ class Question(BaseModel):
             "rather than as an answer lacking evidence."
         ),
     )
-    reviewed: date_type | None = Field(
+    reviewed: datetime | date_type | None = Field(
         default=None,
         description=(
-            "When the answer was last read against its evidence. Any edit "
-            "to the question, this field included, marks it current, so "
-            "this is the way to say an answer still holds after its "
-            "evidence changed without rewording it."
+            "When the answer was last read against its evidence, as a date "
+            "or a timestamp. Any edit to the question, this field included, "
+            "marks it current, so this is the way to say an answer still "
+            "holds after its evidence changed without rewording it. Use a "
+            "timestamp when reviewing more than once in a day, since "
+            "setting the same date again is not an edit."
         ),
     )
     evidence: (

@@ -235,7 +235,8 @@ def test_check_questions(tmp_dir):
     assert status.questions[3].status == "stale"
     assert "now 1" in (status.questions[3].evidence[0].message or "")
     _commit("Change it again")
-    ck_info["questions"][3]["reviewed"] = "2026-08-30"
+    # A second review the same day is a timestamp, so it is a real edit
+    ck_info["questions"][3]["reviewed"] = "2026-08-29T15:40:00"
     _write_yaml(ck_info)
     ck_info = calkit.load_calkit_info()
     _commit("Review again")

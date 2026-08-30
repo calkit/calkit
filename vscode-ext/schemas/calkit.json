@@ -4970,6 +4970,10 @@
         "reviewed": {
           "anyOf": [
             {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
               "format": "date",
               "type": "string"
             },
@@ -4978,7 +4982,7 @@
             }
           ],
           "default": null,
-          "description": "When the answer was last read against its evidence. Any edit to the question, this field included, marks it current, so this is the way to say an answer still holds after its evidence changed without rewording it.",
+          "description": "When the answer was last read against its evidence, as a date or a timestamp. Any edit to the question, this field included, marks it current, so this is the way to say an answer still holds after its evidence changed without rewording it. Use a timestamp when reviewing more than once in a day, since setting the same date again is not an edit.",
           "title": "Reviewed"
         }
       },

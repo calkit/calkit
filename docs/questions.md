@@ -94,6 +94,9 @@ reviewed: 2026-08-29
 
 Any edit to the question marks it current once committed, so this is the
 way to say an answer survived without rewording it.
+A second review on the same day needs a timestamp
+(`reviewed: 2026-08-29T15:40:00`), since setting the same date again is
+not an edit.
 If it no longer holds, rewrite it.
 The `check-questions` [agent skill](ai-tools.md) walks through exactly
 that, using the check's report to know which questions to read.

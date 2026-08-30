@@ -42,7 +42,9 @@ Judgment, done here:
    (`calkit list questions`) against the current evidence, and if it helps,
    the old evidence (`git show <commit>:<path>`). Decide:
    - **The claim still holds**: say so, and set `reviewed` on the question
-     to today's date. That edit is what marks it current.
+     to the current date, or a timestamp if it was already reviewed today
+     (an unchanged value is not an edit). That edit is what marks it
+     current.
    - **The claim no longer holds**: draft a corrected answer, show the user
      the old and new text side by side with the values that changed, and
      only after they agree, edit `calkit.yaml`.

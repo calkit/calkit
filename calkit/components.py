@@ -23,14 +23,15 @@ all of it is whether the component has any provenance at all: a file no
 stage produces and nobody has declared reached the page from nowhere, and
 no amount of rerunning fixes that.
 
-Everything here reads the
-document's ``<document>.provenance.json`` sidecar, ``calkit.yaml`` and
-``dvc.lock``; a position in the source can be resolved without a sidecar,
-so an editor can answer "where did this come from?" in a project that has
-never been built.
+Everything here reads the document's ``<document>.provenance.json``
+sidecar, ``calkit.yaml`` and ``dvc.lock``; a position in the source can be
+resolved without a sidecar, so an editor can answer "where did this come
+from?" in a project that has never been built.
 
 The sidecar is the contract, not LaTeX. Any format that writes one gets
-the same answers from the same code.
+the same answers from the same code, and so does any reader: the checkout
+the CLI has and the Git tree a server reads differ only in a
+:class:`ProjectView`, never in what counts as out of date.
 """
 
 from __future__ import annotations
@@ -327,188 +328,246 @@ def generated_commands(
     return out
 
 
-def _current_hash(path: str, wdir: str, lock: dict[str, str]) -> str | None:
-    """The hash of a project path right now.
+class ProjectView:
+    """What classifying a component needs to know about a project.
 
-    ``dvc.lock`` covers cached outputs; a Git-stored output has no entry
-    there, so its content is hashed the same way DVC would, which keeps the
-    comparison meaningful for the generated ``.tex`` files and anything
-    else kept in Git.
+    A checkout answers these from the filesystem; a server answers them
+    from a Git tree at some ref, and a document in some other format
+    answers them however it likes. What is written down in ``calkit.yaml``
+    is the same either way, so it is answered here once; anything that
+    needs the project's files is left to a subclass, and the judgment
+    about whether a component is still current stays in one place for all
+    of them.
     """
-    if lock.get(path):
-        return lock[path]
-    full = os.path.join(wdir, path)
-    if not os.path.isfile(full):
-        return None
-    digest = hashlib.md5()
-    with open(full, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
+    def __init__(self, ck_info: dict) -> None:
+        self.ck_info = ck_info
+        self._stages = ck_info.get("pipeline", {}).get("stages", {}) or {}
 
-def _provenance_of(
-    path: str, ck_info: dict, stage_name: str | None
-) -> Provenance:
-    """Where a component's source file came from.
+    # -- Answered from calkit.yaml, wherever the project is read from --
 
-    A stage that produces it is the end of the question: the command, the
-    inputs and the environment are all recorded, and none of it was
-    written by hand. Otherwise the file has to say for itself, by being
-    declared as imported from somewhere or as created by someone. A file
-    that does neither is the gap this whole page is about -- every
-    automated check above it passes because there is nothing to check.
-    """
-    if stage_name:
-        return "pipeline"
-    for collection in DECLARED_COLLECTIONS:
-        for entry in ck_info.get(collection) or []:
-            if not isinstance(entry, dict):
-                continue
-            if Path(str(entry.get("path", ""))).as_posix() != path:
-                continue
-            if entry.get("imported_from"):
-                return "imported"
-            if entry.get("created_by"):
-                return "attested"
-    return "undeclared"
+    def stage_for(self, path: str) -> str | None:
+        """The stage that produces a path, if the pipeline makes it."""
+        from calkit.pipeline import get_stage_for_output
 
+        return get_stage_for_output(path, self.ck_info)
 
-def _script_for(stage: dict | None) -> str | None:
-    """The file someone would open to change what a stage produces."""
-    if not isinstance(stage, dict):
-        return None
-    for key in ("script_path", "notebook_path", "target_path"):
-        value = stage.get(key)
-        if isinstance(value, str):
-            return value
-    return None
+    def stage_inputs(self, stage: str | None) -> list[str]:
+        config = self._stages.get(stage) if stage else None
+        if not isinstance(config, dict):
+            return []
+        return [
+            inp if isinstance(inp, str) else json.dumps(inp)
+            for inp in config.get("inputs") or []
+        ]
 
-
-def current_value(path: str, key: str | None, wdir: str) -> Any:
-    """What the project says a value is now, or None if it can't be read.
-
-    Raw, as the results file holds it. A key the document made up out of a
-    ``--format-json`` expression has nothing behind it in the file, and
-    reads as unknown rather than as a mismatch.
-    """
-    if not key:
-        return None
-    from calkit.questions import read_evidence_file, resolve_key
-
-    try:
-        data = read_evidence_file(os.path.join(wdir, path))
-        return resolve_key(data, key)
-    except (OSError, KeyError, ValueError, TypeError):
+    def script_for(self, stage: str | None) -> str | None:
+        """The file someone would open to change what a stage produces."""
+        config = self._stages.get(stage) if stage else None
+        if not isinstance(config, dict):
+            return None
+        for key in ("script_path", "notebook_path", "target_path"):
+            value = config.get(key)
+            if isinstance(value, str):
+                return value
         return None
 
+    def declared_as(self, path: str) -> Provenance:
+        """Whether anything is recorded about where a file came from.
 
-def _stale_stage_names(
-    ck_info: dict, wdir: str, check_stages: bool
-) -> set[str] | None:
-    """Stages the pipeline would rerun, or None if we didn't look.
+        Only the declaration: a path the pipeline produces is answered
+        before this is asked.
+        """
+        for collection in DECLARED_COLLECTIONS:
+            for entry in self.ck_info.get(collection) or []:
+                if not isinstance(entry, dict):
+                    continue
+                if Path(str(entry.get("path", ""))).as_posix() != path:
+                    continue
+                if entry.get("imported_from"):
+                    return "imported"
+                if entry.get("created_by"):
+                    return "attested"
+        return "undeclared"
 
-    None and the empty set mean different things: nothing known versus
-    nothing stale, and a component shouldn't be called current on the
-    strength of a check that never ran.
-    """
-    if not check_stages:
+    # -- Answered from the project's files, so where they are matters --
+
+    def exists(self, path: str) -> bool:
+        """Whether the project still has this file."""
+        raise NotImplementedError
+
+    def current_hash(self, path: str) -> str | None:
+        """The hash of a path now, as the pipeline would record it."""
+        raise NotImplementedError
+
+    def read_results(self, path: str) -> Any:
+        """A results file, loaded. Raises if it can't be read."""
+        raise NotImplementedError
+
+    def stale_stages(self) -> set[str] | None:
+        """Stages the pipeline would rerun, or None if nothing looked.
+
+        None and the empty set mean different things: nothing known versus
+        nothing stale, and a component shouldn't be called current on the
+        strength of a check that never ran.
+        """
         return None
-    import calkit.pipeline
 
-    try:
-        status = calkit.pipeline.get_status(
-            ck_info=ck_info,
-            wdir=wdir,
-            check_environments=False,
-            clean_notebooks=False,
-        )
-    except Exception:
-        return None
-    # An iterated stage is keyed 'name@param' in the pipeline status, but
-    # an output belongs to the stage as it is written in calkit.yaml
-    return {name.split("@")[0] for name in status.stale_stage_names}
-
-
-def _stale_answers(ck_info: dict, wdir: str) -> set[str]:
-    """Question numbers whose answers no longer match their evidence.
-
-    A generated block is current when the answer behind it is, and that is
-    a question :mod:`calkit.questions` already answers, so it is asked
-    rather than re-derived here.
-    """
-    if not ck_info.get("questions"):
+    def stale_answers(self) -> set[str]:
+        """Question numbers whose answers no longer match their evidence."""
         return set()
-    from calkit.questions import check_questions
 
-    try:
-        status = check_questions(ck_info=ck_info, wdir=wdir)
-    except Exception:
-        return set()
-    return {
-        str(q.index)
-        for q in status.questions
-        if q.status in ("stale", "error")
-    }
+    def current_value(self, path: str, key: str | None) -> Any:
+        """What the project says a value is now, raw, or None if unreadable.
+
+        A key the document made up out of a ``--format-json`` expression
+        has nothing behind it in the file, and reads as unknown rather
+        than as a mismatch.
+        """
+        if not key:
+            return None
+        from calkit.questions import resolve_key
+
+        try:
+            return resolve_key(self.read_results(path), key)
+        except (OSError, KeyError, ValueError, TypeError):
+            return None
 
 
-def enrich(
-    raw: list[dict],
-    ck_info: dict,
-    wdir: str,
-    stale_stages: set[str] | None = None,
-) -> list[Component]:
+class LocalProject(ProjectView):
+    """A project as a working directory, which is what the CLI has."""
+
+    def __init__(
+        self,
+        ck_info: dict,
+        wdir: str,
+        check_stages: bool = True,
+    ) -> None:
+        super().__init__(ck_info)
+        self.wdir = wdir
+        self.check_stages = check_stages
+        self._lock: dict[str, str] | None = None
+        self._stale_stages: set[str] | None = None
+        self._looked_for_stale_stages = False
+        self._stale_answers: set[str] | None = None
+
+    def exists(self, path: str) -> bool:
+        full = os.path.join(self.wdir, path)
+        # A DVC-tracked file that hasn't been pulled is still the
+        # project's, and its pointer is always in Git
+        return os.path.exists(full) or os.path.isfile(full + ".dvc")
+
+    def current_hash(self, path: str) -> str | None:
+        if self._lock is None:
+            from calkit.latex import _lock_hashes
+
+            self._lock = _lock_hashes(self.wdir)
+        if self._lock.get(path):
+            return self._lock[path]
+        # A Git-stored output has no dvc.lock entry, so its content is
+        # hashed the same way DVC would, which keeps the comparison
+        # meaningful for the generated .tex files and anything else in Git
+        full = os.path.join(self.wdir, path)
+        if not os.path.isfile(full):
+            return None
+        digest = hashlib.md5()
+        with open(full, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    def read_results(self, path: str) -> Any:
+        from calkit.questions import read_evidence_file
+
+        return read_evidence_file(os.path.join(self.wdir, path))
+
+    def stale_stages(self) -> set[str] | None:
+        if not self.check_stages or self._looked_for_stale_stages:
+            return self._stale_stages
+        self._looked_for_stale_stages = True
+        import calkit.pipeline
+
+        try:
+            status = calkit.pipeline.get_status(
+                ck_info=self.ck_info,
+                wdir=self.wdir,
+                check_environments=False,
+                clean_notebooks=False,
+            )
+        except Exception:
+            return None
+        # An iterated stage is keyed 'name@param' in the pipeline status,
+        # but an output belongs to the stage as calkit.yaml writes it
+        self._stale_stages = {
+            name.split("@")[0] for name in status.stale_stage_names
+        }
+        return self._stale_stages
+
+    def stale_answers(self) -> set[str]:
+        if self._stale_answers is not None:
+            return self._stale_answers
+        self._stale_answers = set()
+        if self.ck_info.get("questions"):
+            from calkit.questions import check_questions
+
+            try:
+                status = check_questions(ck_info=self.ck_info, wdir=self.wdir)
+                self._stale_answers = {
+                    str(q.index)
+                    for q in status.questions
+                    if q.status in ("stale", "error")
+                }
+            except Exception:
+                pass
+        return self._stale_answers
+
+
+def enrich(raw: list[dict], view: ProjectView) -> list[Component]:
     """Turn bare ``{kind, path, key}`` records into full components.
 
     This is the whole point of the module: given only where something came
     from, say which stage makes it, what to open to change it, and whether
-    what the document shows is still what the project produces.
+    what the document shows is still what the project produces. Everything
+    it needs comes through the view, so the same judgment is reached from
+    a checkout, from a Git tree on a server, and from any document format
+    that can say what it injected.
     """
-    import calkit.latex
-
-    stages = ck_info.get("pipeline", {}).get("stages", {}) or {}
-    # dvc.lock and the stage lookup are the same for every component, so
-    # they are read once rather than per record
-    lock = calkit.latex._lock_hashes(wdir)
+    stale_stages = view.stale_stages()
     stale_answers = (
-        _stale_answers(ck_info, wdir)
+        view.stale_answers()
         if any(r.get("kind") == "block" for r in raw)
         else set()
     )
-    records = {
-        r["path"]: r
-        for r in calkit.latex.artifact_records(
-            sorted({rec["path"] for rec in raw}), ck_info, wdir
-        )
-    }
     out: list[Component] = []
     for rec in raw:
         path = rec["path"]
-        record = records[path]
-        stage_name = record["stage"]
+        kind = rec.get("kind", "value")
+        stage_name = view.stage_for(path)
         component = Component(
-            kind=rec.get("kind", "value"),
+            kind=kind,
             path=path,
             key=rec.get("key") or None,
             pages=rec.get("pages") or [],
             stage=stage_name,
-            stage_inputs=record["stage_inputs"],
-            script=_script_for(stages.get(stage_name)),
+            stage_inputs=view.stage_inputs(stage_name),
+            script=view.script_for(stage_name),
             # A block is the project's own words in calkit.yaml, so there
             # is no outside source to account for
             provenance=(
                 "project"
-                if rec.get("kind") == "block"
-                else _provenance_of(path, ck_info, stage_name)
+                if kind == "block"
+                else "pipeline"
+                if stage_name
+                else view.declared_as(path)
             ),
             document_value=rec.get("document_value"),
             build_value=rec.get("value"),
             build_hash=rec.get("hash"),
             locations=rec.get("locations") or [],
         )
-        component.current_hash = _current_hash(path, wdir, lock)
-        if component.kind == "value":
-            component.current_value = current_value(path, component.key, wdir)
+        component.current_hash = view.current_hash(path)
+        if kind == "value":
+            component.current_value = view.current_value(path, component.key)
         reasons: list[StaleReason] = []
         # Calling something current means something was actually checked,
         # so each check that could run says so; a component nothing could
@@ -516,11 +575,11 @@ def enrich(
         checked = stale_stages is not None
         if stale_stages is not None and stage_name in stale_stages:
             reasons.append("stage-out-of-date")
-        if component.kind == "block":
+        if kind == "block":
             checked = True
             if component.key in stale_answers:
                 reasons.append("answer-stale")
-        elif component.kind == "value":
+        elif kind == "value":
             # A value is compared value to value: a results file changing
             # in a key the document never cites says nothing about the
             # page. Only a build records the value it used, so an unbuilt
@@ -534,9 +593,7 @@ def enrich(
             if component.build_hash != component.current_hash:
                 reasons.append("changed-since-build")
         component.stale_reasons = reasons
-        if not os.path.exists(os.path.join(wdir, path)) and not os.path.isfile(
-            os.path.join(wdir, path + ".dvc")
-        ):
+        if not view.exists(path):
             component.status = "missing"
         elif reasons:
             component.status = "stale"
@@ -631,7 +688,7 @@ def describe_document(
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
     sidecar = read_sidecar(document, wdir)
-    stale_stages = _stale_stage_names(ck_info, wdir, check_stages)
+    view = LocalProject(ck_info, wdir, check_stages)
     if sidecar is not None:
         target = sidecar.get("document", source_path(document))
         # The build says what the document shows; only the source says
@@ -654,15 +711,13 @@ def describe_document(
         return DocumentComponents(
             document=target,
             built=True,
-            components=enrich(components, ck_info, wdir, stale_stages),
+            components=enrich(components, view),
         )
     target = source_path(document)
     return DocumentComponents(
         document=target,
         built=False,
-        components=enrich(
-            _source_components(target, wdir), ck_info, wdir, stale_stages
-        ),
+        components=enrich(_source_components(target, wdir), view),
     )
 
 
@@ -856,6 +911,4 @@ def resolve_position(
         merged = dict(built.get(key, {}))
         merged.update({k: v for k, v in rec.items() if v is not None})
         raw.append(merged)
-    return enrich(
-        raw, ck_info, wdir, _stale_stage_names(ck_info, wdir, check_stages)
-    )
+    return enrich(raw, LocalProject(ck_info, wdir, check_stages))

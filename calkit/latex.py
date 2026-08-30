@@ -549,6 +549,9 @@ def collect_provenance(
             sorted({u["path"] for u in uses.values()}), ck_info, wdir
         )
     }
+    from calkit.components import LocalProject
+
+    view = LocalProject(ck_info, wdir, check_stages=False)
     components = []
     for use in uses.values():
         rec = records.get(use["path"], {})
@@ -564,9 +567,7 @@ def collect_provenance(
         # raw, since one value can be typeset several ways in one document
         # and a difference in formatting is not a difference in the result.
         if use["kind"] == "value":
-            from calkit.components import current_value
-
-            entry["value"] = current_value(use["path"], use["key"], wdir)
+            entry["value"] = view.current_value(use["path"], use["key"])
         components.append(entry)
     components.sort(key=lambda u: (u["kind"], u["path"], u["key"] or ""))
     sidecar = {"document": target_path, "components": components}

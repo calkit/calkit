@@ -110,12 +110,17 @@ def _run(monkeypatch, answers: list[str], **kwargs) -> None:
     run_procedure("measure-rig", **kwargs)
 
 
-def _log_rows(name: str = "measure-rig") -> list[dict]:
-    import csv
+def _log_paths(name: str = "measure-rig") -> list[str]:
     import glob
 
+    return sorted(glob.glob(f".calkit/procedure-runs/{name}/*.csv"))
+
+
+def _log_rows(name: str = "measure-rig") -> list[dict]:
+    import csv
+
     rows: list[dict] = []
-    for path in sorted(glob.glob(f".calkit/procedure-runs/{name}/*.csv")):
+    for path in _log_paths(name):
         with open(path) as f:
             rows += list(csv.DictReader(f))
     return rows
@@ -139,6 +144,12 @@ def test_run_procedure(tmp_dir, monkeypatch, in_file):
     # Every step is timed, and the version that ran is recorded
     assert rows[0]["start"] and rows[0]["end"]
     assert rows[1]["calkit_version"] == calkit.__version__
+    # A run log is named for when the run started, and Windows has no
+    # colon in a filename. Asserted here rather than left to Windows CI,
+    # which is where this last went wrong.
+    illegal = set(':*?"<>|')
+    for path in _log_paths():
+        assert not set(os.path.basename(path)) & illegal, path
     # Each step is committed on its own as it is completed
     log = subprocess.check_output(
         ["git", "log", "--format=%s"], text=True

@@ -3831,8 +3831,12 @@ def run_procedure(
     # timestamp corresponding to the period in which now falls
     # If so, exit
     # If not, continue
-    # Create empty CSV if one doesn't exist
-    t_start_overall_str = t_start_overall.isoformat(timespec="seconds")
+    # Create empty CSV if one doesn't exist. Colons are not legal in a
+    # Windows filename, so the time is separated the same way the run logs
+    # separate theirs.
+    t_start_overall_str = t_start_overall.isoformat(
+        timespec="seconds"
+    ).replace(":", "-")
     fpath = f".calkit/procedure-runs/{name}/{t_start_overall_str}.csv"
     dirname = os.path.dirname(fpath)
     if not os.path.isdir(dirname):

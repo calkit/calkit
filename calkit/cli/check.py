@@ -318,7 +318,6 @@ def check_repro(
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
         return
-
     calkit.echo(res.to_pretty())
     if res.untraceable_literals:
         try:
@@ -338,7 +337,7 @@ def check_repro(
             table.add_column("Value", style="red")
             table.add_column("Context")
             table.add_column("Suggestion")
-
+            # One row per finding, in the order the checker sorted them
             for finding in res.untraceable_literals:
                 table.add_row(
                     finding["file"],

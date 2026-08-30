@@ -2,7 +2,8 @@
 
 import os
 import posixpath
-from typing import Callable
+import re
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field, computed_field
 
@@ -400,6 +401,177 @@ def find_scripts_not_in_pipeline(
     return scripts
 
 
+def _mask_match(match: re.Match) -> str:
+    """Whitespace as long as what matched.
+
+    Blanking rather than deleting, so every later match still reports the
+    line and column it has in the real file.
+    """
+    return " " * len(match.group(0))
+
+
+def _mask_exclusion_zones(tex_source: str) -> str:
+    """Mask out LaTeX constructs where numeric literals should be ignored."""
+    masked = tex_source
+    # Comments: % to end of line, but not an escaped \%
+    masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
+    # Environments whose contents are never results
+    environments_to_mask = ["thebibliography"]
+    for env in environments_to_mask:
+        # Match \begin{env} ... \end{env} across multiple lines
+        pattern = (
+            r"\\begin\{"
+            + re.escape(env)
+            + r"\}.*?\\end\{"
+            + re.escape(env)
+            + r"\}"
+        )
+        masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
+    # Macros whose arguments are references, layout, or links rather than
+    # anything computed
+    macros_to_mask = [
+        r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
+        r"\\bibitem\{[^}]*\}",
+        r"\\href\{[^}]*\}\{[^}]*\}",
+        r"\\url\{[^}]*\}",
+        r"\\doi\{[^}]*\}",
+        r"\\ref\{[^}]*\}",
+        r"\\eqref\{[^}]*\}",
+        r"\\pageref\{[^}]*\}",
+        r"\\label\{[^}]*\}",
+        r"\\input\{[^}]*\}",
+        r"\\include\{[^}]*\}",
+        r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\setlength\{[^}]*\}\{[^}]*\}",
+        r"\\vspace\*?\{[^}]*\}",
+        r"\\hspace\*?\{[^}]*\}",
+        r"\\geometry\{[^}]*\}",
+        r"\\multicolumn\{[^}]*\}\{[^}]*\}\{[^}]*\}",
+    ]
+    for macro_pattern in macros_to_mask:
+        masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
+    # Bare DOIs
+    masked = re.sub(r"10\.\d{4,}/[^\s]+", _mask_match, masked)
+    # Years, 1500 to 2100
+    masked = re.sub(r"\b(1[5-9]\d{2}|20\d{2}|2100)\b", _mask_match, masked)
+    # Page ranges, e.g., 123--145 and pp. 123
+    masked = re.sub(r"\b\d+\s*--\s*\d+\b", _mask_match, masked)
+    masked = re.sub(r"\bpp\.\s*\d+\b", _mask_match, masked)
+    return masked
+
+
+def find_untraceable_literals(
+    tex_source: str,
+    filepath: str,
+    from_json_values: set[str] | dict[str, str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Scan LaTeX source for hardcoded numeric literals not traceable to a pipeline output.
+
+    Parameters
+    ----------
+    tex_source : str
+        The contents of the LaTeX file to scan.
+    filepath : str
+        The path of the LaTeX file (used for reporting).
+    from_json_values : set[str] | dict[str, str] | None
+        Traceable string values (or dict mapping value to macro name) that the pipeline produces.
+        Any matched literal corresponding to one of these values will not be flagged.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        A list of findings. Each finding is a dictionary with keys:
+        - value: the matched literal string
+        - file: the filepath
+        - line: 1-indexed line number
+        - column: 1-indexed column number
+        - context: the surrounding text snippet
+        - reason: explanation of why it was flagged
+        - suggestion: fix instructions
+    """
+    from_json: dict[str, str | None]
+    if from_json_values is None:
+        from_json = {}
+    elif isinstance(from_json_values, set):
+        from_json = {v: None for v in from_json_values}
+    else:
+        from_json = from_json_values
+    findings = []
+    masked_source = _mask_exclusion_zones(tex_source)
+    # What a result looks like, most specific first, so a value with
+    # uncertainty is read whole rather than as a bare decimal. Group 1 is
+    # the literal itself.
+    result_like_patterns = [
+        # Values with uncertainty, e.g., 0.42 \pm 0.03
+        r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+        # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
+        r"(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
+        # Percentages, e.g., 12.7\%
+        r"(\b\d+(?:\.\d+)?\s*\\%)",
+        # Plain decimals, e.g., 0.42
+        r"(\b\d+\.\d+\b)",
+    ]
+    # Searched one pattern at a time rather than combined, so an earlier,
+    # more specific pattern claims its span and a later one can't re-report
+    # part of the same literal
+    matched_intervals: list[tuple[int, int]] = []
+
+    def is_overlapping(start: int, end: int) -> bool:
+        for s, e in matched_intervals:
+            if max(start, s) < min(end, e):
+                return True
+        return False
+
+    lines = tex_source.splitlines()
+    for pattern in result_like_patterns:
+        for match in re.finditer(pattern, masked_source):
+            start, end = match.span(1)
+            if is_overlapping(start, end):
+                continue
+            matched_intervals.append((start, end))
+            matched_str = match.group(1).strip()
+            # A value the project computes is accounted for, whatever
+            # spacing the document wrote it with
+            cmp_str = matched_str.replace(" ", "")
+            if any(
+                cmp_str == tracked.replace(" ", "") for tracked in from_json
+            ):
+                continue
+            # Where it is, counted on the unmasked source so the position
+            # is the one someone opening the file will see
+            preceding = tex_source[:start]
+            line_idx = preceding.count("\n")
+            col_idx = (
+                len(preceding) - preceding.rfind("\n") - 1
+                if "\n" in preceding
+                else len(preceding)
+            )
+            context = lines[line_idx].strip() if line_idx < len(lines) else ""
+            findings.append(
+                {
+                    "value": matched_str,
+                    "file": filepath,
+                    "line": line_idx + 1,
+                    "column": col_idx + 1,
+                    "context": context,
+                    "reason": (
+                        "result-like decimal not traceable to a pipeline "
+                        "output"
+                    ),
+                    "suggestion": (
+                        "Compute this in a pipeline stage, write it to a "
+                        "results JSON file, add a 'json-to-latex' stage "
+                        "over that file, and reference the generated "
+                        "command instead of typing the number."
+                    ),
+                }
+            )
+    # In the order someone reads the file
+    findings.sort(key=lambda x: (x["line"], x["column"]))
+    return findings
+
+
 def _traceable_values(wdir: str, stages: dict) -> set[str]:
     """Every value a ``json-to-latex`` stage puts within the document's reach.
 
@@ -445,8 +617,6 @@ def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
 
 def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
     """Every LaTeX file a manuscript is made of, following its inputs."""
-    import re
-
     targets: set[str] = set()
     for pub in ck_info.get("publications", []) or []:
         path = pub.get("path", "") if isinstance(pub, dict) else ""
@@ -496,8 +666,6 @@ def find_untraceable_literals_in_project(
     and everything it inputs, skipping the files the pipeline generates,
     and reports what it finds that no results file explains.
     """
-    from calkit.check_literals import find_untraceable_literals
-
     traceable = _traceable_values(wdir, stages)
     generated = _generated_tex_paths(wdir, stages)
     findings: list[dict] = []

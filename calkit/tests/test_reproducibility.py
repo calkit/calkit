@@ -5,7 +5,11 @@ import subprocess
 
 import calkit
 from calkit.dvc import run_dvc_command
-from calkit.reproducibility import ReproCheck, check_reproducibility
+from calkit.reproducibility import (
+    ReproCheck,
+    check_reproducibility,
+    find_untraceable_literals,
+)
 
 
 def test_check_reproducibility(tmp_dir):
@@ -199,3 +203,65 @@ def test_check_call():
     )
     out = [v.strip() for v in out]
     assert "yo" in out
+
+
+def test_find_untraceable_literals():
+    def values(tex, from_json=None):
+        return [
+            f["value"]
+            for f in find_untraceable_literals(tex, "main.tex", from_json)
+        ]
+
+    # A result-like number typed into the document, in each of the forms
+    # one gets written in
+    assert values("Here is a hardcoded decimal: 3.14.") == ["3.14"]
+    assert values("And another one in math mode: $0.42$.") == ["0.42"]
+    assert values(r"Uncertainty $0.42 \pm 0.03$ is flagged.") == [
+        r"0.42 \pm 0.03"
+    ]
+    assert values("Scientific $1.2e-3$ is flagged.") == ["1.2e-3"]
+    assert values(r"But this 12.7\% is flagged.") == [r"12.7\%"]
+    # The check under-flags on purpose: a false positive on a number that
+    # belongs in the text as written costs more than a missed one. So a
+    # reference, a citation, a link, a year, a page range, a layout length
+    # and a bare integer are all left alone.
+    for tex in [
+        r"reported \resultCd in the text",
+        r"\cite{smith2020}",
+        r"\href{https://example.com}{the value 1.2}",
+        r"\url{http://9.8.7.6/data}",
+        "10.1017/jfm.2020.123",
+        "2023",
+        r"pp.\ 123--145",
+        "we ran 12 simulations",
+        "% ... 9.81 ...",
+        r"\begin{thebibliography} 4.56 \end{thebibliography}",
+        r"\includegraphics[width=0.8\textwidth]{fig.pdf}",
+        r"\setlength{\parindent}{0.5in}",
+        r"\geometry{margin=1.5cm}",
+        r"See Fig.~\ref{fig:1} and Eq.~\eqref{eq:2}",
+    ]:
+        assert values(tex) == [], tex
+    # A value the project computes is accounted for, whatever spacing the
+    # document wrote it with, and whether it is offered as a set or a dict
+    assert values("... 1.23 ...", {"1.23": None}) == []
+    assert values("... 1.23 ...", {"1.23"}) == []
+    assert values(r"$0.42 \pm 0.03$", {r"0.42\pm0.03"}) == []
+    # A finding says what it is and where, so an editor can jump to it
+    findings = find_untraceable_literals(
+        "line one\nand then 3.14 here\n", "paper/main.tex"
+    )
+    assert len(findings) == 1
+    assert findings[0]["value"] == "3.14"
+    assert findings[0]["file"] == "paper/main.tex"
+    assert findings[0]["line"] == 2
+    assert findings[0]["column"] == 10
+    assert findings[0]["context"] == "and then 3.14 here"
+    assert findings[0]["reason"]
+    # The fix points at the stage kind, not at a hand-written DVC command
+    assert "json-to-latex" in findings[0]["suggestion"]
+    # Reported in the order someone reads the file
+    assert [
+        f["line"]
+        for f in find_untraceable_literals("9.99\n1.11\n", "main.tex")
+    ] == [1, 2]

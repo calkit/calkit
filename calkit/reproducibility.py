@@ -466,29 +466,30 @@ def find_untraceable_literals(
     filepath: str,
     from_json_values: set[str] | dict[str, str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Scan LaTeX source for hardcoded numeric literals not traceable to a pipeline output.
+    """Find numbers in LaTeX source that no pipeline output accounts for.
 
     Parameters
     ----------
     tex_source : str
         The contents of the LaTeX file to scan.
     filepath : str
-        The path of the LaTeX file (used for reporting).
-    from_json_values : set[str] | dict[str, str] | None
-        Traceable string values (or dict mapping value to macro name) that the pipeline produces.
-        Any matched literal corresponding to one of these values will not be flagged.
+        The path of the LaTeX file, for reporting.
+    from_json_values : set[str] | dict[str, str | None] | None
+        Values the pipeline produces, which a literal matching one of them
+        is therefore traceable to. A dict is accepted for callers that
+        carry something alongside each value; only its keys are read.
 
     Returns
     -------
     list[dict[str, Any]]
-        A list of findings. Each finding is a dictionary with keys:
+        One finding per literal, each with keys:
         - value: the matched literal string
         - file: the filepath
         - line: 1-indexed line number
         - column: 1-indexed column number
-        - context: the surrounding text snippet
-        - reason: explanation of why it was flagged
-        - suggestion: fix instructions
+        - context: the line the literal is on
+        - reason: why it was flagged
+        - suggestion: how to make it traceable
     """
     from_json: dict[str, str | None]
     if from_json_values is None:
@@ -506,7 +507,8 @@ def find_untraceable_literals(
         # Values with uncertainty, e.g., 0.42 \pm 0.03
         r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
         # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
-        r"(\b\d+(?:\.\d+)?(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
+        r"(\b\d+(?:\.\d+)?"
+        r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
         # Percentages, e.g., 12.7\%
         r"(\b\d+(?:\.\d+)?\s*\\%)",
         # Plain decimals, e.g., 0.42

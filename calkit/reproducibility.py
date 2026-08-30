@@ -2,9 +2,10 @@
 
 import os
 import posixpath
-from typing import Callable
+import re
+from typing import Any, Callable
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 import calkit
 from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, has_provenance
@@ -129,6 +130,8 @@ class ReproCheck(BaseModel):
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
     n_dvc_remotes: int
+    # Numbers typed into a manuscript that no pipeline output accounts for
+    untraceable_literals: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -309,6 +312,13 @@ class ReproCheck(BaseModel):
             f"{self.n_misc_needing_provenance} "
             f"{_bool_to_check_x(self.n_misc_needing_provenance == 0)}\n"
         )
+        if self.untraceable_literals:
+            txt += (
+                f"Untraceable literals: {len(self.untraceable_literals)} "
+                f"{_bool_to_check_x(False)}\n"
+            )
+        else:
+            txt += f"Untraceable literals: 0 {_bool_to_check_x(True)}\n"
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
@@ -389,6 +399,288 @@ def find_scripts_not_in_pipeline(
         if path not in referenced:
             scripts.append(path)
     return scripts
+
+
+def _mask_match(match: re.Match) -> str:
+    """Whitespace as long as what matched.
+
+    Blanking rather than deleting, so every later match still reports the
+    line and column it has in the real file.
+    """
+    return " " * len(match.group(0))
+
+
+def _mask_exclusion_zones(tex_source: str) -> str:
+    """Mask out LaTeX constructs where numeric literals should be ignored."""
+    masked = tex_source
+    # Comments: % to end of line, but not an escaped \%
+    masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
+    # Environments whose contents are never results
+    environments_to_mask = ["thebibliography"]
+    for env in environments_to_mask:
+        # Match \begin{env} ... \end{env} across multiple lines
+        pattern = (
+            r"\\begin\{"
+            + re.escape(env)
+            + r"\}.*?\\end\{"
+            + re.escape(env)
+            + r"\}"
+        )
+        masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
+    # Macros whose arguments are references, layout, or links rather than
+    # anything computed
+    macros_to_mask = [
+        r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
+        r"\\bibitem\{[^}]*\}",
+        r"\\href\{[^}]*\}\{[^}]*\}",
+        r"\\url\{[^}]*\}",
+        r"\\doi\{[^}]*\}",
+        r"\\ref\{[^}]*\}",
+        r"\\eqref\{[^}]*\}",
+        r"\\pageref\{[^}]*\}",
+        r"\\label\{[^}]*\}",
+        r"\\input\{[^}]*\}",
+        r"\\include\{[^}]*\}",
+        r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\setlength\{[^}]*\}\{[^}]*\}",
+        r"\\vspace\*?\{[^}]*\}",
+        r"\\hspace\*?\{[^}]*\}",
+        r"\\geometry\{[^}]*\}",
+        r"\\multicolumn\{[^}]*\}\{[^}]*\}\{[^}]*\}",
+    ]
+    for macro_pattern in macros_to_mask:
+        masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
+    # Bare DOIs
+    masked = re.sub(r"10\.\d{4,}/[^\s]+", _mask_match, masked)
+    # Years, 1500 to 2100
+    masked = re.sub(r"\b(1[5-9]\d{2}|20\d{2}|2100)\b", _mask_match, masked)
+    # Page ranges, e.g., 123--145 and pp. 123
+    masked = re.sub(r"\b\d+\s*--\s*\d+\b", _mask_match, masked)
+    masked = re.sub(r"\bpp\.\s*\d+\b", _mask_match, masked)
+    return masked
+
+
+def find_untraceable_literals(
+    tex_source: str,
+    filepath: str,
+    from_json_values: set[str] | dict[str, str | None] | None = None,
+) -> list[dict[str, Any]]:
+    """Find numbers in LaTeX source that no pipeline output accounts for.
+
+    Parameters
+    ----------
+    tex_source : str
+        The contents of the LaTeX file to scan.
+    filepath : str
+        The path of the LaTeX file, for reporting.
+    from_json_values : set[str] | dict[str, str | None] | None
+        Values the pipeline produces, which a literal matching one of them
+        is therefore traceable to. A dict is accepted for callers that
+        carry something alongside each value; only its keys are read.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        One finding per literal, each with keys:
+        - value: the matched literal string
+        - file: the filepath
+        - line: 1-indexed line number
+        - column: 1-indexed column number
+        - context: the line the literal is on
+        - reason: why it was flagged
+        - suggestion: how to make it traceable
+    """
+    from_json: dict[str, str | None]
+    if from_json_values is None:
+        from_json = {}
+    elif isinstance(from_json_values, set):
+        from_json = {v: None for v in from_json_values}
+    else:
+        from_json = from_json_values
+    findings = []
+    masked_source = _mask_exclusion_zones(tex_source)
+    # What a result looks like, most specific first, so a value with
+    # uncertainty is read whole rather than as a bare decimal. Group 1 is
+    # the literal itself.
+    result_like_patterns = [
+        # Values with uncertainty, e.g., 0.42 \pm 0.03
+        r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+        # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
+        r"(\b\d+(?:\.\d+)?"
+        r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
+        # Percentages, e.g., 12.7\%
+        r"(\b\d+(?:\.\d+)?\s*\\%)",
+        # Plain decimals, e.g., 0.42
+        r"(\b\d+\.\d+\b)",
+    ]
+    # Searched one pattern at a time rather than combined, so an earlier,
+    # more specific pattern claims its span and a later one can't re-report
+    # part of the same literal
+    matched_intervals: list[tuple[int, int]] = []
+
+    def is_overlapping(start: int, end: int) -> bool:
+        for s, e in matched_intervals:
+            if max(start, s) < min(end, e):
+                return True
+        return False
+
+    lines = tex_source.splitlines()
+    for pattern in result_like_patterns:
+        for match in re.finditer(pattern, masked_source):
+            start, end = match.span(1)
+            if is_overlapping(start, end):
+                continue
+            matched_intervals.append((start, end))
+            matched_str = match.group(1).strip()
+            # A value the project computes is accounted for, whatever
+            # spacing the document wrote it with
+            cmp_str = matched_str.replace(" ", "")
+            if any(
+                cmp_str == tracked.replace(" ", "") for tracked in from_json
+            ):
+                continue
+            # Where it is, counted on the unmasked source so the position
+            # is the one someone opening the file will see
+            preceding = tex_source[:start]
+            line_idx = preceding.count("\n")
+            col_idx = (
+                len(preceding) - preceding.rfind("\n") - 1
+                if "\n" in preceding
+                else len(preceding)
+            )
+            context = lines[line_idx].strip() if line_idx < len(lines) else ""
+            findings.append(
+                {
+                    "value": matched_str,
+                    "file": filepath,
+                    "line": line_idx + 1,
+                    "column": col_idx + 1,
+                    "context": context,
+                    "reason": (
+                        "result-like decimal not traceable to a pipeline "
+                        "output"
+                    ),
+                    "suggestion": (
+                        "Compute this in a pipeline stage, write it to a "
+                        "results JSON file, add a 'json-to-latex' stage "
+                        "over that file, and reference the generated "
+                        "command instead of typing the number."
+                    ),
+                }
+            )
+    # In the order someone reads the file
+    findings.sort(key=lambda x: (x["line"], x["column"]))
+    return findings
+
+
+def _traceable_values(wdir: str, stages: dict) -> set[str]:
+    """Every value a ``json-to-latex`` stage puts within the document's reach.
+
+    Read from the results files those stages consume rather than from the
+    LaTeX they generate: the results file is what the value actually is,
+    and the generated commands are one rendering of it.
+    """
+    import json
+
+    values: set[str] = set()
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex from-json" not in cmd:
+            continue
+        for dep in stage.get("deps", []) or []:
+            if not str(dep).endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(wdir, str(dep))) as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                for value in data.values():
+                    if isinstance(value, (int, float, str)):
+                        values.add(str(value))
+    return values
+
+
+def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
+    """LaTeX files the pipeline writes, which are not manuscripts."""
+    paths: set[str] = set()
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex from-" not in cmd:
+            continue
+        for out in stage.get("outs", []) or []:
+            out_path = out if isinstance(out, str) else next(iter(out))
+            if str(out_path).endswith(".tex"):
+                paths.add(os.path.abspath(os.path.join(wdir, str(out_path))))
+    return paths
+
+
+def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
+    """Every LaTeX file a manuscript is made of, following its inputs."""
+    targets: set[str] = set()
+    for pub in ck_info.get("publications", []) or []:
+        path = pub.get("path", "") if isinstance(pub, dict) else ""
+        if str(path).endswith(".tex"):
+            targets.add(str(path))
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex build" not in cmd:
+            continue
+        for dep in stage.get("deps", []) or []:
+            if str(dep).endswith(".tex"):
+                targets.add(str(dep))
+    found: set[str] = set()
+
+    def walk(rel: str) -> None:
+        full = os.path.abspath(os.path.join(wdir, rel))
+        if full in found or not os.path.isfile(full):
+            return
+        found.add(full)
+        try:
+            with open(full, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            return
+        for match in re.finditer(r"\\(?:input|include)\{([^}]+)\}", content):
+            child = match.group(1)
+            if not child.endswith(".tex"):
+                child += ".tex"
+            walk(
+                os.path.relpath(
+                    os.path.join(os.path.dirname(full), child), wdir
+                )
+            )
+
+    for target in targets:
+        walk(target)
+    return found
+
+
+def find_untraceable_literals_in_project(
+    wdir: str, ck_info: dict, stages: dict
+) -> list[dict]:
+    """Numbers typed into a manuscript that no pipeline output accounts for.
+
+    A result typed into prose is a number nobody can check, and it goes
+    stale the moment the stage behind it reruns. This reads the manuscript
+    and everything it inputs, skipping the files the pipeline generates,
+    and reports what it finds that no results file explains.
+    """
+    traceable = _traceable_values(wdir, stages)
+    generated = _generated_tex_paths(wdir, stages)
+    findings: list[dict] = []
+    for path in sorted(_tex_sources(wdir, ck_info, stages) - generated):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            continue
+        findings += find_untraceable_literals(
+            content, os.path.relpath(path, wdir), traceable
+        )
+    return findings
 
 
 def check_reproducibility(
@@ -473,4 +765,7 @@ def check_reproducibility(
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)
+    res["untraceable_literals"] = find_untraceable_literals_in_project(
+        wdir=wdir, ck_info=ck_info, stages=stages
+    )
     return ReproCheck.model_validate(res)

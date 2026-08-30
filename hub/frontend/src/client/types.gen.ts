@@ -4959,6 +4959,12 @@ export type ReproCheck = {
    */
   n_dvc_remotes: number
   /**
+   * Untraceable Literals
+   */
+  untraceable_literals?: Array<{
+    [key: string]: unknown
+  }>
+  /**
    * Recommendation
    *
    * Formulate a recommendation for the project.
@@ -6343,6 +6349,12 @@ export type ReproCheckWritable = {
    * N Dvc Remotes
    */
   n_dvc_remotes: number
+  /**
+   * Untraceable Literals
+   */
+  untraceable_literals?: Array<{
+    [key: string]: unknown
+  }>
 }
 
 /**

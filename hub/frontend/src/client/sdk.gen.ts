@@ -4477,6 +4477,11 @@ export class ProjectsService {
    * ``built`` is false when no build has left a provenance record, in
    * which case there is nothing to report and nothing is wrong: the
    * document may simply never have been built with provenance turned on.
+   *
+   * ``path`` names the document, by its source or its output, or the
+   * folder holding it, for a caller that knows which folder a paper is in
+   * but not which file in it is the paper. The resolved document comes
+   * back in ``document``.
    */
   public static getProjectDocumentComponents<
     ThrowOnError extends boolean = true,

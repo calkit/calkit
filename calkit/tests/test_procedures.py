@@ -65,8 +65,8 @@ def test_load(tmp_dir):
         )
 
 
-def _project(tmp_dir, in_file: bool = False) -> dict:
-    """A committed project with one procedure, inline or in its own file."""
+def _project(in_file: bool = False) -> dict:
+    # A committed project with one procedure, inline or in its own file
     import subprocess
 
     subprocess.check_call(["git", "init", "-q"])
@@ -101,38 +101,33 @@ def _project(tmp_dir, in_file: bool = False) -> dict:
     return ck_info
 
 
-def _run(monkeypatch, answers: list[str]) -> None:
-    """Run the procedure, answering each prompt in turn."""
+def _run(monkeypatch, answers: list[str], **kwargs) -> None:
+    # Run the procedure, answering each prompt in turn
     from calkit.cli.main.core import run_procedure
 
     remaining = list(answers)
     monkeypatch.setattr("builtins.input", lambda *_: remaining.pop(0))
-    run_procedure("measure-rig")
+    run_procedure("measure-rig", **kwargs)
 
 
 def _log_rows(name: str = "measure-rig") -> list[dict]:
     import csv
     import glob
 
-    paths = sorted(glob.glob(f".calkit/procedure-runs/{name}/*.csv"))
     rows: list[dict] = []
-    for path in paths:
+    for path in sorted(glob.glob(f".calkit/procedure-runs/{name}/*.csv")):
         with open(path) as f:
             rows += list(csv.DictReader(f))
     return rows
 
 
 @pytest.mark.parametrize("in_file", [False, True])
-def test_run_procedure_logs_every_step(tmp_dir, monkeypatch, in_file):
-    """A run records what was done and what the person entered.
-
-    Whether the procedure is written inline or kept in its own file makes
-    no difference to carrying it out: ``load`` resolves either, so the run
-    and its log are the same.
-    """
+def test_run_procedure(tmp_dir, monkeypatch, in_file):
     import subprocess
 
-    _project(tmp_dir, in_file=in_file)
+    # Whether the procedure is written inline or kept in its own file makes
+    # no difference to carrying it out
+    _project(in_file=in_file)
     _run(monkeypatch, ["", "21.5", "yes"])
     rows = _log_rows()
     assert [r["step"] for r in rows] == ["0", "1"]
@@ -150,54 +145,45 @@ def test_run_procedure_logs_every_step(tmp_dir, monkeypatch, in_file):
     ).split("\n")
     assert "Execute procedure measure-rig step 1" in log
     assert "Execute procedure measure-rig step 0" in log
-
-
-def test_run_procedure_rejects_a_bad_input_and_asks_again(
-    tmp_dir, monkeypatch
-):
     # A float input that isn't one is a typo at the bench, not a reason to
-    # lose the run
-    _project(tmp_dir)
-    _run(monkeypatch, ["", "not-a-number", "21.5", "yes"])
-    rows = _log_rows()
-    assert rows[1]["temperature"] == "21.5"
+    # lose the run: it asks again
+    _run(monkeypatch, ["", "not-a-number", "22.5", "yes"])
+    assert _log_rows()[3]["temperature"] == "22.5"
+    # The log is still written with --no-commit; only the commits stop
+    before = subprocess.check_output(
+        ["git", "log", "--format=%s"], text=True
+    ).count("Execute procedure")
+    _run(monkeypatch, ["", "23.5", "yes"], no_commit=True)
+    assert len(_log_rows()) == 6
+    assert (
+        subprocess.check_output(
+            ["git", "log", "--format=%s"], text=True
+        ).count("Execute procedure")
+        == before
+    )
+    # A name the project doesn't have is an error, not an empty run
+    from calkit.cli.main.core import run_procedure
+
+    with pytest.raises(typer.Exit):
+        run_procedure("no-such-procedure")
 
 
-def test_run_procedure_can_skip_the_per_step_commits(tmp_dir, monkeypatch):
+def test_run_procedure_definition_must_be_committed(tmp_dir, monkeypatch):
     import subprocess
 
     from calkit.cli.main.core import run_procedure
+    from calkit.procedures import definition_paths
 
-    _project(tmp_dir)
-    remaining = ["", "21.5", "yes"]
-    monkeypatch.setattr("builtins.input", lambda *_: remaining.pop(0))
-    run_procedure("measure-rig", no_commit=True)
-    # The log is still written; only the commits are skipped
-    assert len(_log_rows()) == 2
-    log = subprocess.check_output(["git", "log", "--format=%s"], text=True)
-    assert "Execute procedure" not in log
-
-
-def test_run_procedure_needs_a_committed_definition(tmp_dir, monkeypatch):
-    """The definition has to be committed; unrelated work in progress is
-    nobody's business.
-
-    A procedure that is a pipeline stage runs after earlier stages have
-    written their outputs, so a whole-tree check could never hold there,
-    and a change to an unrelated file says nothing about which procedure
-    was carried out.
-    """
-    import subprocess
-
-    from calkit.cli.main.core import run_procedure
-
-    ck_info = _project(tmp_dir)
-    # Something else in the tree, uncommitted: not this procedure's problem
+    ck_info = _project()
+    # Something else in the tree, uncommitted, is not this procedure's
+    # business: a procedure that is a pipeline stage runs after earlier
+    # stages have written their outputs, so a whole-tree check could never
+    # hold there
     with open("notes.txt", "w") as f:
         f.write("still thinking\n")
     _run(monkeypatch, ["", "21.5", "yes"])
     assert len(_log_rows()) == 2
-    # The procedure's own definition, edited and not committed: that is
+    # The procedure's own definition, edited and not committed, is
     ck_info["procedures"]["measure-rig"]["steps"].append(
         {"summary": "Put the kettle on"}
     )
@@ -210,38 +196,25 @@ def test_run_procedure_needs_a_committed_definition(tmp_dir, monkeypatch):
     # Three steps now, so: step 0, the two inputs of step 1, then step 2
     _run(monkeypatch, ["", "22.0", "ok", ""])
     assert len(_log_rows()) == 5
-
-
-def test_run_procedure_refuses_a_name_it_does_not_have(tmp_dir):
-    from calkit.cli.main.core import run_procedure
-
-    _project(tmp_dir)
-    with pytest.raises(typer.Exit):
-        run_procedure("no-such-procedure")
-
-
-def test_definition_paths(tmp_dir):
-    from calkit.procedures import definition_paths
-
-    ck_info = _project(tmp_dir, in_file=True)
-    # calkit.yaml names it, and the file holds it; both have to be
-    # committed for a run to stand for an agreed procedure
-    assert definition_paths("measure-rig", ck_info=ck_info) == [
+    # calkit.yaml names the procedure, and the file holds it when it is
+    # kept in one; both have to be committed
+    assert definition_paths("measure-rig", ck_info=ck_info) == ["calkit.yaml"]
+    in_file = {
+        "procedures": {"measure-rig": {"path": "procedures/measure-rig.yaml"}}
+    }
+    assert definition_paths("measure-rig", ck_info=in_file) == [
         "calkit.yaml",
         "procedures/measure-rig.yaml",
     ]
-    inline = {"procedures": {"measure-rig": {"title": "x", "steps": []}}}
-    assert definition_paths("measure-rig", ck_info=inline) == ["calkit.yaml"]
     # A name the project doesn't have, and an entry that doesn't validate,
     # still have calkit.yaml behind them
-    assert definition_paths("nope", ck_info=inline) == ["calkit.yaml"]
+    assert definition_paths("nope", ck_info=in_file) == ["calkit.yaml"]
     assert definition_paths(
         "bad", ck_info={"procedures": {"bad": "not an entry"}}
     ) == ["calkit.yaml"]
 
 
 def test_procedure_pipeline_stage(tmp_dir):
-    """A manual step sits in the pipeline where an automated one does."""
     from calkit.models.pipeline import Pipeline
 
     pipeline = Pipeline.model_validate(
@@ -290,14 +263,9 @@ def test_procedure_pipeline_stage(tmp_dir):
     # must not leave the stage depending on a file that is no longer there
     pipeline.resolve_procedure_paths({"measure-rig": {"title": "x"}})
     assert stage.to_dvc()["deps"] == ["calkit.yaml"]
-
-
-def test_procedure_stage_declaring_its_own_log(tmp_dir):
     # Declaring the log directory as an output is redundant but harmless;
     # it must not end up in the compiled stage twice
-    from calkit.models.pipeline import Pipeline
-
-    pipeline = Pipeline.model_validate(
+    declared = Pipeline.model_validate(
         {
             "stages": {
                 "collect": {
@@ -308,8 +276,7 @@ def test_procedure_stage_declaring_its_own_log(tmp_dir):
             }
         }
     )
-    outs = pipeline.stages["collect"].to_dvc()["outs"]
-    assert outs == [
+    assert declared.stages["collect"].to_dvc()["outs"] == [
         {
             ".calkit/procedure-runs/measure-rig": {
                 "cache": False,

@@ -74,12 +74,10 @@ def _write_yaml(ck_info: dict) -> None:
 
 
 def test_history_is_read_once_for_all_questions(tmp_dir):
-    """A long calkit.yaml history costs one reading, not one per question.
-
-    Every question walks the same history looking for the commit it was
-    last edited at. Reading it per question turned checking a handful of
-    them into double-digit seconds on a project with any history at all.
-    """
+    # Every question walks the same calkit.yaml history looking for the
+    # commit it was last edited at. Reading it per question turned checking
+    # a handful of them into double-digit seconds on a project with any
+    # history at all.
     import json
     import subprocess
 

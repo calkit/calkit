@@ -151,6 +151,7 @@ const SaveFiles = ({
             >
               <FormLabel htmlFor="commit-message">Commit message</FormLabel>
               <Input
+                autoComplete="off"
                 id="commit-message"
                 {...register("commit_message", {})}
                 placeholder="Ex: Update test.py"

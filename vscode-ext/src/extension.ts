@@ -31,11 +31,22 @@ import type {
   StaleStageDetail,
 } from "./types";
 import { dvcStageOutputPaths } from "./pipeline/core";
+import {
+  formatYamlSyntaxError,
+  yamlSyntaxError,
+  type YamlSyntaxError,
+} from "./yaml";
 import { CalkitSidebarProvider } from "./sidebar";
 import {
   resolveFigureRefStage,
   resolveImageRefToRepoRelative,
 } from "./figures/core";
+import {
+  findMarkdownStageBlocks,
+  markdownStagePath,
+  splitMarkdownStageName,
+} from "./markdown/core";
+import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import {
   FigureSourceCodeLensProvider,
   openFiguresCarousel,
@@ -52,6 +63,7 @@ const COMMAND_RESTART_JOB = "calkit-vscode.restartCalkitJob";
 const COMMAND_SHOW_PROVENANCE = "calkit-vscode.showProvenance";
 const COMMAND_RUN_STAGE = "calkit-vscode.runStage";
 const COMMAND_RUN_STAGE_FOR_FILE = "calkit-vscode.runStageForFile";
+const COMMAND_RUN_MARKDOWN_STAGE = "calkit-vscode.runMarkdownStage";
 const COMMAND_RUN_PIPELINE = "calkit-vscode.runPipeline";
 const COMMAND_SHOW_DAG = "calkit-vscode.showPipelineDag";
 const COMMAND_NEW_STAGE = "calkit-vscode.newStage";
@@ -131,6 +143,9 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_MIN_CALKIT_VERSION = "0.41.15";
 const DEFAULT_NOTEBOOK_SLURM_TIME = "120";
 const CALKIT_INSTALL_DOCS_URL = "https://docs.calkit.org/installation";
+const WINDOWS_INSTALL_SCRIPT = "irm install-ps1.calkit.org | iex";
+const WINDOWS_INSTALL_COMMAND = `powershell -ExecutionPolicy ByPass -c "${WINDOWS_INSTALL_SCRIPT}"`;
+const UNIX_INSTALL_COMMAND = "curl -LsSf install.calkit.org | sh";
 const MISSING_IJULIA_ERROR_TEXT =
   "IJulia is not installed in this Julia environment";
 
@@ -419,6 +434,19 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         runStageInTerminal(workspaceRoot, stageName);
+      },
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_RUN_MARKDOWN_STAGE,
+      (stageName?: string, projectDir?: string) => {
+        const workspaceRoot = getWorkspaceRoot();
+        if (!workspaceRoot || !stageName) {
+          return;
+        }
+        runStageInTerminal(workspaceRoot, stageName, projectDir);
       },
     ),
   );
@@ -1323,6 +1351,19 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
+  // Puts a "Run stage" action above each stage a Markdown file declares
+  const markdownStageCodeLensProvider = new MarkdownStageCodeLensProvider({
+    getWorkspaceRoot,
+    readCalkitConfig,
+    runMarkdownStageCommand: COMMAND_RUN_MARKDOWN_STAGE,
+  });
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(
+      { scheme: "file", pattern: "**/*.md" },
+      markdownStageCodeLensProvider,
+    ),
+  );
+
   // Set up PDF auto-refresh watchers for PDF-producing stages now and whenever
   // the pipeline config changes (the latter picks up newly added stages).
   const workspaceRootForPdfWatchers = getWorkspaceRoot();
@@ -1334,6 +1375,9 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
     figureCodeLensProvider.refresh();
+    // A file only gets stage lenses once calkit.yaml declares it, so these
+    // have to be recomputed when that changes
+    markdownStageCodeLensProvider.refresh();
     const root = getWorkspaceRoot();
     if (root) {
       void setupStagePdfRefreshWatchers(context, root);
@@ -1419,16 +1463,6 @@ async function ensureCalkitCliReady(): Promise<void> {
       return;
     }
 
-    const hasNotebookUpdate = await hasUpdateNotebookCommand(workspaceRoot);
-    if (!hasNotebookUpdate) {
-      await promptCalkitInstallOrUpgrade({
-        mode: "upgrade",
-        title: "Calkit CLI is too old for this extension",
-        message: `Detected Calkit ${installedVersion}, but this extension requires at least ${minimumVersion} with 'calkit update notebook'.`,
-      });
-      return;
-    }
-
     if (compareSemver(installedVersion, minimumVersion) < 0) {
       await promptCalkitInstallOrUpgrade({
         mode: "upgrade",
@@ -1483,20 +1517,6 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
-async function hasUpdateNotebookCommand(
-  workspaceRoot?: string,
-): Promise<boolean> {
-  try {
-    await execFileAsync("calkit", ["update", "notebook", "--help"], {
-      cwd: workspaceRoot,
-      timeout: 5_000,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 async function promptCalkitInstallOrUpgrade(options: {
   mode: "install" | "upgrade";
   title: string;
@@ -1519,32 +1539,54 @@ async function promptCalkitInstallOrUpgrade(options: {
     return;
   }
 
-  const command = await pickCalkitSetupCommand(options.mode);
-  if (!command) {
+  const selected = await pickCalkitSetupCommand(options.mode);
+  if (!selected) {
     return;
   }
-
-  const terminal = vscode.window.createTerminal("Calkit Setup");
+  // The PowerShell installer runs as the terminal's own shell rather than as
+  // text typed into one. VS Code hands these arguments to the process
+  // directly, so nothing can strip the quotes that keep `irm ... | iex`
+  // inside -Command; when they were stripped, the outer shell took the pipe
+  // and fed the script to `iex` a line at a time, which fails (issue #1569).
+  const terminal = selected.powershell
+    ? vscode.window.createTerminal({
+        name: "Calkit Setup",
+        shellPath: "powershell.exe",
+        shellArgs: [
+          "-NoExit",
+          "-ExecutionPolicy",
+          "ByPass",
+          "-Command",
+          WINDOWS_INSTALL_SCRIPT,
+        ],
+      })
+    : vscode.window.createTerminal("Calkit Setup");
   terminal.show(true);
-  terminal.sendText(command, true);
+  if (!selected.powershell) {
+    terminal.sendText(selected.command, true);
+  }
   void vscode.window.showInformationMessage(
     "Started Calkit setup command in terminal. After it finishes, reload VS Code.",
   );
 }
 
+interface CalkitSetupCommand extends vscode.QuickPickItem {
+  /** The command line, as documented. */
+  command: string;
+  /** Run it as a PowerShell process instead of typing it into a terminal. */
+  powershell?: boolean;
+}
+
 async function pickCalkitSetupCommand(
   mode: "install" | "upgrade",
-): Promise<string | undefined> {
+): Promise<CalkitSetupCommand | undefined> {
   const isWindows = process.platform === "win32";
-  const installItems = [
+  const installItems: CalkitSetupCommand[] = [
     {
       label: "Official installer (recommended)",
-      description: isWindows
-        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
-        : "curl -LsSf install.calkit.org | sh",
-      command: isWindows
-        ? 'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"'
-        : "curl -LsSf install.calkit.org | sh",
+      description: isWindows ? WINDOWS_INSTALL_COMMAND : UNIX_INSTALL_COMMAND,
+      command: isWindows ? WINDOWS_INSTALL_COMMAND : UNIX_INSTALL_COMMAND,
+      powershell: isWindows,
     },
     {
       label: "uv tool",
@@ -1564,15 +1606,14 @@ async function pickCalkitSetupCommand(
     },
     {
       label: "Windows PowerShell installer",
-      description:
-        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
-      command:
-        'powershell -ExecutionPolicy ByPass -c "irm install-ps1.calkit.org | iex"',
+      description: WINDOWS_INSTALL_COMMAND,
+      command: WINDOWS_INSTALL_COMMAND,
+      powershell: true,
     },
     {
       label: "Linux/macOS installer",
-      description: "curl -LsSf install.calkit.org | sh",
-      command: "curl -LsSf install.calkit.org | sh",
+      description: UNIX_INSTALL_COMMAND,
+      command: UNIX_INSTALL_COMMAND,
     },
   ];
 
@@ -1581,7 +1622,7 @@ async function pickCalkitSetupCommand(
     placeHolder: "Choose an installation command to run in terminal",
     matchOnDescription: true,
   });
-  return selected?.command;
+  return selected;
 }
 
 export function deactivate(): void {
@@ -1616,7 +1657,15 @@ async function readDvcYaml(
     if (isFileNotFoundError(error)) {
       return {};
     }
-    log(`Failed to read dvc.yaml: ${String(error)}`);
+    // Logged rather than shown: dvc.yaml is generated from calkit.yaml, so a
+    // syntax error in it is already being reported against its source, and a
+    // read that lands mid-write shouldn't raise a notification.
+    const syntaxError = yamlSyntaxError(error);
+    log(
+      syntaxError
+        ? formatYamlSyntaxError("dvc.yaml", syntaxError)
+        : `Failed to read dvc.yaml: ${String(error)}`,
+    );
     return undefined;
   }
 }
@@ -3473,10 +3522,23 @@ function getOrCreateTerminal(name: string, cwd: string): vscode.Terminal {
   return vscode.window.createTerminal({ name, cwd });
 }
 
-function runStageInTerminal(workspaceRoot: string, stageName: string): void {
+function runStageInTerminal(
+  workspaceRoot: string,
+  stageName: string,
+  projectDir?: string,
+): void {
   const terminal = getOrCreateTerminal("calkit: run", workspaceRoot);
   terminal.show();
-  terminal.sendText(`calkit run ${shQuote(stageName)}`);
+  // A project can live in a subdirectory of the workspace without being
+  // declared as a subproject, so point the CLI at it rather than assuming
+  // the terminal is already in the right place. The path is absolute
+  // because the terminal is reused, and the user may have cd'd it
+  // somewhere else since it was created.
+  const prefix =
+    projectDir && path.relative(workspaceRoot, projectDir)
+      ? `calkit -C ${shQuote(projectDir)}`
+      : "calkit";
+  terminal.sendText(`${prefix} run ${shQuote(stageName)}`);
 }
 
 function isLatexWorkshopInstalled(): boolean {
@@ -3575,6 +3637,29 @@ async function openStageSourceFile(
   workspaceRoot: string,
   stageName: string,
 ): Promise<void> {
+  // A stage declared in a Markdown file has no source file of its own, so
+  // open the file that declares it and go to the block
+  const md = splitMarkdownStageName(stageName, currentCalkitConfig);
+  if (md) {
+    const mdPath = markdownStagePath(currentCalkitConfig, md.markdownStageName);
+    if (mdPath) {
+      const uri = vscode.Uri.file(path.join(workspaceRoot, mdPath));
+      const doc = await vscode.workspace.openTextDocument(uri);
+      const block = findMarkdownStageBlocks(doc.getText()).find(
+        (b) => b.name === md.blockName,
+      );
+      const editor = await vscode.window.showTextDocument(doc);
+      if (block) {
+        const pos = new vscode.Position(block.line, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenter,
+        );
+      }
+      return;
+    }
+  }
   const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
   const filePath =
     (typeof stage?.notebook_path === "string"
@@ -3654,6 +3739,15 @@ async function findStageForFile(
       stage.script_path === relPath ||
       stage.target_path === relPath ||
       pipelineStageOutputPaths(stage).includes(relPath)
+    ) {
+      return stageName;
+    }
+    // A markdown stage stands in for the stages its blocks declare, and
+    // its target_path is the file itself
+    if (
+      stage.kind === "markdown" &&
+      typeof stage.target_path === "string" &&
+      stage.target_path.replace(/\\/g, "/") === relPath
     ) {
       return stageName;
     }
@@ -4042,16 +4136,78 @@ async function readCalkitConfig(
     const bytes = await vscode.workspace.fs.readFile(fileUri);
     const raw = Buffer.from(bytes).toString("utf8");
     const parsed = YAML.parse(raw) as CalkitInfo | undefined;
+    clearYamlProblem(fileUri);
     return parsed ?? {};
   } catch (error) {
     if (isFileNotFoundError(error)) {
+      clearYamlProblem(fileUri);
       return {};
     }
-    void vscode.window.showErrorMessage(
-      `Failed to read calkit.yaml: ${String(error)}`,
-    );
+    reportYamlProblem(fileUri, error);
     return undefined;
   }
+}
+
+// A file we can't read is reported once per distinct problem: the config is
+// re-read on every refresh, so a broken file would otherwise stack up an
+// unbounded pile of identical notifications.
+const reportedYamlProblems = new Map<string, string>();
+
+function clearYamlProblem(fileUri: vscode.Uri): void {
+  reportedYamlProblems.delete(fileUri.fsPath);
+}
+
+function reportYamlProblem(fileUri: vscode.Uri, error: unknown): void {
+  const fileName = path.basename(fileUri.fsPath);
+  const syntaxError = yamlSyntaxError(error);
+  const message = syntaxError
+    ? formatYamlSyntaxError(fileName, syntaxError)
+    : `Failed to read ${fileName}: ${String(error)}`;
+  log(message);
+  if (reportedYamlProblems.get(fileUri.fsPath) === message) {
+    return;
+  }
+  reportedYamlProblems.set(fileUri.fsPath, message);
+  // Not awaited: reads happen during refreshes that shouldn't block on the
+  // user dismissing a notification.
+  void (async () => {
+    const openAction = `Open ${fileName}`;
+    const choice = await vscode.window.showErrorMessage(message, openAction);
+    if (choice === openAction) {
+      await revealYamlProblem(fileUri, syntaxError);
+    }
+  })().catch((openError: unknown) => {
+    // The file can be deleted, or lose read permission, between the
+    // notification and the click, so opening it is allowed to fail.
+    const failure = `Failed to open ${fileName}: ${String(openError)}`;
+    log(failure);
+    void vscode.window.showErrorMessage(failure);
+  });
+}
+
+async function revealYamlProblem(
+  fileUri: vscode.Uri,
+  syntaxError: YamlSyntaxError | undefined,
+): Promise<void> {
+  const document = await vscode.workspace.openTextDocument(fileUri);
+  const editor = await vscode.window.showTextDocument(document);
+  if (syntaxError?.line === undefined) {
+    return;
+  }
+  // The parser reports one-based positions, and it can point past the end of
+  // the file, so clamp before jumping there.
+  const line = Math.min(syntaxError.line - 1, document.lineCount - 1);
+  const position = document.validatePosition(
+    new vscode.Position(
+      Math.max(line, 0),
+      Math.max((syntaxError.column ?? 1) - 1, 0),
+    ),
+  );
+  editor.selection = new vscode.Selection(position, position);
+  editor.revealRange(
+    new vscode.Range(position, position),
+    vscode.TextEditorRevealType.InCenter,
+  );
 }
 
 async function fileExists(fsPath: string): Promise<boolean> {

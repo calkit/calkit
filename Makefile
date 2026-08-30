@@ -6,7 +6,10 @@ help: ## Show this help.
 .PHONY: install
 install: ## Create the project's virtual environment.
 	@echo "🚀 Creating virtual environment"
-	@uv sync
+	# --all-packages, since a bare `uv sync` would install only this
+	# package and uninstall the hub backend's dependencies from the
+	# workspace's single shared .venv
+	@uv sync --all-packages
 
 .PHONY: dev
 dev: ## Start up the hub containers for development.
@@ -17,7 +20,7 @@ frontend-client: ## Regenerate the hub frontend's API client.
 	@$(MAKE) -C hub/frontend client
 
 .PHONY: format
-format: sync-docs ## Automatically format files.
+format: sync-docs sync-resources ## Automatically format files.
 	@echo "🚀 Linting code with pre-commit"
 	@uv run pre-commit run -a
 
@@ -44,12 +47,35 @@ test-cov: ## Test the code coverage with pytest.
 test-docs: sync-docs ## Test if documentation can be built without warnings or errors.
 	@uv run mkdocs build -s
 
+.PHONY: schema
+schema: ## Generate the published JSON schema for calkit.yaml.
+	@echo "🚀 Generating calkit.yaml JSON schema"
+	@uv run calkit describe schema -o docs/schemas/calkit.json
+	@cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json
+
 .PHONY: sync-docs
-sync-docs: ## Sync documentation content from docs/*.md into README.md.
+sync-docs: schema ## Sync documentation content from docs/*.md into README.md.
 	@echo "🚀 Generating docs references"
 	@uv run python scripts/generate-docs-references.py
 	@echo "🚀 Syncing documentation"
 	@uv run python scripts/sync-docs.py
+
+.PHONY: unreleased
+unreleased: ## List each product's commits since its last release.
+	@uv run python scripts/list-changes.py
+
+.PHONY: sync-resources
+sync-resources: ## Regenerate the dev container spec from the VS Code config.
+	@echo "🚀 Syncing project resources"
+	@uv run python scripts/sync-resources.py
+
+.PHONY: devcontainer-image
+devcontainer-image: ## Build the dev container image and smoke test it.
+	@echo "🚀 Building the dev container image"
+	@docker build -t calkit/devcontainer:dev calkit/resources/devcontainer
+	@echo "🚀 Smoke testing the dev container image"
+	@docker run --rm calkit/devcontainer:dev bash -c \
+		"calkit --version && uv --version && pixi --version && conda --version"
 
 .PHONY: docs
 docs: sync-docs ## Build and serve the documentation.

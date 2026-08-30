@@ -5,11 +5,12 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import threading
 import time
 from collections import OrderedDict
 from copy import deepcopy
-from typing import Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 import git
 import requests
@@ -21,7 +22,11 @@ from sqlmodel import Session, and_, or_, select
 
 import app.users
 from app.config import settings
-from calkit.notebooks import get_executed_notebook_path
+from calkit.notebooks import (
+    MARIMO_DETECT_N_BYTES,
+    get_executed_notebook_path,
+    is_marimo_notebook,
+)
 
 
 # libyaml's C loader is ~10x faster than the pure-Python SafeLoader on
@@ -31,13 +36,19 @@ def _yaml_load(data: bytes | str):
     return yaml.load(data, Loader=yaml.CSafeLoader)
 
 
+import app.dvc
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
+    normalize_artifact_path,
     params_from_url,
     ryaml,
     utcnow,
 )
-from app.dvc import expand_dvc_lock_outs, get_data_fpath_for_md5
+from app.dvc import (
+    expand_dvc_lock_outs,
+    get_data_fpath_for_md5,
+    read_dvc_dir_cached,
+)
 from app.git import (
     RepoTree,
     get_ck_info_from_repo,
@@ -112,11 +123,16 @@ def _resolve_github_collaborator_access(
     querying GitHub and caching the result on a miss. Sets
     ``project.current_user_access`` (left None if it can't be determined).
     """
+    # Plain read, deliberately not SELECT ... FOR UPDATE. The row lock would
+    # be held until the request's session closes, so every concurrent request
+    # for this (user, project) would serialize behind whichever one is doing
+    # the slowest Git/object-storage work. Nothing here needs the lock: the
+    # row is write-once, and the insert race below is settled by catching the
+    # unique violation.
     access_query = (
         select(UserProjectAccess)
         .where(UserProjectAccess.project_id == project.id)
         .where(UserProjectAccess.user_id == current_user.id)
-        .with_for_update()
     )
     access = session.exec(access_query).first()
     if access is not None:
@@ -151,8 +167,7 @@ def _resolve_github_collaborator_access(
             f"Failed to fetch permissions from GitHub ({resp.status_code})"
         )
     project.current_user_access = permissions
-    # SELECT ... FOR UPDATE locks nothing when the row doesn't exist yet, so
-    # concurrent requests for the same user and project can both get here and
+    # Concurrent requests for the same user and project can both get here and
     # try to insert. Losing that race is harmless (the winner cached the same
     # permission), but the unique violation would otherwise 500 the request.
     session.add(
@@ -300,6 +315,180 @@ def dvc_outputs_from_tree(project: Project, tree: RepoTree) -> dict[str, dict]:
         )
         outs.setdefault(path, out)
     return outs
+
+
+def read_project_file(
+    project: Project,
+    tree: RepoTree,
+    path: str,
+    max_bytes: int,
+    session: Session | None = None,
+    current_user: User | None = None,
+    dvc_only: bool = False,
+) -> bytes:
+    """A file's bytes at a ref, from Git or from DVC storage.
+
+    Git-tracked files come out of the tree; anything else is looked up
+    among the DVC outputs and read from object storage. A DVC output
+    imported from another Calkit project is a pointer whose ``remote``
+    names that project; its bytes live in that project's storage (the
+    pointer is ``push: false``, so they never get copied here). Such a
+    read goes to the source project, after checking the reader can see
+    it, when a session is given.
+
+    Raises 404 when the path isn't a file (a directory, or not in the
+    project) or its object was never pushed, and 413 when it's larger
+    than ``max_bytes``, checked before reading and again after, since a
+    DVC output's recorded size is what the pusher said it was.
+    """
+    if not dvc_only and tree.is_file(path):
+        data = bytes(tree.read_bytes(path))
+        if len(data) > max_bytes:
+            raise HTTPException(413, f"'{path}' is too large to read")
+        return data
+    outs = dvc_outputs_from_tree(project=project, tree=tree)
+    out = outs.get(path)
+    if out is None or not out.get("md5"):
+        what = "DVC-tracked" if dvc_only else "a file in this project"
+        raise HTTPException(404, f"'{path}' is not {what}")
+    if str(out.get("md5")).endswith(".dir"):
+        raise HTTPException(404, f"'{path}' is a directory, not a file")
+    if (out.get("size") or 0) > max_bytes:
+        raise HTTPException(413, f"'{path}' is too large to read")
+    remote = str(out.get("remote") or "")
+    if session is not None and remote.startswith("calkit:") and "/" in remote:
+        src_owner, src_project = remote[len("calkit:") :].split("/", 1)
+        # Raises if the source project is missing or not readable
+        get_project(
+            session=session,
+            owner_name=src_owner,
+            project_name=src_project,
+            current_user=current_user,
+            min_access_level="read",
+        )
+    fs = get_object_fs()
+    fpath = app.dvc.object_fpath_for_out(
+        owner_name=project.owner_account_name,
+        project_name=project.name,
+        dvc_out=out,
+        fs=fs,
+    )
+    if fpath is None:
+        where = (
+            f"{remote[len('calkit:') :]}'s storage"
+            if remote.startswith("calkit:")
+            else "storage"
+        )
+        raise HTTPException(404, f"'{path}' has not been pushed to {where}")
+    with fs.open(fpath, "rb") as f:
+        data = bytes(f.read(max_bytes + 1))
+    if len(data) > max_bytes:
+        raise HTTPException(413, f"'{path}' is too large to read")
+    return data
+
+
+def read_app_file(
+    project: Project,
+    repo: git.Repo,
+    dir_path: str,
+    rel_path: str,
+    ref: str | None = None,
+) -> bytes | None:
+    """Read one file from inside a DVC-tracked directory, by its path
+    relative to that directory.
+
+    A WASM app is a directory of several hundred small files, all fetched
+    while the page loads, so this resolves a single file rather than
+    listing the whole tree. Returns None if the directory isn't tracked,
+    the file isn't in it, or its object was never pushed.
+
+    Falls back to the working tree for a directory tracked with Git, since
+    a small static app needn't be in DVC at all.
+    """
+
+    def contained(path: str) -> str | None:
+        """Normalize a path, or None if it isn't inside the repo."""
+        if not path:
+            return ""
+        if posixpath.isabs(path):
+            return None
+        norm = posixpath.normpath(path)
+        if norm == ".." or norm.startswith("../"):
+            return None
+        return "" if norm == "." else norm
+
+    # Both paths reach the filesystem directly when ref is None, since a
+    # WorkingTree joins onto the checkout root without bounding the result.
+    # dir_path comes from the project's own calkit.yaml and rel_path from
+    # the request, so neither may escape the repo. Normalizing here also
+    # means a request for 'a/../b.js' resolves rather than missing.
+    checked_dir = contained(dir_path)
+    checked_rel = contained(rel_path)
+    if checked_dir is None or checked_rel is None or not checked_rel:
+        return None
+    dir_path, rel_path = checked_dir, checked_rel
+    tree = get_repo_tree_for_ref(repo, ref)
+    full_path = posixpath.join(dir_path, rel_path) if dir_path else rel_path
+    if tree.is_file(full_path):
+        # A symlink pointing out of the tree reads whatever it targets on
+        # the server, so reject it the way get_contents_from_tree does
+        if tree.is_symlink(full_path) and not tree.is_safe_symlink(full_path):
+            logger.warning(
+                f"Unsafe symlink detected in {project.owner_account_name}/"
+                f"{project.name} at {full_path}"
+            )
+            return None
+        return tree.read_bytes(full_path)
+    owner_name = project.owner_account_name
+    project_name = project.name
+    # dvc.lock outs are expanded per file and cached on the bytes of
+    # dvc.lock, so the whole app resolves out of one cached mapping. Only a
+    # directory tracked with `dvc add` needs the pointer-file scan below,
+    # which walks the entire tree and so mustn't run per asset request.
+    dvc_lock_outs = get_ck_info_and_dvc_outs_from_tree(
+        project=project, tree=tree
+    ).dvc_lock_outs
+    out = dvc_lock_outs.get(full_path)
+    if out is None and dir_path not in dvc_lock_outs:
+        out = dvc_outputs_from_tree(project=project, tree=tree).get(dir_path)
+        if out is None:
+            return None
+        md5 = out.get("md5", "")
+        if not md5.endswith(".dir"):
+            return None
+        dir_fpath = get_data_fpath_for_md5(
+            owner_name=owner_name,
+            project_name=project_name,
+            md5=md5,
+        )
+        # The .dir object is a JSON list of {"md5": ..., "relpath": ...},
+        # which is how we map a request path onto the object holding its
+        # bytes. Reads of it are cached by object path.
+        entries = (
+            read_dvc_dir_cached(dir_fpath) if dir_fpath is not None else None
+        )
+        md5_by_relpath = {
+            e.get("relpath"): e.get("md5")
+            for e in (entries or [])
+            if isinstance(e, dict)
+        }
+        out = {"md5": md5_by_relpath.get(rel_path)}
+    file_md5 = out.get("md5") if out is not None else None
+    # A request that lands on the directory itself resolves to its .dir
+    # object, which is a listing rather than anything servable
+    if not file_md5 or file_md5.endswith(".dir"):
+        return None
+    fs = get_object_fs()
+    file_fpath = get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=file_md5,
+        fs=fs,
+    )
+    if file_fpath is None:
+        return None
+    with fs.open(file_fpath, "rb") as f:
+        return f.read()
 
 
 def get_contents_from_repo(
@@ -489,6 +678,54 @@ def record_overleaf_links(
     return links
 
 
+# The artifact collections whose entries declare a path. Several aren't in
+# CATEGORIES_PLURAL_TO_SINGULAR, which only covers the kinds that can be
+# imported between projects, so they're listed explicitly.
+_PATH_CATEGORIES = list(CATEGORIES_PLURAL_TO_SINGULAR) + [
+    "presentations",
+    "results",
+    "tables",
+]
+
+
+def normalize_ck_info_paths(ck_info: dict[str, Any]) -> dict[str, Any]:
+    """Normalize every artifact path declared in ``ck_info``, in place.
+
+    See ``normalize_artifact_path``: a path written as ``./paper/main.pdf``
+    means the same file as ``paper/main.pdf``, but only the latter matches a
+    dvc.lock out or a Git tree entry, so declared paths have to be cleaned up
+    before anything keys artifacts by path.
+
+    Only safe for metadata that is read and never written back to
+    calkit.yaml, since it rewrites the paths the user declared.
+    """
+    for category in _PATH_CATEGORIES:
+        itemlist = ck_info.get(category)
+        if not isinstance(itemlist, list):
+            continue
+        for item in itemlist:
+            if not isinstance(item, dict):
+                continue
+            if isinstance(item.get("path"), str):
+                item["path"] = normalize_artifact_path(item["path"])
+            # References items carry their own files, each with a path
+            files = item.get("files")
+            if isinstance(files, list):
+                for f in files:
+                    if isinstance(f, dict) and isinstance(f.get("path"), str):
+                        f["path"] = normalize_artifact_path(f["path"])
+    # Showcase elements reference artifacts by path rather than declaring one
+    showcase = ck_info.get("showcase")
+    if isinstance(showcase, list):
+        for element in showcase:
+            if not isinstance(element, dict):
+                continue
+            for key in ("figure", "publication", "notebook"):
+                if isinstance(element.get(key), str):
+                    element[key] = normalize_artifact_path(element[key])
+    return ck_info
+
+
 def get_ck_info_and_dvc_outs_from_tree(
     project: Project,
     tree: RepoTree,
@@ -513,8 +750,11 @@ def get_ck_info_and_dvc_outs_from_tree(
     ck_bytes = (
         tree.read_bytes("calkit.yaml") if tree.is_file("calkit.yaml") else b""
     )
-    dvc_bytes = (
+    dvc_lock_bytes = (
         tree.read_bytes("dvc.lock") if tree.is_file("dvc.lock") else b""
+    )
+    dvc_yaml_bytes = (
+        tree.read_bytes("dvc.yaml") if tree.is_file("dvc.yaml") else b""
     )
     zip_paths_json = ".calkit/zip/paths.json"
     zip_bytes = (
@@ -529,7 +769,7 @@ def get_ck_info_and_dvc_outs_from_tree(
     h.update(project_name.encode())
     h.update(b"\0")
     h.update(hashlib.sha1(ck_bytes).digest())
-    h.update(hashlib.sha1(dvc_bytes).digest())
+    h.update(hashlib.sha1(dvc_lock_bytes).digest())
     h.update(hashlib.sha1(zip_bytes).digest())
     cache_key = h.hexdigest()
     now = time.monotonic()
@@ -555,7 +795,18 @@ def get_ck_info_and_dvc_outs_from_tree(
     )
     t1 = time.perf_counter()
     ck_info = (_yaml_load(ck_bytes) or {}) if ck_bytes else {}
-    dvc_lock = (_yaml_load(dvc_bytes) or {}) if dvc_bytes else {}
+    # calkit.yaml can hold any YAML value, and only a mapping is usable
+    if not isinstance(ck_info, dict):
+        ck_info = {}
+    normalize_ck_info_paths(ck_info)
+    dvc_lock = (_yaml_load(dvc_lock_bytes) or {}) if dvc_lock_bytes else {}
+    if dvc_yaml_bytes:
+        try:
+            dvc_lock = app.dvc.drop_stale_lock_stages(
+                dvc_lock, _yaml_load(dvc_yaml_bytes) or {}
+            )
+        except Exception as e:
+            logger.warning(f"Could not read dvc.yaml to prune the lock: {e}")
     t_parse = time.perf_counter() - t1
     logger.info(f"Parsed calkit.yaml and dvc.lock in {t_parse * 1000:.0f}ms")
     t2 = time.perf_counter()
@@ -596,6 +847,10 @@ def get_contents_from_tree(
             raise HTTPException(400, "Absolute paths are not allowed")
         if ".." in path.split(os.sep):
             raise HTTPException(400, "Path traversal is not allowed")
+        # Callers can pass a path straight through from a link or an API
+        # client, e.g. "./paper/main.pdf", but every key matched below is
+        # clean. Normalizing to the repo root means the same as no path.
+        path = normalize_artifact_path(path) or None
     # Reject unsafe symlinks
     if path is not None and tree.is_symlink(path):
         if not tree.is_safe_symlink(path):
@@ -907,21 +1162,23 @@ def get_contents_from_tree(
         content = None
         url = None
         if md5:
-            fp = get_data_fpath_for_md5(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             if fp is not None:
                 url = get_object_url(
                     fp, fname=os.path.basename(dvc_fpath), fs=fs
                 )
+            # No fs.exists() guard: get_data_fpath_for_md5 only returns a path
+            # it has already confirmed exists, so re-checking is a wasted
+            # round trip on every artifact.
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
                 and fp is not None
-                and fs.exists(fp)
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
@@ -951,10 +1208,10 @@ def get_contents_from_tree(
             else:
                 dvc_out = dvc_lock_outs[path]
             md5 = dvc_out["md5"]
-            fp = get_data_fpath_for_md5(
+            fp = app.dvc.object_fpath_for_out(
                 owner_name=owner_name,
                 project_name=project_name,
-                md5=md5,
+                dvc_out=dvc_out,
                 fs=fs,
             )
             url = (
@@ -967,12 +1224,12 @@ def get_contents_from_tree(
             # Read small files inline from object storage, mirroring the
             # Calkit-object branch above, so callers can use their content
             # without a second round trip through the presigned URL.
+            # As above, fp is already known to exist, so no fs.exists() guard.
             content = None
             if (
                 size is not None
                 and size <= RETURN_CONTENT_SIZE_LIMIT
                 and fp is not None
-                and fs.exists(fp)
                 and not path.endswith(".h5")
                 and not path.endswith(".parquet")
             ):
@@ -1000,17 +1257,21 @@ def get_ck_info_for_ref(
     project: Project,
     repo: git.Repo,
     ref: str | None = None,
-    process_includes: bool = False,
+    read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
-    the ref or doesn't hold a mapping.
+    the ref or doesn't hold a mapping. Declared artifact paths come back
+    normalized (see ``normalize_ck_info_paths``), so callers must not write
+    the result back to calkit.yaml.
+
+    Pass ``read_only=True`` only when the caller won't write the result back;
+    see ``get_ck_info_from_repo``.
     """
     if ref is None:
-        return get_ck_info_from_repo(
-            repo=repo,
-            process_includes=process_includes,
+        return normalize_ck_info_paths(
+            get_ck_info_from_repo(repo=repo, read_only=read_only)
         )
     try:
         ck_item = get_contents_from_repo(
@@ -1030,7 +1291,7 @@ def get_ck_info_for_ref(
     # mapping is usable project metadata
     if not isinstance(ck_info, dict):
         return {}
-    return ck_info
+    return normalize_ck_info_paths(ck_info)
 
 
 def get_dvc_pipeline_for_ref(
@@ -1107,6 +1368,110 @@ def get_publication_from_repo(
     raise HTTPException(404, "Publication not found")
 
 
+def item_is_marimo_notebook(path: str, item: ContentsItem) -> bool:
+    """Whether a fetched notebook's contents are a marimo notebook.
+
+    Decided from bytes we already have rather than by reading anything
+    extra, so this costs nothing for the ``.ipynb`` case and never turns a
+    listing into a scan of the repo.
+    """
+    if not path.endswith(".py") or not item.content:
+        return False
+    try:
+        head = base64.b64decode(item.content)[:MARIMO_DETECT_N_BYTES]
+    except Exception:
+        return False
+    return bool(is_marimo_notebook(head.decode("utf-8", errors="replace")))
+
+
+def notebooks_from_ck_info(ck_info: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every notebook calkit.yaml knows about.
+
+    That's the ``notebooks`` list plus any notebook a pipeline stage runs,
+    which belongs to the project whether or not it was declared separately.
+    The stage half is also the only way a marimo notebook is ever found: it
+    is a ``.py`` file, so scanning for the ``.ipynb`` extension can't turn
+    one up, and making people declare it twice would be a trap.
+    """
+    notebooks = ck_info.get("notebooks") or []
+    if not isinstance(notebooks, list):
+        return []
+    notebooks = [
+        nb for nb in notebooks if isinstance(nb, dict) and nb.get("path")
+    ]
+    known_paths = {nb["path"] for nb in notebooks}
+    stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+    for stage in stages.values():
+        if not isinstance(stage, dict):
+            continue
+        nb_path = stage.get("notebook_path")
+        if isinstance(nb_path, str) and nb_path and nb_path not in known_paths:
+            notebooks.append({"path": nb_path})
+            known_paths.add(nb_path)
+    return notebooks
+
+
+def find_notebook_paths_in_tree(tree: RepoTree) -> list[str]:
+    """Every ``.ipynb`` file in a tree, outside hidden directories.
+
+    Walks the tree rather than the checkout, so an undeclared notebook is
+    listed for the ref that was asked for. The working directory is
+    whatever branch the cached clone happens to sit on, which is only
+    coincidentally the one being browsed.
+    """
+    found: list[str] = []
+
+    def walk(dirname: str) -> None:
+        for name in sorted(tree.listdir(dirname or None)):
+            # Skips .git, .dvc, .venv and .ipynb_checkpoints in one rule
+            if name.startswith("."):
+                continue
+            path = posixpath.join(dirname, name) if dirname else name
+            # A symlinked directory can point back up the tree, and a walk
+            # that follows one never finishes
+            if tree.is_symlink(path):
+                continue
+            if tree.is_dir(path):
+                walk(path)
+            elif name.endswith(".ipynb"):
+                found.append(path)
+
+    walk("")
+    return found
+
+
+def link_notebook_to_stage_and_app(
+    notebook: dict[str, Any], ck_info: dict[str, Any]
+) -> None:
+    """Attach to a notebook the stage that runs it, and the app that stage
+    builds, if there is one.
+
+    Any stage kind counts: naming the notebook in ``notebook_path`` is what
+    ties a stage to it, so a marimo stage runs one just as a
+    jupyter-notebook stage does. Shared with the notebooks listing so the
+    two can't disagree about which stage a notebook belongs to.
+    """
+    if not notebook.get("stage"):
+        stages = (ck_info.get("pipeline") or {}).get("stages", {}) or {}
+        for stage_name, stage in stages.items():
+            if isinstance(stage, dict) and stage.get(
+                "notebook_path"
+            ) == notebook.get("path"):
+                notebook["stage"] = stage_name
+                break
+    # An app records the stage that builds it, so a notebook whose stage
+    # builds an app can point at it
+    apps_info = ck_info.get("apps")
+    if notebook.get("stage") and isinstance(apps_info, dict):
+        for app_name, app_info in apps_info.items():
+            if (
+                isinstance(app_info, dict)
+                and app_info.get("stage") == notebook["stage"]
+            ):
+                notebook["app"] = app_name
+                break
+
+
 def get_notebook_from_repo(
     project: Project,
     repo: git.Repo,
@@ -1118,42 +1483,57 @@ def get_notebook_from_repo(
     """
     ck_info = get_ck_info_for_ref(project=project, repo=repo, ref=ref)
     notebooks = ck_info.get("notebooks", [])
-    for notebook in notebooks:
-        if notebook.get("path") == path:
-            item = get_contents_from_repo(
+    notebook = None
+    for nb in notebooks:
+        if nb.get("path") == path:
+            notebook = nb
+            break
+    # Notebooks don't need to be declared in the ``notebooks`` list, e.g., one
+    # defined as a jupyter-notebook pipeline stage, so fall back to the path
+    # itself and let fetching its contents below decide whether it exists
+    if notebook is None:
+        notebook = {"path": path}
+    link_notebook_to_stage_and_app(notebook, ck_info)
+    item = get_contents_from_repo(
+        project=project,
+        repo=repo,
+        path=path,
+        ref=ref,
+    )
+    # A marimo notebook is a Python module, and running it produces an app
+    # rather than an executed copy of itself, so there's no HTML export to
+    # look for and its source is what there is to show
+    if item_is_marimo_notebook(path, item):
+        notebook["output_format"] = "source"
+    else:
+        try:
+            # If the notebook has HTML output, return that
+            html_path = get_executed_notebook_path(
+                notebook_path=path, to="html"
+            )
+            html_item = get_contents_from_repo(
                 project=project,
                 repo=repo,
-                path=path,
+                path=html_path,
                 ref=ref,
             )
-            try:
-                # If the notebook has HTML output, return that
-                html_path = get_executed_notebook_path(
-                    notebook_path=path, to="html"
-                )
-                html_item = get_contents_from_repo(
-                    project=project,
-                    repo=repo,
-                    path=html_path,
-                    ref=ref,
-                )
-                item = html_item
+            item = html_item
+            notebook["output_format"] = "html"
+        except HTTPException as e:
+            logger.info(f"Notebook HTML does not exist at {html_path}: {e}")
+    notebook["url"] = item.url
+    notebook["content"] = item.content
+    notebook["storage"] = item.storage
+    # Figure out the output format from the URL content disposition
+    if item.url is not None:
+        params = params_from_url(item.url)
+        rcd = params.get("response-content-disposition")
+        if rcd is not None:
+            if rcd[0].endswith(".ipynb"):
+                notebook["output_format"] = "notebook"
+            elif rcd[0].endswith(".html"):
                 notebook["output_format"] = "html"
-            except HTTPException as e:
-                logger.info(
-                    f"Notebook HTML does not exist at {html_path}: {e}"
-                )
-            notebook["url"] = item.url
-            notebook["content"] = item.content
-            notebook["storage"] = item.storage
-            # Figure out the output format from the URL content disposition
-            if item.url is not None:
-                params = params_from_url(item.url)
-                rcd = params.get("response-content-disposition")
-                if rcd is not None:
-                    if rcd[0].endswith(".ipynb"):
-                        notebook["output_format"] = "notebook"
-                    elif rcd[0].endswith(".html"):
-                        notebook["output_format"] = "html"
-            return Notebook.model_validate(notebook)
-    raise HTTPException(404, "Notebook not found")
+    # Default to the raw notebook if no HTML version was found
+    if not notebook.get("output_format") and item.content and not item.url:
+        notebook["output_format"] = "notebook"
+    return Notebook.model_validate(notebook)

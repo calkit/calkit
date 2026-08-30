@@ -461,3 +461,133 @@ def test_resolve_ref_fetches_what_a_shallow_clone_lacks(tmp_dir):
     # A revision that doesn't exist is reported as missing rather than
     # retried forever
     assert calkit.git.resolve_ref(repo, "nope-not-a-branch") is None
+
+
+def test_check_branch_is_current(tmp_dir):
+    # What matters isn't which branch the work happens on, but whether it
+    # contains everything already on the trunk, since a branch missing that
+    # can take shared state backwards.
+    main_dir = os.path.join(str(tmp_dir), "main")
+    remote_dir = os.path.join(str(tmp_dir), "remote")
+    os.makedirs(main_dir)
+    git.Repo.init(path=remote_dir, bare=True)
+    repo = git.Repo.init(main_dir)
+    with open(os.path.join(main_dir, "a.txt"), "w") as f:
+        f.write("a")
+    repo.git.add("a.txt")
+    repo.git.commit(["-m", "First commit"])
+    # With no remote and no other branch, there's nothing to check against
+    assert calkit.git.check_branch_is_current(repo) is None
+    default_branch = repo.active_branch.name
+    repo.git.remote(["add", "origin", remote_dir])
+    repo.git.push(["--set-upstream", "origin", default_branch])
+    assert calkit.git.get_default_branch(repo) == default_branch
+    # Being on the default branch passes, and so does a branch cut from its
+    # tip, even before that branch has any commits of its own
+    assert calkit.git.check_branch_is_current(repo) is None
+    behind_from = repo.head.commit.hexsha
+    repo.git.checkout(["-b", "fresh"])
+    assert calkit.git.check_branch_is_current(repo) is None
+    with open(os.path.join(main_dir, "b.txt"), "w") as f:
+        f.write("b")
+    repo.git.add("b.txt")
+    repo.git.commit(["-m", "Work on a branch"])
+    assert calkit.git.check_branch_is_current(repo) is None
+    # A branch cut before something that landed on the default branch is not
+    repo.git.checkout(default_branch)
+    with open(os.path.join(main_dir, "c.txt"), "w") as f:
+        f.write("c")
+    repo.git.add("c.txt")
+    repo.git.commit(["-m", "Work on the default branch"])
+    repo.git.push()
+    repo.git.checkout(["-b", "behind", behind_from])
+    msg = calkit.git.check_branch_is_current(repo)
+    assert msg is not None
+    assert "behind" in msg
+    assert "1 commit(s)" in msg
+    # Merging what it's missing resolves it
+    repo.git.merge(default_branch)
+    assert calkit.git.check_branch_is_current(repo) is None
+    # The default branch is held to the same standard, since a local copy of
+    # it can be behind the remote everyone else pushes to
+    repo.git.checkout(default_branch)
+    repo.git.reset(["--hard", behind_from])
+    msg = calkit.git.check_branch_is_current(repo)
+    assert msg is not None
+    assert f"'origin/{default_branch}'" in msg
+
+
+def _install_stripping_filter(repo: git.Repo, pattern: str = "*.ipynb"):
+    """Configure a clean filter that mangles content, the way nbstripout does.
+
+    A stand-in for nbstripout so the test doesn't need it installed: what
+    matters is that Git rewrites content on its way into the object store,
+    not what the rewrite is.
+    """
+    # Spelled with no quotes, spaces, or backslashes in any token: Git runs
+    # filter commands through a shell---its bundled sh on Windows---which eats
+    # the backslashes in a Windows interpreter path, leaving a command that
+    # never runs. Marked required so that failure is a loud error instead of a
+    # silent pass-through that looks like the content was never filtered.
+    repo.git.config("filter.stripper.clean", "sed -e s/.*/stripped/")
+    repo.git.config("filter.stripper.required", "true")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text(f"{pattern} filter=stripper\n")
+
+
+def test_get_filter_driver(tmp_dir):
+    repo = git.Repo.init()
+    Path("nb.ipynb").write_text("real content")
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") is None
+    _install_stripping_filter(repo)
+    assert calkit.git.get_filter_driver(repo, "nb.ipynb") == "stripper"
+    # A path the pattern doesn't cover is untouched.
+    assert calkit.git.get_filter_driver(repo, "notes.txt") is None
+
+
+def test_ensure_path_is_not_filtered(tmp_dir):
+    repo = git.Repo.init()
+    repo.git.config("user.email", "test@example.com")
+    repo.git.config("user.name", "Test")
+    path = ".calkit/notebooks/executed/nb.ipynb"
+    Path(path).parent.mkdir(parents=True)
+    Path(path).write_text("real content")
+    Path("other.ipynb").write_text("real content")
+    attributes = Path(repo.git_dir) / "info" / "attributes"
+    # A repo with no filters is left completely alone.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert not attributes.exists()
+    _install_stripping_filter(repo)
+    repo.git.add("-A")
+    repo.git.commit("-m", "Init")
+    # The committed bytes don't match the working tree, and nothing shows as
+    # modified, which is what makes this worth guarding against.
+    assert repo.git.show(f"HEAD:{path}") == "stripped", (
+        "the stand-in clean filter didn't run, so there's nothing here for "
+        "the exemption to fix; check that its command works on this platform"
+    )
+    assert not repo.git.status("--porcelain")
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    # The exemption is scoped: everything else stays filtered.
+    assert calkit.git.get_filter_driver(repo, "other.ipynb") == "stripper"
+    # Already-committed content is repaired rather than left for the next run.
+    repo.git.commit("-m", "Unfilter")
+    assert repo.git.show(f"HEAD:{path}") == "real content"
+    assert repo.git.show("HEAD:other.ipynb") == "stripped"
+    # Idempotent: a second call neither re-adds the rule nor errors.
+    before = attributes.read_text()
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path) is None
+    assert attributes.read_text() == before
+    # Re-installing the filter appends a pattern after our exemption, and the
+    # last matching line in the file wins, so the notebook is filtered again.
+    with open(attributes, "a", encoding="utf-8") as f:
+        f.write("*.ipynb filter=stripper\n")
+    assert calkit.git.get_filter_driver(repo, path) == "stripper"
+    # Moving the exemption back to the end restores it, without the file
+    # accumulating a copy of the rule per call.
+    assert calkit.git.ensure_path_is_not_filtered(repo, path=path)
+    assert calkit.git.get_filter_driver(repo, path) is None
+    rule = f"{path} -filter"
+    assert attributes.read_text().splitlines().count(rule) == 1

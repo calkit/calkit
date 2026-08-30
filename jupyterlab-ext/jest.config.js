@@ -13,17 +13,34 @@ const esModules = [
 ].join("|");
 
 const baseConfig = jestJupyterLab(__dirname);
-// Remove testRegex when using projects
-const { testRegex, ...baseConfigWithoutRegex } = baseConfig;
+// testRegex is replaced per project by testMatch, and the rest of these are
+// only understood at the top level, so none of them belong in a project
+const {
+  testRegex,
+  testTimeout,
+  reporters,
+  coverageReporters,
+  coverageDirectory,
+  ...projectBaseConfig
+} = baseConfig;
+
+// The UI tests build a project with its own virtual environment under
+// ui-tests/test-project. Jest scanning it turns every package that ships a
+// labextension into a duplicate module, so keep it out of the module map
+const generatedPaths = ["<rootDir>/ui-tests/test-project/"];
 
 module.exports = {
+  testTimeout,
+  reporters,
+  coverageDirectory,
+  modulePathIgnorePatterns: generatedPaths,
   projects: [
     {
       displayName: "ui",
-      ...baseConfigWithoutRegex,
+      ...projectBaseConfig,
       automock: false,
       testMatch: ["<rootDir>/src/__tests__/*.spec.ts"],
-      testPathIgnorePatterns: ["useQueries"],
+      modulePathIgnorePatterns: generatedPaths,
       transformIgnorePatterns: [`/node_modules/(?!${esModules}).+`],
     },
     {
@@ -31,6 +48,7 @@ module.exports = {
       preset: "ts-jest",
       testEnvironment: "jsdom",
       testMatch: ["<rootDir>/src/hooks/__tests__/useQueries.test.tsx"],
+      modulePathIgnorePatterns: generatedPaths,
     },
   ],
   collectCoverageFrom: [

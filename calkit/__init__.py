@@ -10,7 +10,6 @@ from .core import *  # noqa: F403, I001
 if TYPE_CHECKING:
     from calkit import (  # noqa: F401
         calc,
-        check,
         conda,
         config,
         datasets,
@@ -37,7 +36,12 @@ if TYPE_CHECKING:
         ops,
         overleaf,
         pipeline,
+        procedures,
+        provenance,
         releases,
+        reproducibility,
+        resources,
+        schema,
         server,
         templates,
     )
@@ -57,10 +61,13 @@ _SUBMODULES = {
     "templates",
     "conda",
     "calc",
-    "check",
+    "procedures",
+    "provenance",
+    "reproducibility",
     "github",
     "invenio",
     "releases",
+    "resources",
     "licenses",
     "overleaf",
     "julia",
@@ -76,6 +83,7 @@ _SUBMODULES = {
     "install",
     "magics",
     "ops",
+    "schema",
     "server",
 }
 

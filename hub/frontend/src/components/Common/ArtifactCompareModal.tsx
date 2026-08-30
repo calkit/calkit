@@ -33,7 +33,7 @@ import {
 } from "@chakra-ui/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link as RouterLink } from "@tanstack/react-router"
-import { Suspense, lazy, useEffect, useState } from "react"
+import { Suspense, lazy, useEffect, useRef, useState } from "react"
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued"
 import {
   FaChevronLeft,
@@ -41,6 +41,7 @@ import {
   FaCodeBranch,
   FaLink,
 } from "react-icons/fa"
+import { useDebounce } from "use-debounce"
 import Tooltip from "./Tooltip"
 
 import {
@@ -52,11 +53,16 @@ import {
   type Publication,
 } from "../../client"
 import useAuth from "../../hooks/useAuth"
+import { httpStatus } from "../../lib/api"
+import { declaredInputs, matchDepsToDatasets } from "../../lib/provenance"
+import FigureEditLauncher from "../Figures/FigureEditLauncher"
 import FigureView from "../Figures/FigureView"
 import FileContent from "../Files/FileContent"
 import SharedCommentsPanel, {
   projectCommentToPanelComment,
 } from "./CommentsPanel"
+import InputsRow, { type InputLink } from "./InputsRow"
+import Markdown from "./Markdown"
 import PdfCanvas from "./PdfCanvas"
 import PdfDocumentViewer from "./PdfDocumentViewer"
 const IpynbRenderer = lazy(() =>
@@ -94,6 +100,9 @@ interface ArtifactCompareModalProps {
   onRefsChange?: (ref1: string | undefined, ref2: string | undefined) => void
   onPrev?: () => void
   onNext?: () => void
+  /** Whether the figure editor is open, when the page keeps it in the URL. */
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }
 
 /** Render the artifact content for a given kind/data. */
@@ -228,20 +237,29 @@ function useArtifactAtRef(
         }).then((response) => response.data)
       }
       if (kind === "figure") {
-        const figs = await ProjectsService.getProjectFigures({
-          owner_name: ownerName,
-          project_name: projectName,
-          ref,
-        }).then((response) => response.data)
-        // Fall back to contents API if not declared in calkit.yaml
-        const found = figs.find((f) => f.path === path)
-        if (found) return found
-        return ProjectsService.getProjectContents({
-          owner_name: ownerName,
-          project_name: projectName,
-          path,
-          ref,
-        }).then((response) => response.data)
+        // Fetch just this figure. Listing every figure to pick one out meant
+        // downloading and base64-encoding the whole project's figures on each
+        // ref, which is what made this modal take minutes to open.
+        try {
+          return await ProjectsService.getProjectFigure({
+            owner_name: ownerName,
+            project_name: projectName,
+            figure_path: path,
+            ref,
+          }).then((response) => response.data)
+        } catch (err) {
+          // A 404 is the one expected outcome: the path isn't a figure at
+          // this ref, so show it as a plain file instead. Anything else
+          // (auth, 5xx, network) is a real failure and has to surface --
+          // swallowing it would silently hand back the wrong shape.
+          if (httpStatus(err) !== 404) throw err
+          return ProjectsService.getProjectContents({
+            owner_name: ownerName,
+            project_name: projectName,
+            path,
+            ref,
+          }).then((response) => response.data)
+        }
       }
       if (kind === "publication") {
         const pubs = await ProjectsService.getProjectPublications({
@@ -285,40 +303,114 @@ function FigureInfo({
   ownerName,
   projectName,
   gitRef,
+  editOpen,
+  onEditOpenChange,
 }: {
   figure: Figure
   ownerName: string
   projectName: string
   gitRef?: string
+  editOpen?: boolean
+  onEditOpenChange?: (open: boolean) => void
 }) {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   // Typed as plain string so the router's typed `to` prop accepts them.
   const filesTo: string = `/${ownerName}/${projectName}/files`
   const pipelineTo: string = `/${ownerName}/${projectName}/pipeline`
+  const datasetsTo: string = `/${ownerName}/${projectName}/datasets`
+  // What the figure was made from: its stage's concrete inputs in dvc.yaml,
+  // matched against the project's declared datasets.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  const datasetsQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "datasets"],
+    queryFn: () =>
+      ProjectsService.getProjectDatasets({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  // The stage as declared in calkit.yaml: its inputs are the data the
+  // author named, whereas dvc.yaml's deps also carry environment locks
+  const stageQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "stage", figure.stage],
+    queryFn: () =>
+      ProjectsService.getProjectPipelineStage({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: figure.stage!,
+      }).then((response) => response.data),
+    enabled: Boolean(figure.stage),
+    retry: false,
+  })
+  const dataLinks: InputLink[] = []
+  if (figure.stage && pipelineQuery.data && datasetsQuery.data) {
+    const deps = declaredInputs(
+      stageQuery.data?.yaml,
+      pipelineQuery.data.dvc_stages,
+      pipelineQuery.data.calkit_yaml,
+    )
+    if (figure.dataset && !deps.includes(figure.dataset))
+      deps.push(figure.dataset)
+    const inputs = matchDepsToDatasets(deps, datasetsQuery.data)
+    for (const { dataset } of inputs.declared) {
+      dataLinks.push({
+        key: dataset.path,
+        to: datasetsTo,
+        label: dataset.title || dataset.path,
+        tooltipPath: dataset.title ? dataset.path : undefined,
+        code: !dataset.title,
+      })
+    }
+    for (const path of inputs.other) {
+      dataLinks.push({
+        key: path,
+        to: filesTo,
+        search: { path, ref: gitRef },
+        label: path,
+        code: true,
+      })
+    }
+  }
   return (
     <Box bg={secBgColor} borderRadius="lg" p={3} mb={3} h="fit-content">
       <Heading size="sm" mb={2}>
         Info
       </Heading>
       {figure.title && (
-        <Text fontSize="sm" mb={1}>
-          <Text as="span" fontWeight="semibold">
+        <Flex fontSize="sm" mb={1} wrap="wrap" align="baseline">
+          <Text as="span" fontWeight="semibold" mr={1}>
             Title:
-          </Text>{" "}
-          <Text as="span" color="gray.500">
-            {figure.title}
           </Text>
-        </Text>
+          <Box flex={1} minW={0} color="gray.500" sx={{ "& p": { my: 0 } }}>
+            <Markdown inline>{figure.title}</Markdown>
+          </Box>
+        </Flex>
       )}
       {figure.description && (
-        <Text fontSize="sm" mb={1}>
+        <Box fontSize="sm" mb={1}>
           <Text as="span" fontWeight="semibold">
             Description:
           </Text>{" "}
-          <Text as="span" color="gray.500">
-            {figure.description}
-          </Text>
-        </Text>
+          <Box
+            as="span"
+            display="inline"
+            color="gray.500"
+            sx={{ "& p": { my: 0 } }}
+          >
+            <Markdown inline>{figure.description}</Markdown>
+          </Box>
+        </Box>
       )}
       <Text fontSize="sm" mb={1}>
         <Text as="span" fontWeight="semibold">
@@ -352,6 +444,16 @@ function FigureInfo({
           </Text>
         )}
       </Text>
+      <InputsRow label="Data" items={dataLinks} />
+      {/* Back into the code that made it, when there is some: last, after
+          the facts, and set off from them */}
+      <FigureEditLauncher
+        ownerName={ownerName}
+        projectName={projectName}
+        figure={figure}
+        isOpen={editOpen}
+        onOpenChange={onEditOpenChange}
+      />
     </Box>
   )
 }
@@ -361,11 +463,14 @@ function FigureComments({
   projectName,
   path,
   gitRef,
+  fetchEnabled = true,
 }: {
   ownerName: string
   projectName: string
   path: string
   gitRef?: string | undefined
+  /** False while the carousel is still settling; see `pathSettled`. */
+  fetchEnabled?: boolean
 }) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -394,6 +499,7 @@ function FigureComments({
         artifact_type: "figure",
         artifact_path: path,
       }).then((response) => response.data),
+    enabled: fetchEnabled,
   })
   const postMutation = useMutation({
     mutationFn: (vars: { body: string; createIssue: boolean }) =>
@@ -477,6 +583,8 @@ export function ArtifactCompareModal({
   onRefsChange,
   onPrev,
   onNext,
+  editOpen,
+  onEditOpenChange,
 }: ArtifactCompareModalProps) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const hoverBg = useColorModeValue("gray.50", "gray.700")
@@ -495,16 +603,46 @@ export function ArtifactCompareModal({
     onRefsChange?.(ref1, ref2)
   }, [ref1, ref2])
 
+  // Read the handlers through a ref so the listener is attached once. Keying
+  // the effect on them instead re-registers whenever the parent hands over
+  // new closures, which it does on every render while the carousel rolls onto
+  // the next page -- and because effects run after paint, a key pressed in
+  // that gap reaches the previous, now-stale handler and does nothing. That
+  // is precisely when someone flipping quickly is pressing.
+  const navHandlers = useRef({ onPrev, onNext })
+  navHandlers.current = { onPrev, onNext }
   useEffect(() => {
     if (!isOpen) return
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft") onPrev?.()
-      else if (e.key === "ArrowRight") onNext?.()
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+      // The comment box lives in this modal, so arrows have to stay with the
+      // field being typed in rather than paging the carousel underneath it.
+      const el = e.target as HTMLElement | null
+      if (
+        el?.isContentEditable ||
+        ["INPUT", "TEXTAREA", "SELECT"].includes(el?.tagName ?? "") ||
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey
+      ) {
+        return
+      }
+      if (e.key === "ArrowLeft") navHandlers.current.onPrev?.()
+      else navHandlers.current.onNext?.()
     }
     window.addEventListener("keydown", handleKey)
     return () => window.removeEventListener("keydown", handleKey)
-  }, [isOpen, onPrev, onNext])
+  }, [isOpen])
 
+  // Comments and file history are the slow panels here, and arrowing through
+  // the carousel changes `path` on every keypress. Hold their fetches until
+  // the path stops moving, so a run of presses costs one request for the
+  // figure you land on instead of one per figure you pass through. The keys
+  // still use the live `path`, so anything already cached (a figure you've
+  // been to before) renders immediately rather than waiting out the delay,
+  // and no panel ever shows another figure's data.
+  const [settledPath] = useDebounce(path, 300)
+  const pathSettled = settledPath === path
   const artifactStorage = (initialArtifact as { storage?: string } | undefined)
     ?.storage as "git" | "dvc" | "dvc-zip" | undefined
   const historyQuery = useQuery({
@@ -524,7 +662,7 @@ export function ArtifactCompareModal({
         limit: 50,
         storage: artifactStorage ?? null,
       }).then((response) => response.data)) as unknown as CommitHistory[],
-    enabled: isOpen,
+    enabled: isOpen && pathSettled,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -542,9 +680,9 @@ export function ArtifactCompareModal({
     (r: GitRef) => r.kind === "branch",
   )
 
-  // For figure/publication/notebook, fetching without a ref loads ALL items just
-  // to find one--skip that when we already have initialArtifact. For "file", the
-  // fetch is a direct single-file call so it's cheap and always useful.
+  // For publication/notebook, fetching without a ref loads ALL items just to
+  // find one--skip that when we already have initialArtifact. For "file" and
+  // "figure" the fetch is a direct single-item call, so it's cheap.
   // When there is no initialArtifact (e.g. opened from the files page), also
   // enable the query without a ref so the current version is shown on open.
   const artifact1Enabled =
@@ -989,6 +1127,8 @@ export function ArtifactCompareModal({
                     ownerName={ownerName}
                     projectName={projectName}
                     gitRef={ref1}
+                    editOpen={editOpen}
+                    onEditOpenChange={onEditOpenChange}
                   />
                 )}
                 <FigureComments
@@ -996,6 +1136,7 @@ export function ArtifactCompareModal({
                   projectName={projectName}
                   path={path}
                   gitRef={ref1}
+                  fetchEnabled={pathSettled}
                 />
               </Box>
             )}

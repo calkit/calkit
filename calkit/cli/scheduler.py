@@ -8,12 +8,14 @@ Registered as ``scheduler|sch``.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import random
 import re
 import shlex
 import shutil
 import signal
-import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -44,6 +46,23 @@ LOCAL_DIR = os.path.join(".calkit", "local")
 # (e.g. `scheduler queue`) never see a half-written file.
 JOBS_DB_PATH = os.path.join(LOCAL_DIR, "scheduler-jobs.db")
 MOCK_DIR = os.path.join(LOCAL_DIR, "mock-scheduler")
+# Serializes the check-for-a-free-slot-then-submit sequence across the
+# parallel batch processes that fan out an iterated stage. Without it they
+# would all see the same free slot and submit together, which is exactly what
+# an environment's max_concurrent_jobs exists to prevent.
+QUEUE_LOCK_PATH = os.path.join(LOCAL_DIR, "scheduler-queue-lock.db")
+# Seconds SQLite waits for the lock before raising; retried past this, so it
+# only bounds how long a single attempt blocks.
+QUEUE_LOCK_TIMEOUT = 60
+# How often a job waiting for a queue slot rechecks. Long enough not to hammer
+# the scheduler with status queries, short enough that a freed slot is taken
+# promptly relative to the runtime of a job worth queueing.
+QUEUE_SLOT_POLL_INTERVAL = 10.0
+MOCK_QUEUE_SLOT_POLL_INTERVAL = 0.25
+# Fraction by which each waiter randomizes its poll interval. A capped sweep
+# leaves one waiting process per unsubmitted case, and without jitter they all
+# wake, take the lock, and query the scheduler in lockstep.
+QUEUE_SLOT_POLL_JITTER = 0.25
 # When set, scheduler commands run jobs on the local host instead of
 # dispatching to a real SLURM/PBS install (see _mock_enabled).
 MOCK_ENV_VAR = "CALKIT_MOCK_SCHEDULER"
@@ -434,6 +453,190 @@ def _is_active(kind: str, job_id: str) -> bool:
     return _poll_job(kind, job_id)[0]
 
 
+def _active_job_ids(kind: str, job_ids: list[str]) -> set[str]:
+    """Return which of ``job_ids`` are still queued or running.
+
+    Answers for the whole set in one scheduler query where possible. Counting
+    queue occupancy means asking about every job this project has submitted,
+    and doing that one ``squeue`` call per job---from every process waiting
+    for a slot, on every poll---would put more load on the scheduler than the
+    submissions we are trying to pace.
+    """
+    if not job_ids:
+        return set()
+    if not _mock_enabled() and kind == "slurm":
+        # Query our own jobs rather than passing `--jobs <ids>`: squeue errors
+        # out when any listed id is unknown, and ids do go unknown once the
+        # scheduler purges a finished job, which is the common case here.
+        p = subprocess.run(
+            ["squeue", "--me", "-h", "-o", "%i"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if p.returncode == 0:
+            wanted = set(job_ids)
+            # Array and step ids appear as `123_4` and `123.batch`; both
+            # belong to the job we recorded as `123`.
+            active = {
+                line.strip().split("_")[0].split(".")[0]
+                for line in p.stdout.splitlines()
+                if line.strip()
+            }
+            return wanted & active
+        # squeue failed---fall through and ask about each job individually
+        # rather than reporting an empty queue we have not confirmed.
+    return {job_id for job_id in job_ids if _is_active(kind, job_id)}
+
+
+def _count_queued_jobs(environment: str, exclude: str) -> int:
+    """Count this project's jobs sitting in the queue for an environment.
+
+    Only jobs Calkit submitted for this project are counted; the limit is
+    about not monopolizing a shared queue with one project's iterated stage,
+    not about the user's jobs at large.
+    """
+    by_kind: dict[str, list[str]] = {}
+    for job_name, info in _load_jobs().items():
+        if job_name == exclude:
+            continue
+        # Records written before environments were tracked have no
+        # environment key. Count them: over-counting delays a submission,
+        # while under-counting is what floods the queue.
+        job_env = info.get("environment")
+        if job_env is not None and job_env != environment:
+            continue
+        if info.get("exit_code") is not None:
+            # Already observed to have finished, so it cannot be in the queue.
+            continue
+        by_kind.setdefault(info.get("kind", "slurm"), []).append(
+            info["job_id"]
+        )
+    return sum(
+        len(_active_job_ids(kind, job_ids))
+        for kind, job_ids in by_kind.items()
+    )
+
+
+@contextlib.contextmanager
+def _queue_lock():
+    """Cross-process mutex around checking for a slot and then submitting.
+
+    Built on SQLite's own locking---an IMMEDIATE transaction takes a write
+    lock that other connections block on---rather than a lock library, since
+    scheduler state already depends on SQLite locking correctly here, and it
+    keeps this to the standard library.
+    """
+    calkit.ensure_local_dir()
+    conn = sqlite3.connect(
+        QUEUE_LOCK_PATH, timeout=QUEUE_LOCK_TIMEOUT, isolation_level=None
+    )
+    try:
+        while True:
+            try:
+                conn.execute("BEGIN IMMEDIATE")
+                break
+            except sqlite3.OperationalError as e:
+                # Another process is mid-submit. It holds the lock only for as
+                # long as one submit command takes, so retrying is better than
+                # failing the stage. Only contention is worth retrying though:
+                # a read-only file or a bad disk would never clear, and
+                # retrying those forever would hang the stage with no
+                # explanation instead of surfacing the real problem.
+                msg = str(e).lower()
+                if "locked" not in msg and "busy" not in msg:
+                    raise
+                time.sleep(1)
+        try:
+            yield
+        finally:
+            conn.rollback()
+    finally:
+        conn.close()
+
+
+def _parse_max_concurrent_jobs(environment: str, value: object) -> int | None:
+    """Interpret an environment's ``max_concurrent_jobs``, or ``None``.
+
+    The value is read straight out of ``calkit.yaml`` rather than through
+    ``SlurmEnvironment``, so its ``ge=1`` constraint never runs and a
+    hand-edited file can put anything here. Reject what we cannot honor
+    instead of guessing: silently reading a bad value as "no limit" would
+    flood the queue this setting exists to protect, and a negative one would
+    leave the wait below with a condition that can never come true.
+    """
+    if value is None:
+        return None
+    # bool is an int subclass, and `max_concurrent_jobs: true` is a mistake,
+    # not a limit of one.
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise_error(
+            f"Environment '{environment}' has an invalid "
+            f"max_concurrent_jobs ({value!r}); expected a positive integer"
+        )
+    # 0 means no limit, matching `calkit update slurm-env
+    # --max-concurrent-jobs 0`.
+    if value == 0:
+        return None
+    if value < 0:
+        raise_error(
+            f"Environment '{environment}' has a negative "
+            f"max_concurrent_jobs ({value}); it must be at least 1"
+        )
+    return value
+
+
+@contextlib.contextmanager
+def _queue_slot(environment: str, name: str, max_jobs: int | None):
+    """Hold a slot in the environment's queue for the duration of the block.
+
+    Blocks until this project has fewer than ``max_jobs`` jobs queued or
+    running, then keeps the lock while the caller submits and records the new
+    job, so concurrent waiters see it and do not overshoot the limit.
+    """
+    max_jobs = _parse_max_concurrent_jobs(environment, max_jobs)
+    if max_jobs is None:
+        yield
+        return
+    announced = False
+    while True:
+        # Check without the lock first. A capped sweep leaves one waiting
+        # process per unsubmitted case, and each poll would otherwise hold the
+        # exclusive lock across a scheduler query---with enough waiters the
+        # lock stays busy and slots go unclaimed long after they free up.
+        # A full queue is the common answer while waiting and needs no lock to
+        # act on; the authoritative check is still made under it below.
+        n_queued = _count_queued_jobs(environment, exclude=name)
+        if n_queued < max_jobs:
+            with _queue_lock():
+                n_queued = _count_queued_jobs(environment, exclude=name)
+                if n_queued < max_jobs:
+                    yield
+                    return
+        if not announced:
+            typer.echo(
+                f"Waiting for a free slot in environment '{environment}' "
+                f"({n_queued} of {max_jobs} jobs queued)"
+            )
+            announced = True
+        # Mocked jobs run locally and finish in seconds, so a full interval
+        # would dominate the runtime of anything using the mock scheduler.
+        interval = (
+            MOCK_QUEUE_SLOT_POLL_INTERVAL
+            if _mock_enabled()
+            else QUEUE_SLOT_POLL_INTERVAL
+        )
+        time.sleep(
+            interval
+            * (
+                1
+                + random.uniform(
+                    -QUEUE_SLOT_POLL_JITTER, QUEUE_SLOT_POLL_JITTER
+                )
+            )
+        )
+
+
 def _cancel(kind: str, job_id: str) -> tuple[bool, str]:
     if _mock_enabled():
         return _mock_cancel(job_id)
@@ -655,6 +858,11 @@ def run_batch(
     the same name, we'll wait for it to finish. The only exception is if the
     dependencies have changed, in which case any queued or running jobs will
     be canceled and a new one submitted.
+
+    If the environment sets ``max_concurrent_jobs``, submission waits until
+    this project has fewer than that many jobs queued or running, so an
+    iterated stage does not put all of its jobs into a shared cluster's queue
+    at once.
     """
     if args is None:
         args = []
@@ -687,21 +895,37 @@ def run_batch(
         log_path = os.path.join(LOGS_DIR, f"{name}.out")
     if is_command is None:
         is_command = not os.path.isfile(target)
-    # Host check
+    # A scheduler env names the cluster its jobs belong to. Submitting from
+    # anywhere else would queue them on the wrong one, so if this isn't that
+    # machine, go there and submit from a workspace instead. Nothing about
+    # the submission changes: the same command runs on the cluster, where
+    # sbatch/qsub exist and where the job's files have to be anyway.
     env_host = env.get("host", "localhost")
-    if env_host != "localhost":
-        current_host = socket.gethostname()
-        current_fqdn = socket.getfqdn()
-        if (
-            env_host != current_host
-            and env_host != current_fqdn
-            and current_host != env_host.split(".")[0]
-            and current_fqdn != env_host
-        ):
-            raise_error(
-                f"Environment '{environment}' is for host '{env_host}', "
-                f"but this is '{current_host}'"
+    if not calkit.environments.host_is_local(env_host):
+        import calkit.workspace as workspace
+
+        ck_info_full = calkit.load_calkit_info()
+        try:
+            ws = workspace.Workspace.from_env(
+                env=env, env_name=environment, ck_info=ck_info_full
             )
+            ws = workspace.resolve_wdir(ws)
+            # Re-run this same invocation over there. It terminates rather
+            # than bouncing onward, since on the cluster the env's host is
+            # local and this branch isn't taken.
+            remote_command = "calkit " + shlex.join(sys.argv[1:])
+            workspace.run_in_workspace(
+                workspace=ws,
+                command=remote_command,
+                job_key=f"{environment}::{name}",
+                label=f"{environment} job '{name}'",
+                deps=list(deps or []),
+                outs=list(outs or []),
+                echo=typer.echo,
+            )
+        except (ValueError, subprocess.CalledProcessError) as e:
+            raise_error(str(e))
+        return
     # Apply env defaults per mode
     env_setup_cmds = env.get("default_setup", []) or []
     if env_default_setup == "merge" and env_setup_cmds:
@@ -872,51 +1096,63 @@ def run_batch(
                     shutil.rmtree(out)
             except Exception as e:
                 raise_error(f"Error deleting '{out}': {e}")
-    # Submit and record atomically with respect to Ctrl+C: a SIGINT here would
-    # otherwise kill the submit command mid-flight or leave a job submitted but
-    # never written to the database (so a re-run would resubmit it). Defer the
-    # signal until the job is safely recorded, then act on it.
+    # Wait for room in the queue before submitting, if the environment caps
+    # how many of this project's jobs may be queued at once. This is done
+    # after deleting outputs (which can be slow) so the slot is held only for
+    # as long as submitting takes.
+    max_jobs = env.get("max_concurrent_jobs")
     pid = None
     interrupted: list[bool] = []
-    prev_sigint = signal.signal(
-        signal.SIGINT, lambda *_: interrupted.append(True)
-    )
-    try:
-        if _mock_enabled():
-            job_id = uuid.uuid4().hex[:12]
-            pid = _mock_submit(
-                job_id=job_id, job_command=job_command, log_path=log_path
-            )
-        else:
-            # start_new_session shields the submit command from the terminal's
-            # Ctrl+C so the submission always completes.
-            p = subprocess.run(
-                submit_cmd,
-                input=submit_input,
-                capture_output=True,
-                check=False,
-                text=True,
-                start_new_session=True,
-            )
-            if p.returncode != 0:
-                raise_error(f"Failed to submit new job: {p.stderr}")
-            job_id = p.stdout.strip()
-        typer.echo(f"Submitted job with ID: {job_id}")
-        new_job = {
-            "kind": kind,
-            "job_id": job_id,
-            "deps": deps,
-            "target": target,
-            "args": args,
-            "setup": setup_cmds,
-            "dep_md5s": current_dep_md5s,
-            "submitted_at": calkit.utcnow().isoformat(),
-        }
-        if pid is not None:
-            new_job["pid"] = pid
-        _record_job(name, new_job)
-    finally:
-        signal.signal(signal.SIGINT, prev_sigint)
+    # The wait for a slot sits outside the SIGINT deferral below so Ctrl+C
+    # still works while waiting---that wait can be long, and deferring the
+    # signal through it would make it uninterruptible.
+    with _queue_slot(environment, name, max_jobs):
+        # Submit and record atomically with respect to Ctrl+C: a SIGINT here
+        # would otherwise kill the submit command mid-flight or leave a job
+        # submitted but never written to the database (so a re-run would
+        # resubmit it). Defer the signal until the job is safely recorded,
+        # then act on it. The queue slot is held across both, so a concurrent
+        # waiter counts this job before deciding it has room to submit.
+        prev_sigint = signal.signal(
+            signal.SIGINT, lambda *_: interrupted.append(True)
+        )
+        try:
+            if _mock_enabled():
+                job_id = uuid.uuid4().hex[:12]
+                pid = _mock_submit(
+                    job_id=job_id, job_command=job_command, log_path=log_path
+                )
+            else:
+                # start_new_session shields the submit command from the
+                # terminal's Ctrl+C so the submission always completes.
+                p = subprocess.run(
+                    submit_cmd,
+                    input=submit_input,
+                    capture_output=True,
+                    check=False,
+                    text=True,
+                    start_new_session=True,
+                )
+                if p.returncode != 0:
+                    raise_error(f"Failed to submit new job: {p.stderr}")
+                job_id = p.stdout.strip()
+            typer.echo(f"Submitted job with ID: {job_id}")
+            new_job = {
+                "kind": kind,
+                "environment": environment,
+                "job_id": job_id,
+                "deps": deps,
+                "target": target,
+                "args": args,
+                "setup": setup_cmds,
+                "dep_md5s": current_dep_md5s,
+                "submitted_at": calkit.utcnow().isoformat(),
+            }
+            if pid is not None:
+                new_job["pid"] = pid
+            _record_job(name, new_job)
+        finally:
+            signal.signal(signal.SIGINT, prev_sigint)
     if interrupted:
         typer.echo(
             f"Interrupted after submitting job '{name}' ({job_id}); it will "

@@ -191,6 +191,10 @@ class User(UserBase, table=True):
     hashed_password: str
     stripe_customer_id: str | None = None
     zenodo_user_id: str | None = None
+    # When the user proved the address is theirs, by entering an emailed
+    # code or following its link; null until then. A Google or GitHub
+    # sign-in that vouched for the address sets it too.
+    email_verified_at: datetime | None = Field(default=None)
     # Relationships
     account: Account = Relationship(back_populates="user", cascade_delete=True)
     github_token: UserGitHubToken | None = Relationship(cascade_delete=True)
@@ -227,6 +231,54 @@ class User(UserBase, table=True):
         back_populates="user",
         cascade_delete=True,
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    feedback: list["Feedback"] = Relationship(
+        back_populates="user",
+        cascade_delete=True,
+    )
+    email_verification: Union["UserEmailVerification", None] = Relationship(
+        back_populates="user", cascade_delete=True
+    )
+    dvc_pushes: list["ProjectDvcPush"] = Relationship(
+        back_populates="user", cascade_delete=True
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_verified(self) -> bool:
+        """Whether the account's email is known to belong to whoever holds it.
+
+        Signing up with a password never checks the address, so anyone can
+        register someone else's email and wait; the verification flow,
+        which stamps ``email_verified_at``, is what settles it. Signing in
+        through Google also checks it (Google only reports an address it
+        has verified, and login refuses the rest) and records which
+        address that was on the credential it leaves behind. Only a match
+        with the account's own email counts there: a Google account
+        connected from settings can be any Google account.
+        """
+        if self.email_verified_at is not None:
+            return True
+        cred = self.get_external_credential("google")
+        return (
+            cred is not None
+            and cred.provider_account_id is not None
+            and cred.provider_account_id.lower() == self.email.lower()
+        )
+
+    @computed_field
+    @property
+    def created(self) -> datetime:
+        """When this user signed up.
+
+        Read off the account rather than stored again here: the two are
+        created in the same transaction, so a column on the user would be a
+        second copy of the same fact, free to drift from it.
+        """
+        return self.account.created
 
     @computed_field
     @property
@@ -249,8 +301,28 @@ class User(UserBase, table=True):
 # Properties to return via API, id is always required
 class UserPublic(UserBase):
     id: uuid.UUID
+    created: datetime
     github_username: str | None
+    email_verified: bool
     subscription: Union["UserSubscription", None]
+
+
+class UserEmailVerification(SQLModel, table=True):
+    """A code emailed to a user to prove the address is theirs.
+
+    One row per user, replaced on each send: only the hash of the code is
+    kept, and it stops working when it expires, after too many wrong
+    guesses (six digits is a small space to search), or once it's used,
+    when the row is deleted.
+    """
+
+    user_id: uuid.UUID = Field(foreign_key="user.id", primary_key=True)
+    code_hash: str = Field(max_length=64)
+    created: datetime = Field(default_factory=utcnow)
+    expires: datetime
+    attempts: int = Field(default=0)
+    # Relationships
+    user: User = Relationship(back_populates="email_verification")
 
 
 class UsersPublic(SQLModel):
@@ -579,6 +651,12 @@ class Project(ProjectBase, table=True):
     releases: list["Release"] = Relationship(
         back_populates="project", cascade_delete=True
     )
+    onboarding_flags: list["UserOnboardingFlag"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    dvc_pushes: list["ProjectDvcPush"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
 
     @computed_field
     @property
@@ -658,6 +736,9 @@ class ProjectPost(ProjectBase):
     git_repo_url: str | None = Field(max_length=2048, default=None)
     template: str | None = None
     git_repo_exists: bool | None = None
+    # Whether a project made from a template keeps the template's commits.
+    # Off by default: the new project's history starts with itself.
+    keep_template_history: bool = False
 
 
 class UserProjectAccess(SQLModel, table=True):
@@ -703,6 +784,122 @@ class UserProjectAccess(SQLModel, table=True):
     @property
     def role_name(self) -> str | None:
         return ROLE_NAMES[self.role_id] if self.role_id is not None else None
+
+
+class Feedback(SQLModel, table=True):
+    """A message a user sent from the in-app help form.
+
+    Stored rather than only emailed: email is fire-and-forget, and a relay
+    that's misconfigured or down would otherwise lose the message and tell
+    the user their feedback failed. The row is the record; the email is a
+    notification about it.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    kind: str = Field(default="feedback", max_length=32)
+    message: str = Field(max_length=5000)
+    # Where the user was when they sent it, so a bug report doesn't cost a
+    # round trip to ask which page.
+    page: str | None = Field(default=None, max_length=2048)
+    created: datetime = Field(default_factory=utcnow)
+    resolved: bool = Field(default=False)
+    # Relationships
+    user: User = Relationship(back_populates="feedback")
+
+
+class FeedbackPublic(SQLModel):
+    id: uuid.UUID
+    kind: str
+    message: str
+    page: str | None
+    created: datetime
+    resolved: bool
+    user_email: str
+    user_full_name: str | None
+
+
+class FeedbackPatch(SQLModel):
+    resolved: bool
+
+
+class UserOnboardingFlag(SQLModel, table=True):
+    """A checklist step a user has dismissed or marked done by hand.
+
+    The onboarding checklists themselves are derived from real state --
+    whether the project has questions, an environment, a pipeline that has
+    run -- so nothing here decides whether a step is complete. This table
+    only holds what that state can't answer: a step done off-hub (an editor
+    extension installed), and a checklist the user is finished with.
+
+    ``project_id`` is null for the account-level checklist. Postgres treats
+    nulls as distinct in a unique constraint, so the account-level rows
+    aren't actually deduped by it; the API checks before inserting and reads
+    collapse to a set, which makes a duplicate harmless either way.
+    """
+
+    __table_args__ = (
+        sqlalchemy.UniqueConstraint(
+            "user_id",
+            "project_id",
+            "step",
+            name="uq_useronboardingflag_user_project_step",
+        ),
+    )
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", index=True)
+    project_id: uuid.UUID | None = Field(
+        foreign_key="project.id", default=None
+    )
+    step: str = Field(min_length=1, max_length=64)
+    created: datetime = Field(default_factory=utcnow)
+    # Relationships
+    user: User = Relationship(back_populates="onboarding_flags")
+    project: Union["Project", None] = Relationship(
+        back_populates="onboarding_flags"
+    )
+
+
+class ProjectDvcPush(SQLModel, table=True):
+    """A batch of DVC objects a user pushed to a project's storage.
+
+    Object uploads arrive one file at a time, and a push of a directory
+    can be hundreds of them, so a row stands for a burst rather than a
+    file: an upload within a few minutes of the user's last one bumps
+    ``updated`` and the count instead of adding a row. That's enough for
+    the project's activity feed to say "pushed 12 files", which is what
+    a reader wants to know, without a row per object.
+    """
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    project_id: uuid.UUID = Field(foreign_key="project.id", index=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id")
+    created: datetime = Field(default_factory=utcnow)
+    updated: datetime = Field(default_factory=utcnow)
+    n_files: int = Field(default=1)
+    # Relationships
+    project: "Project" = Relationship(back_populates="dvc_pushes")
+    user: User = Relationship(back_populates="dvc_pushes")
+
+
+class OnboardingFlags(SQLModel):
+    """Every onboarding flag a user has set, in one response.
+
+    Both checklists are read on pages that are already fetching plenty, so
+    they share a single query rather than each adding one: ``account`` holds
+    the account-level steps, and ``projects`` maps a project ID to the steps
+    flagged on it.
+    """
+
+    account: list[str] = []
+    projects: dict[str, list[str]] = {}
+    # The user's earliest-created project, where first-project tips show
+    first_project_id: uuid.UUID | None = None
+
+
+class OnboardingFlagPost(SQLModel):
+    step: str = Field(min_length=1, max_length=64)
+    project_id: uuid.UUID | None = None
 
 
 class ProjectInvitation(SQLModel, table=True):
@@ -808,11 +1005,58 @@ class StageStatus(SQLModel):
 
 class Pipeline(SQLModel):
     mermaid: str
+    # Set when the pipeline is invalid, e.g. two stages writing overlapping
+    # outputs. The rest of this response still describes what's declared, so
+    # the page can show the stages alongside an explanation instead of
+    # failing outright.
+    error: str | None = None
     dvc_stages: dict[str, DvcPipelineStage | DvcForeachStage]
     dvc_yaml: str
     calkit_yaml: str | None
+    # Stages declared in calkit.yaml, which is a subset of dvc_stages: the
+    # compiled pipeline also contains stages Calkit generates (LaTeX diffs)
+    # and any hand-written dvc.yaml ones. Only these can be edited.
+    ck_stages: list[str] = Field(default_factory=list)
     stage_statuses: dict[str, StageStatus] = Field(default_factory=dict)
     status: Literal["up-to-date", "stale", "unknown"] = "unknown"
+
+
+class PipelineStage(SQLModel):
+    """One stage of the Calkit pipeline, as editable YAML.
+
+    The YAML is the stage's body only (no name key), exactly as it sits in
+    calkit.yaml -- same key order, same comments.
+    """
+
+    name: str
+    yaml: str
+
+
+class PipelineStagePut(SQLModel):
+    yaml: str
+    message: str | None = None
+
+
+class PipelineStageEdit(SQLModel):
+    """A stage edit to compute, against the editor's unsaved content.
+
+    The YAML is what's in the editor rather than what's committed, so
+    re-detecting right after changing ``target_path`` looks at the new
+    target.
+    """
+
+    yaml: str
+
+
+class PipelineStageEdited(SQLModel):
+    """The stage after an edit, plus what the edit touched.
+
+    ``changed`` is what the user should see happened: the inputs added, or
+    the default-valued keys removed.
+    """
+
+    yaml: str
+    changed: list[str]
 
 
 class Question(SQLModel, table=True):
@@ -844,6 +1088,28 @@ class Result(SQLModel):
     title: str
     description: str | None = None
     stage: str | None = None
+    # Which value inside the file this result is; null means the whole file.
+    # Several results can share a path with different keys.
+    key: str | None = None
+
+
+class Table(SQLModel):
+    """Tabular data the project publishes, resolved for display.
+
+    Carries content like a figure does rather than metadata alone: a table
+    is only useful once its rows can be read, and the files are small
+    enough to inline. Large or DVC-tracked ones come back as a ``url``
+    instead, exactly as figures do.
+    """
+
+    path: str
+    title: str
+    description: str | None = None
+    stage: str | None = None
+    stage_status: "StageStatus | None" = None
+    content: str | None = None  # Base64 encoded
+    url: str | None = None
+    storage: Literal["git", "dvc", "dvc-zip"] | None = None
 
 
 class CommentHighlight(BaseModel):
@@ -990,6 +1256,21 @@ class Dataset(DatasetBase, table=True):
     # TODO: Track size? -- basically all DVC properties
     # Relationships
     project: Project = Relationship(back_populates="datasets")
+
+
+class DatasetPublic(DatasetBase):
+    """A dataset as the API returns it, with its provenance spelled out.
+
+    The table keeps ``imported_from`` as a project path for the one kind of
+    import the hub can resolve itself; the structured origin (DOI, URL, Git
+    repo, project) and the creators come straight from calkit.yaml, which
+    is where they're authored.
+    """
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    imported_from_info: dict[str, Any] | None = None
+    created_by: list[dict[str, Any]] | None = None
 
 
 class DVCOut(BaseModel):
@@ -1150,10 +1431,48 @@ class Publication(BaseModel):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
 
 
+class PublicationComponent(BaseModel):
+    """One file a publication is made of and where it comes from."""
+
+    # Repo-relative
+    path: str
+    kind: Literal["produced", "authored", "attested", "imported", "unknown"]
+    # In the publication's folder, or read by its build stage from
+    # elsewhere in the project
+    via: Literal["folder", "input"] = "folder"
+    # For "produced": the stage that makes it, and that stage's kind, so a
+    # map-paths copy can be told from something computed
+    stage: str | None = None
+    stage_kind: str | None = None
+    # For "authored": where the source is edited
+    source: Literal["overleaf", "git"] | None = None
+    # For "unknown": a project figure with identical bytes, if any
+    matching_figure: str | None = None
+    size: int | None = None
+
+
+class PublicationComponents(BaseModel):
+    folder: str
+    items: list[PublicationComponent]
+    n_unknown: int
+
+
+class MiscArtifact(BaseModel):
+    """A calkit.yaml ``misc`` entry: a path attributed to someone or to
+    somewhere, without being a figure, dataset, or publication.
+    """
+
+    path: str
+    title: str | None = None
+    description: str | None = None
+    created_by: list[dict[str, Any]] | None = None
+    imported_from: dict[str, Any] | None = None
+
+
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1167,7 +1486,7 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "publication"]
+    kind: Literal["figure", "result", "table", "publication"]
     path: str
     key: str | None = None
     explanation: str | None = None
@@ -1214,10 +1533,16 @@ class Notebook(BaseModel):
     title: str | None = None
     description: str | None = None
     stage: str | None = None
-    output_format: Literal["html", "notebook"] | None = None
+    # 'source' is the notebook's own code, which is what there is to show for
+    # a marimo notebook: it's a Python module, and what running it produces
+    # is an app rather than an executed copy of itself.
+    output_format: Literal["html", "notebook", "source"] | None = None
     url: str | None = None
     content: str | None = None
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
+    # Key in the project's ``apps`` mapping, when this notebook's stage is
+    # what builds that app
+    app: str | None = None
 
 
 class FeatureVote(SQLModel, table=True):
@@ -1245,6 +1570,22 @@ class FeatureVoteStatus(SQLModel):
     feature: str
     count: int
     has_voted: bool
+
+
+class FeatureVoter(SQLModel):
+    email: str
+    full_name: str | None = None
+    account_name: str | None = None
+    created: datetime
+
+
+class FeatureVoteSummary(SQLModel):
+    """Every vote for one feature, for the admin page: demand is only
+    useful alongside who's asking, which is what feedback shows too."""
+
+    feature: str
+    count: int
+    voters: list[FeatureVoter]
 
 
 class GitRef(BaseModel):

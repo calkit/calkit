@@ -1,5 +1,7 @@
 """Tests for ``cli.update``."""
 
+import json
+import os
 import subprocess
 import sys
 
@@ -7,9 +9,231 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.docker
+import calkit.resources
 from calkit.cli.update import update_app
 
 runner = CliRunner()
+
+
+def test_update_project_config(tmp_dir, monkeypatch):
+    # These all write bundled resources, so none should touch the network
+    def fail(*args, **kwargs):
+        raise AssertionError("Should not make any HTTP requests")
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", fail)
+    subprocess.check_call(["calkit", "init"])
+    result = runner.invoke(update_app, ["devcontainer"])
+    assert result.exit_code == 0
+    with open(os.path.join(".devcontainer", "devcontainer.json")) as f:
+        assert json.load(f) == calkit.resources.load_json(
+            "devcontainer", calkit.resources.DEVCONTAINER_FNAME
+        )
+    result = runner.invoke(update_app, ["vscode-config"])
+    assert result.exit_code == 0
+    for fname in calkit.resources.VSCODE_FNAMES:
+        with open(os.path.join(".vscode", fname)) as f:
+            assert json.load(f) == calkit.resources.load_json("vscode", fname)
+    result = runner.invoke(update_app, ["github-actions"])
+    assert result.exit_code == 0
+    with open(os.path.join(".github", "workflows", "run-calkit.yml")) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    repo = calkit.git.get_repo()
+    assert repo.git.ls_files(".devcontainer")
+    assert repo.git.ls_files(".vscode")
+    assert repo.git.ls_files(".github")
+    assert not repo.git.status("--porcelain")
+    # All three should be safe to rerun
+    assert runner.invoke(update_app, ["devcontainer"]).exit_code == 0
+    assert runner.invoke(update_app, ["vscode-config"]).exit_code == 0
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    assert not repo.git.status("--porcelain")
+
+
+def test_update_dataset(tmp_dir):
+    from datetime import date
+
+    from calkit.models.core import ProjectInfo
+
+    subprocess.check_call(["calkit", "init"])
+    # A DOI is normalized and the date is kept as a date, not a string
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/a.csv",
+            "--imported-from-doi",
+            "https://doi.org/10.5281/zenodo.1234567",
+            "--imported-from-date",
+            "2026-01-02",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"] == [
+        {
+            "path": "data/a.csv",
+            "imported_from": {
+                "doi": "10.5281/zenodo.1234567",
+                "date": date(2026, 1, 2),
+            },
+        }
+    ]
+    # Git needs a commit hash; a branch would move
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-rev",
+            "main",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "commit hash" in result.output
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--imported-from-git-rev is required" in result.output
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/b.csv",
+            "--imported-from-git-url",
+            "https://github.com/a/b",
+            "--imported-from-git-rev",
+            "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "--imported-from-git-path",
+            "data/x.csv",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["imported_from"] == {
+        "git": {
+            "repo_url": "https://github.com/a/b",
+            "rev": "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "path": "data/x.csv",
+        }
+    }
+    # Only one source, and the extras need a source to go with
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/c.csv",
+            "--imported-from-url",
+            "https://x.org/c.csv",
+            "--imported-from-doi",
+            "10.5281/zenodo.1",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "only one of" in result.output
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/c.csv", "--imported-from-date", "2026-01-02"],
+    )
+    assert result.exit_code != 0
+    assert "go with one of" in result.output
+    # Existing entries are updated in place, and a stage can be set alone
+    result = runner.invoke(
+        update_app, ["dataset", "data/a.csv", "--stage", "fetch"]
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][0]["stage"] == "fetch"
+    assert ck_info["datasets"][0]["imported_from"]["doi"] == (
+        "10.5281/zenodo.1234567"
+    )
+    assert len(ck_info["datasets"]) == 2
+    # An import can't be added to a dataset someone collected
+    ck_info["datasets"].append(
+        {"path": "data/raw.csv", "created_by": {"email": "me@x.edu"}}
+    )
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app,
+        ["dataset", "data/raw.csv", "--imported-from-url", "https://x"],
+    )
+    assert result.exit_code != 0
+    assert "cannot also be imported" in result.output
+    ck_info = calkit.load_calkit_info()
+    assert "imported_from" not in ck_info["datasets"][2]
+    # What was written validates as a whole, dates included
+    info = ProjectInfo.model_validate(ck_info)
+    assert info.datasets[0].imported_from.date == date(2026, 1, 2)
+
+
+def test_update_github_actions(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    workflow_dir = os.path.join(".github", "workflows")
+    ref = calkit.resources.get_action_ref()
+    # A project that mentions Calkit in an unrelated workflow should get its
+    # own, and that workflow should be left alone
+    os.makedirs(workflow_dir, exist_ok=True)
+    other_fpath = os.path.join(workflow_dir, "docs.yml")
+    other_txt = "name: Docs\njobs:\n  main:\n    steps:\n      - run: calkit\n"
+    with open(other_fpath, "w") as f:
+        f.write(other_txt)
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(other_fpath) as f:
+        assert f.read() == other_txt
+    out_fpath = os.path.join(workflow_dir, "run-calkit.yml")
+    with open(out_fpath) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    # A workflow written by an older version of Calkit, which is still the
+    # example, should be replaced outright so it picks up any other changes
+    # to it, wherever it lives
+    os.remove(out_fpath)
+    old_fpath = os.path.join(workflow_dir, "run.yml")
+    with open(old_fpath, "w") as f:
+        f.write(
+            calkit.resources.render_github_actions_workflow(version="0.1.0")
+        )
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    assert not os.path.isfile(out_fpath)
+    with open(old_fpath) as f:
+        assert f.read() == calkit.resources.render_github_actions_workflow()
+    # A customized workflow, here one still pointing at the action's previous
+    # home, should only have its action ref updated
+    custom_txt = (
+        "name: Run pipeline\n"
+        "jobs:\n"
+        "  main:\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: calkit/run-action@v2\n"
+        "        with:\n"
+        "          extra-args: --no-check\n"
+        "      - run: echo custom\n"
+    )
+    with open(old_fpath, "w") as f:
+        f.write(custom_txt)
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(old_fpath) as f:
+        updated_txt = f.read()
+    assert updated_txt == custom_txt.replace("calkit/run-action@v2", ref)
+    # Rerunning should be a no-op, and shouldn't leave anything uncommitted
+    repo = calkit.git.get_repo()
+    repo.git.add(".github")
+    repo.git.commit(["-m", "Add workflows"])
+    assert runner.invoke(update_app, ["github-actions"]).exit_code == 0
+    with open(old_fpath) as f:
+        assert f.read() == updated_txt
+    assert not repo.git.status("--porcelain")
 
 
 def test_update_uv_env(tmp_dir):
@@ -238,3 +462,35 @@ def test_update_agent_skills_can_be_run_twice(fake_home):
     assert result2.exit_code == 0
     # Existing custom files should be preserved by copytree dirs_exist_ok.
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
+
+
+def test_update_docker_env_registry(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {"kind": "docker", "path": "Dockerfile", "image": "img"}
+    }
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "ghcr.io"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (
+        calkit.load_calkit_info()["environments"]["main"]["registry"]
+        == "ghcr.io"
+    )
+    # A shell can't pass YAML's null, so 'none' is how it's asked for, but
+    # what lands in calkit.yaml is the null the field is documented with,
+    # not a string that only happens to be read as one
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "none"]
+    )
+    assert result.exit_code == 0, result.output
+    env = calkit.load_calkit_info()["environments"]["main"]
+    assert env["registry"] is None
+    assert calkit.docker.resolve_registry_prefix(env) is None
+    with open("calkit.yaml") as f:
+        assert "registry: none" not in f.read()
+    # Nothing to update is a mistake worth reporting, not a no-op
+    result = runner.invoke(update_app, ["docker-env", "-n", "main"])
+    assert result.exit_code != 0

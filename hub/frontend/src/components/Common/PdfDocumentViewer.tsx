@@ -17,10 +17,10 @@ import {
   IconButton,
   Input,
   Link,
-  Spinner,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
+import LoadingSpinner from "./LoadingSpinner"
 import Tooltip from "./Tooltip"
 import mixpanel from "mixpanel-browser"
 import type { PDFDocumentProxy } from "pdfjs-dist"
@@ -274,7 +274,7 @@ export default function PdfDocumentViewer({
       {pdfReady && (
         <PdfLoader
           url={url}
-          beforeLoad={<Spinner color="ui.main" />}
+          beforeLoad={<LoadingSpinner />}
           errorMessage={
             // Without this, a PDF that can't be fetched or parsed (e.g. an
             // external, CORS-blocked, or auth-gated URL) would hang on the
@@ -990,6 +990,7 @@ function PdfViewerInner({
             isDisabled={pageNav.current <= 1}
           />
           <Input
+            autoComplete="off"
             size="xs"
             width="44px"
             textAlign="center"
@@ -1055,6 +1056,7 @@ function PdfViewerInner({
         {searchOpen && (
           <Flex align="center" gap={0.5} ml={2}>
             <Input
+              autoComplete="off"
               size="xs"
               width="150px"
               placeholder="Search document…"

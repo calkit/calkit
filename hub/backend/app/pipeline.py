@@ -28,8 +28,10 @@ from typing import Literal
 import ruamel.yaml
 from pydantic import BaseModel, Field
 
+import calkit.notebooks
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
+from app.storage import get_data_prefix_for_owner
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +146,66 @@ def _md5_in_object_storage(
         return False
 
 
+def _list_stored_md5s(
+    owner_name: str, project_name: str, fs
+) -> set[str] | None:
+    """Every md5 stored for a project, gathered by listing rather than probing.
+
+    A project's objects all live under one prefix per layout, so a single
+    paginated listing names all of them at once. That beats asking about each
+    md5 individually by a wide margin: on a project with ~6k lock entries,
+    listing takes well under a second where the per-md5 checks take ~12,
+    because the cost stops scaling with the number of artifacts.
+
+    Returns None if a listing fails, so the caller can fall back to probing.
+    """
+    # Mirrors the two layouts `make_data_fpath` writes: the current
+    # `<owner>/<project>/files/md5/<idx>/<rest>` and the legacy
+    # `<owner>/<project>/<idx>/<rest>`.
+    markers = [
+        (
+            f"{get_data_prefix_for_owner(owner_name)}/"
+            f"{project_name.lower()}/files/md5",
+            f"/{project_name.lower()}/files/md5/",
+        ),
+        (
+            f"{get_data_prefix_for_owner(owner_name, lowercase=False)}/"
+            f"{project_name}",
+            f"/{project_name}/",
+        ),
+    ]
+    md5s: set[str] = set()
+    for prefix, marker in markers:
+        try:
+            keys = fs.find(prefix)
+        except FileNotFoundError:
+            # A project that has never pushed under this layout.
+            continue
+        except Exception as e:
+            logger.warning(f"Failed to list object storage at {prefix}: {e}")
+            return None
+        for key in keys:
+            # Split on the marker rather than the prefix: `fs.find` returns
+            # keys without the scheme the prefix carries.
+            _, sep, rel = key.partition(marker)
+            if not sep:
+                continue
+            parts = rel.strip("/").split("/")
+            # Exactly <idx>/<rest>. Anything deeper is the current layout
+            # showing up underneath the legacy prefix, which the first marker
+            # already covered.
+            if len(parts) == 2:
+                md5s.add(parts[0] + parts[1])
+    return md5s
+
+
 def _precompute_storage_presence(
     dvc_lock: dict, owner_name: str, project_name: str, fs
 ) -> dict[str, bool]:
-    """Existence in object storage for every dep/out md5, checked in parallel.
+    """Existence in object storage for every dep/out md5.
 
-    Replaces the serial per-md5 ``fs.exists`` round-trips with one concurrent
-    batch. Returns a ``{md5: present}`` map; md5s absent from the map are
-    treated as not present by callers.
+    Returns a ``{md5: present}`` map; md5s absent from the map are treated as
+    not present by callers.
     """
     md5s: set[str] = set()
     for stage in (dvc_lock.get("stages") or {}).values():
@@ -161,6 +215,10 @@ def _precompute_storage_presence(
                 md5s.add(m)
     if not md5s:
         return {}
+    stored = _list_stored_md5s(owner_name, project_name, fs)
+    if stored is not None:
+        return {m: m in stored for m in md5s}
+    # Listing failed; fall back to probing each md5 concurrently.
     presence: dict[str, bool] = {}
     workers = min(_STORAGE_CHECK_MAX_WORKERS, len(md5s))
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -213,15 +271,57 @@ def _stage_status_cache_put(
             _stage_status_cache.popitem(last=False)
 
 
-def _build_outs_index(dvc_lock: dict) -> dict[str, str | None]:
-    """Map out path -> md5 across all stages in the lock."""
+def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:
+    """Map out path -> md5 across the given lock stages.
+
+    Pass only the stages that belong to the current pipeline (see
+    ``_get_live_lock_stages``). A dead entry left in the lock often claims the
+    same out path as the stage that replaced it, with the md5 from whenever it
+    last ran, and later entries win here -- so including them resolves a dep to
+    a hash nothing has produced in a while and flags its consumers stale.
+    """
     out_map: dict[str, str | None] = {}
-    for stage in (dvc_lock.get("stages") or {}).values():
+    for stage in lock_stages.values():
         for out in stage.get("outs") or []:
             p = out.get("path")
             if p:
                 out_map[p] = out.get("md5")
     return out_map
+
+
+def _get_live_lock_stages(
+    lock_stages: dict, yaml_stages: dict, current_expansions: dict
+) -> dict:
+    """The lock entries that are stages of the current pipeline.
+
+    dvc.lock accumulates entries that no longer correspond to anything
+    runnable: stages renamed or removed from dvc.yaml, a bare ``name`` left
+    from before that stage became a matrix, and expansions of matrix
+    combinations that have since changed. dvc/calkit status ignore all of
+    them, so the hub does too -- both when reporting status and when reading
+    the lock for what a dep's current hash should be.
+    """
+    live: dict = {}
+    for stage_name, lock_stage in lock_stages.items():
+        base = _get_base_stage_name(stage_name)
+        if base.startswith("_"):
+            continue
+        yaml_stage = yaml_stages.get(base)
+        if yaml_stage is None:
+            continue
+        if (
+            isinstance(yaml_stage, dict)
+            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
+            and "@" not in stage_name
+        ):
+            continue
+        if (
+            base in current_expansions
+            and stage_name not in current_expansions[base]
+        ):
+            continue
+        live[stage_name] = lock_stage
+    return live
 
 
 def _resolve_current_dep_md5(
@@ -244,7 +344,37 @@ def _resolve_current_dep_md5(
         return _hash_tree_file(tree, path)
     if path in outs_index:
         return outs_index[path]
+    cleaned = _cleaned_notebook_md5(path, tree)
+    if cleaned is not None:
+        return cleaned
     return None
+
+
+CLEANED_NOTEBOOKS_DIR = ".calkit/notebooks/cleaned/"
+
+
+def _cleaned_notebook_md5(path: str, tree: RepoTree) -> str | None:
+    """The md5 a cleaned-notebook dep would have, from the source notebook.
+
+    Cleaned notebooks are generated on the fly by ``calkit run`` and never
+    committed, so the dep can't be read; but its content is a function of
+    the committed notebook, so its hash can be computed. Without this an
+    edit to a notebook in the app never showed its stage as stale.
+    """
+    if not path.startswith(CLEANED_NOTEBOOKS_DIR):
+        return None
+    source = path[len(CLEANED_NOTEBOOKS_DIR) :]
+    if not tree.is_file(source):
+        return None
+    try:
+        nb = json.loads(tree.read_bytes(source))
+    except Exception as e:
+        logger.warning(f"Could not parse notebook {source}: {e}")
+        return None
+    # The same cleaning and the same ``json.dump(indent=2)`` as ``calkit
+    # run`` uses, which is what makes this hash match the lock's
+    text = json.dumps(calkit.notebooks.clean_notebook(nb), indent=2)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()
 
 
 def _get_nested(data: dict | None, dotted_key: str):
@@ -370,9 +500,13 @@ def compute_stage_statuses(
         fs = get_object_fs()
     lock_stages = dvc_lock.get("stages") or {}
     yaml_stages = dvc_yaml.get("stages") or {}
-    outs_index = _build_outs_index(dvc_lock)
+    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
+    live_lock_stages = _get_live_lock_stages(
+        lock_stages, yaml_stages, current_expansions
+    )
+    outs_index = _build_outs_index(live_lock_stages)
     presence = _precompute_storage_presence(
-        dvc_lock, owner_name, project_name, fs
+        {"stages": live_lock_stages}, owner_name, project_name, fs
     )
     # DVC outputs that calkit stores as a zip live under .calkit/zip/, not at
     # the standard files/md5 object path, so the md5 presence check above can't
@@ -388,7 +522,6 @@ def compute_stage_statuses(
             zip_workspace_paths = {k.rstrip("/") for k in zip_map}
     except Exception as e:
         logger.warning(f"Failed to read .calkit/zip/paths.json: {e}")
-    current_expansions = _compute_current_expansions(yaml_stages, lock_stages)
     result: dict[str, StageStatus] = {}
     locked_bases = {_get_base_stage_name(n) for n in lock_stages.keys()}
     for stage_name in yaml_stages.keys():
@@ -396,38 +529,9 @@ def compute_stage_statuses(
             continue
         if stage_name not in locked_bases:
             result[stage_name] = StageStatus(status="not-run")
-    for stage_name, lock_stage in lock_stages.items():
+    for stage_name, lock_stage in live_lock_stages.items():
         base = _get_base_stage_name(stage_name)
-        if base.startswith("_"):
-            continue
-        yaml_stage = yaml_stages.get(base)
-        if yaml_stage is None:
-            # Stale lock entry for a stage no longer in dvc.yaml (renamed or
-            # removed, or a bare entry left from before a stage became a
-            # matrix). It's not part of the current pipeline, so don't report
-            # it -- dvc/calkit status ignore it too.
-            continue
-        if (
-            isinstance(yaml_stage, dict)
-            and ("matrix" in yaml_stage or "foreach" in yaml_stage)
-            and "@" not in stage_name
-        ):
-            # A matrix/foreach stage exists in dvc.lock only as ``name@...``
-            # expansions; a bare ``name`` entry is stale cruft from before it
-            # was expanded, often with outdated deps. Only the expansions are
-            # real stages.
-            continue
-        if (
-            base in current_expansions
-            and stage_name not in current_expansions[base]
-        ):
-            # Drop leftover matrix/foreach expansions: ``base@...`` entries from
-            # old matrix combinations (or an older DVC naming scheme, e.g.
-            # ``@1-3-1`` vs the current ``@_arg01``) that aren't in the current
-            # pipeline. Their objects are often gc'd, so the hub would wrongly
-            # flag them stale even though a current entry produces the same
-            # output. lock files drift into this state easily, so guard for it.
-            continue
+        yaml_stage = yaml_stages[base]
         modified_command = False
         modified_inputs: list[str] = []
         modified_outputs: list[str] = []
@@ -637,23 +741,40 @@ def color_mermaid_by_status(
     return mermaid.rstrip() + "\n" + "\n".join(extra) + "\n"
 
 
-def find_stage_for_path(path: str, dvc_lock: dict) -> str | None:
+def find_stage_for_path(
+    path: str, dvc_lock: dict, valid_stages: set[str] | None = None
+) -> str | None:
     """Return the stage in ``dvc.lock`` that produces *path*.
 
     Matches an exact out path first; failing that, matches a stage whose out is
     a *directory* containing *path* (e.g. an out of ``figures`` produces
     ``figures/test.png``). Exact matches always win over directory matches.
+
+    ``valid_stages`` limits matching to stages that are part of the current
+    pipeline, and should be passed whenever the caller has that set (the keys
+    of ``compute_stage_statuses``). dvc.lock accumulates entries that are no
+    longer real stages -- a bare ``name`` left from before it became a matrix,
+    or expansions from a matrix combination that has since changed -- and
+    those are exactly the entries staleness reporting drops. Matching one
+    anyway pins the artifact to a stage that has no status, so it silently
+    shows none. Stale entries are still used as a last resort, since naming
+    the stage that most likely produced a file beats naming nothing.
     """
-    dir_match: str | None = None
+    matches: list[tuple[bool, bool, str]] = []  # (is_exact, is_valid, name)
     for stage_name, stage in (dvc_lock.get("stages") or {}).items():
+        is_valid = valid_stages is None or stage_name in valid_stages
         for out in stage.get("outs") or []:
             out_path = out.get("path")
             if not out_path:
                 continue
             if out_path == path:
-                return stage_name
-            if dir_match is None and path.startswith(
-                out_path.rstrip("/") + "/"
-            ):
-                dir_match = stage_name
-    return dir_match
+                if is_valid:
+                    return stage_name
+                matches.append((True, False, stage_name))
+            elif path.startswith(out_path.rstrip("/") + "/"):
+                matches.append((False, is_valid, stage_name))
+    if not matches:
+        return None
+    # Exact beats directory, and a current stage beats a stale one.
+    matches.sort(key=lambda m: (not m[0], not m[1]))
+    return matches[0][2]

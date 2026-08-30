@@ -80,6 +80,18 @@ export type BodyProjectsPostProjectDatasetUpload = {
    * File
    */
   file: Blob | File
+  /**
+   * Created By
+   */
+  created_by?: string | null
+  /**
+   * Created By Name
+   */
+  created_by_name?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | null
 }
 
 /**
@@ -106,6 +118,18 @@ export type BodyProjectsPostProjectFigure = {
    * File
    */
   file?: Blob | File | null
+  /**
+   * Created By
+   */
+  created_by?: string | null
+  /**
+   * Created By Name
+   */
+  created_by_name?: string | null
+  /**
+   * Created With Ai
+   */
+  created_with_ai?: string | null
 }
 
 /**
@@ -160,6 +184,10 @@ export type BodyProjectsPostProjectOverleafPublication = {
    */
   auto_build?: boolean | null
   /**
+   * Replace Existing
+   */
+  replace_existing?: boolean | null
+  /**
    * File
    */
   file?: Blob | File | null
@@ -207,6 +235,32 @@ export type BodyProjectsPostProjectPublication = {
    * File
    */
   file?: Blob | File | null
+}
+
+/**
+ * Body_projects-post_project_upload
+ */
+export type BodyProjectsPostProjectUpload = {
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * File
+   */
+  file: Blob | File
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Is Public
+   */
+  is_public?: boolean
 }
 
 /**
@@ -312,6 +366,10 @@ export type ConnectedAccounts = {
    * Zotero
    */
   zotero: boolean
+  /**
+   * Cli
+   */
+  cli?: boolean
 }
 
 /**
@@ -391,6 +449,34 @@ export type ContentsItem = {
    * Dir Items
    */
   dir_items?: Array<ContentsItemBase> | null
+}
+
+/**
+ * CreatorPost
+ *
+ * Someone credited with creating a dataset.
+ *
+ * Everything is optional here; that a person needs an email or an ORCID
+ * is enforced by the calkit model this is validated through, so the rule
+ * lives in one place rather than being restated and left to drift.
+ */
+export type CreatorPost = {
+  /**
+   * Email
+   */
+  email?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
+  /**
+   * Orcid
+   */
+  orcid?: string | null
+  /**
+   * With Ai
+   */
+  with_ai?: string | Array<string> | null
 }
 
 /**
@@ -530,6 +616,100 @@ export type DatasetForImport = {
    * Git Rev
    */
   git_rev: string
+}
+
+/**
+ * DatasetPost
+ *
+ * A dataset to declare, however it came to be part of the project.
+ */
+export type DatasetPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Created By
+   */
+  created_by?: Array<CreatorPost> | null
+  imported_from?: ImportedFromPost | null
+}
+
+/**
+ * DatasetPublic
+ *
+ * A dataset as the API returns it, with its provenance spelled out.
+ *
+ * The table keeps ``imported_from`` as a project path for the one kind of
+ * import the hub can resolve itself; the structured origin (DOI, URL, Git
+ * repo, project) and the creators come straight from calkit.yaml, which
+ * is where they're authored.
+ */
+export type DatasetPublic = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Imported From
+   */
+  imported_from?: string | null
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Project Id
+   */
+  project_id: string
+  /**
+   * Imported From Info
+   */
+  imported_from_info?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Created By
+   */
+  created_by?: Array<{
+    [key: string]: unknown
+  }> | null
 }
 
 /**
@@ -858,6 +1038,26 @@ export type DvcPipelineStage = {
 }
 
 /**
+ * EmailVerificationConfirm
+ */
+export type EmailVerificationConfirm = {
+  /**
+   * Code
+   */
+  code: string
+}
+
+/**
+ * EmailVerificationToken
+ */
+export type EmailVerificationToken = {
+  /**
+   * Token
+   */
+  token: string
+}
+
+/**
  * Environment
  */
 export type Environment = {
@@ -891,6 +1091,30 @@ export type Environment = {
    * File Content
    */
   file_content?: string | null
+  /**
+   * Locks
+   */
+  locks?: Array<EnvironmentLock>
+}
+
+/**
+ * EnvironmentLock
+ *
+ * A lock file pinning what an environment actually resolved to.
+ */
+export type EnvironmentLock = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Truncated
+   */
+  truncated?: boolean
 }
 
 /**
@@ -982,6 +1206,115 @@ export type FeatureVoteStatus = {
 }
 
 /**
+ * FeatureVoteSummary
+ *
+ * Every vote for one feature, for the admin page: demand is only
+ * useful alongside who's asking, which is what feedback shows too.
+ */
+export type FeatureVoteSummary = {
+  /**
+   * Feature
+   */
+  feature: string
+  /**
+   * Count
+   */
+  count: number
+  /**
+   * Voters
+   */
+  voters: Array<FeatureVoter>
+}
+
+/**
+ * FeatureVoter
+ */
+export type FeatureVoter = {
+  /**
+   * Email
+   */
+  email: string
+  /**
+   * Full Name
+   */
+  full_name?: string | null
+  /**
+   * Account Name
+   */
+  account_name?: string | null
+  /**
+   * Created
+   */
+  created: string
+}
+
+/**
+ * FeedbackPatch
+ */
+export type FeedbackPatch = {
+  /**
+   * Resolved
+   */
+  resolved: boolean
+}
+
+/**
+ * FeedbackPost
+ */
+export type FeedbackPost = {
+  /**
+   * Kind
+   */
+  kind?: "feedback" | "bug" | "help"
+  /**
+   * Message
+   */
+  message: string
+  /**
+   * Page
+   */
+  page?: string | null
+}
+
+/**
+ * FeedbackPublic
+ */
+export type FeedbackPublic = {
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Message
+   */
+  message: string
+  /**
+   * Page
+   */
+  page: string | null
+  /**
+   * Created
+   */
+  created: string
+  /**
+   * Resolved
+   */
+  resolved: boolean
+  /**
+   * User Email
+   */
+  user_email: string
+  /**
+   * User Full Name
+   */
+  user_full_name: string | null
+}
+
+/**
  * Figure
  */
 export type Figure = {
@@ -1022,6 +1355,103 @@ export type Figure = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+}
+
+/**
+ * FigureScriptPost
+ */
+export type FigureScriptPost = {
+  /**
+   * Figure Path
+   */
+  figure_path: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Script Path
+   */
+  script_path: string
+  /**
+   * Script Content
+   */
+  script_content: string
+  /**
+   * Inputs
+   */
+  inputs?: Array<string>
+  /**
+   * Packages
+   */
+  packages?: Array<string>
+  /**
+   * Environment
+   */
+  environment?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
+}
+
+/**
+ * FigureScriptResult
+ */
+export type FigureScriptResult = {
+  figure: Figure
+  /**
+   * Stage Name
+   */
+  stage_name: string
+  /**
+   * Environment
+   */
+  environment: string
+  /**
+   * Environment Created
+   */
+  environment_created: boolean
+  /**
+   * Packages Missing
+   */
+  packages_missing: Array<string>
+  /**
+   * Script Content
+   */
+  script_content: string
+}
+
+/**
+ * FiguresPage
+ *
+ * A page of project figures, with the total available for paging.
+ */
+export type FiguresPage = {
+  /**
+   * Items
+   */
+  items: Array<Figure>
+  /**
+   * Total
+   */
+  total: number
+  /**
+   * Limit
+   */
+  limit: number
+  /**
+   * Offset
+   */
+  offset: number
 }
 
 /**
@@ -1434,6 +1864,24 @@ export type GitRemoteHead = {
 }
 
 /**
+ * GitSourcePost
+ */
+export type GitSourcePost = {
+  /**
+   * Repo Url
+   */
+  repo_url: string
+  /**
+   * Rev
+   */
+  rev?: string | null
+  /**
+   * Path
+   */
+  path?: string | null
+}
+
+/**
  * GithubPullRequest
  */
 export type GithubPullRequest = {
@@ -1471,6 +1919,46 @@ export type HttpValidationError = {
    * Detail
    */
   detail?: Array<ValidationError>
+}
+
+/**
+ * Hdf5Key
+ */
+export type Hdf5Key = {
+  /**
+   * Key
+   */
+  key: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Shape
+   */
+  shape?: Array<number> | null
+  /**
+   * Dtype
+   */
+  dtype?: string | null
+  /**
+   * Tabular
+   */
+  tabular?: boolean
+}
+
+/**
+ * Hdf5Listing
+ */
+export type Hdf5Listing = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Keys
+   */
+  keys: Array<Hdf5Key>
 }
 
 /**
@@ -1537,6 +2025,43 @@ export type ImportInfo = {
    * Path
    */
   path: string
+}
+
+/**
+ * ImportedFromPost
+ *
+ * Where a dataset came from, as one of four mutually exclusive kinds.
+ *
+ * Sent flat rather than as a tagged union so the generated client has one
+ * shape to build; exactly which kind it is falls out of which field is
+ * set, and that's checked below rather than trusted.
+ */
+export type ImportedFromPost = {
+  /**
+   * Project
+   */
+  project?: string | null
+  /**
+   * Path
+   */
+  path?: string | null
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Doi
+   */
+  doi?: string | null
+  git?: GitSourcePost | null
+  /**
+   * Date
+   */
+  date?: string | null
 }
 
 /**
@@ -1650,33 +2175,53 @@ export type ItemLock = {
 }
 
 /**
- * LabelDatasetPost
+ * MapPathEntry
+ *
+ * One copy to add, as ``MapPathsStage.mapping_from`` takes it.
+ *
+ * The kind is worked out from what ``src`` is when not given, which the
+ * calkit mapping models can't do on their own since they each fix one.
  */
-export type LabelDatasetPost = {
+export type MapPathEntry = {
   /**
-   * Imported From
+   * Src
    */
-  imported_from?: string | null
+  src: string
   /**
-   * Path
+   * Dest
    */
-  path: string
+  dest: string
   /**
-   * Title
+   * Kind
    */
-  title?: string | null
+  kind?:
+    | "file-to-file"
+    | "file-to-dir"
+    | "dir-to-dir-merge"
+    | "dir-to-dir-replace"
+    | null
+}
+
+/**
+ * MapPathsPost
+ */
+export type MapPathsPost = {
   /**
-   * Tabular
+   * Paths
    */
-  tabular?: boolean | null
+  paths: Array<MapPathEntry>
   /**
-   * Stage
+   * Stage Name
    */
-  stage?: string | null
+  stage_name?: string | null
   /**
-   * Description
+   * Target Stage
    */
-  description?: string | null
+  target_stage?: string | null
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -1687,6 +2232,74 @@ export type Message = {
    * Message
    */
   message: string
+}
+
+/**
+ * MiscArtifact
+ *
+ * A calkit.yaml ``misc`` entry: a path attributed to someone or to
+ * somewhere, without being a figure, dataset, or publication.
+ */
+export type MiscArtifact = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Created By
+   */
+  created_by?: Array<{
+    [key: string]: unknown
+  }> | null
+  /**
+   * Imported From
+   */
+  imported_from?: {
+    [key: string]: unknown
+  } | null
+}
+
+/**
+ * MiscArtifactPost
+ *
+ * A path to attribute, either to whoever made it here or to where it
+ * came from, for a file that isn't a figure, dataset, or publication.
+ */
+export type MiscArtifactPost = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title?: string | null
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Created By
+   */
+  created_by?: Array<CreatorPost> | null
+  /**
+   * Imported From
+   */
+  imported_from?: {
+    [key: string]: unknown
+  } | null
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -1736,7 +2349,7 @@ export type Notebook = {
   /**
    * Output Format
    */
-  output_format?: "html" | "notebook" | null
+  output_format?: "html" | "notebook" | "source" | null
   /**
    * Url
    */
@@ -1749,6 +2362,10 @@ export type Notebook = {
    * Storage
    */
   storage?: "git" | "dvc" | "dvc-zip" | null
+  /**
+   * App
+   */
+  app?: string | null
 }
 
 /**
@@ -1808,6 +2425,47 @@ export type OAuthCodeExchange = {
    * Redirect Uri
    */
   redirect_uri: string
+}
+
+/**
+ * OnboardingFlagPost
+ */
+export type OnboardingFlagPost = {
+  /**
+   * Step
+   */
+  step: string
+  /**
+   * Project Id
+   */
+  project_id?: string | null
+}
+
+/**
+ * OnboardingFlags
+ *
+ * Every onboarding flag a user has set, in one response.
+ *
+ * Both checklists are read on pages that are already fetching plenty, so
+ * they share a single query rather than each adding one: ``account`` holds
+ * the account-level steps, and ``projects`` maps a project ID to the steps
+ * flagged on it.
+ */
+export type OnboardingFlags = {
+  /**
+   * Account
+   */
+  account?: Array<string>
+  /**
+   * Projects
+   */
+  projects?: {
+    [key: string]: Array<string>
+  }
+  /**
+   * First Project Id
+   */
+  first_project_id?: string | null
 }
 
 /**
@@ -2170,6 +2828,10 @@ export type Pipeline = {
    */
   mermaid: string
   /**
+   * Error
+   */
+  error?: string | null
+  /**
    * Dvc Stages
    */
   dvc_stages: {
@@ -2184,6 +2846,10 @@ export type Pipeline = {
    */
   calkit_yaml: string | null
   /**
+   * Ck Stages
+   */
+  ck_stages?: Array<string>
+  /**
    * Stage Statuses
    */
   stage_statuses?: {
@@ -2193,6 +2859,74 @@ export type Pipeline = {
    * Status
    */
   status?: "up-to-date" | "stale" | "unknown"
+}
+
+/**
+ * PipelineStage
+ *
+ * One stage of the Calkit pipeline, as editable YAML.
+ *
+ * The YAML is the stage's body only (no name key), exactly as it sits in
+ * calkit.yaml -- same key order, same comments.
+ */
+export type PipelineStage = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdit
+ *
+ * A stage edit to compute, against the editor's unsaved content.
+ *
+ * The YAML is what's in the editor rather than what's committed, so
+ * re-detecting right after changing ``target_path`` looks at the new
+ * target.
+ */
+export type PipelineStageEdit = {
+  /**
+   * Yaml
+   */
+  yaml: string
+}
+
+/**
+ * PipelineStageEdited
+ *
+ * The stage after an edit, plus what the edit touched.
+ *
+ * ``changed`` is what the user should see happened: the inputs added, or
+ * the default-valued keys removed.
+ */
+export type PipelineStageEdited = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Changed
+   */
+  changed: Array<string>
+}
+
+/**
+ * PipelineStagePut
+ */
+export type PipelineStagePut = {
+  /**
+   * Yaml
+   */
+  yaml: string
+  /**
+   * Message
+   */
+  message?: string | null
 }
 
 /**
@@ -2369,9 +3103,53 @@ export type PresignedUrlAccess = {
 }
 
 /**
+ * ProjectActivityItem
+ *
+ * One thing that happened in a project.
+ *
+ * ``id`` is stable across reads (a commit hash or a row ID) so the
+ * frontend can key on it; ``link`` is a route relative to the project
+ * page, or None when there's nowhere better to send the reader.
+ */
+export type ProjectActivityItem = {
+  /**
+   * Kind
+   */
+  kind: "commit" | "dvc-push" | "collaborator" | "todo" | "comment" | "release"
+  /**
+   * Timestamp
+   */
+  timestamp: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Actor
+   */
+  actor?: string | null
+  /**
+   * Id
+   */
+  id: string
+  /**
+   * Link
+   */
+  link?: string | null
+}
+
+/**
  * ProjectApp
  */
 export type ProjectApp = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Kind
+   */
+  kind?: string
   /**
    * Path
    */
@@ -2388,6 +3166,10 @@ export type ProjectApp = {
    * Description
    */
   description?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
 }
 
 /**
@@ -2817,6 +3599,10 @@ export type ProjectPost = {
    * Git Repo Exists
    */
   git_repo_exists?: boolean | null
+  /**
+   * Keep Template History
+   */
+  keep_template_history?: boolean
 }
 
 /**
@@ -2994,6 +3780,64 @@ export type Publication = {
 }
 
 /**
+ * PublicationComponent
+ *
+ * One file a publication is made of and where it comes from.
+ */
+export type PublicationComponent = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Kind
+   */
+  kind: "produced" | "authored" | "attested" | "imported" | "unknown"
+  /**
+   * Via
+   */
+  via?: "folder" | "input"
+  /**
+   * Stage
+   */
+  stage?: string | null
+  /**
+   * Stage Kind
+   */
+  stage_kind?: string | null
+  /**
+   * Source
+   */
+  source?: "overleaf" | "git" | null
+  /**
+   * Matching Figure
+   */
+  matching_figure?: string | null
+  /**
+   * Size
+   */
+  size?: number | null
+}
+
+/**
+ * PublicationComponents
+ */
+export type PublicationComponents = {
+  /**
+   * Folder
+   */
+  folder: string
+  /**
+   * Items
+   */
+  items: Array<PublicationComponent>
+  /**
+   * N Unknown
+   */
+  n_unknown: number
+}
+
+/**
  * PublicationOverleaf
  */
 export type PublicationOverleaf = {
@@ -3052,7 +3896,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "publication"
+  kind: "figure" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -3081,7 +3925,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "publication"
+  kind: "figure" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -3104,6 +3948,10 @@ export type QuestionPost = {
    * Question
    */
   question: string
+  /**
+   * Hypothesis
+   */
+  hypothesis?: string | null
 }
 
 /**
@@ -4075,9 +4923,47 @@ export type ReproCheck = {
    */
   n_publications_no_import_or_stage: number
   /**
+   * N Misc
+   */
+  n_misc?: number
+  /**
+   * N Misc No Import Or Stage
+   */
+  n_misc_no_import_or_stage?: number
+  /**
+   * N Tables
+   */
+  n_tables?: number
+  /**
+   * N Tables No Import Or Stage
+   */
+  n_tables_no_import_or_stage?: number
+  /**
+   * N Presentations
+   */
+  n_presentations?: number
+  /**
+   * N Presentations No Import Or Stage
+   */
+  n_presentations_no_import_or_stage?: number
+  /**
+   * Misc Needing Provenance
+   */
+  misc_needing_provenance?: Array<string>
+  /**
+   * Scripts Not In Pipeline
+   */
+  scripts_not_in_pipeline?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
+  /**
+   * Untraceable Literals
+   */
+  untraceable_literals?: Array<{
+    [key: string]: unknown
+  }>
   /**
    * Recommendation
    *
@@ -4096,6 +4982,26 @@ export type ReproCheck = {
    * N Publications With Import Or Stage
    */
   readonly n_publications_with_import_or_stage: number
+  /**
+   * N Misc With Import Or Stage
+   */
+  readonly n_misc_with_import_or_stage: number
+  /**
+   * N Tables With Import Or Stage
+   */
+  readonly n_tables_with_import_or_stage: number
+  /**
+   * N Presentations With Import Or Stage
+   */
+  readonly n_presentations_with_import_or_stage: number
+  /**
+   * N Misc Needing Provenance
+   */
+  readonly n_misc_needing_provenance: number
+  /**
+   * N Scripts Not In Pipeline
+   */
+  readonly n_scripts_not_in_pipeline: number
   /**
    * N Stages Without Env
    */
@@ -4126,6 +5032,10 @@ export type Result = {
    * Stage
    */
   stage?: string | null
+  /**
+   * Key
+   */
+  key?: string | null
 }
 
 /**
@@ -4397,6 +5307,127 @@ export type SubscriptionUpdate = {
 }
 
 /**
+ * Table
+ *
+ * Tabular data the project publishes, resolved for display.
+ *
+ * Carries content like a figure does rather than metadata alone: a table
+ * is only useful once its rows can be read, and the files are small
+ * enough to inline. Large or DVC-tracked ones come back as a ``url``
+ * instead, exactly as figures do.
+ */
+export type Table = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+  /**
+   * Stage
+   */
+  stage?: string | null
+  stage_status?: StageStatus | null
+  /**
+   * Content
+   */
+  content?: string | null
+  /**
+   * Url
+   */
+  url?: string | null
+  /**
+   * Storage
+   */
+  storage?: "git" | "dvc" | "dvc-zip" | null
+}
+
+/**
+ * TableText
+ *
+ * A window of a table as CSV, which is what the table viewer reads.
+ *
+ * A table can be wider or longer than a browser can hold (a 2D array in
+ * an HDF5 file with thousands of columns, say), so the response is a
+ * window in both dimensions and says where it sits in the whole.
+ */
+export type TableText = {
+  /**
+   * Path
+   */
+  path: string
+  /**
+   * Content
+   */
+  content: string
+  /**
+   * Columns
+   */
+  columns: Array<string>
+  /**
+   * N Rows
+   */
+  n_rows: number
+  /**
+   * N Cols
+   */
+  n_cols: number
+  /**
+   * Row Offset
+   */
+  row_offset: number
+  /**
+   * Row Limit
+   */
+  row_limit: number
+  /**
+   * Col Offset
+   */
+  col_offset: number
+  /**
+   * Col Limit
+   */
+  col_limit: number
+  /**
+   * Truncated
+   */
+  truncated: boolean
+}
+
+/**
+ * TemplatePublic
+ *
+ * A template the hub can start a file or project from.
+ *
+ * ``name`` is what ``calkit new`` and the publication routes take, e.g.,
+ * ``latex/article``; the rest is for showing it in a list.
+ */
+export type TemplatePublic = {
+  /**
+   * Name
+   */
+  name: string
+  /**
+   * Kind
+   */
+  kind: string
+  /**
+   * Title
+   */
+  title: string
+  /**
+   * Description
+   */
+  description?: string | null
+}
+
+/**
  * TextDiff
  */
 export type TextDiff = {
@@ -4635,9 +5666,17 @@ export type UserPublic = {
    */
   id: string
   /**
+   * Created
+   */
+  created: string
+  /**
    * Github Username
    */
   github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
   subscription: UserSubscription | null
 }
 
@@ -5275,9 +6314,47 @@ export type ReproCheckWritable = {
    */
   n_publications_no_import_or_stage: number
   /**
+   * N Misc
+   */
+  n_misc?: number
+  /**
+   * N Misc No Import Or Stage
+   */
+  n_misc_no_import_or_stage?: number
+  /**
+   * N Tables
+   */
+  n_tables?: number
+  /**
+   * N Tables No Import Or Stage
+   */
+  n_tables_no_import_or_stage?: number
+  /**
+   * N Presentations
+   */
+  n_presentations?: number
+  /**
+   * N Presentations No Import Or Stage
+   */
+  n_presentations_no_import_or_stage?: number
+  /**
+   * Misc Needing Provenance
+   */
+  misc_needing_provenance?: Array<string>
+  /**
+   * Scripts Not In Pipeline
+   */
+  scripts_not_in_pipeline?: Array<string>
+  /**
    * N Dvc Remotes
    */
   n_dvc_remotes: number
+  /**
+   * Untraceable Literals
+   */
+  untraceable_literals?: Array<{
+    [key: string]: unknown
+  }>
 }
 
 /**
@@ -5319,9 +6396,17 @@ export type UserPublicWritable = {
    */
   id: string
   /**
+   * Created
+   */
+  created: string
+  /**
    * Github Username
    */
   github_username: string | null
+  /**
+   * Email Verified
+   */
+  email_verified: boolean
   subscription: UserSubscriptionWritable | null
 }
 
@@ -5819,6 +6904,18 @@ export type ReadUsersData = {
      * Limit
      */
     limit?: number
+    /**
+     * Search For
+     */
+    search_for?: string | null
+    /**
+     * Sort By
+     */
+    sort_by?: "created" | "email" | "full_name"
+    /**
+     * Descending
+     */
+    descending?: boolean
   }
   url: "/users"
 }
@@ -5954,6 +7051,77 @@ export type UpdateCurrentUserPasswordResponses = {
 export type UpdateCurrentUserPasswordResponse =
   UpdateCurrentUserPasswordResponses[keyof UpdateCurrentUserPasswordResponses]
 
+export type PostUserEmailVerificationData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/email-verification"
+}
+
+export type PostUserEmailVerificationResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostUserEmailVerificationResponse =
+  PostUserEmailVerificationResponses[keyof PostUserEmailVerificationResponses]
+
+export type PostUserEmailVerificationConfirmData = {
+  body: EmailVerificationConfirm
+  path?: never
+  query?: never
+  url: "/user/email-verification/confirm"
+}
+
+export type PostUserEmailVerificationConfirmErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostUserEmailVerificationConfirmError =
+  PostUserEmailVerificationConfirmErrors[keyof PostUserEmailVerificationConfirmErrors]
+
+export type PostUserEmailVerificationConfirmResponses = {
+  /**
+   * Successful Response
+   */
+  200: UserPublic
+}
+
+export type PostUserEmailVerificationConfirmResponse =
+  PostUserEmailVerificationConfirmResponses[keyof PostUserEmailVerificationConfirmResponses]
+
+export type PostVerifyEmailData = {
+  body: EmailVerificationToken
+  path?: never
+  query?: never
+  url: "/verify-email"
+}
+
+export type PostVerifyEmailErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostVerifyEmailError =
+  PostVerifyEmailErrors[keyof PostVerifyEmailErrors]
+
+export type PostVerifyEmailResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostVerifyEmailResponse =
+  PostVerifyEmailResponses[keyof PostVerifyEmailResponses]
+
 export type RegisterUserData = {
   body: UserRegister
   path?: never
@@ -6082,7 +7250,19 @@ export type GetUserGithubReposData = {
     /**
      * Page
      */
-    page?: number
+    page?: number | null
+    /**
+     * Affiliation
+     */
+    affiliation?: string
+    /**
+     * Sort
+     */
+    sort?: "updated" | "created" | "pushed" | "full_name"
+    /**
+     * Search
+     */
+    search?: string | null
   }
   url: "/user/github/repos"
 }
@@ -6547,6 +7727,86 @@ export type GetUserStorageResponses = {
 export type GetUserStorageResponse =
   GetUserStorageResponses[keyof GetUserStorageResponses]
 
+export type DeleteUserOnboardingFlagData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Step
+     */
+    step?: string | null
+    /**
+     * Project Id
+     */
+    project_id?: string | null
+  }
+  url: "/user/onboarding-flags"
+}
+
+export type DeleteUserOnboardingFlagErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteUserOnboardingFlagError =
+  DeleteUserOnboardingFlagErrors[keyof DeleteUserOnboardingFlagErrors]
+
+export type DeleteUserOnboardingFlagResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type DeleteUserOnboardingFlagResponse =
+  DeleteUserOnboardingFlagResponses[keyof DeleteUserOnboardingFlagResponses]
+
+export type GetUserOnboardingFlagsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/user/onboarding-flags"
+}
+
+export type GetUserOnboardingFlagsResponses = {
+  /**
+   * Successful Response
+   */
+  200: OnboardingFlags
+}
+
+export type GetUserOnboardingFlagsResponse =
+  GetUserOnboardingFlagsResponses[keyof GetUserOnboardingFlagsResponses]
+
+export type PutUserOnboardingFlagData = {
+  body: OnboardingFlagPost
+  path?: never
+  query?: never
+  url: "/user/onboarding-flags"
+}
+
+export type PutUserOnboardingFlagErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutUserOnboardingFlagError =
+  PutUserOnboardingFlagErrors[keyof PutUserOnboardingFlagErrors]
+
+export type PutUserOnboardingFlagResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PutUserOnboardingFlagResponse =
+  PutUserOnboardingFlagResponses[keyof PutUserOnboardingFlagResponses]
+
 export type GetHubVersionData = {
   body?: never
   path?: never
@@ -6593,6 +7853,39 @@ export type TestEmailResponses = {
 }
 
 export type TestEmailResponse = TestEmailResponses[keyof TestEmailResponses]
+
+export type GetTemplatesData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Kind
+     */
+    kind?: string | null
+  }
+  url: "/templates"
+}
+
+export type GetTemplatesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetTemplatesError = GetTemplatesErrors[keyof GetTemplatesErrors]
+
+export type GetTemplatesResponses = {
+  /**
+   * Response Misc-Get Templates
+   *
+   * Successful Response
+   */
+  200: Array<TemplatePublic>
+}
+
+export type GetTemplatesResponse =
+  GetTemplatesResponses[keyof GetTemplatesResponses]
 
 export type GetDiscountCodeData = {
   body?: never
@@ -6899,6 +8192,56 @@ export type PostProjectResponses = {
 
 export type PostProjectResponse =
   PostProjectResponses[keyof PostProjectResponses]
+
+export type PostProjectUploadData = {
+  body: BodyProjectsPostProjectUpload
+  headers?: {
+    /**
+     * Content-Length
+     */
+    "content-length"?: number | null
+  }
+  path?: never
+  query?: never
+  url: "/projects/upload"
+}
+
+export type PostProjectUploadErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectUploadError =
+  PostProjectUploadErrors[keyof PostProjectUploadErrors]
+
+export type PostProjectUploadResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectPublic
+}
+
+export type PostProjectUploadResponse =
+  PostProjectUploadResponses[keyof PostProjectUploadResponses]
+
+export type GetFeaturedProjectsData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/projects/featured"
+}
+
+export type GetFeaturedProjectsResponses = {
+  /**
+   * Successful Response
+   */
+  200: ProjectsPublic
+}
+
+export type GetFeaturedProjectsResponse =
+  GetFeaturedProjectsResponses[keyof GetFeaturedProjectsResponses]
 
 export type GetOwnedProjectsData = {
   body?: never
@@ -7944,6 +9287,30 @@ export type GetProjectFiguresData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Limit
+     *
+     * Max number of figures to return
+     */
+    limit?: number
+    /**
+     * Offset
+     *
+     * Number of figures to skip
+     */
+    offset?: number
+    /**
+     * Q
+     *
+     * Filter figures by path, title or description. Applied across the whole project, before paging.
+     */
+    q?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }
@@ -7960,11 +9327,9 @@ export type GetProjectFiguresError =
 
 export type GetProjectFiguresResponses = {
   /**
-   * Response Projects-Get Project Figures
-   *
    * Successful Response
    */
-  200: Array<Figure>
+  200: FiguresPage
 }
 
 export type GetProjectFiguresResponse =
@@ -8005,6 +9370,55 @@ export type PostProjectFigureResponses = {
 
 export type PostProjectFigureResponse =
   PostProjectFigureResponses[keyof PostProjectFigureResponses]
+
+export type GetProjectTablesData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each table's content. Set false for a metadata-only listing that skips object storage entirely.
+     */
+    include_content?: boolean
+  }
+  url: "/projects/{owner_name}/{project_name}/tables"
+}
+
+export type GetProjectTablesErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectTablesError =
+  GetProjectTablesErrors[keyof GetProjectTablesErrors]
+
+export type GetProjectTablesResponses = {
+  /**
+   * Response Projects-Get Project Tables
+   *
+   * Successful Response
+   */
+  200: Array<Table>
+}
+
+export type GetProjectTablesResponse =
+  GetProjectTablesResponses[keyof GetProjectTablesResponses]
 
 export type GetProjectResultsData = {
   body?: never
@@ -8335,11 +9749,47 @@ export type GetProjectDatasetsResponses = {
    *
    * Successful Response
    */
-  200: Array<Dataset>
+  200: Array<DatasetPublic>
 }
 
 export type GetProjectDatasetsResponse =
   GetProjectDatasetsResponses[keyof GetProjectDatasetsResponses]
+
+export type PostProjectDatasetData = {
+  body: DatasetPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/datasets"
+}
+
+export type PostProjectDatasetErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectDatasetError =
+  PostProjectDatasetErrors[keyof PostProjectDatasetErrors]
+
+export type PostProjectDatasetResponses = {
+  /**
+   * Successful Response
+   */
+  200: Dataset
+}
+
+export type PostProjectDatasetResponse =
+  PostProjectDatasetResponses[keyof PostProjectDatasetResponses]
 
 export type GetProjectDatasetData = {
   body?: never
@@ -8389,42 +9839,6 @@ export type GetProjectDatasetResponses = {
 
 export type GetProjectDatasetResponse =
   GetProjectDatasetResponses[keyof GetProjectDatasetResponses]
-
-export type PostProjectDatasetLabelData = {
-  body: LabelDatasetPost
-  path: {
-    /**
-     * Owner Name
-     */
-    owner_name: string
-    /**
-     * Project Name
-     */
-    project_name: string
-  }
-  query?: never
-  url: "/projects/{owner_name}/{project_name}/datasets/label"
-}
-
-export type PostProjectDatasetLabelErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type PostProjectDatasetLabelError =
-  PostProjectDatasetLabelErrors[keyof PostProjectDatasetLabelErrors]
-
-export type PostProjectDatasetLabelResponses = {
-  /**
-   * Successful Response
-   */
-  200: Dataset
-}
-
-export type PostProjectDatasetLabelResponse =
-  PostProjectDatasetLabelResponses[keyof PostProjectDatasetLabelResponses]
 
 export type PostProjectDatasetUploadData = {
   body: BodyProjectsPostProjectDatasetUpload
@@ -8546,6 +9960,87 @@ export type PostProjectPublicationResponses = {
 
 export type PostProjectPublicationResponse =
   PostProjectPublicationResponses[keyof PostProjectPublicationResponses]
+
+export type GetProjectPublicationComponentsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Path
+     */
+    path: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/publications/components"
+}
+
+export type GetProjectPublicationComponentsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPublicationComponentsError =
+  GetProjectPublicationComponentsErrors[keyof GetProjectPublicationComponentsErrors]
+
+export type GetProjectPublicationComponentsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PublicationComponents
+}
+
+export type GetProjectPublicationComponentsResponse =
+  GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
+
+export type PostProjectMiscData = {
+  body: MiscArtifactPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/misc"
+}
+
+export type PostProjectMiscErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectMiscError =
+  PostProjectMiscErrors[keyof PostProjectMiscErrors]
+
+export type PostProjectMiscResponses = {
+  /**
+   * Successful Response
+   */
+  200: MiscArtifact
+}
+
+export type PostProjectMiscResponse =
+  PostProjectMiscResponses[keyof PostProjectMiscResponses]
 
 export type GetProjectPresentationsData = {
   body?: never
@@ -8828,6 +10323,171 @@ export type GetProjectPipelineResponses = {
 
 export type GetProjectPipelineResponse =
   GetProjectPipelineResponses[keyof GetProjectPipelineResponses]
+
+export type GetProjectPipelineStageData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type GetProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectPipelineStageError =
+  GetProjectPipelineStageErrors[keyof GetProjectPipelineStageErrors]
+
+export type GetProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type GetProjectPipelineStageResponse =
+  GetProjectPipelineStageResponses[keyof GetProjectPipelineStageResponses]
+
+export type PutProjectPipelineStageData = {
+  body: PipelineStagePut
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}"
+}
+
+export type PutProjectPipelineStageErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PutProjectPipelineStageError =
+  PutProjectPipelineStageErrors[keyof PutProjectPipelineStageErrors]
+
+export type PutProjectPipelineStageResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PutProjectPipelineStageResponse =
+  PutProjectPipelineStageResponses[keyof PutProjectPipelineStageResponses]
+
+export type RemoveProjectPipelineStageDefaultsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/remove-defaults"
+}
+
+export type RemoveProjectPipelineStageDefaultsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type RemoveProjectPipelineStageDefaultsError =
+  RemoveProjectPipelineStageDefaultsErrors[keyof RemoveProjectPipelineStageDefaultsErrors]
+
+export type RemoveProjectPipelineStageDefaultsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type RemoveProjectPipelineStageDefaultsResponse =
+  RemoveProjectPipelineStageDefaultsResponses[keyof RemoveProjectPipelineStageDefaultsResponses]
+
+export type DetectProjectPipelineStageInputsData = {
+  body: PipelineStageEdit
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Stage Name
+     */
+    stage_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/detect-inputs"
+}
+
+export type DetectProjectPipelineStageInputsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DetectProjectPipelineStageInputsError =
+  DetectProjectPipelineStageInputsErrors[keyof DetectProjectPipelineStageInputsErrors]
+
+export type DetectProjectPipelineStageInputsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStageEdited
+}
+
+export type DetectProjectPipelineStageInputsResponse =
+  DetectProjectPipelineStageInputsResponses[keyof DetectProjectPipelineStageInputsResponses]
 
 export type GetProjectCollaboratorsData = {
   body?: never
@@ -10235,6 +11895,49 @@ export type PutProjectDevContainerResponses = {
 export type PutProjectDevContainerResponse =
   PutProjectDevContainerResponses[keyof PutProjectDevContainerResponses]
 
+export type GetProjectAppsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps"
+}
+
+export type GetProjectAppsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectAppsError =
+  GetProjectAppsErrors[keyof GetProjectAppsErrors]
+
+export type GetProjectAppsResponses = {
+  /**
+   * Response Projects-Get Project Apps
+   *
+   * Successful Response
+   */
+  200: Array<ProjectApp>
+}
+
+export type GetProjectAppsResponse =
+  GetProjectAppsResponses[keyof GetProjectAppsResponses]
+
 export type GetProjectAppData = {
   body?: never
   path: {
@@ -10276,6 +11979,56 @@ export type GetProjectAppResponses = {
 
 export type GetProjectAppResponse =
   GetProjectAppResponses[keyof GetProjectAppResponses]
+
+export type ServeProjectAppFileData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * App Name
+     */
+    app_name: string
+  }
+  query?: {
+    /**
+     * Path
+     */
+    path?: string
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Git Sha
+     */
+    git_sha?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve"
+}
+
+export type ServeProjectAppFileErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type ServeProjectAppFileError =
+  ServeProjectAppFileErrors[keyof ServeProjectAppFileErrors]
+
+export type ServeProjectAppFileResponses = {
+  /**
+   * Successful Response
+   */
+  200: unknown
+}
 
 export type GetProjectShowcaseData = {
   body?: never
@@ -10640,6 +12393,302 @@ export type PostProjectFsBatchOpResponses = {
 
 export type PostProjectFsBatchOpResponse =
   PostProjectFsBatchOpResponses[keyof PostProjectFsBatchOpResponses]
+
+export type DeleteProjectMapPathsData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query: {
+    /**
+     * Stage Name
+     */
+    stage_name: string
+    /**
+     * Src
+     */
+    src: string
+    /**
+     * Dest
+     */
+    dest: string
+    /**
+     * Target Stage
+     */
+    target_stage?: string | null
+  }
+  url: "/projects/{owner_name}/{project_name}/pipeline/map-paths"
+}
+
+export type DeleteProjectMapPathsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type DeleteProjectMapPathsError =
+  DeleteProjectMapPathsErrors[keyof DeleteProjectMapPathsErrors]
+
+export type DeleteProjectMapPathsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type DeleteProjectMapPathsResponse =
+  DeleteProjectMapPathsResponses[keyof DeleteProjectMapPathsResponses]
+
+export type PostProjectMapPathsData = {
+  body: MapPathsPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/pipeline/map-paths"
+}
+
+export type PostProjectMapPathsErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectMapPathsError =
+  PostProjectMapPathsErrors[keyof PostProjectMapPathsErrors]
+
+export type PostProjectMapPathsResponses = {
+  /**
+   * Successful Response
+   */
+  200: PipelineStage
+}
+
+export type PostProjectMapPathsResponse =
+  PostProjectMapPathsResponses[keyof PostProjectMapPathsResponses]
+
+export type PostProjectFigureScriptData = {
+  body: FigureScriptPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/figures/script"
+}
+
+export type PostProjectFigureScriptErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectFigureScriptError =
+  PostProjectFigureScriptErrors[keyof PostProjectFigureScriptErrors]
+
+export type PostProjectFigureScriptResponses = {
+  /**
+   * Successful Response
+   */
+  200: FigureScriptResult
+}
+
+export type PostProjectFigureScriptResponse =
+  PostProjectFigureScriptResponses[keyof PostProjectFigureScriptResponses]
+
+export type GetProjectDatasetCsvData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: {
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Row Offset
+     */
+    row_offset?: number
+    /**
+     * Row Limit
+     */
+    row_limit?: number
+    /**
+     * Col Offset
+     */
+    col_offset?: number
+    /**
+     * Col Limit
+     */
+    col_limit?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/dataset-csv/{path}"
+}
+
+export type GetProjectDatasetCsvErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDatasetCsvError =
+  GetProjectDatasetCsvErrors[keyof GetProjectDatasetCsvErrors]
+
+export type GetProjectDatasetCsvResponses = {
+  /**
+   * Successful Response
+   */
+  200: TableText
+}
+
+export type GetProjectDatasetCsvResponse =
+  GetProjectDatasetCsvResponses[keyof GetProjectDatasetCsvResponses]
+
+export type GetProjectDatasetHdf5Data = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+    /**
+     * Path
+     */
+    path: string
+  }
+  query?: {
+    /**
+     * Key
+     */
+    key?: string | null
+    /**
+     * Ref
+     */
+    ref?: string | null
+    /**
+     * Row Offset
+     */
+    row_offset?: number
+    /**
+     * Row Limit
+     */
+    row_limit?: number
+    /**
+     * Col Offset
+     */
+    col_offset?: number
+    /**
+     * Col Limit
+     */
+    col_limit?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}"
+}
+
+export type GetProjectDatasetHdf5Errors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectDatasetHdf5Error =
+  GetProjectDatasetHdf5Errors[keyof GetProjectDatasetHdf5Errors]
+
+export type GetProjectDatasetHdf5Responses = {
+  /**
+   * Response Projects-Get Project Dataset Hdf5
+   *
+   * Successful Response
+   */
+  200: Hdf5Listing | TableText
+}
+
+export type GetProjectDatasetHdf5Response =
+  GetProjectDatasetHdf5Responses[keyof GetProjectDatasetHdf5Responses]
+
+export type GetProjectActivityData = {
+  body?: never
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+  }
+  url: "/projects/{owner_name}/{project_name}/activity"
+}
+
+export type GetProjectActivityErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetProjectActivityError =
+  GetProjectActivityErrors[keyof GetProjectActivityErrors]
+
+export type GetProjectActivityResponses = {
+  /**
+   * Response Projects-Get Project Activity
+   *
+   * Successful Response
+   */
+  200: Array<ProjectActivityItem>
+}
+
+export type GetProjectActivityResponse =
+  GetProjectActivityResponses[keyof GetProjectActivityResponses]
 
 export type GetReferencesData = {
   body?: never
@@ -11655,6 +13704,100 @@ export type GetDatasetsResponses = {
 export type GetDatasetsResponse =
   GetDatasetsResponses[keyof GetDatasetsResponses]
 
+export type GetFeedbackData = {
+  body?: never
+  path?: never
+  query?: {
+    /**
+     * Limit
+     */
+    limit?: number
+    /**
+     * Offset
+     */
+    offset?: number
+  }
+  url: "/feedback"
+}
+
+export type GetFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type GetFeedbackError = GetFeedbackErrors[keyof GetFeedbackErrors]
+
+export type GetFeedbackResponses = {
+  /**
+   * Response Feedback-Get Feedback
+   *
+   * Successful Response
+   */
+  200: Array<FeedbackPublic>
+}
+
+export type GetFeedbackResponse =
+  GetFeedbackResponses[keyof GetFeedbackResponses]
+
+export type PostFeedbackData = {
+  body: FeedbackPost
+  path?: never
+  query?: never
+  url: "/feedback"
+}
+
+export type PostFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostFeedbackError = PostFeedbackErrors[keyof PostFeedbackErrors]
+
+export type PostFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostFeedbackResponse =
+  PostFeedbackResponses[keyof PostFeedbackResponses]
+
+export type PatchFeedbackData = {
+  body: FeedbackPatch
+  path: {
+    /**
+     * Feedback Id
+     */
+    feedback_id: string
+  }
+  query?: never
+  url: "/feedback/{feedback_id}"
+}
+
+export type PatchFeedbackErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PatchFeedbackError = PatchFeedbackErrors[keyof PatchFeedbackErrors]
+
+export type PatchFeedbackResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PatchFeedbackResponse =
+  PatchFeedbackResponses[keyof PatchFeedbackResponses]
+
 export type DeleteFeatureVoteData = {
   body?: never
   path: {
@@ -11750,3 +13893,22 @@ export type PostFeatureVoteResponses = {
 
 export type PostFeatureVoteResponse =
   PostFeatureVoteResponses[keyof PostFeatureVoteResponses]
+
+export type GetFeatureVotesData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/feature-votes"
+}
+
+export type GetFeatureVotesResponses = {
+  /**
+   * Response Feedback-Get Feature Votes
+   *
+   * Successful Response
+   */
+  200: Array<FeatureVoteSummary>
+}
+
+export type GetFeatureVotesResponse =
+  GetFeatureVotesResponses[keyof GetFeatureVotesResponses]

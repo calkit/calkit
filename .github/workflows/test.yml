@@ -56,7 +56,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          # Needed so the example project in examples/basic is checked
+          # against the calkit.yaml JSON schema
+          submodules: true
       - name: Configure Git Credentials
         run: |
           git config --global user.name github-actions[bot]
@@ -64,13 +68,13 @@ jobs:
           git config --global init.defaultBranch main
           git config --global push.autoSetupRemote true
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
           enable-cache: true
       - name: Setup Miniforge
-        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
         with:
           miniforge-version: latest
           auto-activate-base: true
@@ -83,6 +87,27 @@ jobs:
         uses: julia-actions/install-juliaup@1cc1b0ecfb06c04ff09fe24cab1476106460750e # v3.1.5
         with:
           channel: "1" # Installs the latest v1 Julia version via Juliaup
+      # Juliaup installs Julia but leaves the depot empty, and the first Pkg
+      # operation then precompiles Pkg and downloads the General registry.
+      # Tests that isolate themselves in a throwaway depot append this one,
+      # so whatever is here is read rather than rebuilt -- measured at 65s
+      # cold vs 1s warm for a single `Pkg.instantiate` on an empty project.
+      - name: Cache the Julia depot
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.julia/artifacts
+            ~/.julia/compiled
+            ~/.julia/packages
+            ~/.julia/registries
+          # A new entry each run, restoring the newest previous one, so the
+          # depot keeps up with whatever the tests install
+          key: julia-depot-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: julia-depot-${{ runner.os }}-
+      # Cheap on a cache hit, and on a miss it pays the precompile once here
+      # rather than inside whichever test happens to reach Julia first
+      - name: Warm the Julia depot
+        run: julia -e 'using Pkg; Pkg.Registry.add("General")'
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -108,9 +133,16 @@ jobs:
       run:
         working-directory: jupyterlab-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+      # The UI tests initialize a project from inside JupyterLab, which
+      # commits, and Git refuses to commit without an identity
+      - name: Configure Git Credentials
+        run: |
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config --global init.defaultBranch main
       - name: Setup uv
-        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           # The tests build many uv environments; a cold
           # cache re-downloads every wheel each run
@@ -136,7 +168,7 @@ jobs:
           uv run jlpm playwright test -u --reporter=list
       - name: Upload Playwright test results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: jupyterlab-ext/ui-tests/test-results/
@@ -149,7 +181,7 @@ jobs:
       run:
         working-directory: vscode-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -168,7 +200,7 @@ jobs:
       run:
         working-directory: browser-ext
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:

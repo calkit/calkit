@@ -27,6 +27,15 @@ This guide will help you get started.
    - [Miniforge](https://conda-forge.org/download/)
    - [uv](https://docs.astral.sh/uv/getting-started/installation/)
    - [Pixi](https://pixi.sh/latest/)
+1. **Create the virtual environment:**
+   ```bash
+   uv sync --all-packages
+   ```
+   This repo is a uv workspace: the hub backend is a member, and both it
+   and the `calkit` package share a single `.venv` at the repo root.
+   Always pass `--all-packages`, since a bare `uv sync` installs only one
+   member and uninstalls the other's dependencies, leaving either the
+   `calkit` CLI or the hub backend unable to import its dependencies.
 1. **Run tests** to ensure everything is working:
    ```bash
    uv run pytest

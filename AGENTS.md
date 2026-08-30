@@ -6,6 +6,13 @@
 - The JupyterLab extension lives in `src`
 - The VS Code extension lives in `vscode-ext`
 - The Chrome extension lives in `browser-ext`
+- GitHub Actions live in `actions`, e.g., `calkit/calkit/actions/run`
+- Config Calkit installs into projects, e.g., the dev container, VS Code, and
+  GitHub Actions configs, lives in `calkit/resources`; see the README there
+  before editing, since some of those files are generated
+
+Be sure to read the `AGENTS.md` file in whatever subproject you're working on,
+if applicable.
 
 ## Working
 
@@ -43,6 +50,8 @@ kept inside functions to keep CLI startup fast.
 
 For prose, only use one space after punctuation.
 
+Always put a comma after "i.e." and "e.g.".
+
 Don't overzealously split up functions just because they're long.
 Functions should usually be used ~3 times before abstracting.
 Otherwise, split up long ones into logical sections with comments.
@@ -53,3 +62,6 @@ caller at the top.
 
 No spaces on either side of en or em dashes used for ranges or pauses in prose,
 respectively.
+
+Never create `helpers` or `utils` modules or packages--tight coupling and
+low cohesion architecture.

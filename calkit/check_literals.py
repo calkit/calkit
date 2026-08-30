@@ -150,16 +150,9 @@ def find_untraceable_literals(
             # Check if this literal is traceable
             # We strip trailing/leading whitespace and standardize some formatting for comparison
             cmp_str = matched_str.replace(" ", "")
-            traceable = False
-            macro_name = None
-
-            for tracked_val, mac_name in from_json.items():
-                if cmp_str == tracked_val.replace(" ", ""):
-                    traceable = True
-                    macro_name = mac_name
-                    break
-
-            if traceable:
+            if any(
+                cmp_str == tracked.replace(" ", "") for tracked in from_json
+            ):
                 continue
 
             # Calculate line and column
@@ -175,13 +168,11 @@ def find_untraceable_literals(
             context = lines[line_idx].strip() if line_idx < len(lines) else ""
 
             suggestion = (
-                "Compute the value in a stage, emit it to JSON, run it through "
-                "a `calkit latex from-json` stage, and reference the generated macro "
-                "instead of hardcoding."
+                "Compute this in a pipeline stage, write it to a results "
+                "JSON file, add a 'json-to-latex' stage over that file, and "
+                "reference the generated command instead of typing the "
+                "number."
             )
-            if macro_name:
-                # If we couldn't precisely match it but somehow we know the macro (fallback logic if added later)
-                suggestion += f" Consider using \\{macro_name}."
 
             finding = {
                 "value": matched_str,

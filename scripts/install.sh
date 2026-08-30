@@ -22,11 +22,14 @@ if ! uv tool install --upgrade calkit-python --python=3.14; then
     exit 1
 fi
 
+# Completion is installed per command name, so the `ck` alias gets it too
 echo "Installing shell completion"
-if ! calkit --install-completion; then
-    echo "⚠️ Failed to install shell completion; run 'calkit --install-completion' manually"
-else
-    echo "✅ Shell completion installed"
-fi
+for cmd in calkit ck; do
+    if ! $cmd --install-completion; then
+        echo "⚠️ Failed to install shell completion for '$cmd'; run '$cmd --install-completion' manually"
+    else
+        echo "✅ Shell completion installed for '$cmd'"
+    fi
+done
 
 echo "✅ Success! 🚀"

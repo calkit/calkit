@@ -1,5 +1,7 @@
 import {
   Box,
+  Button,
+  ButtonGroup,
   Flex,
   Heading,
   Icon,
@@ -38,6 +40,11 @@ import {
 } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
 import FileContent from "../../../../../components/Files/FileContent"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import NotebookView from "../../../../../components/Notebooks/NotebookView"
+import FileEditorModal, {
+  isEditableText,
+} from "../../../../../components/Files/FileEditorModal"
 import SelectedItemInfo, {
   inferKindFromPath,
 } from "../../../../../components/Files/SelectedItemInfo"
@@ -52,6 +59,11 @@ const fileSearchSchema = z.object({
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
   editor_open: z.boolean().optional(),
+  file_editor_open: z.boolean().optional(),
+  // For a notebook: whether the source or the executed copy is shown, and
+  // whether the in-browser runner is open
+  nb_view: z.enum(["source", "executed"]).optional(),
+  nb_run: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -240,8 +252,17 @@ function Item({ item, level, selectedPath, setSelectedPath }: ItemProps) {
 
 function Files() {
   const { accountName, projectName } = Route.useParams()
-  const { path, ref, compare_open, base_ref, compare_ref, editor_open } =
-    Route.useSearch()
+  const {
+    path,
+    ref,
+    compare_open,
+    base_ref,
+    compare_ref,
+    editor_open,
+    file_editor_open,
+    nb_view,
+    nb_run,
+  } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const {
@@ -346,12 +367,15 @@ function Files() {
   // The in-browser LaTeX editor can open a .tex source directly, or a LaTeX
   // publication (whose source we derive as <name>.tex, matching the
   // publications page). deps help load figures from outside the paper dir.
+  // Only a PDF publication gets that treatment: an .html or .md one has no
+  // .tex behind it, and deriving one would open the LaTeX editor on a file
+  // that doesn't exist instead of editing the publication itself.
   const latexTexPath: string | undefined =
     selectedItem?.type === "file"
       ? selectedItem.path.endsWith(".tex")
         ? selectedItem.path
-        : artifactKind === "publication"
-          ? selectedItem.path.replace(/\.[^/.]+$/, ".tex")
+        : artifactKind === "publication" && selectedItem.path.endsWith(".pdf")
+          ? selectedItem.path.replace(/\.pdf$/, ".tex")
           : undefined
       : undefined
   // No pipeline deps here (that lives on the Publication object, not a file
@@ -360,6 +384,53 @@ function Files() {
     navigate({ search: (prev) => ({ ...prev, editor_open: true }) })
   const closeEditor = () =>
     navigate({ search: (prev) => ({ ...prev, editor_open: undefined }) })
+  // Anything textual and in the repo can be edited in the app. DVC-tracked
+  // files live outside Git, so committing one here wouldn't update the pointer
+  // the project actually reads.
+  const editableFilePath: string | undefined =
+    selectedItem?.type === "file" &&
+    selectedItem.in_repo &&
+    isEditableText(selectedItem.path)
+      ? selectedItem.path
+      : undefined
+  // One "Edit file" button, whichever editor it opens: a .tex source (and a
+  // LaTeX publication, whose source we derive) gets the LaTeX editor with its
+  // preview, everything else textual gets the plain one.
+  const canEdit = Boolean(
+    (latexTexPath || editableFilePath) && userHasWriteAccess && !ref,
+  )
+  const openFileEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, file_editor_open: true }) })
+  const closeFileEditor = () =>
+    navigate({ search: (prev) => ({ ...prev, file_editor_open: undefined }) })
+  // A notebook has two faces: its source, and the executed copy the
+  // pipeline produced (HTML or a notebook with outputs). The notebooks
+  // endpoint knows about the second and about the stage that runs it.
+  const isNotebook = Boolean(selectedPath?.toLowerCase().endsWith(".ipynb"))
+  const notebooksQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "notebooks", ref],
+    queryFn: () =>
+      ProjectsService.getProjectNotebooks({
+        owner_name: accountName,
+        project_name: projectName,
+        ref,
+      }).then((response) => response.data),
+    enabled: isNotebook,
+    retry: false,
+  })
+  const notebook = isNotebook
+    ? (notebooksQuery.data ?? []).find((nb) => nb.path === selectedPath)
+    : undefined
+  const hasExecuted = Boolean(notebook && (notebook.content || notebook.url))
+  // Executed is the default: it's what the pipeline made, and the thing a
+  // reader wants first. Source is the fallback when there isn't one.
+  const nbView = nb_view ?? "executed"
+  const showExecuted =
+    isNotebook &&
+    nbView === "executed" &&
+    (notebooksQuery.isPending || hasExecuted)
+  const setNbView = (view: "source" | "executed") =>
+    navigate({ search: (prev) => ({ ...prev, nb_view: view }) })
 
   return (
     <>
@@ -417,8 +488,44 @@ function Files() {
           </PageMenu>
           <Flex flex={1} minW={0} gap={6} align="flex-start">
             <Box flex={1} minW={0} minH={0} overflowY="auto" overflowX="auto">
+              {isNotebook && selectedItemQuery?.data ? (
+                <ButtonGroup size="xs" isAttached variant="outline" mb={2}>
+                  <Button
+                    onClick={() => setNbView("source")}
+                    isActive={
+                      nbView === "source" ||
+                      (!notebooksQuery.isPending && !hasExecuted)
+                    }
+                  >
+                    Source
+                  </Button>
+                  <Button
+                    onClick={() => setNbView("executed")}
+                    isActive={nbView === "executed" && hasExecuted}
+                    isDisabled={!notebooksQuery.isPending && !hasExecuted}
+                    title={
+                      hasExecuted
+                        ? undefined
+                        : "No executed copy yet; run the pipeline to make one"
+                    }
+                  >
+                    Executed
+                  </Button>
+                </ButtonGroup>
+              ) : null}
               {selectedPath !== undefined && selectedItemQuery.isPending ? (
                 <LoadingSpinner />
+              ) : showExecuted ? (
+                notebooksQuery.isPending || !notebook ? (
+                  <LoadingSpinner />
+                ) : (
+                  // NotebookView fills its container, and this column has no
+                  // height of its own, so give it the same height FileContent
+                  // uses for its panes, less the toggle above.
+                  <Box height="calc(100vh - 200px)">
+                    <NotebookView notebook={notebook} />
+                  </Box>
+                )
               ) : selectedItemQuery?.data?.content ||
                 selectedItemQuery?.data?.url ? (
                 <FileContent item={selectedItemQuery.data!} />
@@ -449,15 +556,35 @@ function Files() {
                       userHasWriteAccess={userHasWriteAccess}
                       onOpenCompare={openCompare}
                       gitRef={ref}
-                      onEditLatex={
-                        latexTexPath && userHasWriteAccess && !ref
-                          ? openEditor
+                      onEditFile={
+                        canEdit
+                          ? latexTexPath
+                            ? openEditor
+                            : openFileEditor
                           : undefined
                       }
                     />
                   ) : (
                     ""
                   )}
+                  {isNotebook && selectedPath && userHasWriteAccess && !ref ? (
+                    <NotebookRunLauncher
+                      ownerName={accountName}
+                      projectName={projectName}
+                      path={selectedPath}
+                      stage={notebook?.stage}
+                      source="files-page"
+                      isOpen={Boolean(nb_run)}
+                      onOpenChange={(open) =>
+                        navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            nb_run: open || undefined,
+                          }),
+                        })
+                      }
+                    />
+                  ) : null}
                 </>
               )}
             </Box>
@@ -484,6 +611,16 @@ function Files() {
               }),
             })
           }
+        />
+      )}
+
+      {file_editor_open && editableFilePath && (
+        <FileEditorModal
+          isOpen={Boolean(file_editor_open)}
+          onClose={closeFileEditor}
+          ownerName={accountName}
+          projectName={projectName}
+          path={editableFilePath}
         />
       )}
 

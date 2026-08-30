@@ -1,7 +1,9 @@
 """Functionality for working with users."""
 
+import hmac
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -15,10 +17,12 @@ from app import utcnow
 from app.config import settings
 from app.core import INVALID_ACCOUNT_NAMES, ORG_ONLY_ACCOUNT_NAMES
 from app.github import token_resp_text_to_dict
+from app.messaging import EMAIL_VERIFICATION_CODE_MINUTES
 from app.models import (
     Account,
     User,
     UserCreate,
+    UserEmailVerification,
     UserExternalCredential,
     UserGitHubToken,
     UserSubscription,
@@ -27,7 +31,9 @@ from app.models import (
 from app.security import (
     decrypt_secret,
     encrypt_secret,
+    generate_email_verification_token,
     get_password_hash,
+    verify_email_verification_token,
     verify_password,
 )
 from app.zenodo import AUTH_URL as ZENODO_AUTH_URL
@@ -145,8 +151,24 @@ def create_user(*, session: Session, user_create: UserCreate) -> User:
     existing = session.exec(
         select(Account).where(Account.name == account_name.lower())
     ).first()
-    if existing is not None:
+    if existing is not None and user_create.account_name:
         raise HTTPException(422, "Account name is already taken")
+    if existing is not None:
+        # A name nobody chose (the email's local part, or a GitHub name
+        # already used here) shouldn't block signup: a second alex@ gets
+        # alex-2
+        base = account_name
+        for n in range(2, 1000):
+            account_name = f"{base}-{n}"
+            if (
+                session.exec(
+                    select(Account).where(Account.name == account_name.lower())
+                ).first()
+                is None
+            ):
+                break
+        else:
+            raise HTTPException(422, "Account name is already taken")
     user = User.model_validate(
         user_create,
         update={
@@ -192,6 +214,147 @@ def get_user_by_email(*, session: Session, email: str) -> User | None:
     return session_user
 
 
+def email_is_verified(*, session: Session, user: User) -> bool:
+    """Whether the account's email is known to belong to whoever holds it.
+
+    See ``User.email_verified`` for what counts.
+    """
+    return user.email_verified
+
+
+EMAIL_VERIFICATION_RESEND_SECONDS = 60
+EMAIL_VERIFICATION_MAX_ATTEMPTS = 5
+
+
+def hash_email_verification_code(code: str) -> str:
+    """The stored form of a code: an HMAC under the server's secret.
+
+    Six digits is too small a space to protect with a slow hash alone,
+    which is why guesses are counted; keying the hash keeps a leaked table
+    from being useful on its own.
+    """
+    return hmac.new(
+        settings.SECRET_KEY.encode(), code.encode(), "sha256"
+    ).hexdigest()
+
+
+def create_email_verification(
+    *, session: Session, user: User
+) -> tuple[str, str]:
+    """Issue a fresh code and link token for the user's current email.
+
+    Returns the code and the token, which the caller emails. Any earlier
+    code stops working. Raises 429 when one was sent less than a minute
+    ago, so the endpoint can't be used to flood an inbox.
+    """
+    now = utcnow()
+    existing = user.email_verification
+    if (
+        existing is not None
+        and (now - existing.created).total_seconds()
+        < EMAIL_VERIFICATION_RESEND_SECONDS
+    ):
+        raise HTTPException(
+            429, "A code was just sent. Wait a minute before asking again."
+        )
+    code = f"{secrets.randbelow(10**6):06d}"
+    expires = now + timedelta(minutes=EMAIL_VERIFICATION_CODE_MINUTES)
+    if existing is None:
+        existing = UserEmailVerification(
+            user_id=user.id,
+            code_hash=hash_email_verification_code(code),
+            expires=expires,
+        )
+    else:
+        existing.code_hash = hash_email_verification_code(code)
+        existing.created = now
+        existing.expires = expires
+        existing.attempts = 0
+    session.add(existing)
+    session.commit()
+    session.refresh(user)
+    token = generate_email_verification_token(
+        user_id=user.id, email=user.email
+    )
+    return code, token
+
+
+def mark_email_verified(*, session: Session, user: User) -> User:
+    """Record that the user's current email is theirs, once."""
+    if user.email_verified_at is None:
+        user.email_verified_at = utcnow()
+        session.add(user)
+    if user.email_verification is not None:
+        session.delete(user.email_verification)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+def confirm_email_verification_code(
+    *, session: Session, user: User, code: str
+) -> User:
+    """Check an entered code and, if it's right, mark the email verified.
+
+    A wrong code counts as an attempt; past the limit the code is thrown
+    away and a new one has to be requested, which is what keeps guessing
+    all million of them from being an option.
+    """
+    pending = user.email_verification
+    if pending is None:
+        raise HTTPException(400, "No verification code has been sent")
+    if pending.expires < utcnow():
+        session.delete(pending)
+        session.commit()
+        raise HTTPException(400, "That code has expired; request a new one")
+    if not hmac.compare_digest(
+        pending.code_hash, hash_email_verification_code(code.strip())
+    ):
+        pending.attempts += 1
+        if pending.attempts >= EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            session.delete(pending)
+            session.commit()
+            raise HTTPException(400, "Too many wrong codes; request a new one")
+        session.add(pending)
+        session.commit()
+        raise HTTPException(400, "That code isn't right")
+    return mark_email_verified(session=session, user=user)
+
+
+def confirm_email_verification_token(*, session: Session, token: str) -> User:
+    """Mark an email verified from the link in the message, without login.
+
+    The token names the user and the address it was sent to; an address
+    changed since then leaves the old link proving nothing about the new
+    one, so the two have to still match.
+    """
+    claims = verify_email_verification_token(token)
+    if claims is None:
+        raise HTTPException(400, "This link is invalid or has expired")
+    user_id, email = claims
+    user = session.get(User, user_id)
+    if user is None or user.email.lower() != email.lower():
+        raise HTTPException(400, "This link is invalid or has expired")
+    if not user.is_active:
+        raise HTTPException(400, "Inactive user")
+    return mark_email_verified(session=session, user=user)
+
+
+def link_github_account(
+    *, session: Session, user: User, github_username: str
+) -> None:
+    """Attach a GitHub identity to an account.
+
+    Only ``github_name`` changes: account names are immutable, since every
+    project URL, configured DVC remote, and object storage path is keyed
+    by them.
+    """
+    user.account.github_name = github_username
+    session.add(user.account)
+    session.commit()
+    session.refresh(user)
+
+
 def get_user_by_github_username(
     *, session: Session, github_username: str
 ) -> User | None:
@@ -221,17 +384,44 @@ def get_github_token(session: Session, user: User) -> str:
     necessary. Tries new UserExternalCredential table first, falls back to
     legacy UserGitHubToken.
     """
-    # Try new credential system first
-    query = (
-        select(UserExternalCredential)
-        .where(
+
+    def load_credential(lock: bool) -> UserExternalCredential | None:
+        query = select(UserExternalCredential).where(
             UserExternalCredential.user_id == user.id,
             UserExternalCredential.provider == "github",
             UserExternalCredential.label == "default",
         )
-        .with_for_update()
-    )
-    credential = session.exec(query).first()
+        if lock:
+            query = query.with_for_update()
+        return session.exec(query).first()
+
+    def refresh_due(credential: UserExternalCredential) -> bool:
+        return (
+            credential.expires is not None
+            and (utcnow() + timedelta(minutes=30)) >= credential.expires
+        )
+
+    # Fast path: a plain read, deliberately not SELECT ... FOR UPDATE. That
+    # lock is held until the request's session closes, and `get_repo` asks for
+    # this token on every project read, so taking it here made every
+    # concurrent request for this user queue behind whichever one was doing
+    # the slowest Git/object-storage work -- a whole page's worth of requests
+    # serializing on one row. Only the branches that write it need the lock.
+    credential = load_credential(lock=False)
+    if credential is not None and not refresh_due(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return tokens["access_token"]
+    # Slow path: we're about to write, so re-read under the row lock and
+    # re-check. Whoever held the lock ahead of us may have refreshed already,
+    # and refreshing a second time would invalidate the token they just
+    # stored. Expire first so the locked read repopulates the instance rather
+    # than handing back the copy the identity map already holds.
+    if credential is not None:
+        session.expire(credential)
+    credential = load_credential(lock=True)
+    if credential is not None and not refresh_due(credential):
+        tokens = json.loads(decrypt_secret(credential.secret_payload))
+        return tokens["access_token"]
     # Fall back to legacy table if not in new system
     if credential is None:
         logger.info(
@@ -265,12 +455,7 @@ def get_github_token(session: Session, user: User) -> str:
             expires=legacy_token.expires,
             refresh_token_expires=legacy_token.refresh_token_expires,
         )
-    # Check if refresh needed
-    needs_refresh = (
-        credential.expires is not None
-        and (utcnow() + timedelta(minutes=30)) >= credential.expires
-    )
-    if needs_refresh:
+    if refresh_due(credential):
         logger.info(f"Refreshing GitHub token for {user.email}")
         tokens = json.loads(decrypt_secret(credential.secret_payload))
         resp = requests.post(
@@ -579,33 +764,43 @@ def get_google_token(session: Session, user: User) -> str:
     return tokens["access_token"]
 
 
-def save_google_token(session: Session, user: User, google_resp: dict):
+def save_google_token(
+    session: Session,
+    user: User,
+    google_resp: dict[str, Any],
+    verified_email: str | None = None,
+) -> None:
     """Save Google OAuth token to UserExternalCredential table.
 
     Preserves existing refresh_token when Google doesn't return a new one
     (Google often omits refresh_token on subsequent authorizations).
+
+    ``verified_email`` is the address Google reported as verified, when the
+    caller fetched the profile and checked it. It's kept on the credential
+    as what this account has proven about its email, and is carried over
+    rather than cleared when a later save doesn't know it.
     """
     now = utcnow()
     # Google's expires_in is in seconds
     expires = now + timedelta(seconds=int(google_resp["expires_in"]))
+    existing_cred = get_external_credential(
+        session=session,
+        user=user,
+        provider="google",
+        label="default",
+    )
     # Preserve existing refresh_token if not provided in response
     refresh_token = google_resp.get("refresh_token")
-    if not refresh_token:
-        # Try to get existing refresh_token
-        existing_cred = get_external_credential(
-            session=session,
-            user=user,
-            provider="google",
-            label="default",
-        )
-        if existing_cred:
-            try:
-                existing_tokens = json.loads(
-                    decrypt_secret(existing_cred.secret_payload)
-                )
-                refresh_token = existing_tokens.get("refresh_token")
-            except Exception:
-                pass
+    if not refresh_token and existing_cred:
+        try:
+            existing_tokens = json.loads(
+                decrypt_secret(existing_cred.secret_payload)
+            )
+            refresh_token = existing_tokens.get("refresh_token")
+        except Exception:
+            pass
+    if verified_email is None and existing_cred is not None:
+        verified_email = existing_cred.provider_account_id
     payload = json.dumps(
         {
             "access_token": google_resp["access_token"],
@@ -618,6 +813,7 @@ def save_google_token(session: Session, user: User, google_resp: dict):
         provider="google",
         secret_payload=payload,
         credential_type="oauth2",
+        provider_account_id=verified_email,
         expires=expires,
     )
 

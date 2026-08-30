@@ -6,29 +6,26 @@ import {
   HStack,
   Heading,
   Icon,
+  Link,
   Text,
   useColorModeValue,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute } from "@tanstack/react-router"
+import { Link as RouterLink, createFileRoute } from "@tanstack/react-router"
 import { useNavigate } from "@tanstack/react-router"
-import { Suspense, lazy } from "react"
 import { FaCodeBranch } from "react-icons/fa"
-import { SiJupyter } from "react-icons/si"
+import { SiJupyter, SiPython } from "react-icons/si"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
 import Tooltip from "../../../../../components/Common/Tooltip"
-
-const IpynbRenderer = lazy(() =>
-  import("react-ipynb-renderer").then(async (m) => {
-    await import("react-ipynb-renderer/dist/styles/monokai.css")
-    return { default: m.IpynbRenderer }
-  }),
-)
 
 import { type Notebook, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import PageMenu from "../../../../../components/Common/PageMenu"
+import NotebookRunLauncher from "../../../../../components/Notebooks/NotebookRunLauncher"
+import useProject from "../../../../../hooks/useProject"
+import NotebookView from "../../../../../components/Notebooks/NotebookView"
 
 const notebookSearchSchema = z.object({
   ref: z.string().optional(),
@@ -36,6 +33,9 @@ const notebookSearchSchema = z.object({
   compare_open: z.boolean().optional(),
   base_ref: z.string().optional(),
   compare_ref: z.string().optional(),
+  // Whether the notebook runner is open on the selected notebook, so a
+  // link can land in it.
+  run: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -45,74 +45,25 @@ export const Route = createFileRoute(
   validateSearch: (search) => notebookSearchSchema.parse(search),
 })
 
-function NotebookView({ notebook }: { notebook: Notebook }) {
-  if (notebook.output_format === "notebook" && notebook.content) {
-    try {
-      const json = JSON.parse(atob(notebook.content))
-      return (
-        <Box
-          overflowY="auto"
-          overflowX="hidden"
-          borderRadius="lg"
-          sx={{
-            ".ipynb-renderer-root": { borderRadius: "var(--chakra-radii-lg)" },
-            ".ipynb-renderer-root #notebook-container": {
-              width: "100%",
-              marginLeft: 0,
-              marginRight: 0,
-            },
-            ".ipynb-renderer-root pre, .ipynb-renderer-root .CodeMirror": {
-              fontSize: "13px !important",
-              lineHeight: "1.5 !important",
-            },
-          }}
-        >
-          <Suspense fallback={<LoadingSpinner />}>
-            <IpynbRenderer ipynb={json} syntaxTheme="atomDark" />
-          </Suspense>
-        </Box>
-      )
-    } catch {
-      // fall through to other renderers
-    }
-  }
-  if (notebook.output_format === "html" && notebook.content) {
-    return (
-      <embed
-        height="100%"
-        width="100%"
-        type="text/html"
-        src={`data:text/html;base64,${notebook.content}`}
-      />
-    )
-  }
-  if (notebook.url) {
-    return (
-      <iframe
-        height="100%"
-        width="100%"
-        title="notebook"
-        src={notebook.url}
-        style={{ border: "none" }}
-      />
-    )
-  }
-  return (
-    <Flex align="center" justify="center" height="300px" color="gray.500">
-      <Text>
-        No rendered output found. Run the notebook and commit the HTML output to
-        view it here.
-      </Text>
-    </Flex>
-  )
-}
-
 function NotebookInfo({
   notebook,
+  accountName,
+  projectName,
+  gitRef,
   onOpenCompare,
+  canRun,
+  runOpen,
+  onRunOpenChange,
 }: {
   notebook: Notebook
+  accountName: string
+  projectName: string
+  gitRef?: string
   onOpenCompare: () => void
+  /** Whether the viewer may run and edit it (write access, default ref). */
+  canRun?: boolean
+  runOpen?: boolean
+  onRunOpenChange?: (open: boolean) => void
 }) {
   const bg = useColorModeValue("ui.secondary", "ui.darkSlate")
 
@@ -133,23 +84,74 @@ function NotebookInfo({
           {notebook.description ?? ""}
         </Text>
       </Text>
+      {/* Path and stage link out the way they do in the other info panels,
+      each carrying the ref being browsed so the file or stage opens at the
+      same commit rather than on the default branch */}
       <Text fontSize="sm" mb={1}>
-        <Text as="span">Path:</Text> <Code fontSize="xs">{notebook.path}</Code>
+        <Text as="span">Path:</Text>{" "}
+        <Link
+          as={RouterLink}
+          to={`/${accountName}/${projectName}/files`}
+          search={{ path: notebook.path, ref: gitRef } as any}
+        >
+          <Code fontSize="xs" cursor="pointer">
+            {notebook.path}
+          </Code>
+        </Link>
       </Text>
       <Text fontSize="sm" mb={1}>
         <Text as="span">Pipeline stage:</Text>{" "}
         {notebook.stage ? (
-          <Code fontSize="xs">{notebook.stage}</Code>
+          <Link
+            as={RouterLink}
+            to={`/${accountName}/${projectName}/pipeline`}
+            search={{ stage: notebook.stage, ref: gitRef } as any}
+          >
+            <Code fontSize="xs" cursor="pointer">
+              {notebook.stage}
+            </Code>
+          </Link>
         ) : (
           <Text as="span" color="red.500">
             Not in pipeline
           </Text>
         )}
       </Text>
+      {/* The notebook's stage is what builds the app, so this is where a
+      reader finds out the notebook has one to look at */}
+      {notebook.app ? (
+        <Text fontSize="sm" mb={1}>
+          <Text as="span">App:</Text>{" "}
+          <Link
+            as={RouterLink}
+            variant="blue"
+            to={`/${accountName}/${projectName}/apps/${notebook.app}`}
+            // Carry the ref being browsed, so the app shown is the one this
+            // notebook builds at that commit rather than silently the one
+            // on the default branch
+            search={{ ref: gitRef } as any}
+          >
+            {notebook.app}
+          </Link>
+        </Text>
+      ) : null}
       <Button mt={2} size="sm" onClick={onOpenCompare}>
         <Icon as={FaCodeBranch} mr={1} />
         Browse history
       </Button>
+      {/* Jupyter notebooks run in the browser; a marimo notebook is a
+          different runtime and waits for its own runner */}
+      {canRun ? (
+        <NotebookRunLauncher
+          ownerName={accountName}
+          projectName={projectName}
+          path={notebook.path}
+          stage={notebook.stage}
+          source="notebooks-page"
+          isOpen={Boolean(runOpen)}
+          onOpenChange={onRunOpenChange}
+        />
+      ) : null}
     </Box>
   )
 }
@@ -158,11 +160,13 @@ function Notebooks() {
   const { accountName, projectName } = Route.useParams()
   const {
     ref,
+    run,
     path: selectedPath,
     compare_open,
     base_ref,
     compare_ref,
   } = Route.useSearch()
+  const { userHasWriteAccess } = useProject(accountName, projectName)
   const navigate = useNavigate({ from: Route.fullPath })
   const setSelectedPath = (p: string) =>
     navigate({ search: (prev) => ({ ...prev, path: p }) })
@@ -233,7 +237,17 @@ function Notebooks() {
                       onClick={() => setSelectedPath(nb.path ?? "")}
                       spacing={1}
                     >
-                      <Icon as={SiJupyter} flexShrink={0} color="orange.400" />
+                      {/* Not every notebook is a Jupyter one; a marimo
+                      notebook is a Python module */}
+                      {nb.path?.endsWith(".py") ? (
+                        <Icon as={SiPython} flexShrink={0} color="blue.400" />
+                      ) : (
+                        <Icon
+                          as={SiJupyter}
+                          flexShrink={0}
+                          color="orange.400"
+                        />
+                      )}
                       <Text fontSize="sm" noOfLines={1}>
                         {nb.title ?? nb.path}
                       </Text>
@@ -257,24 +271,35 @@ function Notebooks() {
                 </Box>
               </>
             ) : (
-              <Flex
-                align="center"
-                justify="center"
-                height="300px"
-                color="gray.500"
-                direction="column"
-                gap={3}
-              >
-                <Icon as={SiJupyter} fontSize="4xl" color="orange.300" />
-                <Text>No notebooks found</Text>
-              </Flex>
+              <NoArtifactFound
+                icon={SiJupyter}
+                iconColor="orange.300"
+                title="No notebooks found"
+                hint={
+                  <>
+                    Add an <Code>.ipynb</Code> file to the repo, or declare one
+                    in <Code>calkit.yaml</Code> to show it here.
+                  </>
+                }
+                docsUrl="https://docs.calkit.org/notebooks/"
+              />
             )}
           </Box>
           {/* Right: info */}
           {selectedNotebook && (
             <Box w="240px" flexShrink={0}>
               <NotebookInfo
+                canRun={userHasWriteAccess && !ref}
+                runOpen={Boolean(run)}
+                onRunOpenChange={(open) =>
+                  navigate({
+                    search: (prev) => ({ ...prev, run: open || undefined }),
+                  })
+                }
                 notebook={selectedNotebook}
+                accountName={accountName}
+                projectName={projectName}
+                gitRef={ref}
                 onOpenCompare={() => openCompare(selectedNotebook.path ?? "")}
               />
               <ArtifactCompareModal

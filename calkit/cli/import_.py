@@ -208,7 +208,9 @@ def import_dataset(
             filter_paths=filter_paths,
         ),
     )
-    datasets.append(new_ds.model_dump())
+    # Nulls left out, so the entry reads as what was recorded rather than as
+    # a form with most of its fields blank
+    datasets.append(new_ds.model_dump(exclude_none=True))
     ck_info["datasets"] = datasets
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
@@ -271,9 +273,7 @@ def import_environment(
         raise_error("Invalid source environment specification")
     if os.path.isdir(project):
         typer.echo(f"Importing from local project directory: {project}")
-        src_ck_info = dict(
-            calkit.load_calkit_info(wdir=project, process_includes=True)
-        )
+        src_ck_info = dict(calkit.load_calkit_info(wdir=project))
         environments = src_ck_info.get("environments", {})
         if env_name not in environments:
             raise_error(f"Environment {env_name} not found in project")
@@ -467,13 +467,24 @@ def import_from_zenodo(
     if kind is not None:
         ck_info = calkit.load_calkit_info()
         items = ck_info.get(kind + "s", [])
+        # A record without a DOI (not every one has been minted one) is still
+        # somewhere in particular, so fall back to its URL rather than
+        # writing ``doi: null``, which nothing would then accept
+        doi = calkit.invenio.extract_doi(record)
+        if doi is not None:
+            imported_from: dict = {"doi": doi}
+        else:
+            imported_from = {
+                "url": record.get("links", {}).get("self_html")
+                or f"https://zenodo.org/records/{record_id}"
+            }
         item_record = {
             "path": dest_dir,
-            "imported_from": {
-                "doi": record.get("doi"),
-            },
-            "title": record.get("metadata", {}).get("title"),
+            "imported_from": imported_from,
         }
+        title = record.get("metadata", {}).get("title")
+        if title:
+            item_record["title"] = title
         items.append(item_record)
         ck_info[kind + "s"] = items
         with open("calkit.yaml", "w") as f:

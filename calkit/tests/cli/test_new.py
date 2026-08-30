@@ -9,6 +9,7 @@ import git
 import pytest
 
 import calkit
+import calkit.schema
 from calkit.environments import get_env_lock_fpath
 
 
@@ -132,6 +133,140 @@ def test_new_figure(tmp_dir):
     )
     pipeline = calkit.dvc.read_pipeline()
     assert pipeline["stages"]["create-figure3"]["deps"] == ["myfigure2.png"]
+    # A figure drawn by hand names who drew it, and what they used
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "figure",
+            "schematic.png",
+            "--title",
+            "Schematic",
+            "--description",
+            "Drawn by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-with-ai",
+            "Claude Opus 5",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    fig = [f for f in ck_info["figures"] if f["path"] == "schematic.png"][0]
+    assert fig["created_by"] == {
+        "email": "me@x.edu",
+        "with_ai": "Claude Opus 5",
+    }
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            [
+                "calkit",
+                "new",
+                "figure",
+                "bad.png",
+                "--title",
+                "Bad",
+                "--description",
+                "Bad.",
+                "--created-by-orcid",
+                "0000-0002-1825-0098",
+            ]
+        )
+
+
+def test_new_dataset(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    # A dataset someone collected names them, and the ORCID is normalized
+    # and checked on the way in rather than at the next validation
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/raw.csv",
+            "--title",
+            "Raw data",
+            "--description",
+            "Measured by hand.",
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-0097",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    ds = ck_info["datasets"][0]
+    assert ds["path"] == "data/raw.csv"
+    assert ds["created_by"] == {
+        "email": "me@x.edu",
+        "orcid": "https://orcid.org/0000-0002-1825-0097",
+    }
+    assert "with_ai" not in ds["created_by"]
+    # The disclosure goes on the person, as a list when there are several
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/transcribed.csv",
+            "--title",
+            "Transcribed",
+            "--description",
+            "Transcribed from sheets.",
+            "--created-by-orcid",
+            "0000-0002-1694-233X",
+            "--created-with-ai",
+            "Claude Opus 5",
+            "--created-with-ai",
+            "Copilot",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][1]["created_by"] == {
+        "orcid": "https://orcid.org/0000-0002-1694-233X",
+        "with_ai": ["Claude Opus 5", "Copilot"],
+    }
+    # A mistyped ORCID, or a tool with nobody to answer for it, is refused
+    for bad_opts in [
+        [
+            "--created-by-email",
+            "me@x.edu",
+            "--created-by-orcid",
+            "0000-0002-1825-009X",
+        ],
+        ["--created-with-ai", "Claude Opus 5"],
+        ["--created-by-email", "not-an-email"],
+    ]:
+        with pytest.raises(subprocess.CalledProcessError):
+            subprocess.check_call(
+                [
+                    "calkit",
+                    "new",
+                    "dataset",
+                    "data/bad.csv",
+                    "--title",
+                    "Bad",
+                    "--description",
+                    "Bad.",
+                ]
+                + bad_opts
+            )
+    ck_info = calkit.load_calkit_info()
+    assert "data/bad.csv" not in [d["path"] for d in ck_info["datasets"]]
+    # Without any of the flags nothing is written, as before
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "dataset",
+            "data/plain.csv",
+            "--title",
+            "Plain",
+            "--description",
+            "Plain.",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert "created_by" not in ck_info["datasets"][2]
 
 
 def test_new_result(tmp_dir):
@@ -147,7 +282,12 @@ def test_new_result(tmp_dir):
         ]
     )
     ck_info = calkit.load_calkit_info()
-    assert "results/metrics.json" in [r["path"] for r in ck_info["results"]]
+    # Calkit init writes the schema modeline into an otherwise empty file,
+    # and declaring something must not wipe it out
+    with open("calkit.yaml") as f:
+        assert f.read().startswith(calkit.schema.MODELINE)
+    assert ck_info["results"][0]["path"] == "results/metrics.json"
+    assert ck_info["results"][0]["title"] == "Key metrics"
     # Won't overwrite without -f
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_call(
@@ -160,6 +300,37 @@ def test_new_result(tmp_dir):
                 "Key metrics",
             ]
         )
+    # Several results can share a file, each naming a value inside it, since
+    # a result is identified by its path and key together
+    for key in ["mean", "std"]:
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", key]
+        )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["mean"]["path"] == "results/metrics.json"
+    assert by_key["std"]["path"] == "results/metrics.json"
+    # Re-declaring the same path and key is what counts as a duplicate
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.check_call(
+            ["calkit", "new", "result", "results/metrics.json", "--key", "std"]
+        )
+    # A name can be attached for referring to the result later
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "result",
+            "results/metrics.json",
+            "--key",
+            "metrics.rmse",
+            "--name",
+            "error",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    by_key = {r.get("key"): r for r in ck_info["results"]}
+    assert by_key["metrics.rmse"]["name"] == "error"
 
 
 def test_new_presentation(tmp_dir):
@@ -263,6 +434,38 @@ def test_new_publication(tmp_dir):
     pub2 = ck_info["publications"][1]
     assert pub2["path"] == "my-paper-2/paper.pdf"
     assert "description" not in pub2
+    # A template that brings its own class and style files declares them as
+    # stage inputs, else editing them wouldn't rebuild the paper and the
+    # in-browser preview couldn't compile it at all
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "publication",
+            "jfm-paper",
+            "--template",
+            "latex/jfm",
+            "--kind",
+            "journal-article",
+            "--title",
+            "A JFM paper",
+            "--stage",
+            "build-jfm-paper",
+            "--environment",
+            "my-latex-env",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    stage = ck_info["pipeline"]["stages"]["build-jfm-paper"]
+    assert stage["inputs"] == [
+        "jfm-paper/jfm.bst",
+        "jfm-paper/jfm.cls",
+        "jfm-paper/lineno-FLM.sty",
+        "jfm-paper/upmath.sty",
+    ]
+    # The article template needs nothing beyond its own .tex
+    article_stage = ck_info["pipeline"]["stages"]["build-latex-article"]
+    assert article_stage.get("inputs", []) == []
 
 
 def test_new_uv_env(tmp_dir):
@@ -672,6 +875,77 @@ def test_new_latex_stage(tmp_dir):
         ["paper.tex", env_lock_fpath]
     )
     assert pipeline["stages"]["build-paper"]["outs"] == ["paper.pdf"]
+    # A document's class, bibliography, and figures become deps automatically,
+    # since LaTeX resolves those itself and the pipeline can't see them
+    os.makedirs("figures", exist_ok=True)
+    with open("figures/fig.png", "wb") as f:
+        f.write(b"not really a PNG")
+    # A DVC-tracked figure is only a pointer file until it's pulled, but it's
+    # still an input
+    with open("figures/dvc-fig.png.dvc", "w") as f:
+        f.write("outs:\n  - path: dvc-fig.png\n")
+    with open("refs.bib", "w") as f:
+        f.write("@article{a, title={A}}\n")
+    with open("myclass.cls", "w") as f:
+        f.write("\\usepackage{mystyle}\n")
+    with open("mystyle.sty", "w") as f:
+        f.write("% nothing\n")
+    with open("paper2.tex", "w") as f:
+        f.write(
+            "\\documentclass{myclass}\n"
+            "\\usepackage{graphicx}\n"
+            "% \\includegraphics{figures/commented}\n"
+            "\\bibliography{refs}\n"
+            "\\includegraphics[width=0.5\\textwidth]{figures/fig}\n"
+            "\\includegraphics{figures/dvc-fig.png}\n"
+        )
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-2",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper2.pdf",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    # graphicx lives in TeX Live, not the project, so it isn't an input
+    assert ck_info["pipeline"]["stages"]["build-paper-2"]["inputs"] == [
+        "figures/dvc-fig.png",
+        "figures/fig.png",
+        "myclass.cls",
+        "mystyle.sty",
+        "refs.bib",
+    ]
+    # Detection can be turned off, and explicit inputs are always kept
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "latex-stage",
+            "--name",
+            "build-paper-3",
+            "--target",
+            "paper2.tex",
+            "--environment",
+            "tex",
+            "--output",
+            "paper3.pdf",
+            "--input",
+            "refs.bib",
+            "--no-detect-inputs",
+        ]
+    )
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["pipeline"]["stages"]["build-paper-3"]["inputs"] == [
+        "refs.bib"
+    ]
     # output_dir / aux_dir / extra latexmk args flow through to the command
     subprocess.check_call(
         [
@@ -826,6 +1100,10 @@ def test_new_nix_env_stages_flake(tmp_dir):
 def test_new_release(tmp_dir, monkeypatch, httpserver):
     # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
     record_id = "test-record-abc123"
+    # A new version of a record gets its own ID, which the client must switch
+    # to; only the draft endpoints below are shared between the two
+    version_record_id = "test-record-def456"
+    any_record_id = f"(?:{record_id}|{version_record_id})"
     doi = "10.5072/zenodo.test123"
     # Point the Zenodo base URL at the local mock server and provide a dummy
     # token so no real credentials are needed.  Both env vars are inherited
@@ -841,26 +1119,27 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json({"id": record_id, "pids": {}})
     # POST /records/{id}/draft/files – initiate a file upload slot
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="POST"
     ).respond_with_json({"entries": []})
     # PUT /records/{id}/draft/files/{filename}/content – stream file bytes
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/content$"),
         method="PUT",
     ).respond_with_data("", status=200)
     # POST /records/{id}/draft/files/{filename}/commit – finalise upload
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/commit$"),
         method="POST",
     ).respond_with_json({"key": "file", "status": "completed"})
     # POST /records/{id}/draft/pids/doi – reserve a DOI for a draft
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/pids/doi$"),
+        method="POST",
     ).respond_with_json({"pids": {"doi": {"identifier": doi}}})
     # GET /records/{id}/draft/files – list files already in the draft
     # (used by --reupload to decide which files to delete first)
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="GET"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="GET"
     ).respond_with_json({"entries": []})
     # POST /records/{id}/draft/actions/publish – publish the draft
     httpserver.expect_request(
@@ -869,6 +1148,16 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json(
         {"id": record_id, "pids": {"doi": {"identifier": doi}}}
     )
+    # POST /records/{id}/versions – create a new version of a record, and
+    # PUT /records/{new_id}/draft – set that new version's metadata; the draft
+    # is only mocked under the new ID, so a client that failed to switch to it
+    # would get no response here
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/versions$"), method="POST"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{version_record_id}/draft$"), method="PUT"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
     # GET /records/{id} – fetch the published record for post-test assertions
     httpserver.expect_request(
         re.compile(rf"^/records/{record_id}$"), method="GET"
@@ -993,7 +1282,6 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     git_tags = git.Repo().tags
     assert "v0.1.0" in [tag.name for tag in git_tags]
     # Check the license is correct
-    # TODO: It seems like we can't use multiple license IDs with the API
     record_id = release["record_id"]
     record = calkit.invenio.get(f"/records/{record_id}")
     metadata = record["metadata"]
@@ -1001,6 +1289,36 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert metadata["license"] == {"id": "cc-by-4.0"}
     related = metadata["related_identifiers"]
     assert related[0]["identifier"] == "https://github.com/calkit/test-project"
+    # Issue #1582: SPDX IDs are case-insensitive, but the InvenioRDM license
+    # vocabulary rejects anything but the lowercase form, so release again
+    # with the licenses spelled in uppercase to check they are normalized
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.2.0",
+            "--license",
+            "MIT",
+            "--license",
+            "CC-BY-4.0",
+            "--draft",
+            "--no-github",
+        ]
+    )
+    # Every set of metadata sent to the service should have carried both
+    # licenses as separate lowercase rights entries, rather than collapsing
+    # them into one: the first release detected them from the LICENSE file,
+    # the second took them from the uppercase --license options
+    rights_sent = [
+        body["metadata"]["rights"]
+        for request, _ in httpserver.log
+        if (body := request.get_json(silent=True)) and "metadata" in body
+    ]
+    expected_rights = [{"id": "mit"}, {"id": "cc-by-4.0"}]
+    assert len(rights_sent) >= 2
+    assert rights_sent == [expected_rights] * len(rights_sent)
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(
@@ -1688,3 +2006,25 @@ def test_new_release_license_and_cff_authors(tmp_dir, monkeypatch):
     print(out)
     assert "Detected license(s): mit" in out
     assert "Read 1 author(s) from CITATION.cff" in out
+
+
+def test_split_template_subdir():
+    # A template may name a directory inside a repo.
+    #
+    # One repo can hold several self-contained examples, e.g.
+    # 'calkit/calkit/examples/markdown'.
+    from calkit.cli.new import _split_template_subdir
+
+    assert _split_template_subdir(
+        "calkit/example-basic", "https://github.com/calkit/example-basic"
+    ) == ("https://github.com/calkit/example-basic", None)
+    assert _split_template_subdir(
+        "calkit/calkit/examples/markdown",
+        "https://github.com/calkit/calkit/examples/markdown",
+    ) == ("https://github.com/calkit/calkit", "examples/markdown")
+    # A full URL's path belongs to the repo, so it is left alone
+    for url in [
+        "https://github.com/calkit/example-basic",
+        "file:///tmp/x/examples/demo",
+    ]:
+        assert _split_template_subdir(url, url) == (url, None)

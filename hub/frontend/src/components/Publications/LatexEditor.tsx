@@ -6,7 +6,9 @@ import {
   Flex,
   FormLabel,
   HStack,
+  IconButton,
   Input,
+  Kbd,
   Link,
   Modal,
   ModalBody,
@@ -21,24 +23,34 @@ import {
   VStack,
   useDisclosure,
 } from "@chakra-ui/react"
-import { StreamLanguage } from "@codemirror/language"
-import { stex } from "@codemirror/legacy-modes/mode/stex"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { EditorView, basicSetup } from "codemirror"
+import type { EditorView } from "codemirror"
 import mixpanel from "mixpanel-browser"
+import { FaPlus, FaTimes } from "react-icons/fa"
 import { merge as diff3Merge } from "node-diff3"
-import { type MutableRefObject, useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { AxiosError } from "axios"
 import { ProjectsService } from "../../client"
 import useCustomToast from "../../hooks/useCustomToast"
+import { refreshProjectContents } from "../../lib/api"
 import { handleError } from "../../lib/errors"
 import {
   LatexCompiler,
   type LatexFile,
   findMissingPackages,
 } from "../../lib/latexCompiler"
-import { loadLatexProject } from "../../lib/latexProject"
+import {
+  TEXT_EXT,
+  ext,
+  loadLatexProject,
+  type MappedPath,
+  mappedPaths,
+} from "../../lib/latexProject"
+import { fetchTree, newBudget } from "../../lib/projectFiles"
+import PathPicker from "../Releases/PathPicker"
+import { trimForSave } from "../../lib/strings"
+import CodeEditorPane from "../Common/CodeEditorPane"
 import PdfDocumentViewer from "../Common/PdfDocumentViewer"
 
 interface LatexEditorProps {
@@ -50,6 +62,8 @@ interface LatexEditorProps {
   // The publication's pipeline-stage deps, if any — used to load figures and
   // other inputs that live outside the .tex's own directory.
   deps?: string[] | null
+  // The publication's build stage, which a mapped path is wired into.
+  stage?: string | null
 }
 
 // Display a repo path relative to the main file's directory, surfacing `../`
@@ -68,43 +82,6 @@ function relativeTo(fromDir: string, to: string): string {
   return "../".repeat(fromParts.length - i) + toParts.slice(i).join("/")
 }
 
-function EditorPane({
-  initialDoc,
-  viewRef,
-  onChange,
-}: {
-  initialDoc: string
-  viewRef: MutableRefObject<EditorView | null>
-  onChange: (text: string) => void
-}) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!ref.current) {
-      return
-    }
-    const view = new EditorView({
-      doc: initialDoc,
-      extensions: [
-        basicSetup,
-        StreamLanguage.define(stex),
-        EditorView.lineWrapping,
-        EditorView.updateListener.of((u) => {
-          if (u.docChanged) {
-            onChange(u.state.doc.toString())
-          }
-        }),
-      ],
-      parent: ref.current,
-    })
-    viewRef.current = view
-    return () => {
-      view.destroy()
-      viewRef.current = null
-    }
-  }, [])
-  return <Box ref={ref} height="100%" overflowY="auto" fontSize="sm" />
-}
-
 const LatexEditor = ({
   isOpen,
   onClose,
@@ -112,10 +89,14 @@ const LatexEditor = ({
   projectName,
   texPath,
   deps,
+  stage,
 }: LatexEditorProps) => {
   // Files are keyed by their full repo path so relative refs (e.g.
   // \includegraphics{../figures/x.png}) resolve against the real layout.
   const viewRef = useRef<EditorView | null>(null)
+  const paperDir = texPath.includes("/")
+    ? texPath.slice(0, texPath.lastIndexOf("/"))
+    : ""
   const compilerRef = useRef<LatexCompiler | null>(null)
   const buffersRef = useRef<Map<string, string>>(new Map())
   // Base (last-reconciled) content per text file — the common ancestor for
@@ -123,6 +104,8 @@ const LatexEditor = ({
   const baseBuffersRef = useRef<Map<string, string>>(new Map())
   const baseShaRef = useRef<string | null>(null)
   const binariesRef = useRef<Map<string, Uint8Array>>(new Map())
+  // Text files the pipeline produces: compiled with, but never edited or saved.
+  const generatedRef = useRef<Set<string>>(new Set())
   const initializedRef = useRef(false)
   const compilingRef = useRef(false)
   const pendingCompileRef = useRef(false)
@@ -157,6 +140,21 @@ const LatexEditor = ({
   const [conflicts, setConflicts] = useState<Set<string>>(new Set())
   const [mergeNonce, setMergeNonce] = useState(0)
 
+  // What map-paths stages copy into the paper's directory, so a mapping
+  // can be undone from here as well as made.
+  const pipelineQuery = useQuery({
+    queryKey: ["projects", ownerName, projectName, "pipeline", undefined],
+    queryFn: () =>
+      ProjectsService.getProjectPipeline({
+        owner_name: ownerName,
+        project_name: projectName,
+      }).then((response) => response.data),
+    enabled: isOpen,
+  })
+  const mapped = useMemo(
+    () => mappedPaths(pipelineQuery.data?.calkit_yaml, paperDir),
+    [pipelineQuery.data?.calkit_yaml, paperDir],
+  )
   const { data: projectFiles } = useQuery({
     queryKey: ["projects", ownerName, projectName, "latex-project", texPath],
     queryFn: () => loadLatexProject(ownerName, projectName, texPath, deps),
@@ -174,7 +172,14 @@ const LatexEditor = ({
       if (f.kind === "text") {
         buffersRef.current.set(f.path, f.text ?? "")
         baseBuffersRef.current.set(f.path, f.text ?? "")
-        texts.push(f.path)
+        // A file the pipeline writes (e.g. copied in by a map-paths stage) is
+        // needed to compile but isn't editable: committing to its path would
+        // put content where the next pipeline run overwrites it.
+        if (f.generated) {
+          generatedRef.current.add(f.path)
+        } else {
+          texts.push(f.path)
+        }
       } else if (f.bytes) {
         binariesRef.current.set(f.path, f.bytes)
       }
@@ -224,6 +229,113 @@ const LatexEditor = ({
     }
   }, [])
 
+  // Mapping a path: copies land under the paper's directory at the source's name,
+  // which is where \\includegraphics{figures/x.png} expects them. The bytes
+  // go straight into the editor so the preview has them now; the stage
+  // makes the same copies on the next pipeline run.
+  const [mapping, setMapping] = useState(false)
+  const mapPath = async (src: string) => {
+    const name = src.split("/").pop() ?? src
+    const dest = paperDir ? `${paperDir}/${name}` : name
+    if (src === dest || src.startsWith(`${paperDir}/`)) {
+      showToast(
+        "Already in the paper's directory",
+        `${src} can be referenced as is.`,
+        "success",
+      )
+      return
+    }
+    setMapping(true)
+    mixpanel.track("Mapped path into LaTeX editor", {
+      isDir: !ext(src),
+    })
+    try {
+      const problems: string[] = []
+      const files = await fetchTree(
+        ownerName,
+        projectName,
+        src,
+        newBudget(),
+        setStatus,
+        problems,
+      )
+      const added: string[] = []
+      for (const file of files) {
+        const target = dest + file.path.slice(src.length)
+        if (TEXT_EXT.has(ext(target))) {
+          const text = new TextDecoder().decode(file.data)
+          buffersRef.current.set(target, text)
+          baseBuffersRef.current.set(target, text)
+          generatedRef.current.add(target)
+          added.push(target)
+        } else {
+          binariesRef.current.set(target, file.data)
+        }
+      }
+      if (added.length) {
+        setTextPaths((current) => [...current, ...added].sort())
+      }
+      setStatus("")
+      const stageResp = await ProjectsService.postProjectMapPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+        mapPathsPost: {
+          paths: [{ src, dest }],
+          target_stage: stage ?? null,
+        },
+      }).then((response) => response.data)
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline"],
+      })
+      showToast(
+        `Mapped ${src}`,
+        `It's at ${dest} here and copied there by stage ${stageResp.name} ` +
+          "on each pipeline run." +
+          (problems.length ? ` Not loaded: ${problems.join("; ")}` : ""),
+        problems.length ? "error" : "success",
+      )
+      if (autoCompile) scheduleCompile()
+    } catch (e) {
+      handleError(e as AxiosError, showToast)
+    } finally {
+      setMapping(false)
+    }
+  }
+  const removeMappedPath = async (entry: MappedPath) => {
+    mixpanel.track("Removed mapped path from LaTeX editor")
+    try {
+      await ProjectsService.deleteProjectMapPaths({
+        owner_name: ownerName,
+        project_name: projectName,
+        stage_name: entry.stage,
+        src: entry.src,
+        dest: entry.dest,
+        target_stage: stage ?? null,
+      })
+      const under = (p: string) =>
+        p === entry.dest || p.startsWith(`${entry.dest}/`)
+      for (const p of [...buffersRef.current.keys()].filter(under)) {
+        buffersRef.current.delete(p)
+        baseBuffersRef.current.delete(p)
+        generatedRef.current.delete(p)
+      }
+      for (const p of [...binariesRef.current.keys()].filter(under)) {
+        binariesRef.current.delete(p)
+      }
+      setTextPaths((current) => current.filter((p) => !under(p)))
+      queryClient.invalidateQueries({
+        queryKey: ["projects", ownerName, projectName, "pipeline"],
+      })
+      showToast(
+        `Removed ${entry.src}`,
+        `Stage ${entry.stage} no longer copies it.`,
+        "success",
+      )
+      if (autoCompile) scheduleCompile()
+    } catch (e) {
+      handleError(e as AxiosError, showToast)
+    }
+  }
   const compile = async (trigger: "manual" | "auto" = "manual") => {
     // Serialize compiles; if one is requested while another runs, recompile
     // once it finishes (so the preview reflects the latest edits).
@@ -253,7 +365,9 @@ const LatexEditor = ({
       const result = await compilerRef.current.compile(files, mainPath)
       // exit_code can be 0 with an empty PDF (busytex returns an empty array
       // when no PDF was written) — treat that as a failure, not a blank preview.
-      if (result.exitCode === 0 && result.pdf && result.pdf.byteLength > 0) {
+      // A PDF with errors behind it still shows, the way Overleaf does;
+      // the status and log say what went wrong.
+      if (result.pdf && result.pdf.byteLength > 0) {
         const pdfBytes = new Uint8Array(result.pdf)
         const blob = new Blob([pdfBytes], { type: "application/pdf" })
         setPdfUrl((prev) => {
@@ -262,8 +376,14 @@ const LatexEditor = ({
           }
           return URL.createObjectURL(blob)
         })
-        setStatus("Compiled ✓")
-        succeeded = true
+        setStatus(
+          result.exitCode === 0
+            ? "Compiled ✓"
+            : "Compiled with errors (see log)",
+        )
+        setLog(result.log)
+        // Counted as a success for tracking only when TeX was happy too
+        succeeded = result.exitCode === 0
       } else {
         const missing = findMissingPackages(result.log)
         setStatus(
@@ -323,8 +443,20 @@ const LatexEditor = ({
 
   const saveMutation = useMutation({
     mutationFn: async (message: string) => {
+      // Whether trimming rewrote anything, so the panes are only remounted
+      // (losing the caret and scroll position) when there is actually
+      // something different to show.
+      let trimmed = false
       for (const repoPath of dirtyRef.current) {
-        const text = buffersRef.current.get(repoPath) ?? ""
+        // Tidied the way the repo's hooks would, so a save doesn't land a
+        // diff that gets rewritten later. The buffer is updated to match, so
+        // what's on screen is what was committed.
+        const typed = buffersRef.current.get(repoPath) ?? ""
+        const text = trimForSave(typed, baseBuffersRef.current.get(repoPath))
+        if (text !== typed) {
+          trimmed = true
+        }
+        buffersRef.current.set(repoPath, text)
         // Skip files already identical to origin (nothing to commit), so one
         // unchanged file doesn't fail the whole save with a "not different"
         // error from the backend.
@@ -342,8 +474,9 @@ const LatexEditor = ({
           bodyProjectsPutProjectContents: { file, message: message || null },
         }).then((response) => response.data)
       }
+      return trimmed
     },
-    onSuccess: async () => {
+    onSuccess: async (trimmed) => {
       // Our just-saved content is now the committed baseline. Advance the base
       // buffers and the remote-head marker to it so the poll doesn't flag our
       // own push as an update to pull. Do this before clearing dirty so we
@@ -362,14 +495,19 @@ const LatexEditor = ({
       setDirty(new Set())
       setCommitMessage("")
       commitModal.onClose()
+      // Show the trimmed text if trimming changed anything, so the pane
+      // isn't left displaying whitespace that wasn't committed. Remounting
+      // resets the caret and scroll position, so don't do it otherwise.
+      if (trimmed) {
+        setMergeNonce((n) => n + 1)
+      }
       showToast("Saved", "Your changes were committed.", "success")
       mixpanel.track("Saved LaTeX changes", {
         project: `${ownerName}/${projectName}`,
         file_count: dirtyRef.current.size,
       })
-      queryClient.invalidateQueries({
-        queryKey: ["projects", ownerName, projectName],
-      })
+      // Fire-and-forget: the save already succeeded, and this never rejects.
+      void refreshProjectContents(ownerName, projectName, queryClient)
     },
     onError: (err: AxiosError) => {
       handleError(err, showToast)
@@ -445,6 +583,17 @@ const LatexEditor = ({
           continue
         }
         const remote = f.text ?? ""
+        if (f.generated && !dirtyRef.current.has(f.path)) {
+          // Not editable, so there's nothing to merge — just take the latest.
+          // A file that loaded as editable can come back generated (its own
+          // read failed and we fell back to the map-paths source), so one
+          // with unsaved edits goes through the merge below instead of having
+          // them silently replaced.
+          buffersRef.current.set(f.path, remote)
+          baseBuffersRef.current.set(f.path, remote)
+          generatedRef.current.add(f.path)
+          continue
+        }
         const base = baseBuffersRef.current.get(f.path)
         const local = buffersRef.current.get(f.path)
         if (base === undefined || local === undefined) {
@@ -528,8 +677,12 @@ const LatexEditor = ({
     }
   }
 
-  // Ctrl/Cmd+S (and the Save button) ask for a commit message before saving.
+  // Ctrl/Cmd+S, Cmd+Enter in the editor, and the Save button all ask for a
+  // commit message before saving.
   const requestSave = () => {
+    if (saveMutation.isPending) {
+      return
+    }
     // Block saving while unresolved conflict markers remain in any buffer.
     const unresolved = [...dirtyRef.current].filter((p) =>
       (buffersRef.current.get(p) ?? "").includes("<<<<<<<"),
@@ -639,6 +792,9 @@ const LatexEditor = ({
             >
               Save
             </Button>
+            <Text fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+              <Kbd>⌘</Kbd>+<Kbd>Enter</Kbd> to save
+            </Text>
             <Button size="sm" variant="ghost" onClick={logPanel.onToggle}>
               {logPanel.isOpen ? "Hide log" : "Show log"}
             </Button>
@@ -676,9 +832,35 @@ const LatexEditor = ({
                   p={2}
                   flexShrink={0}
                 >
-                  <Text fontSize="xs" color="ui.dim" mb={1} px={1}>
-                    Files
-                  </Text>
+                  <Flex align="center" mb={1} px={1}>
+                    <Text fontSize="xs" color="ui.dim">
+                      Files
+                    </Text>
+                    {/* Bring a file or folder from elsewhere in the project
+                        into the paper's directory: here, for the preview,
+                        and as a map-paths stage, for the pipeline. */}
+                    <PathPicker
+                      ownerName={ownerName}
+                      projectName={projectName}
+                      value=""
+                      allowFolders
+                      onChange={(path) => {
+                        if (path) mapPath(path)
+                      }}
+                      trigger={
+                        <IconButton
+                          aria-label="Map a file or folder from the project into the paper"
+                          icon={<FaPlus fontSize="9px" />}
+                          size="xs"
+                          variant="primary"
+                          height="16px"
+                          minW="16px"
+                          ml={1.5}
+                          isLoading={mapping}
+                        />
+                      }
+                    />
+                  </Flex>
                   <VStack align="stretch" spacing={0}>
                     {textPaths.map((p) => (
                       <Button
@@ -699,26 +881,77 @@ const LatexEditor = ({
                         {displayPath(p)}
                       </Button>
                     ))}
-                    {[...binariesRef.current.keys()].sort().map((p) => (
-                      <Text
-                        key={p}
-                        fontSize="xs"
-                        color="ui.dim"
-                        px={3}
-                        py={1}
-                        isTruncated
-                      >
-                        {displayPath(p)}
-                      </Text>
-                    ))}
+                    {/* Read-only inputs: binaries (figures) and anything the
+                        pipeline generates, which is compiled with but not
+                        editable here. */}
+                    {[...binariesRef.current.keys(), ...generatedRef.current]
+                      .sort()
+                      .map((p) => (
+                        <Text
+                          key={p}
+                          fontSize="xs"
+                          color="ui.dim"
+                          px={3}
+                          py={1}
+                          isTruncated
+                          title={
+                            generatedRef.current.has(p)
+                              ? "Generated by the pipeline — not editable here"
+                              : undefined
+                          }
+                        >
+                          {displayPath(p)}
+                        </Text>
+                      ))}
                   </VStack>
+                  {mapped.length ? (
+                    <>
+                      <Text fontSize="xs" color="ui.dim" mt={3} mb={1} px={1}>
+                        Mapped paths
+                      </Text>
+                      <VStack align="stretch" spacing={0}>
+                        {mapped.map((entry) => (
+                          <Flex
+                            key={`${entry.stage}:${entry.src}:${entry.dest}`}
+                            align="center"
+                            px={1}
+                            py={0.5}
+                          >
+                            <Text
+                              fontSize="xs"
+                              isTruncated
+                              flex={1}
+                              title={`${entry.src} → ${entry.dest} (stage ${entry.stage})`}
+                            >
+                              {/* map-paths notation, from the paper's
+                                  directory: ../figures->figures */}
+                              {relativeTo(paperDir, entry.src)}
+                              {"->"}
+                              {relativeTo(paperDir, entry.dest)}
+                            </Text>
+                            <IconButton
+                              aria-label={`Stop mapping ${entry.src}`}
+                              icon={<FaTimes fontSize="9px" />}
+                              size="xs"
+                              variant="ghost"
+                              height="16px"
+                              minW="16px"
+                              onClick={() => removeMappedPath(entry)}
+                            />
+                          </Flex>
+                        ))}
+                      </VStack>
+                    </>
+                  ) : null}
                 </Box>
                 <Box flex="1" borderRightWidth="1px" minW={0}>
-                  <EditorPane
+                  <CodeEditorPane
                     key={`${activePath}:${mergeNonce}`}
                     initialDoc={buffersRef.current.get(activePath) ?? ""}
+                    path={activePath}
                     viewRef={viewRef}
                     onChange={(text) => markDirty(activePath, text)}
+                    onModEnter={requestSave}
                   />
                 </Box>
                 <Box flex="1" minW={0} position="relative" bg="blackAlpha.50">
@@ -741,6 +974,27 @@ const LatexEditor = ({
                       <Text>No preview yet.</Text>
                       <Text fontSize="sm">
                         Click "Compile preview" to render the PDF.
+                      </Text>
+                    </Flex>
+                  )}
+                  {/* Overlay rather than replacing the preview, so the last
+                      rendered PDF stays visible (and keeps its scroll
+                      position) while a recompile is in flight. */}
+                  {compiling && (
+                    <Flex
+                      position="absolute"
+                      inset={0}
+                      zIndex={10}
+                      align="center"
+                      justify="center"
+                      direction="column"
+                      gap={3}
+                      bg="blackAlpha.300"
+                      backdropFilter="blur(1px)"
+                    >
+                      <Spinner size="xl" thickness="3px" color="ui.main" />
+                      <Text fontSize="sm" fontWeight="medium">
+                        Compiling…
                       </Text>
                     </Flex>
                   )}
@@ -821,6 +1075,7 @@ const LatexEditor = ({
           <ModalCloseButton />
           <ModalBody>
             <Input
+              autoComplete="off"
               ref={commitInputRef}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}

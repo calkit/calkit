@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 from functools import lru_cache
+from typing import Any
 
 import ruamel.yaml
 from dvc.commands import dag
@@ -47,7 +48,7 @@ def run_dvc_command(args: list[str], wdir: str, check: bool = False) -> int:
 
 
 @lru_cache(maxsize=512)
-def _read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
+def read_dvc_dir_cached(dvc_dir_path: str) -> list[dict] | None:
     """Cache DVC .dir file contents by path.
 
     Returns None if file doesn't exist.
@@ -127,6 +128,10 @@ def get_data_fpath_for_md5(
     """Return the first existing object-storage path for a DVC MD5.
 
     Supports both the current `files/md5` layout and the legacy layout.
+
+    Deliberately uncached: the result feeds pipeline staleness checks, where
+    an object that has gone away must be observed as missing. Callers that
+    resolve many artifacts at once should parallelize instead.
     """
     if not md5 or len(md5) < 3:
         return None
@@ -248,7 +253,7 @@ def expand_dvc_lock_outs(
 
     def _try_read(path: str) -> list[dict] | None:
         try:
-            return _read_dvc_dir_cached(path)
+            return read_dvc_dir_cached(path)
         except Exception as e:
             logger.warning(f"Failed to read {path}: {e}")
             return None
@@ -377,3 +382,57 @@ def expand_dvc_lock_outs(
                     stage=stage_name,
                 )
     return dvc_lock_outs
+
+
+def drop_stale_lock_stages(
+    dvc_lock: dict[str, Any], dvc_yaml: dict[str, Any]
+) -> dict[str, Any]:
+    """The lock with entries for stages no longer in dvc.yaml removed.
+
+    A stage that was renamed or deleted leaves its entry behind in
+    dvc.lock, and when it wrote the same output path as a live stage the
+    two disagree about the file's hash. DVC resolves the path through the
+    live stage, and so must the hub, or it looks for an object that was
+    never pushed. A `foreach` stage locks as ``name@key``, which counts as
+    ``name`` being present.
+    """
+    stages = dvc_lock.get("stages") if isinstance(dvc_lock, dict) else None
+    live = dvc_yaml.get("stages") if isinstance(dvc_yaml, dict) else None
+    if not isinstance(stages, dict) or not isinstance(live, dict):
+        return dvc_lock
+    kept = {
+        name: stage
+        for name, stage in stages.items()
+        if name in live or name.split("@", 1)[0] in live
+    }
+    if len(kept) == len(stages):
+        return dvc_lock
+    return {**dvc_lock, "stages": kept}
+
+
+def object_fpath_for_out(
+    owner_name: str,
+    project_name: str,
+    dvc_out: dict[str, Any],
+    fs: Any,
+) -> str | None:
+    """Where a DVC output's bytes sit in storage, or None if not pushed.
+
+    An output imported from another Calkit project is a pointer whose
+    ``remote`` names that project (``calkit:owner/project``) and is
+    ``push: false``, so its bytes only ever live in the source project's
+    storage. That is where such a lookup goes; anything else is looked up
+    in this project's storage.
+    """
+    md5 = dvc_out.get("md5")
+    if not md5:
+        return None
+    remote = str(dvc_out.get("remote") or "")
+    if remote.startswith("calkit:") and "/" in remote:
+        owner_name, project_name = remote[len("calkit:") :].split("/", 1)
+    return get_data_fpath_for_md5(
+        owner_name=owner_name,
+        project_name=project_name,
+        md5=md5,
+        fs=fs,
+    )

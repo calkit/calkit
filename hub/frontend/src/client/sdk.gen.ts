@@ -19,6 +19,7 @@ import type {
   BodyProjectsPostProjectFigure,
   BodyProjectsPostProjectOverleafPublication,
   BodyProjectsPostProjectPublication,
+  BodyProjectsPostProjectUpload,
   BodyProjectsPutProjectContents,
   CommentReply,
   ContentPatch,
@@ -28,6 +29,7 @@ import type {
   CreateReleaseShareResponses,
   CreateUserErrors,
   CreateUserResponses,
+  DatasetPost,
   DeleteCurrentUserResponses,
   DeleteFeatureVoteErrors,
   DeleteFeatureVoteResponses,
@@ -42,6 +44,8 @@ import type {
   DeleteProjectFileLockResponses,
   DeleteProjectInvitationErrors,
   DeleteProjectInvitationResponses,
+  DeleteProjectMapPathsErrors,
+  DeleteProjectMapPathsResponses,
   DeleteProjectNativeCollaboratorErrors,
   DeleteProjectNativeCollaboratorResponses,
   DeleteProjectReferenceItemErrors,
@@ -56,15 +60,24 @@ import type {
   DeleteUserErrors,
   DeleteUserExternalCredentialErrors,
   DeleteUserExternalCredentialResponses,
+  DeleteUserOnboardingFlagErrors,
+  DeleteUserOnboardingFlagResponses,
   DeleteUserResponses,
   DeleteUserTokenErrors,
   DeleteUserTokenResponses,
+  DetectProjectPipelineStageInputsErrors,
+  DetectProjectPipelineStageInputsResponses,
   DeviceAuthorizeRequest,
   DeviceAuthRequest,
   DeviceTokenRequest,
   DiscountCodePost,
+  EmailVerificationConfirm,
+  EmailVerificationToken,
   Environment,
   ExternalReleasePost,
+  FeedbackPatch,
+  FeedbackPost,
+  FigureScriptPost,
   FileLockPost,
   FsOpBatchRequest,
   FsOpRequest,
@@ -77,8 +90,12 @@ import type {
   GetDatasetsResponses,
   GetDiscountCodeErrors,
   GetDiscountCodeResponses,
+  GetFeaturedProjectsResponses,
+  GetFeatureVotesResponses,
   GetFeatureVoteStatusErrors,
   GetFeatureVoteStatusResponses,
+  GetFeedbackErrors,
+  GetFeedbackResponses,
   GetHubVersionResponses,
   GetNotificationsErrors,
   GetNotificationsResponses,
@@ -90,8 +107,12 @@ import type {
   GetOrgUsersResponses,
   GetOwnedProjectsErrors,
   GetOwnedProjectsResponses,
+  GetProjectActivityErrors,
+  GetProjectActivityResponses,
   GetProjectAppErrors,
   GetProjectAppResponses,
+  GetProjectAppsErrors,
+  GetProjectAppsResponses,
   GetProjectCollaboratorsErrors,
   GetProjectCollaboratorsResponses,
   GetProjectCommentsErrors,
@@ -104,7 +125,11 @@ import type {
   GetProjectContents2Responses,
   GetProjectContentsErrors,
   GetProjectContentsResponses,
+  GetProjectDatasetCsvErrors,
+  GetProjectDatasetCsvResponses,
   GetProjectDatasetErrors,
+  GetProjectDatasetHdf5Errors,
+  GetProjectDatasetHdf5Responses,
   GetProjectDatasetResponses,
   GetProjectDatasetsErrors,
   GetProjectDatasetsResponses,
@@ -149,8 +174,12 @@ import type {
   GetProjectOverleafSyncStatusResponses,
   GetProjectPipelineErrors,
   GetProjectPipelineResponses,
+  GetProjectPipelineStageErrors,
+  GetProjectPipelineStageResponses,
   GetProjectPresentationsErrors,
   GetProjectPresentationsResponses,
+  GetProjectPublicationComponentsErrors,
+  GetProjectPublicationComponentsResponses,
   GetProjectPublicationsErrors,
   GetProjectPublicationsResponses,
   GetProjectQuestionsErrors,
@@ -172,6 +201,8 @@ import type {
   GetProjectSoftwareErrors,
   GetProjectSoftwareResponses,
   GetProjectsResponses,
+  GetProjectTablesErrors,
+  GetProjectTablesResponses,
   GetProjectZoteroCollectionsErrors,
   GetProjectZoteroCollectionsResponses,
   GetProjectZoteroItemPdfErrors,
@@ -193,11 +224,14 @@ import type {
   GetReleaseViewErrors,
   GetReleaseViewResponses,
   GetSubscriptionPlansResponses,
+  GetTemplatesErrors,
+  GetTemplatesResponses,
   GetUserConnectedAccountsResponses,
   GetUserGithubAppInstallationsResponses,
   GetUserGithubReposErrors,
   GetUserGithubReposResponses,
   GetUserGithubTokenResponses,
+  GetUserOnboardingFlagsResponses,
   GetUserOrgsResponses,
   GetUserOverleafSyncErrors,
   GetUserOverleafSyncResponses,
@@ -213,7 +247,6 @@ import type {
   ImportGithubReleasesResponses,
   IssuePatch,
   IssuePost,
-  LabelDatasetPost,
   ListReleaseSharesErrors,
   ListReleaseSharesResponses,
   LoginAccessTokenErrors,
@@ -226,19 +259,24 @@ import type {
   LoginWithGithubTokenResponses,
   LoginWithGoogleErrors,
   LoginWithGoogleResponses,
+  MapPathsPost,
   MarkAllNotificationsReadResponses,
   MarkNotificationReadErrors,
   MarkNotificationReadResponses,
   MetricsResponses,
+  MiscArtifactPost,
   NativeCollaboratorPost,
   NewPassword,
   OAuthCodeExchange,
+  OnboardingFlagPost,
   OrgMemberPost,
   OrgPost,
   OrgSubscriptionUpdate,
   OverleafSyncPost,
   ParseReleaseUrlErrors,
   ParseReleaseUrlResponses,
+  PatchFeedbackErrors,
+  PatchFeedbackResponses,
   PatchProjectCommentErrors,
   PatchProjectCommentResponses,
   PatchProjectContentsErrors,
@@ -249,12 +287,16 @@ import type {
   PatchProjectResponses,
   PatchUserTokenErrors,
   PatchUserTokenResponses,
+  PipelineStageEdit,
+  PipelineStagePut,
   PostDiscountCodeErrors,
   PostDiscountCodeResponses,
   PostExternalReleaseErrors,
   PostExternalReleaseResponses,
   PostFeatureVoteErrors,
   PostFeatureVoteResponses,
+  PostFeedbackErrors,
+  PostFeedbackResponses,
   PostLoginDeviceAuthorizeErrors,
   PostLoginDeviceAuthorizeResponses,
   PostLoginDeviceErrors,
@@ -269,8 +311,8 @@ import type {
   PostProjectCommentReplyErrors,
   PostProjectCommentReplyResponses,
   PostProjectCommentResponses,
-  PostProjectDatasetLabelErrors,
-  PostProjectDatasetLabelResponses,
+  PostProjectDatasetErrors,
+  PostProjectDatasetResponses,
   PostProjectDatasetUploadErrors,
   PostProjectDatasetUploadResponses,
   PostProjectDvcFileErrors,
@@ -280,6 +322,8 @@ import type {
   PostProjectErrors,
   PostProjectFigureErrors,
   PostProjectFigureResponses,
+  PostProjectFigureScriptErrors,
+  PostProjectFigureScriptResponses,
   PostProjectFileLockErrors,
   PostProjectFileLockResponses,
   PostProjectFsBatchOpErrors,
@@ -294,6 +338,10 @@ import type {
   PostProjectInvitationResponses,
   PostProjectIssueErrors,
   PostProjectIssueResponses,
+  PostProjectMapPathsErrors,
+  PostProjectMapPathsResponses,
+  PostProjectMiscErrors,
+  PostProjectMiscResponses,
   PostProjectOverleafPublicationErrors,
   PostProjectOverleafPublicationResponses,
   PostProjectOverleafSyncErrors,
@@ -313,12 +361,17 @@ import type {
   PostProjectStatusResponses,
   PostProjectSyncErrors,
   PostProjectSyncResponses,
+  PostProjectUploadErrors,
+  PostProjectUploadResponses,
   PostProjectZoteroImportErrors,
   PostProjectZoteroImportResponses,
   PostProjectZoteroSyncErrors,
   PostProjectZoteroSyncResponses,
   PostReleaseCommentErrors,
   PostReleaseCommentResponses,
+  PostUserEmailVerificationConfirmErrors,
+  PostUserEmailVerificationConfirmResponses,
+  PostUserEmailVerificationResponses,
   PostUserGithubAuthErrors,
   PostUserGithubAuthResponses,
   PostUserGoogleAuthErrors,
@@ -330,6 +383,8 @@ import type {
   PostUserZoteroAuthErrors,
   PostUserZoteroAuthResponses,
   PostUserZoteroAuthStartResponses,
+  PostVerifyEmailErrors,
+  PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
   ProjectInvitationPost,
@@ -344,12 +399,16 @@ import type {
   PutProjectContentsResponses,
   PutProjectDevContainerErrors,
   PutProjectDevContainerResponses,
+  PutProjectPipelineStageErrors,
+  PutProjectPipelineStageResponses,
   PutProjectQuestionErrors,
   PutProjectQuestionResponses,
   PutProjectReferenceItemErrors,
   PutProjectReferenceItemResponses,
   PutProjectReferenceNotesErrors,
   PutProjectReferenceNotesResponses,
+  PutUserOnboardingFlagErrors,
+  PutUserOnboardingFlagResponses,
   PutUserOverleafTokenErrors,
   PutUserOverleafTokenResponses,
   PutUserSubscriptionErrors,
@@ -378,12 +437,16 @@ import type {
   ReleasePost,
   ReleaseShareTokenPost,
   ReleaseUrlImport,
+  RemoveProjectPipelineStageDefaultsErrors,
+  RemoveProjectPipelineStageDefaultsResponses,
   ResetPasswordErrors,
   ResetPasswordResponses,
   ResolveReleaseCommentErrors,
   ResolveReleaseCommentResponses,
   SearchProjectRefsErrors,
   SearchProjectRefsResponses,
+  ServeProjectAppFileErrors,
+  ServeProjectAppFileResponses,
   SubscriptionUpdate,
   TestEmailErrors,
   TestEmailResponses,
@@ -958,12 +1021,19 @@ export class UsersService {
   /**
    * Read Users
    *
-   * Retrieve users.
+   * Retrieve users, optionally searched and sorted.
+   *
+   * Sorted newest-first by default: the reason to open this page is usually
+   * to see who just signed up, which is the one thing an unordered page of
+   * a few hundred users can't tell you.
    */
   public static readUsers<ThrowOnError extends boolean = true>(
     parameters?: {
       skip?: number
       limit?: number
+      search_for?: string | null
+      sort_by?: "created" | "email" | "full_name"
+      descending?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<ReadUsersResponses, ReadUsersErrors, ThrowOnError> {
@@ -974,6 +1044,9 @@ export class UsersService {
           args: [
             { in: "query", key: "skip" },
             { in: "query", key: "limit" },
+            { in: "query", key: "search_for" },
+            { in: "query", key: "sort_by" },
+            { in: "query", key: "descending" },
           ],
         },
       ],
@@ -1139,6 +1212,107 @@ export class UsersService {
   }
 
   /**
+   * Post User Email Verification
+   *
+   * Email the current user a code and a link to prove the address is theirs.
+   *
+   * The code is good for a quarter hour and the link for a day; asking
+   * again replaces both, no more than once a minute.
+   */
+  public static postUserEmailVerification<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostUserEmailVerificationResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).post<
+      PostUserEmailVerificationResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-verification",
+      ...options,
+    })
+  }
+
+  /**
+   * Post User Email Verification Confirm
+   *
+   * Enter the emailed code; the user comes back with the email verified.
+   */
+  public static postUserEmailVerificationConfirm<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      emailVerificationConfirm: EmailVerificationConfirm
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostUserEmailVerificationConfirmResponses,
+    PostUserEmailVerificationConfirmErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailVerificationConfirm", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostUserEmailVerificationConfirmResponses,
+      PostUserEmailVerificationConfirmErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/email-verification/confirm",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Verify Email
+   *
+   * Follow the link in the verification email.
+   *
+   * No login needed, since the link may well be opened in a browser that
+   * isn't signed in; the token is what proves the address.
+   */
+  public static postVerifyEmail<ThrowOnError extends boolean = true>(
+    parameters: {
+      emailVerificationToken: EmailVerificationToken
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostVerifyEmailResponses,
+    PostVerifyEmailErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "emailVerificationToken", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostVerifyEmailResponses,
+      PostVerifyEmailErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/verify-email",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Register User
    *
    * Create a new user with email + password, without a GitHub account.
@@ -1272,11 +1446,19 @@ export class UsersService {
 
   /**
    * Get User Github Repos
+   *
+   * List the GitHub repos this user could create a project for.
+   *
+   * Pages through to the cap when no page is given, since callers filter the
+   * list themselves and can only filter what they were sent.
    */
   public static getUserGithubRepos<ThrowOnError extends boolean = true>(
     parameters?: {
       per_page?: number
-      page?: number
+      page?: number | null
+      affiliation?: string
+      sort?: "updated" | "created" | "pushed" | "full_name"
+      search?: string | null
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -1291,6 +1473,9 @@ export class UsersService {
           args: [
             { in: "query", key: "per_page" },
             { in: "query", key: "page" },
+            { in: "query", key: "affiliation" },
+            { in: "query", key: "sort" },
+            { in: "query", key: "search" },
           ],
         },
       ],
@@ -1830,6 +2015,110 @@ export class UsersService {
       ...options,
     })
   }
+
+  /**
+   * Delete User Onboarding Flag
+   *
+   * Undo a dismissal, e.g. to bring a checklist back.
+   *
+   * With no ``step``, every flag the user has goes, on every project: what
+   * "reset my checklists" means from account settings.
+   */
+  public static deleteUserOnboardingFlag<ThrowOnError extends boolean = true>(
+    parameters?: {
+      step?: string | null
+      project_id?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteUserOnboardingFlagResponses,
+    DeleteUserOnboardingFlagErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "step" },
+            { in: "query", key: "project_id" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteUserOnboardingFlagResponses,
+      DeleteUserOnboardingFlagErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get User Onboarding Flags
+   *
+   * Return every onboarding step this user has dismissed or marked done.
+   *
+   * Both checklists come back together because the pages that show them are
+   * already making several requests, and one small response shared between
+   * them beats a second round trip per project.
+   */
+  public static getUserOnboardingFlags<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetUserOnboardingFlagsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetUserOnboardingFlagsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+    })
+  }
+
+  /**
+   * Put User Onboarding Flag
+   *
+   * Dismiss a checklist, or mark a step done that we can't detect.
+   */
+  public static putUserOnboardingFlag<ThrowOnError extends boolean = true>(
+    parameters: {
+      onboardingFlagPost: OnboardingFlagPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutUserOnboardingFlagResponses,
+    PutUserOnboardingFlagErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "onboardingFlagPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).put<
+      PutUserOnboardingFlagResponses,
+      PutUserOnboardingFlagErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/user/onboarding-flags",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
 }
 
 export class MiscService {
@@ -1879,6 +2168,36 @@ export class MiscService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/test-email/",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Templates
+   *
+   * List the templates in the calkit registry, optionally of one kind.
+   *
+   * Read from the package rather than repeated in the frontend, so adding
+   * one there is enough.
+   */
+  public static getTemplates<ThrowOnError extends boolean = true>(
+    parameters?: {
+      kind?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetTemplatesResponses, GetTemplatesErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ in: "query", key: "kind" }] }],
+    )
+    return (options?.client ?? client).get<
+      GetTemplatesResponses,
+      GetTemplatesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      url: "/templates",
       ...options,
       ...params,
     })
@@ -2205,6 +2524,82 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Post Project Upload
+   *
+   * Create a project from an uploaded zip of an existing one.
+   *
+   * For work that isn't on GitHub yet, which is most of what "clean up a
+   * project in progress" means. The repo is created and scaffolded the same
+   * way an empty project is, then the archive is committed on top of it, so
+   * the first two commits read as "here's the scaffolding" and "here's what
+   * I had".
+   */
+  public static postProjectUpload<ThrowOnError extends boolean = true>(
+    parameters: {
+      "content-length"?: number | null
+      bodyProjectsPostProjectUpload: BodyProjectsPostProjectUpload
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectUploadResponses,
+    PostProjectUploadErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "headers", key: "content-length" },
+            { key: "bodyProjectsPostProjectUpload", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectUploadResponses,
+      PostProjectUploadErrors,
+      ThrowOnError
+    >({
+      ...formDataBodySerializer,
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/upload",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": null,
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Featured Projects
+   *
+   * Return the hub's curated example projects, in configured order.
+   *
+   * Curated rather than newest-first, since the projects a first-time
+   * visitor should see are the ones that show what a finished Calkit
+   * project looks like, not whatever was created most recently.
+   */
+  public static getFeaturedProjects<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeaturedProjectsResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetFeaturedProjectsResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/featured",
+      ...options,
     })
   }
 
@@ -3246,12 +3641,24 @@ export class ProjectsService {
 
   /**
    * Get Project Figures
+   *
+   * Get a page of the project's figures.
+   *
+   * Figure content is downloaded from object storage and inlined, so this is
+   * paginated: a project with hundreds of figures would otherwise take
+   * minutes and return a payload measured in hundreds of megabytes. Callers
+   * that only need paths and titles should pass ``include_content=false``,
+   * which skips that download entirely.
    */
   public static getProjectFigures<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
       ref?: string | null
+      limit?: number
+      offset?: number
+      q?: string | null
+      include_content?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3267,6 +3674,10 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "query", key: "ref" },
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+            { in: "query", key: "q" },
+            { in: "query", key: "include_content" },
           ],
         },
       ],
@@ -3331,6 +3742,50 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Tables
+   *
+   * Get the project's tables, declared and auto-detected.
+   */
+  public static getProjectTables<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+      include_content?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectTablesResponses,
+    GetProjectTablesErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "include_content" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectTablesResponses,
+      GetProjectTablesErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/tables",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get Project Results
    */
   public static getProjectResults<ThrowOnError extends boolean = true>(
@@ -3372,6 +3827,13 @@ export class ProjectsService {
 
   /**
    * Get Project Figure
+   *
+   * Get a single figure, declared or auto-detected.
+   *
+   * Discovery runs the same way it does for the listing, so this resolves
+   * every figure the listing would show -- not just the ones declared in
+   * calkit.yaml -- and returns them with the same comment counts and stage
+   * status attached.
    */
   public static getProjectFigure<ThrowOnError extends boolean = true>(
     parameters: {
@@ -3676,6 +4138,58 @@ export class ProjectsService {
   }
 
   /**
+   * Post Project Dataset
+   *
+   * Declare a dataset, imported or already in the repo.
+   *
+   * One route for every way a dataset joins a project: pick a path that's
+   * already there (collected, or produced by a stage), or name where it was
+   * imported from. Which one it is decides whether the path has to exist
+   * yet -- an import names data that hasn't been fetched.
+   */
+  public static postProjectDataset<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      datasetPost: DatasetPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectDatasetResponses,
+    PostProjectDatasetErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "datasetPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectDatasetResponses,
+      PostProjectDatasetErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/datasets",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Get Project Dataset
    */
   public static getProjectDataset<ThrowOnError extends boolean = true>(
@@ -3716,51 +4230,6 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/datasets/{path}",
       ...options,
       ...params,
-    })
-  }
-
-  /**
-   * Post Project Dataset Label
-   */
-  public static postProjectDatasetLabel<ThrowOnError extends boolean = true>(
-    parameters: {
-      owner_name: string
-      project_name: string
-      labelDatasetPost: LabelDatasetPost
-    },
-    options?: Options<never, ThrowOnError>,
-  ): RequestResult<
-    PostProjectDatasetLabelResponses,
-    PostProjectDatasetLabelErrors,
-    ThrowOnError
-  > {
-    const params = buildClientParams(
-      [parameters],
-      [
-        {
-          args: [
-            { in: "path", key: "owner_name" },
-            { in: "path", key: "project_name" },
-            { key: "labelDatasetPost", map: "body" },
-          ],
-        },
-      ],
-    )
-    return (options?.client ?? client).post<
-      PostProjectDatasetLabelResponses,
-      PostProjectDatasetLabelErrors,
-      ThrowOnError
-    >({
-      responseType: "json",
-      security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/datasets/label",
-      ...options,
-      ...params,
-      headers: {
-        "Content-Type": "application/json",
-        ...options?.headers,
-        ...params.headers,
-      },
     })
   }
 
@@ -3899,6 +4368,128 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Publication Components
+   *
+   * List the files a publication is made of, each with its provenance.
+   *
+   * A component is any file in the publication's folder, i.e., the
+   * directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
+   * than dotfiles, the publication's own output, and LaTeX build leftovers
+   * (``via`` is ``folder``), plus anything its build stage reads from
+   * outside that folder, with ``from_stage_outputs`` inputs expanded and
+   * directories walked (``via`` is ``input``). Each is one of:
+   *
+   * - ``produced``: an output of a pipeline stage, whether declared in its
+   * ``outputs`` or as the destination of a map-paths mapping (a file, or
+   * anything under a directory destination). ``stage`` names it, and
+   * ``stage_kind`` says whether that's a copy (``map-paths``) or
+   * something computed.
+   * - ``attested``: declared in calkit.yaml as a figure, dataset, or misc
+   * artifact with ``created_by``.
+   * - ``imported``: declared likewise with ``imported_from``.
+   * - ``authored``: a LaTeX or text source, edited in Overleaf when the
+   * folder is synced with one (``source``), otherwise in Git.
+   * - ``unknown``: anything else. A figure-like file at or under 20 MB is
+   * compared byte-for-byte against the project's declared figures, and
+   * ``matching_figure`` names one with identical content, which is what
+   * a copy made without a map-paths stage looks like.
+   *
+   * ``n_unknown`` counts the ``unknown`` items.
+   */
+  public static getProjectPublicationComponents<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPublicationComponentsResponses,
+    GetProjectPublicationComponentsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPublicationComponentsResponses,
+      GetProjectPublicationComponentsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/publications/components",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Misc
+   *
+   * Declare a misc artifact: attest to who made a file, or record where
+   * it was imported from.
+   *
+   * The path has to exist in the project and not already be declared as a
+   * figure, dataset, publication, or misc artifact, since those carry the
+   * same attribution and are edited as what they are.
+   */
+  public static postProjectMisc<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      miscArtifactPost: MiscArtifactPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectMiscResponses,
+    PostProjectMiscErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "miscArtifactPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectMiscResponses,
+      PostProjectMiscErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/misc",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
    * Get Project Presentations
    */
   public static getProjectPresentations<ThrowOnError extends boolean = true>(
@@ -3951,6 +4542,15 @@ export class ProjectsService {
    *
    * Accepts multipart/form-data with an optional 'file' field
    * (for the ZIP archive).
+   *
+   * With ``replace_existing``, a folder already at ``path`` is emptied
+   * first. The publications declared in it and the stages that built them
+   * are dropped, but "feeder" stages, i.e., ones whose outputs land in the
+   * folder like a template's figure and results copies, are kept and wired
+   * into the new build stage as ``from_stage_outputs`` inputs. Showcase
+   * entries pointing at a dropped publication are retargeted to the new
+   * one, and reference files in the folder stay declared only when the
+   * Overleaf project carries the same file.
    */
   public static postProjectOverleafPublication<
     ThrowOnError extends boolean = true,
@@ -4227,6 +4827,208 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/pipeline",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Project Pipeline Stage
+   */
+  public static getProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectPipelineStageResponses,
+    GetProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectPipelineStageResponses,
+      GetProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Put Project Pipeline Stage
+   */
+  public static putProjectPipelineStage<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStagePut: PipelineStagePut
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PutProjectPipelineStageResponses,
+    PutProjectPipelineStageErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStagePut", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).put<
+      PutProjectPipelineStageResponses,
+      PutProjectPipelineStageErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Remove Project Pipeline Stage Defaults
+   *
+   * Drop keys the stage leaves at their default.
+   *
+   * Older versions of Calkit wrote every optional field out, so a stage
+   * can carry a dozen nulls that say nothing. Removing them is offered as
+   * an action rather than done on save, since it's the user's file and
+   * their call. Remaining keys keep the order and comments they had.
+   */
+  public static removeProjectPipelineStageDefaults<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStageEdit: PipelineStageEdit
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    RemoveProjectPipelineStageDefaultsResponses,
+    RemoveProjectPipelineStageDefaultsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStageEdit", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      RemoveProjectPipelineStageDefaultsResponses,
+      RemoveProjectPipelineStageDefaultsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/remove-defaults",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Detect Project Pipeline Stage Inputs
+   *
+   * Add the files a LaTeX stage's document reads to its inputs.
+   *
+   * LaTeX resolves its class, style, bibliography, and figure files itself,
+   * so they're invisible to the pipeline unless declared -- and undeclared,
+   * a change to the class file doesn't rebuild the paper and the in-browser
+   * editor can't compile it. Returns the stage with anything found merged
+   * in, so the user sees what would be added before saving.
+   */
+  public static detectProjectPipelineStageInputs<
+    ThrowOnError extends boolean = true,
+  >(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      pipelineStageEdit: PipelineStageEdit
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DetectProjectPipelineStageInputsResponses,
+    DetectProjectPipelineStageInputsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "stage_name" },
+            { key: "pipelineStageEdit", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      DetectProjectPipelineStageInputsResponses,
+      DetectProjectPipelineStageInputsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/stages/{stage_name}/detect-inputs",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 
@@ -5790,7 +6592,52 @@ export class ProjectsService {
   }
 
   /**
+   * Get Project Apps
+   */
+  public static getProjectApps<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      ref?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectAppsResponses,
+    GetProjectAppsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "ref" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectAppsResponses,
+      GetProjectAppsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/apps",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get Project App
+   *
+   * Return the project's first app.
+   *
+   * Superseded by the ``apps`` endpoint; kept so existing clients keep
+   * working.
    */
   public static getProjectApp<ThrowOnError extends boolean = true>(
     parameters: {
@@ -5820,6 +6667,60 @@ export class ProjectsService {
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
       url: "/projects/{owner_name}/{project_name}/app",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Serve Project App File
+   *
+   * Serve one file from a static-html app.
+   *
+   * The app's declared path names its entrypoint, and the directory holding
+   * it is the serving root, so sibling assets resolve against it. Bytes are
+   * proxied rather than redirected to a presigned URL because the browser
+   * refuses an ES module whose content type isn't exactly right, and a
+   * WASM app is almost entirely module imports.
+   */
+  public static serveProjectAppFile<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      app_name: string
+      path?: string
+      ref?: string | null
+      git_sha?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    ServeProjectAppFileResponses,
+    ServeProjectAppFileErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "app_name" },
+            { in: "query", key: "path" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "git_sha" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      ServeProjectAppFileResponses,
+      ServeProjectAppFileErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/apps/{app_name}/serve",
       ...options,
       ...params,
     })
@@ -6228,6 +7129,321 @@ export class ProjectsService {
         ...options?.headers,
         ...params.headers,
       },
+    })
+  }
+
+  /**
+   * Delete Project Map Paths
+   *
+   * Take one copy out of a map-paths stage.
+   *
+   * The last copy takes the stage with it, and any stage that read from it
+   * stops doing so, so nothing is left pointing at a stage that's gone.
+   */
+  public static deleteProjectMapPaths<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      stage_name: string
+      src: string
+      dest: string
+      target_stage?: string | null
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    DeleteProjectMapPathsResponses,
+    DeleteProjectMapPathsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "stage_name" },
+            { in: "query", key: "src" },
+            { in: "query", key: "dest" },
+            { in: "query", key: "target_stage" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).delete<
+      DeleteProjectMapPathsResponses,
+      DeleteProjectMapPathsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Project Map Paths
+   *
+   * Add copies to a map-paths stage, creating the stage if needed.
+   *
+   * The stage is committed to calkit.yaml and dvc.yaml is recompiled, so
+   * the next run makes the copies; when a target stage is named, it now
+   * depends on them.
+   */
+  public static postProjectMapPaths<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      mapPathsPost: MapPathsPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectMapPathsResponses,
+    PostProjectMapPathsErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "mapPathsPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectMapPathsResponses,
+      PostProjectMapPathsErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/pipeline/map-paths",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Post Project Figure Script
+   *
+   * Commit a figure editor script as a stage that produces the figure.
+   *
+   * One commit carries the script, the stage, the figure entry, and the
+   * environment (created or amended), so the repo never holds a figure
+   * that points at a stage that doesn't exist yet.
+   */
+  public static postProjectFigureScript<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      figureScriptPost: FigureScriptPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectFigureScriptResponses,
+    PostProjectFigureScriptErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "figureScriptPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectFigureScriptResponses,
+      PostProjectFigureScriptErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/figures/script",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get Project Dataset Csv
+   *
+   * A tabular file as CSV, for the table viewer.
+   *
+   * CSV and TSV are read and re-emitted (which also normalizes them);
+   * parquet and JSON lines are converted. Rows beyond ``MAX_ROWS`` are cut
+   * and the response says so, rather than sending a browser more than it
+   * can hold.
+   */
+  public static getProjectDatasetCsv<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      ref?: string | null
+      row_offset?: number
+      row_limit?: number
+      col_offset?: number
+      col_limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDatasetCsvResponses,
+    GetProjectDatasetCsvErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "row_offset" },
+            { in: "query", key: "row_limit" },
+            { in: "query", key: "col_offset" },
+            { in: "query", key: "col_limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDatasetCsvResponses,
+      GetProjectDatasetCsvErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dataset-csv/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Dataset Hdf5
+   *
+   * Browse an HDF5 file: its keys, or one dataset as CSV.
+   *
+   * Without ``key`` the response lists every group and dataset with shape
+   * and dtype; with ``key`` it returns that dataset the way the CSV route
+   * does, so the same table viewer shows it.
+   */
+  public static getProjectDatasetHdf5<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      path: string
+      key?: string | null
+      ref?: string | null
+      row_offset?: number
+      row_limit?: number
+      col_offset?: number
+      col_limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectDatasetHdf5Responses,
+    GetProjectDatasetHdf5Errors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "path", key: "path" },
+            { in: "query", key: "key" },
+            { in: "query", key: "ref" },
+            { in: "query", key: "row_offset" },
+            { in: "query", key: "row_limit" },
+            { in: "query", key: "col_offset" },
+            { in: "query", key: "col_limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectDatasetHdf5Responses,
+      GetProjectDatasetHdf5Errors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/dataset-hdf5/{path}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get Project Activity
+   *
+   * The newest ``limit`` things that happened in the project.
+   *
+   * Each source contributes at most ``limit`` items before the merge, so
+   * a busy commit history can't crowd out a release from last week within
+   * the window, only past it. To-dos are GitHub issues, which nothing here
+   * records, so that kind isn't produced yet.
+   */
+  public static getProjectActivity<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      limit?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    GetProjectActivityResponses,
+    GetProjectActivityErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { in: "query", key: "limit" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetProjectActivityResponses,
+      GetProjectActivityErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/activity",
+      ...options,
+      ...params,
     })
   }
 }
@@ -7348,7 +8564,121 @@ export class DatasetsService {
   }
 }
 
-export class FeatureVotesService {
+export class FeedbackService {
+  /**
+   * Get Feedback
+   *
+   * List what users have sent in, newest first.
+   */
+  public static getFeedback<ThrowOnError extends boolean = true>(
+    parameters?: {
+      limit?: number
+      offset?: number
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeedbackResponses, GetFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "limit" },
+            { in: "query", key: "offset" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).get<
+      GetFeedbackResponses,
+      GetFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Post Feedback
+   *
+   * Record a user's feedback, bug report, or question.
+   *
+   * The row is written first and the email is best-effort after it: a relay
+   * that's down is a notification problem, not a reason to tell someone
+   * their feedback didn't go through and lose what they typed.
+   */
+  public static postFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedbackPost: FeedbackPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PostFeedbackResponses, PostFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [{ args: [{ key: "feedbackPost", map: "body" }] }],
+    )
+    return (options?.client ?? client).post<
+      PostFeedbackResponses,
+      PostFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Patch Feedback
+   *
+   * Mark a piece of feedback dealt with, or put it back.
+   */
+  public static patchFeedback<ThrowOnError extends boolean = true>(
+    parameters: {
+      feedback_id: string
+      feedbackPatch: FeedbackPatch
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<PatchFeedbackResponses, PatchFeedbackErrors, ThrowOnError> {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "feedback_id" },
+            { key: "feedbackPatch", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).patch<
+      PatchFeedbackResponses,
+      PatchFeedbackErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feedback/{feedback_id}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
   /**
    * Delete Feature Vote
    *
@@ -7440,6 +8770,30 @@ export class FeatureVotesService {
       url: "/feature-votes/{feature}",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Get Feature Votes
+   *
+   * Every feature's votes with who cast them, for the admin page.
+   *
+   * Listed alongside feedback, since both answer the same question: what
+   * do users want that isn't there yet? Features nobody has voted for
+   * still appear, at zero, so the list is the full set on offer.
+   */
+  public static getFeatureVotes<ThrowOnError extends boolean = true>(
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<GetFeatureVotesResponses, unknown, ThrowOnError> {
+    return (options?.client ?? client).get<
+      GetFeatureVotesResponses,
+      unknown,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/feature-votes",
+      ...options,
     })
   }
 }

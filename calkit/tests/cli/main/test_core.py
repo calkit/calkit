@@ -3,6 +3,8 @@
 import json
 import os
 import shutil
+import socket
+import stat
 import subprocess
 import sys
 from datetime import datetime
@@ -19,8 +21,11 @@ from git.exc import InvalidGitRepositoryError
 
 import calkit
 import calkit.cli.main
+import calkit.schema
 from calkit.cli.core import complete_stage_names
 from calkit.cli.main.core import (
+    STAGE_OUTPUT_END,
+    STAGE_OUTPUT_START,
     _get_running_pipeline_status,
     _get_subproject_targets_for_run,
     _prune_run_logs,
@@ -106,11 +111,14 @@ def _repo_test_file(name: str) -> Path:
 
 
 def test_init(tmp_dir):
-    # With no calkit.yaml present, init creates an empty one
+    # With no calkit.yaml present, init creates one holding only the schema
+    # modeline, so editors validate and autocomplete it
     assert not os.path.isfile("calkit.yaml")
     subprocess.check_call(["calkit", "init"])
     assert os.path.isfile("calkit.yaml")
     assert calkit.load_calkit_info() == {}
+    with open("calkit.yaml") as f:
+        assert f.read() == calkit.schema.MODELINE + "\n"
     # Already initialized: init without --force fails and does not clobber
     result = subprocess.run(
         ["calkit", "init"],
@@ -141,6 +149,35 @@ def test_init(tmp_dir):
     # --force allows re-initialization without clobbering calkit.yaml
     subprocess.check_call(["calkit", "init", "--force"], cwd="sub")
     assert calkit.load_calkit_info(wdir="sub") == ck_info
+    # An existing DVC repo with no calkit.yaml is left alone rather than
+    # failing on DVC's refusal to initialize over an existing .dvc (#1013)
+    os.remove(os.path.join("sub", "calkit.yaml"))
+    assert os.path.isdir(os.path.join("sub", ".dvc"))
+    result = subprocess.run(
+        ["calkit", "init"],
+        cwd="sub",
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "already initialized" in result.stdout.lower()
+    assert os.path.isfile(os.path.join("sub", "calkit.yaml"))
+    assert calkit.load_calkit_info(wdir="sub") == {}
+    # A .dvc directory left behind by an interrupted init has no config in
+    # it, so it is re-initialized rather than taken for a working repo
+    os.remove(os.path.join("sub", ".dvc", "config"))
+    subprocess.check_call(["calkit", "init"], cwd="sub")
+    assert os.path.isfile(os.path.join("sub", ".dvc", "config"))
+    # --no-commit stages the initial files without committing, so a
+    # bootstrap (as run by xr) can be rolled back by restoring files
+    os.makedirs("nocommit")
+    root_repo = git.Repo(".")
+    n_commits_before = root_repo.head.commit.count()
+    subprocess.check_call(["calkit", "init", "--no-commit"], cwd="nocommit")
+    staged = calkit.git.get_staged_files(repo=root_repo)
+    assert "nocommit/.dvc/config" in staged
+    assert "nocommit/calkit.yaml" in staged
+    assert root_repo.head.commit.count() == n_commits_before
 
 
 @skipif_windows_docker
@@ -534,6 +571,55 @@ def test_run_in_env_detect_default(tmp_dir):
     assert ck_info == ck_info_2
 
 
+def test_run_in_env_system(tmp_dir):
+    # A named system env runs the command on this machine, like the built-in
+    # '_system' env, but with a lock file recording what it pinned
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n  sys:\n    kind: system\n    lock:\n      - os\n"
+        )
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
+    with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
+        assert set(json.load(f)) == {"os"}
+    # A host naming this machine runs here rather than connecting to it
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  here:\n"
+            "    kind: system\n"
+            f"    host: {socket.gethostname()}\n"
+        )
+    out = subprocess.check_output(
+        ["calkit", "xenv", "-n", "here", "--", "python", "-c", "print('hi')"],
+        text=True,
+    )
+    assert "hi" in out
+    # A workspace directory is derived from the project name, so a project
+    # without one has nothing to derive from and says so rather than
+    # picking a directory it was never told about. No user is needed: SSH
+    # resolves that itself.
+    with open("calkit.yaml", "w") as f:
+        f.write(
+            "environments:\n"
+            "  remote:\n"
+            "    kind: system\n"
+            "    host: not-this-box.invalid\n"
+        )
+    res = subprocess.run(
+        ["calkit", "xenv", "-n", "remote", "--", "echo", "hi"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    combined = res.stdout + res.stderr
+    assert "'wdir'" in combined
+    assert "'user'" not in combined
+
+
 def test_to_shell_cmd():
     cmd = ["python", "-c", "import math; print('hello world')"]
     subprocess.check_call(cmd)
@@ -876,6 +962,51 @@ def test_save(tmp_dir):
     assert last_commit_message == "A unique message"
 
 
+def test_save_data_not_in_cache(tmp_dir):
+    # We should skip DVC-tracked paths that are missing from both the
+    # workspace and the cache, e.g., because they were never pulled
+    subprocess.check_call(["calkit", "init"])
+    with open("data.csv", "w") as f:
+        f.write("a,b\n1,2\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "data.csv",
+            "-t",
+            "dvc",
+            "-m",
+            "Add data",
+            "--no-push",
+        ]
+    )
+    with open("data.csv.dvc") as f:
+        dvc_out_before = f.read()
+    # Delete the data and its cache, simulating a machine onto which it was
+    # never pulled
+    os.remove("data.csv")
+    cache_dir = os.path.join(".dvc", "cache")
+    # DVC protects cached files by making them read-only, which stops them
+    # from being deleted on Windows
+    for dirpath, _, fnames in os.walk(cache_dir):
+        for fname in fnames:
+            os.chmod(
+                os.path.join(dirpath, fname), stat.S_IWRITE | stat.S_IREAD
+            )
+    shutil.rmtree(cache_dir)
+    with open("README.md", "a") as f:
+        f.write("\nSome more info.\n")
+    out = subprocess.check_output(
+        ["calkit", "save", "-am", "Update README", "--no-push"], text=True
+    )
+    assert "data.csv" in out and "not in the cache" in out
+    # The DVC pointer file should be untouched, since there's nothing to commit
+    with open("data.csv.dvc") as f:
+        assert f.read() == dvc_out_before
+    repo = git.Repo()
+    assert not repo.git.status("--porcelain")
+
+
 def test_call_dvc():
     subprocess.check_call(["calkit", "dvc", "--help"])
     subprocess.check_call(["calkit", "dvc", "stage", "--help"])
@@ -1062,7 +1193,7 @@ def test_run_ignore_errors(tmp_dir):
         }
     }
     with open("dvc.yaml", "w") as f:
-        yaml.dump(dvc_yaml, f)
+        calkit.ryaml.dump(dvc_yaml, f)
     subprocess.check_call(
         ["calkit", "save", "-am", "Create pipeline", "--no-push"]
     )
@@ -1220,6 +1351,63 @@ def _write_fake_run_log() -> None:
         f.write("\n".join(lines) + "\n")
 
 
+def test_stage_run_info_ignores_stage_output():
+    # Stage output shares the log with DVC's records and can be shaped exactly
+    # like one, so it must not be parsed as one
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            STAGE_OUTPUT_START,
+            f"{ts}1,000 - ERROR - a warning from the stage's own logger",
+            f"{ts}1,500 - INFO - Running stage 'not-a-stage':",
+            # Output with no final newline shares a line with the end marker
+            "no trailing newline here" + STAGE_OUTPUT_END,
+            f"{ts}2,000 - INFO - Running stage 'b':",
+            STAGE_OUTPUT_START,
+            "plain output",
+            STAGE_OUTPUT_END,
+            f"{ts}3,000 - INFO - Stage 'c' didn't change, skipping",
+        ]
+    )
+    info = _stage_run_info_from_log_content(content)
+    assert list(info) == ["a", "b", "c"]
+    assert info["a"]["status"] == "completed"
+    assert info["b"]["status"] == "completed"
+    assert info["c"]["status"] == "skipped"
+
+
+def test_stage_run_info_last_stage():
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            f"{ts}1,000 - INFO - Updating lock file 'dvc.lock'",
+        ]
+    )
+    # While the run is in progress, the last stage stays open---that's how
+    # status knows it's the one running
+    assert "status" not in _stage_run_info_from_log_content(content)["a"]
+    # Once the run is over, it's closed out with the final record's timestamp
+    info = _stage_run_info_from_log_content(content, run_finished=True)["a"]
+    assert info["status"] == "completed"
+    assert info["end_time"] == datetime.fromisoformat(f"{ts}1,000").isoformat()
+
+
+def test_stage_run_info_last_stage_failed():
+    # A failed last stage must not be closed out as completed
+    ts = "2025-01-01 00:00:0"
+    content = "\n".join(
+        [
+            f"{ts}0,000 - INFO - Running stage 'a':",
+            f"{ts}1,000 - ERROR - failed to reproduce 'a': boom",
+            "dvc.exceptions.ReproductionError: failed to reproduce 'a'",
+        ]
+    )
+    info = _stage_run_info_from_log_content(content, run_finished=True)
+    assert info["a"]["status"] == "failed"
+
+
 def test_get_running_pipeline_status(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     # No rwlock present means no run is in progress
@@ -1369,7 +1557,7 @@ def test_run_writes_private_logs(tmp_dir):
         }
     }
     with open("dvc.yaml", "w") as f:
-        yaml.dump(dvc_yaml, f)
+        calkit.ryaml.dump(dvc_yaml, f)
     # Without --log, the log is retained privately under .calkit/local/logs
     # (gitignored) and not saved to the tracked .calkit/logs directory
     subprocess.check_call(["calkit", "run"])
@@ -1381,11 +1569,15 @@ def test_run_writes_private_logs(tmp_dir):
     assert not os.path.isdir(tracked_dir) or not [
         f for f in os.listdir(tracked_dir) if f.endswith(".log")
     ]
+    # Run info and system info are saved privately without --log too
+    assert os.path.isdir(os.path.join(".calkit", "local", "runs"))
+    assert os.path.isdir(os.path.join(".calkit", "local", "systems"))
     # With --log, the log is also saved to the tracked directory plus run info
     subprocess.check_call(["calkit", "run", "--log", "--force"])
     tracked = [f for f in os.listdir(tracked_dir) if f.endswith(".log")]
     assert len(tracked) == 1
     assert os.path.isdir(os.path.join(".calkit", "runs"))
+    assert os.path.isdir(os.path.join(".calkit", "systems"))
 
 
 def test_prune_run_logs(tmp_dir):
@@ -1414,6 +1606,26 @@ def test_prune_run_logs(tmp_dir):
         f.write("x")
     _prune_run_logs(logs_dir, keep=10, protect=old_active)
     assert os.path.isfile(os.path.join(logs_dir, old_active))
+
+
+def test_prune_run_logs_json_suffix(tmp_dir):
+    runs_dir = "runs"
+    os.makedirs(runs_dir)
+    for i in range(15):
+        name = f"2025-01-01T00-00-{i:02d}-{i:02d}.json"
+        with open(os.path.join(runs_dir, name), "w") as f:
+            f.write("{}")
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    remaining = sorted(os.listdir(runs_dir))
+    assert len(remaining) == 10
+    # Oldest by name are removed; newest 10 kept
+    assert remaining[0] == "2025-01-01T00-00-05-05.json"
+    assert remaining[-1] == "2025-01-01T00-00-14-14.json"
+    # A .log file in the same dir must be untouched by a .json prune
+    with open(os.path.join(runs_dir, "keep.log"), "w") as f:
+        f.write("x")
+    _prune_run_logs(runs_dir, keep=10, suffix=".json")
+    assert os.path.isfile(os.path.join(runs_dir, "keep.log"))
 
 
 def test_map_paths(tmp_dir):
@@ -2037,6 +2249,142 @@ def test_call_dvc_passthrough_hint(tmp_dir):
     )
 
 
+def _read_only_log(logs_dir: str) -> str:
+    log_files = [f for f in os.listdir(logs_dir) if f.endswith(".log")]
+    assert len(log_files) == 1
+    with open(os.path.join(logs_dir, log_files[0])) as f:
+        return f.read()
+
+
+def _read_only_run_info() -> dict:
+    runs_dir = os.path.join(".calkit", "local", "runs")
+    fnames = os.listdir(runs_dir)
+    assert len(fnames) == 1
+    with open(os.path.join(runs_dir, fnames[0])) as f:
+        return json.load(f)
+
+
+def test_run_captures_stage_logs(tmp_dir):
+    """Test stage stdout and stderr are teed to the terminal and run log."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    # A stage that writes to both streams, the second line shaped like a log
+    # record so it would be misread as one if it weren't bracketed, and no
+    # final newline so the end marker shares its line
+    script = (
+        "import sys\n"
+        "sys.stdout.write('OUT_MARKER\\n')\n"
+        "sys.stderr.write('2026-05-23 10:00:00,000 - ERROR - ERR_MARKER')\n"
+    )
+    with open("stage_script.py", "w") as f:
+        f.write(script)
+    dvc_yaml = {"stages": {"test_stage": {"cmd": "python stage_script.py"}}}
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode == 0
+    # Both markers reach the terminal, since stage stderr is teed into stdout
+    assert "OUT_MARKER" in res.stdout
+    assert "ERR_MARKER" in res.stdout
+    # Stage output and DVC's own records share one log
+    log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
+    assert "OUT_MARKER" in log_content
+    assert "ERR_MARKER" in log_content
+    assert "Running stage 'test_stage'" in log_content
+    # The stage's ERROR line isn't taken for a DVC one, which would leave the
+    # stage unfinished
+    stage_info = _read_only_run_info()["stages"]["test_stage"]
+    assert stage_info["status"] == "completed"
+    assert stage_info["end_time"] >= stage_info["start_time"]
+
+
+def test_run_captures_stage_logs_failure(tmp_dir):
+    """Test that stage output is captured even if the stage fails."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    script = (
+        "import sys\nsys.stdout.write('FAIL_OUT_MARKER\\n')\nsys.exit(1)\n"
+    )
+    with open("stage_fail.py", "w") as f:
+        f.write(script)
+    dvc_yaml = {"stages": {"fail_stage": {"cmd": "python stage_fail.py"}}}
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    res = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert res.returncode != 0
+    log_content = _read_only_log(os.path.join(".calkit", "local", "logs"))
+    assert "FAIL_OUT_MARKER" in log_content
+
+
+def test_run_log_flag_copies_stage_logs(tmp_dir):
+    """Test that --log copies the log with stage output to the tracked dir."""
+    subprocess.check_call(["git", "init"])
+    subprocess.check_call(["calkit", "init"])
+    script = "import sys\nsys.stdout.write('OUT_MARKER\\n')\n"
+    with open("stage_script.py", "w") as f:
+        f.write(script)
+    dvc_yaml = {
+        "stages": {"test_stage_log": {"cmd": "python stage_script.py"}}
+    }
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    res = subprocess.run(
+        ["calkit", "run", "--log"], capture_output=True, text=True
+    )
+    assert res.returncode == 0
+    log_content = _read_only_log(os.path.join(".calkit", "logs"))
+    assert "OUT_MARKER" in log_content
+
+
+@skipif_windows_mock_scheduler
+def test_run_scheduler_stage_respects_max_concurrent_jobs(tmp_dir):
+    # An iterate_over stage on a scheduler env normally submits every job at
+    # once. With max_concurrent_jobs set, submissions are paced so the project
+    # never occupies more than that many queue slots---the point being not to
+    # monopolize a shared cluster.
+    env = {**os.environ, "CALKIT_MOCK_SCHEDULER": "1"}
+    subprocess.check_call(["calkit", "init"])
+    with open("run.sh", "w") as f:
+        # Each job announces itself, holds long enough to overlap with any
+        # concurrently running sibling, records how many were running at that
+        # moment, then leaves.
+        f.write('touch "running-$1"\n')
+        f.write("sleep 1\n")
+        f.write("ls running-* | wc -l >> counts.txt\n")
+        f.write('rm "running-$1"\n')
+        f.write('echo "$1" > "out-$1.txt"\n')
+    ck_info = {
+        "environments": {"slurm": {"kind": "slurm", "max_concurrent_jobs": 2}},
+        "pipeline": {
+            "stages": {
+                "sweep": {
+                    "kind": "shell-script",
+                    "script_path": "run.sh",
+                    "environment": "slurm",
+                    "args": ["{x}"],
+                    "iterate_over": [
+                        {"arg_name": "x", "values": [1, 2, 3, 4, 5, 6]}
+                    ],
+                    "outputs": ["out-{x}.txt"],
+                }
+            }
+        },
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["calkit", "run"], env=env)
+    # Every case still runs to completion---the limit paces the pipeline, it
+    # does not drop work.
+    for x in range(1, 7):
+        assert os.path.exists(f"out-{x}.txt")
+    with open("counts.txt") as f:
+        observed = [int(line) for line in f.read().split() if line]
+    assert len(observed) == 6
+    # Without the limit all six would be in flight together; with it, never
+    # more than two.
+    assert max(observed) <= 2
+
+
 def test_dotenv_is_loaded_for_every_command(tmp_dir):
     # Which hub a command targets must not depend on whether that command
     # happens to read a secret: 'calkit run' loaded .env and 'calkit push'
@@ -2068,3 +2416,182 @@ def test_calkit_env_no_longer_selects_a_hub(tmp_dir, capsys):
         os.environ["CALKIT_ENV"] = "test"
         _warn_on_stale_calkit_env()
         assert capsys.readouterr().err == ""
+
+
+def test_stage_stdout_from_log_content():
+    # Stage output is read back out of the run log, not captured twice.
+    from calkit.cli.main.core import (
+        STAGE_OUTPUT_END,
+        STAGE_OUTPUT_START,
+        _stage_stdout_from_log_content,
+    )
+
+    log = "\n".join(
+        [
+            "2025-01-01T00:00:00 - INFO - Running stage 'README.md/a':",
+            STAGE_OUTPUT_START,
+            "hello",
+            "world" + STAGE_OUTPUT_END,
+            "2025-01-01T00:00:01 - INFO - Running stage 'README.md/b':",
+            STAGE_OUTPUT_START,
+            STAGE_OUTPUT_END,
+            "2025-01-01T00:00:02 - INFO - Stage 'other' didn't change, "
+            "skipping",
+        ]
+    )
+    res = _stage_stdout_from_log_content(log)
+    # Output lacking a final newline shares its line with the end marker
+    assert res["README.md/a"] == "hello\nworld"
+    # A stage that ran but printed nothing is still recorded, so its block
+    # can be emptied rather than left stale
+    assert res["README.md/b"] == ""
+    # A skipped stage produced no output this run, so it must not be
+    # listed---its block should keep what it has
+    assert "other" not in res
+
+
+def test_run_refuses_outside_a_project(tmp_dir):
+    # `calkit run` must not initialize anything outside a project.
+    #
+    # It initializes Git and DVC as needed, so a wrong working directory
+    # would otherwise scatter a .dvc directory into an unrelated folder ---
+    # and inside an existing Git repo that now succeeds, since DVC is told
+    # the project is a subdirectory.
+    result = subprocess.run(["calkit", "run"], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "no calkit.yaml or dvc.yaml" in result.stderr.lower()
+    assert not os.path.exists(".dvc")
+    # Same inside an existing Git repo, which is the case that would now
+    # otherwise succeed rather than failing on DVC's own check
+    subprocess.check_call(["git", "init", "-q", "."])
+    os.makedirs("sub")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert not os.path.exists(os.path.join("sub", ".dvc"))
+    # A project with only a dvc.yaml is still a project
+    with open(os.path.join("sub", "dvc.yaml"), "w") as f:
+        f.write("stages: {}\n")
+    result = subprocess.run(
+        ["calkit", "run"], cwd="sub", capture_output=True, text=True
+    )
+    assert "no calkit.yaml or dvc.yaml" not in result.stderr.lower()
+
+
+def test_project_dir_option(tmp_dir):
+    # `-C` changes directory before anything reads the filesystem.
+    os.makedirs("proj")
+    with open(os.path.join("proj", "calkit.yaml"), "w") as f:
+        f.write("name: from-subdir\n")
+    subprocess.check_call(["git", "init", "-q", "."])
+    # The project is initialized inside proj, not wherever we were standing
+    result = subprocess.run(
+        ["calkit", "-C", "proj", "init"], capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert os.path.isdir(os.path.join("proj", ".dvc"))
+    assert not os.path.isdir(".dvc")
+    # The long spelling matches make/tar/git/uv, which all mean chdir
+    result = subprocess.run(
+        ["calkit", "--directory", "proj", "status"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    # A missing directory is reported rather than silently ignored
+    result = subprocess.run(
+        ["calkit", "-C", "nope", "status"], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "does not exist" in result.stderr
+
+
+def test_commit(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("test")
+    Path("test/yo.txt").touch()
+    Path("test/sup.txt").touch()
+    Path("hey.txt").touch()
+    subprocess.check_call(["calkit", "add", "hey.txt"])
+    subprocess.check_call(["calkit", "add", "test/sup.txt"])
+    subprocess.check_call(["calkit", "commit", "hey.txt", "-M"])
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    # Test committing to DVC, where the path itself is kept out of Git, so
+    # only its pointer and ignore rule can be committed for it
+    Path("data.csv").write_text("data\n")
+    subprocess.check_call(
+        ["calkit", "save", "data.csv", "-t", "dvc", "-M", "--no-push"]
+    )
+    repo = calkit.git.get_repo()
+    assert repo.head.commit.message.strip() == "Add data.csv"
+    committed = repo.git.show("--name-only", "--format=", "HEAD").split("\n")
+    assert "data.csv.dvc" in committed
+    assert ".gitignore" in committed
+    assert "data.csv" not in committed
+    # Paths that weren't asked for are left alone
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    assert calkit.git.get_untracked_files() == ["test/yo.txt"]
+    # Changing a DVC-tracked path is an update, not an add
+    Path("data.csv").write_text("more data\n")
+    subprocess.check_call(["calkit", "save", "data.csv", "-M", "--no-push"])
+    assert (
+        calkit.git.get_repo().head.commit.message.strip() == "Update data.csv"
+    )
+    # Paths are interpreted relative to the working directory
+    Path("test/deep.txt").write_text("deep\n")
+    subprocess.check_call(
+        ["calkit", "save", "deep.txt", "-M", "--no-push"], cwd="test"
+    )
+    assert (
+        calkit.git.get_repo().head.commit.message.strip()
+        == "Add test/deep.txt"
+    )
+    # A path with nothing staged for it is called out, and nothing else gets
+    # committed in its place
+    Path("hey.txt").write_text("changed\n")
+    result = subprocess.run(
+        ["calkit", "commit", "hey.txt", "-m", "Update hey.txt"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "No changes staged" in result.stdout
+    assert calkit.git.get_staged_files() == ["test/sup.txt"]
+    # Committing without paths commits what was staged, not what's in the
+    # working tree
+    Path("partial.txt").write_text("staged\n")
+    subprocess.check_call(["calkit", "add", "partial.txt"])
+    Path("partial.txt").write_text("unstaged\n")
+    subprocess.check_call(["calkit", "commit", "-m", "Add partial.txt"])
+    repo = calkit.git.get_repo()
+    assert repo.git.show("HEAD:partial.txt") == "staged"
+    # Resolving a merge is still possible, though Git refuses to commit only
+    # some paths while one is in progress
+    subprocess.check_call(["git", "checkout", "--", "."])
+    default_branch = repo.active_branch.name
+    repo.git.checkout("-b", "other", "HEAD~1")
+    Path("conflict.txt").write_text("other\n")
+    subprocess.check_call(
+        ["calkit", "save", "conflict.txt", "-m", "Add conflict", "--no-push"]
+    )
+    repo.git.checkout(default_branch)
+    Path("conflict.txt").write_text("main\n")
+    subprocess.check_call(
+        ["calkit", "save", "conflict.txt", "-m", "Add conflict", "--no-push"]
+    )
+    subprocess.run(["git", "merge", "other"], capture_output=True)
+    Path("conflict.txt").write_text("resolved\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "save",
+            "conflict.txt",
+            "-m",
+            "Resolve conflict",
+            "--no-push",
+        ]
+    )
+    repo = calkit.git.get_repo()
+    assert repo.head.commit.message.strip() == "Resolve conflict"
+    assert not repo.is_dirty()

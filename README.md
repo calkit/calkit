@@ -37,7 +37,7 @@ without the cognitive overhead.
 
 <!-- https://docs.google.com/drawings/d/1XMGnbgYYNFAVUBDyUaCyLfRB7efvJdrnrKmFlNmT19o/edit -->
 
-![pipeline](docs/img/pipeline.png)
+![pipeline](https://docs.calkit.org/img/pipeline.png)
 
 ## Features
 
@@ -73,6 +73,11 @@ without the cognitive overhead.
 - Extensions for doing all of the above graphically in
   [JupyterLab](https://docs.calkit.org/jupyterlab) and
   [VS Code](https://marketplace.visualstudio.com/items?itemName=Calkit.calkit-vscode).
+- A [browser extension](https://docs.calkit.org/browser-ext) for collecting references
+  directly to BibTeX (optionally synced with Zotero),
+  viewing DVC-stored files on GitHub,
+  and syncing figures and results with Overleaf directly in Chrome,
+  Microsoft Edge, and more.
 
 <!-- END INCLUDE -->
 
@@ -128,7 +133,7 @@ If you want to use Calkit without installing it,
 you can use uv's `uvx` command to run it directly:
 
 ```sh
-uvx calk9 --help
+uvx ck9 --help
 ```
 
 ### Nix
@@ -197,7 +202,7 @@ This re-execs the CLI via `uvx --from calkit-python@<version> calkit`,
 so it requires [uv](https://docs.astral.sh/uv/) on `PATH`.
 You can also declare a minimum version in `calkit.yaml`;
 see
-[Pinning the Calkit CLI version](https://docs.calkit.org/dependencies.md#pinning-the-calkit-cli-version).
+[Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
 
 ### Calkit Assistant
 

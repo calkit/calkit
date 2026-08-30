@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -710,3 +711,353 @@ def execute_notebook(
             p = subprocess.run(cmd)
             if p.returncode != 0:
                 raise_error(f"nbconvert failed for format '{to_fmt}'")
+
+
+def _pyodide_provided_packages() -> set[str]:
+    """Return the packages Pyodide ships, per marimo's lock file.
+
+    These are binary builds pinned by the runtime, so their versions come
+    from Pyodide rather than from the project's environment. Fetched from
+    the same URL marimo's exported apps read at load time.
+
+    A failure here returns an empty set, so nothing gets pinned rather than
+    pinned wrongly -- a missing pin is a lost record, a wrong one is a
+    version that never runs.
+    """
+    import json
+
+    import requests
+
+    import calkit
+
+    cache_path = (
+        pathlib.Path(calkit.ensure_local_dir())
+        / "marimo"
+        / "pyodide-lock.json"
+    )
+    url = "https://wasm.marimo.app/pyodide-lock.json"
+    try:
+        resp = requests.get(url, timeout=20)
+        resp.raise_for_status()
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(resp.text)
+        lock = resp.json()
+    except Exception as e:
+        # Fall back to a previous fetch so an offline build still splits
+        # pinnable packages from Pyodide's correctly
+        if cache_path.is_file():
+            warn(f"Using cached Pyodide lock ({e})")
+            lock = json.loads(cache_path.read_text())
+        else:
+            warn(
+                f"Could not read Pyodide lock, so nothing will be pinned: {e}"
+            )
+            return set()
+    return {
+        name.lower().replace("_", "-") for name in lock.get("packages", {})
+    }
+
+
+@notebooks_app.command(
+    name="export-marimo-wasm",
+    help="Export a marimo notebook to a WebAssembly app.",
+)
+# This wraps `marimo export html-warm` rather than letting a stage call it
+# through `calkit xenv` for two reasons.
+#
+# First, marimo's export is not self-contained. It requires the data an app
+# reads to already sit in a `public` directory beside the notebook, and
+# copies only that directory into the output. Nothing in marimo puts the
+# files there, so without this step either the export ships an app whose
+# data 404s, or the project keeps a generated `public` directory next to its
+# source. We assemble a build directory instead, so nothing is generated in
+# the project tree and the notebook's location doesn't matter.
+#
+# Second, a stage's command is recorded in dvc.lock, so it has to stay
+# stable. Spelling out marimo's flags in the stage means every stage in
+# every project goes stale when those flags change; keeping them here means
+# one wrapper absorbs it.
+def export_marimo_wasm(
+    path: Annotated[str, typer.Argument(help="Notebook path.")],
+    output_path: Annotated[
+        str,
+        typer.Option("-o", "--output", help="Output path for the app."),
+    ],
+    env_name: Annotated[
+        str | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            help=(
+                "Name or path to the spec of the environment in which to "
+                "export the notebook; must include marimo."
+            ),
+        ),
+    ] = None,
+    mode: Annotated[
+        str,
+        typer.Option(
+            "--mode", help="Whether the app is read-only ('run') or editable."
+        ),
+    ] = "run",
+    show_code: Annotated[
+        bool,
+        typer.Option("--show-code", help="Show notebook code in the app."),
+    ] = False,
+    layout_path: Annotated[
+        str | None,
+        typer.Option(
+            "--layout",
+            help=(
+                "Path to the layout file named in the notebook's "
+                "marimo.App(layout_file=...) call."
+            ),
+        ),
+    ] = None,
+    include_paths: Annotated[
+        list[str],
+        typer.Option(
+            "--include",
+            help=(
+                "Path to publish with the app, copied beneath 'public' at "
+                "its project-relative path. May be a glob, and may be "
+                "repeated."
+            ),
+        ),
+    ] = [],
+    no_validate: Annotated[
+        bool,
+        typer.Option(
+            "--no-validate",
+            help=(
+                "Skip executing the notebook to check it works before "
+                "exporting."
+            ),
+        ),
+    ] = False,
+    no_check: Annotated[
+        bool,
+        typer.Option(
+            "--no-check", help="Do not check environment before exporting."
+        ),
+    ] = False,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", "-v", help="Print verbose output.")
+    ] = False,
+) -> None:
+    import ast
+    import glob
+    import json
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from calkit.cli.main import run_in_env
+    from calkit.notebooks import MARIMO_DETECT_N_BYTES, is_marimo_notebook
+
+    # The notebook kind is detected from the file rather than named in a
+    # command per kind, so adding Jupyter export later is additive and
+    # doesn't rename this one out from under anybody.
+    if not os.path.isfile(path):
+        raise_error(f"Notebook does not exist: {path}")
+    with open(path) as f:
+        head = f.read(MARIMO_DETECT_N_BYTES)
+    # Named for the engine rather than for what it produces, so a future
+    # export-jupyterlite sits beside it without either pretending to be a
+    # generic 'export' whose options are actually engine-specific.
+    if path.endswith(".ipynb") or not is_marimo_notebook(head):
+        raise_error(
+            f"{path} is not a marimo notebook; to render a Jupyter "
+            "notebook to HTML use 'calkit nb execute --to html'"
+        )
+    if mode not in ("run", "edit"):
+        raise_error(f"Invalid mode '{mode}'; use run or edit")
+    # marimo copies the 'public' directory that sits next to the notebook, so
+    # exporting in place would generate files in the project root. Assemble a
+    # build directory instead, under .calkit/local, which carries its own
+    # '*' .gitignore so this never needs an entry in the project's. Named for
+    # the notebook's whole path, since two notebooks in different directories
+    # can share a stem and would otherwise wipe out each other's build.
+    build_name = Path(path).with_suffix("").as_posix().replace("/", "_")
+    build_dir = (
+        Path(calkit.ensure_local_dir()) / "marimo" / "build" / build_name
+    )
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True)
+    build_notebook_path = build_dir / Path(path).name
+    shutil.copy2(path, build_notebook_path)
+    # marimo needs an inline PEP 723 block to know what to install in the
+    # browser, and without one the app dies on its first third-party import.
+    # Rather than make the notebook carry a second dependency spec beside the
+    # project's environment, generate one into the build copy from what the
+    # notebook actually imports. A hand-written block is left alone, so this
+    # can still be overridden.
+    source = build_notebook_path.read_text()
+    if "# /// script" not in source:
+        import_roots: set[str] = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                import_roots.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                # A relative import resolves within the project, not to a
+                # distribution we could install
+                if node.level == 0 and node.module:
+                    import_roots.add(node.module.split(".")[0])
+        import_roots -= sys.stdlib_module_names
+        # Resolve module names to distribution names in the stage's own
+        # environment, since they often differ (sklearn is scikit-learn) and
+        # only that environment knows which distribution provided what.
+        resolver = build_dir / "_resolve_dists.py"
+        dists_path = build_dir / "_dists.json"
+        resolver.write_text(
+            "import json, sys\n"
+            "from importlib.metadata import packages_distributions, version\n"
+            "mods = json.loads(sys.argv[1])\n"
+            "found = packages_distributions()\n"
+            "out = {}\n"
+            "for d in sorted({found.get(m, [m])[0] for m in mods}):\n"
+            "    try:\n"
+            "        out[d] = version(d)\n"
+            "    except Exception:\n"
+            "        out[d] = None\n"
+            "open(sys.argv[2], 'w').write(json.dumps(out))\n"
+        )
+        run_in_env(
+            [
+                "python",
+                str(resolver),
+                json.dumps(sorted(import_roots)),
+                str(dists_path),
+            ],
+            env_name=env_name,
+            no_check=no_check,
+            verbose=False,
+            relaxed_check=True,
+        )
+        versions = json.loads(dists_path.read_text())
+        resolver.unlink()
+        dists_path.unlink()
+        # Only packages micropip installs can meaningfully be pinned.
+        # Anything Pyodide ships is a binary build whose version the runtime
+        # fixes, so a pin there would record a version that never runs and
+        # would actively conflict if pins were ever enforced. Ask marimo's
+        # Pyodide lock which packages those are.
+        provided = _pyodide_provided_packages()
+        deps = ["marimo"]
+        for dist, ver in sorted(versions.items()):
+            if dist == "marimo":
+                continue
+            if ver is None or dist.lower().replace("_", "-") in provided:
+                deps.append(dist)
+            else:
+                deps.append(f"{dist}=={ver}")
+        block = (
+            "# /// script\n"
+            "# dependencies = [\n"
+            + "".join(f'#     "{d}",\n' for d in deps)
+            + "# ]\n# ///\n\n"
+        )
+        build_notebook_path.write_text(block + source)
+        typer.echo(f"Declared dependencies for the browser: {', '.join(deps)}")
+    # marimo resolves layout_file relative to the notebook, not the project,
+    # so the copy has to keep that same relative position. These differ for
+    # any notebook that doesn't sit at the project root.
+    if layout_path is not None:
+        if not os.path.isfile(layout_path):
+            raise_error(f"Layout file does not exist: {layout_path}")
+        notebook_dir = os.path.dirname(path)
+        rel_layout = (
+            os.path.relpath(layout_path, notebook_dir)
+            if notebook_dir
+            else layout_path
+        )
+        if rel_layout.startswith(".."):
+            raise_error(
+                f"Layout file {layout_path} is outside the notebook's "
+                f"directory ({notebook_dir}); marimo can only reference a "
+                "layout beneath it"
+            )
+        build_layout_path = build_dir / rel_layout
+        build_layout_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(layout_path, build_layout_path)
+    # Copy included paths beneath public/, preserving project-relative paths
+    # so notebook code reads the same locally and in the browser
+    public_dir = build_dir / "public"
+    n_included = 0
+    for pattern in include_paths:
+        matches = sorted(glob.glob(pattern, recursive=True))
+        if not matches:
+            raise_error(f"No files match included path: {pattern}")
+        for match in matches:
+            dest = public_dir / match
+            if os.path.isdir(match):
+                shutil.copytree(match, dest, dirs_exist_ok=True)
+            else:
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(match, dest)
+            n_included += 1
+    if include_paths:
+        typer.echo(f"Copied {n_included} included path(s) into public")
+    # We don't ship marimo, so it has to be in the project environment. Probe
+    # for it up front, since otherwise a missing marimo surfaces as the
+    # notebook failing to execute, which sends people looking in the wrong
+    # place. run_in_env turns a failed command into raise_error, i.e., a
+    # typer.Exit, rather than letting CalledProcessError out, so that's what
+    # has to be caught to replace its message with a useful one.
+    typer.echo("Checking marimo is available")
+    try:
+        run_in_env(
+            ["marimo", "--version"],
+            env_name=env_name,
+            no_check=no_check,
+            verbose=False,
+            relaxed_check=True,
+        )
+    except (typer.Exit, subprocess.CalledProcessError, FileNotFoundError):
+        raise_error(
+            "marimo is not available in environment "
+            f"'{env_name or 'default'}'; add it to that environment's "
+            "dependencies. Calkit doesn't ship marimo."
+        )
+    # A WASM export never executes the notebook, and exits zero even if every
+    # cell is broken, so without this a totally broken app ships green. An
+    # 'html' export does execute, and fails properly. It only works after
+    # assembly, since mo.notebook_location() then resolves to the build
+    # directory, where public/ exists.
+    if not no_validate:
+        typer.echo("Checking the notebook executes")
+        validate_path = build_dir / "_validate.html"
+        try:
+            run_in_env(
+                ["marimo", "export", "html", str(build_notebook_path)]
+                + ["-o", str(validate_path)],
+                env_name=env_name,
+                no_check=no_check,
+                verbose=verbose,
+                relaxed_check=True,
+            )
+        except (typer.Exit, subprocess.CalledProcessError):
+            raise_error(
+                "Notebook failed to execute; fix it or pass --no-validate. "
+                "Note this runs in the project environment, not the "
+                "browser's, so it can't catch every failure."
+            )
+        validate_path.unlink(missing_ok=True)
+    cmd = ["marimo", "export", "html-wasm", str(build_notebook_path)]
+    cmd += ["-o", output_path, "--mode", mode]
+    if show_code:
+        cmd.append("--show-code")
+    typer.echo(f"Exporting {path} to {output_path}")
+    run_in_env(
+        cmd,
+        env_name=env_name,
+        no_check=no_check,
+        verbose=verbose,
+        relaxed_check=True,
+    )
+    if not Path(output_path).exists():
+        raise_error(f"Export did not produce {output_path}")
+    typer.echo(f"Exported app to {output_path}")

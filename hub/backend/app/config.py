@@ -35,6 +35,29 @@ def parse_allowed_emails(v: Any) -> list[str] | None:
     raise ValueError(v)
 
 
+def parse_featured_projects(v: Any) -> list[str]:
+    """Parse the featured project list into normalized ``owner/name`` slugs.
+
+    Accepts a comma-separated string or a list, and drops anything that
+    isn't a two-part slug so one typo in the environment can't take the
+    landing page down with a 500.
+    """
+    if v is None:
+        return []
+    if isinstance(v, str):
+        v = v.split(",")
+    if not isinstance(v, list):
+        raise ValueError(v)
+    slugs = []
+    for item in v:
+        slug = str(item).strip().strip("/").lower()
+        if slug.count("/") != 1 or not all(slug.split("/")):
+            continue
+        if slug not in slugs:
+            slugs.append(slug)
+    return slugs
+
+
 def parse_cors(v: Any) -> list[str] | str:
     if isinstance(v, str) and not v.startswith("["):
         return [i.strip() for i in v.split(",")]
@@ -187,6 +210,34 @@ class Settings(BaseSettings):
         return email.strip().lower() in {
             a.lower() for a in self.ALLOWED_USER_EMAILS
         }
+
+    # Projects showcased to signed-out visitors and to users who haven't
+    # created anything yet, as a comma-separated list of ``owner/name``
+    # slugs. Newest-first is what a hub has before anyone curates it, and
+    # it shows a first-time visitor whatever happened to be created last
+    # rather than what Calkit is for. Order here is the order shown.
+    # Private or missing projects are skipped rather than erroring, so a
+    # slug can be listed before the project is public.
+    FEATURED_PROJECTS: Annotated[
+        list[str], BeforeValidator(parse_featured_projects)
+    ] = [
+        "calkit/example-basic",
+        "petebachant/nacafoil-openfoam",
+        "petebachant/strava-analysis",
+        "calkit/example-matlab",
+        "calkit/example-overleaf",
+        "petebachant/rans-boundary-layer-validation",
+    ]
+
+    # Where in-app feedback and help requests are sent. Falls back to the
+    # hub operator (the bootstrap superuser), so a self-hosted instance
+    # reaches someone real without being configured first.
+    FEEDBACK_EMAIL: str | None = None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def feedback_email(self) -> str:
+        return self.FEEDBACK_EMAIL or self.FIRST_SUPERUSER
 
     # Email configuration
     SMTP_TLS: bool = True

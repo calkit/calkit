@@ -9,10 +9,13 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from contextlib import contextmanager
+from datetime import timezone
+from typing import Any
 
 import git
 from fastapi import HTTPException
@@ -23,7 +26,7 @@ from sqlmodel import Session, select
 
 import calkit
 from app import github, users
-from app.core import logger, ryaml
+from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
 
 _SYMLINK_MODE = 0o120000
@@ -297,6 +300,27 @@ def get_repo(
             return repo
         try:
             with lock:
+                # Re-check the TTL now that we hold the lock. A page load
+                # fires many requests at once, so they all see the same
+                # expired timestamp and queue here together -- and without
+                # this, every one of them would fetch in turn, each paying
+                # the network round trip and the working-tree reset behind
+                # it. The winner touches `updated_fpath` below, so everyone
+                # behind it can see the refresh already happened and go
+                # straight to reading. An explicit `ttl=None`/`0` still
+                # always refreshes, which is what callers asking for that
+                # mean.
+                if os.path.isfile(updated_fpath):
+                    last_updated = os.path.getmtime(updated_fpath)
+                ttl_expired = ttl is None or (
+                    (time.time() - last_updated) > ttl
+                )
+                if not ttl_expired and not is_shallow:
+                    if access_token:
+                        repo.git.update_environment(
+                            **_make_git_auth_env(access_token)
+                        )
+                    return repo
                 # Migrate repos cloned with an embedded token in the remote
                 # URL to the plain URL so our credential helper is used
                 # instead. Plain https URLs from GitHub never contain "@", so
@@ -336,14 +360,33 @@ def get_repo(
                                 ["origin", branch_name],
                                 kill_after_timeout=GIT_FETCH_TIMEOUT,
                             )
-                        # If we had any failed previous transactions, reset
-                        # and clean
-                        repo.git.reset()
-                        repo.git.clean("-fd")
-                        repo.git.stash("save", "Auto-stash before pull")
-                        repo.git.checkout([f"origin/{branch_name}"])
-                        repo.git.branch(["-D", branch_name])
-                        repo.git.checkout(["-b", branch_name])
+                        # Only rewrite the working tree when the remote
+                        # actually moved. The reset/clean/checkout dance below
+                        # rewrites files that concurrent readers of this same
+                        # checkout are parsing right now -- the file lock
+                        # serializes writers against each other, not against
+                        # readers -- and a torn read of calkit.yaml surfaces
+                        # as a bogus parse error or a 500. The fetch itself
+                        # only writes .git, so it is safe to leave running on
+                        # every refresh; skipping the rewrite when there is
+                        # nothing new removes the hazard from the common case.
+                        try:
+                            local_sha = repo.head.commit.hexsha
+                            remote_sha = repo.commit(
+                                f"origin/{branch_name}"
+                            ).hexsha
+                        except Exception as e:
+                            logger.warning(f"Could not compare to origin: {e}")
+                            local_sha, remote_sha = None, None
+                        if local_sha is None or local_sha != remote_sha:
+                            # If we had any failed previous transactions, reset
+                            # and clean
+                            repo.git.reset()
+                            repo.git.clean("-fd")
+                            repo.git.stash("save", "Auto-stash before pull")
+                            repo.git.checkout([f"origin/{branch_name}"])
+                            repo.git.branch(["-D", branch_name])
+                            repo.git.checkout(["-b", branch_name])
                     else:
                         with _timed("fetch-all", repo=repo_label):
                             repo.git.fetch(
@@ -371,7 +414,35 @@ def get_repo(
     # read, which would be pure overhead.
     if user is not None and did_refresh:
         _configure_committer(repo, user, session=session)
+    if did_refresh:
+        record_project_update(project, repo, session)
     return repo
+
+
+def record_project_update(
+    project: Project, repo: git.Repo, session: Session
+) -> None:
+    """Move the project's "last updated" up to its head commit, if newer.
+
+    The time follows the repo rather than the database row: a push from
+    the CLI, a collaborator's commit, an Overleaf sync, or a commit the
+    hub itself just made. It's recorded lazily, whenever something sees a
+    newer head, which is what "most recently worked on" should mean on
+    the projects list.
+    """
+    try:
+        head_dt = repo.head.commit.committed_datetime.astimezone(
+            timezone.utc
+        ).replace(tzinfo=None)
+        if project.updated is None or head_dt > project.updated:
+            project.updated = head_dt
+            session.add(project)
+            session.commit()
+            # The commit expires the row's attributes; callers go on using
+            # the project, so load them back now rather than lazily later
+            session.refresh(project)
+    except Exception as e:
+        logger.warning(f"Could not record project update time: {e}")
 
 
 def _detect_full_name_from_history(repo: git.Repo, email: str) -> str | None:
@@ -438,10 +509,17 @@ def get_zip_path_map_from_repo(repo: git.Repo) -> dict:
         return {}
 
 
-def get_ck_info_from_repo(repo: git.Repo, process_includes=False) -> dict:
+def get_ck_info_from_repo(repo: git.Repo, read_only: bool = False) -> dict:
+    """Load calkit.yaml from the repo's working tree.
+
+    Pass ``read_only=True`` when the result is only inspected, never written
+    back: it swaps ruamel's round-trip parser for the C loader, which is far
+    faster but drops the comments and quoting a faithful rewrite needs.
+    """
     try:
         ck_info = calkit.load_calkit_info(
-            wdir=repo.working_dir, process_includes=process_includes
+            wdir=repo.working_dir,
+            read_only=read_only,
         )
     except (YAMLError, IndexError) as e:
         # A user's calkit.yaml can be malformed (e.g., multiple YAML documents
@@ -465,7 +543,6 @@ def get_ck_info(
     user: User | None,
     session: Session,
     ttl=None,
-    process_includes=False,
     ref: str | None = None,
 ) -> dict:
     """Load the calkit.yaml file contents into a dictionary."""
@@ -476,7 +553,7 @@ def get_ck_info(
         ttl=ttl,
         ref=ref,
     )
-    return get_ck_info_from_repo(repo=repo, process_includes=process_includes)
+    return get_ck_info_from_repo(repo=repo)
 
 
 def get_dvc_pipeline(
@@ -810,18 +887,32 @@ def _dvc_lock_outs_at(commit: git.Commit) -> dict[str, str] | None:
     return _parse_dvc_lock_outs(blob.hexsha, blob.data_stream.read)
 
 
+def _peek_dvc_lock_outs(blob_sha: str) -> dict[str, str] | None:
+    """Return a parsed dvc.lock blob if cached, without parsing on a miss.
+
+    Refreshes LRU recency on a hit exactly as ``_parse_dvc_lock_outs`` does,
+    so a revision that keeps getting read isn't evicted ahead of a colder one.
+    """
+    cached = _DVC_LOCK_PARSE_CACHE.get(blob_sha)
+    if cached is not None:
+        _DVC_LOCK_PARSE_CACHE.move_to_end(blob_sha)
+    return cached
+
+
 def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     """Return {out_path: md5} for a dvc.lock blob, caching by blob SHA.
 
     ``read_bytes`` is a zero-arg callable returning the blob contents, only
     invoked on cache miss so batched callers don't pay the cost twice.
     """
-    cached = _DVC_LOCK_PARSE_CACHE.get(blob_sha)
+    cached = _peek_dvc_lock_outs(blob_sha)
     if cached is not None:
-        _DVC_LOCK_PARSE_CACHE.move_to_end(blob_sha)
         return cached
     try:
-        data = ryaml.load(read_bytes()) or {}
+        # Not ryaml: we only pull plain strings out of this and never write it
+        # back. On a 47 KB dvc.lock that is ~6 ms/parse versus ~94 ms, which
+        # dominates file-history requests walking hundreds of revisions.
+        data = load_yaml_fast(read_bytes()) or {}
     except Exception:
         data = {}
     outs: dict[str, str] = {}
@@ -909,6 +1000,46 @@ def _get_commits_for_paths(
         )
         return []
     return _parse_log_records(proc.stdout.decode("utf-8", errors="replace"))
+
+
+def _batch_check_blobs(repo: git.Repo, specs: list[str]) -> dict[str, str]:
+    """Return ``{spec: blob_sha}`` via ``git cat-file --batch-check``.
+
+    Unlike ``_batch_read_blobs`` this transfers only object headers, not
+    content. Naming the blob a commit points at is what lets a caller answer
+    from ``_DVC_LOCK_PARSE_CACHE`` (keyed by blob SHA, and shared across
+    requests) without transferring the blob at all -- so a revision parsed by
+    an earlier request costs nothing here beyond its header.
+    """
+    results: dict[str, str] = {}
+    if not specs:
+        return results
+    try:
+        proc = subprocess.Popen(
+            ["git", "cat-file", "--batch-check"],
+            cwd=repo.working_dir,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as exc:
+        logger.warning(f"git cat-file --batch-check failed to start: {exc}")
+        return results
+    stdout, stderr = proc.communicate(("\n".join(specs) + "\n").encode())
+    if proc.returncode != 0:
+        logger.warning(
+            f"git cat-file --batch-check failed (exit {proc.returncode}): "
+            f"{stderr.decode('utf-8', errors='replace').strip()}"
+        )
+        return results
+    lines = stdout.decode("utf-8", errors="replace").splitlines()
+    for spec, line in zip(specs, lines):
+        parts = line.split(" ")
+        # "<name> missing" or "<name> ambiguous"
+        if len(parts) < 3 or parts[1] != "blob":
+            continue
+        results[spec] = parts[0]
+    return results
 
 
 def _batch_read_blobs(
@@ -1067,23 +1198,76 @@ def get_file_history(
         lock_commits = _get_commits_for_paths(
             repo, dvc_lock_walk, ["dvc.lock"]
         )
+        # Resolve each commit's dvc.lock to a blob SHA up front (headers
+        # only, no content), so revisions already in the parse cache from an
+        # earlier request cost nothing to transfer.
         specs = [f"{c['hash']}:dvc.lock" for c in lock_commits]
-        blobs = _batch_read_blobs(repo, specs)
-        # Walk oldest -> newest to detect md5 transitions for ``path``.
-        prev_hash: str | None = None
-        for c in reversed(lock_commits):
-            entry = blobs.get(f"{c['hash']}:dvc.lock")
-            if entry is None:
+        spec_shas = _batch_check_blobs(repo, specs)
+        # Parse revisions lazily, newest first and in batches, so a request
+        # that only needs the newest few transitions doesn't parse the whole
+        # walk. Each parse is the expensive part, so this is what bounds the
+        # cost by what's actually returned.
+        md5_at: dict[int, str | None] = {}
+        batch_size = 32
+
+        def _md5_at(i: int) -> str | None:
+            """``path``'s md5 in dvc.lock at ``lock_commits[i]``, or None."""
+            if i in md5_at:
+                return md5_at[i]
+            # Fetch a window starting at i, skipping revisions we can already
+            # answer from the cross-request parse cache.
+            window = range(i, min(i + batch_size, len(lock_commits)))
+            pending = []
+            for j in window:
+                if j in md5_at:
+                    continue
+                sha = spec_shas.get(f"{lock_commits[j]['hash']}:dvc.lock")
+                if sha is None:
+                    md5_at[j] = None
+                    continue
+                cached_outs = _peek_dvc_lock_outs(sha)
+                if cached_outs is not None:
+                    md5_at[j] = cached_outs.get(path) or None
+                else:
+                    pending.append((j, sha))
+            if pending:
+                # Two commits in the window can point at the same dvc.lock
+                # blob (merges, reverts); read each distinct one once.
+                blobs = _batch_read_blobs(
+                    repo, list(dict.fromkeys(s for _, s in pending))
+                )
+                for j, sha in pending:
+                    entry = blobs.get(sha)
+                    if entry is None:
+                        md5_at[j] = None
+                        continue
+                    outs = _parse_dvc_lock_outs(sha, lambda b=entry[1]: b)
+                    md5_at[j] = outs.get(path) or None
+            return md5_at.get(i)
+
+        # Walk newest -> oldest. A commit is a transition when its md5 differs
+        # from the nearest *older* revision that records one at all (None when
+        # there is none, i.e. the path first appears here) -- the same rule
+        # the previous oldest-first walk applied, but able to stop early.
+        lock_hits: list[dict[str, Any]] = []
+        for i in range(len(lock_commits)):
+            current_hash = _md5_at(i)
+            if not current_hash:
                 continue
-            blob_sha, content = entry
-            outs = _parse_dvc_lock_outs(blob_sha, lambda b=content: b)
-            current_hash = outs.get(path) if outs else None
-            if current_hash and current_hash != prev_hash:
+            prev_hash: str | None = None
+            for j in range(i + 1, len(lock_commits)):
+                older = _md5_at(j)
+                if older:
+                    prev_hash = older
+                    break
+            if current_hash != prev_hash:
+                c = lock_commits[i]
                 if c["hash"] not in seen:
                     seen.add(c["hash"])
-                    commits.append(c)
-            if current_hash:
-                prev_hash = current_hash
+                    lock_hits.append(c)
+                    if len(lock_hits) >= max_count:
+                        break
+        commits.extend(lock_hits)
     commits.sort(key=lambda c: c["committed_date"], reverse=True)
     result = commits[:max_count]
     _FILE_HISTORY_CACHE[cache_key] = result
@@ -1230,77 +1414,118 @@ class WorkingTree(RepoTree):
         return os.listdir(self._abs(path))
 
 
+_ODB_LOCK_ATTR = "_calkit_odb_lock"
+_ODB_LOCK_GUARD = threading.Lock()
+
+
+def odb_lock(repo: git.Repo) -> threading.RLock:
+    """Return the lock serializing object-database reads for ``repo``.
+
+    GitPython funnels every object read through a single persistent
+    ``git cat-file --batch`` subprocess hanging off the repo's ``Git``
+    instance, and ``Git.stream_object_data`` documents itself as not
+    thread-safe. Concurrent readers interleave on that one pipe and either
+    raise ("SHA ... could not be resolved") or deadlock on it outright, so
+    any caller fanning tree reads across threads has to serialize them.
+
+    Scoped to the ``Repo`` *instance*, not the repo directory: ``get_repo``
+    builds a fresh ``Repo`` (and thus a fresh subprocess) per request, so
+    keying on the directory would serialize unrelated requests for nothing.
+    """
+    with _ODB_LOCK_GUARD:
+        lock = getattr(repo, _ODB_LOCK_ATTR, None)
+        if lock is None:
+            lock = threading.RLock()
+            setattr(repo, _ODB_LOCK_ATTR, lock)
+        return lock
+
+
 class GitTree(RepoTree):
     """RepoTree that reads directly from git's object database.
 
     No working-tree checkout required--file content streams straight from
     blob objects. Suitable for browsing any historical ref without touching
     the filesystem beyond the git object store.
+
+    Every method holds the repo's ``odb_lock`` for the duration of its git
+    reads, which makes this class safe to share across a thread pool. The
+    lock covers only the git access; callers that overlap slow object-storage
+    work around these calls still get to run that part concurrently.
     """
 
     def __init__(self, repo: git.Repo, ref: str) -> None:
-        self._git_tree = _resolve_commit(repo, ref).tree
+        self._lock = odb_lock(repo)
+        with self._lock:
+            self._git_tree = _resolve_commit(repo, ref).tree
 
     def _get(self, path: str) -> git.Blob | git.Tree:
+        # Caller must hold self._lock: resolving a path walks intermediate
+        # tree objects, each of which is an object-database read.
         try:
             return self._git_tree[path]  # type: ignore[return-value]
         except KeyError:
             raise KeyError(path)
 
     def exists(self, path: str) -> bool:
-        try:
-            self._get(path)
-            return True
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                self._get(path)
+                return True
+            except KeyError:
+                return False
 
     def is_file(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            return isinstance(e, git.Blob) and e.mode != _SYMLINK_MODE
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                e = self._get(path)
+                return isinstance(e, git.Blob) and e.mode != _SYMLINK_MODE
+            except KeyError:
+                return False
 
     def is_dir(self, path: str | None) -> bool:
         if not path:
             return True  # root is always a tree
-        try:
-            return isinstance(self._get(path), git.Tree)
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                return isinstance(self._get(path), git.Tree)
+            except KeyError:
+                return False
 
     def is_symlink(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            return isinstance(e, git.Blob) and e.mode == _SYMLINK_MODE
-        except KeyError:
-            return False
+        with self._lock:
+            try:
+                e = self._get(path)
+                return isinstance(e, git.Blob) and e.mode == _SYMLINK_MODE
+            except KeyError:
+                return False
 
     def is_safe_symlink(self, path: str) -> bool:
-        try:
-            e = self._get(path)
-            if not isinstance(e, git.Blob) or e.mode != _SYMLINK_MODE:
+        with self._lock:
+            try:
+                e = self._get(path)
+                if not isinstance(e, git.Blob) or e.mode != _SYMLINK_MODE:
+                    return False
+                target = e.data_stream.read().decode()
+            except Exception:
                 return False
-            target = e.data_stream.read().decode()
-            parent = posixpath.dirname(path)
-            resolved = posixpath.normpath(posixpath.join(parent, target))
-            return not resolved.startswith("..") and not posixpath.isabs(
-                resolved
-            )
-        except Exception:
-            return False
+        parent = posixpath.dirname(path)
+        resolved = posixpath.normpath(posixpath.join(parent, target))
+        return not resolved.startswith("..") and not posixpath.isabs(resolved)
 
     def read_bytes(self, path: str) -> bytes:
-        return self._get(path).data_stream.read()
+        with self._lock:
+            return self._get(path).data_stream.read()
 
     def size(self, path: str) -> int:
-        return self._get(path).size
+        with self._lock:
+            return self._get(path).size
 
     def listdir(self, path: str | None) -> list[str]:
-        t = self._git_tree if not path else self._get(path)
-        if not isinstance(t, git.Tree):
-            raise NotADirectoryError(path)
-        return [posixpath.basename(item.path) for item in t]
+        with self._lock:
+            t = self._git_tree if not path else self._get(path)
+            if not isinstance(t, git.Tree):
+                raise NotADirectoryError(path)
+            return [posixpath.basename(item.path) for item in t]
 
 
 def _resolve_commit(repo: git.Repo, ref: str) -> git.Commit:

@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRef } from "react"
 
-import { type Issue, ProjectsService } from "../client"
-import { dataOrNull } from "../lib/api"
+import { type Figure, type Issue, ProjectsService } from "../client"
+import { dataOrNull, httpStatus } from "../lib/api"
 import { isAuthenticationError } from "../lib/auth"
 
 const useProject = (accountName: string, projectName: string, ref?: string) => {
@@ -24,7 +24,8 @@ const useProject = (accountName: string, projectName: string, ref?: string) => {
       if (isAuthenticationError(error)) {
         return failureCount < 2
       }
-      if (error.message === "Not Found" || error.message === "Forbidden") {
+      const status = (error as any)?.response?.status ?? (error as any)?.status
+      if (status === 404 || status === 403) {
         return false
       }
       return failureCount < 3
@@ -88,6 +89,13 @@ const useProjectReadme = (
         path: "README.md",
         ref,
       }).then((response) => response.data),
+    // A project with no README 404s, and that's an answer, not a failure.
+    // The default three retries turned one miss into four requests against
+    // an endpoint that resolves the project's whole DVC index, and the
+    // backoff between them (1s, 2s, 4s) kept the README panel spinning for
+    // seconds after the first reply had already settled the question.
+    retry: (failureCount, error) =>
+      httpStatus(error) !== 404 && failureCount < 3,
   })
   return { readmeRequest }
 }
@@ -109,19 +117,37 @@ const useProjectQuestions = (
   return { questionsRequest }
 }
 
+const FIGURES_PAGE_LIMIT = 100
+
+// The figures endpoint is paginated because it inlines each figure's content.
+// Callers here want the complete list to populate a picker, and only need
+// paths and titles for it, so they ask for metadata only (no object-storage
+// reads at all) and page through to the end rather than silently stopping at
+// whatever the first page happened to hold.
 const useProjectFigures = (
   accountName: string,
   projectName: string,
   ref?: string,
 ) => {
   const figuresRequest = useQuery({
-    queryKey: ["projects", accountName, projectName, "figures", ref],
-    queryFn: () =>
-      ProjectsService.getProjectFigures({
-        owner_name: accountName,
-        project_name: projectName,
-        ref,
-      }).then((response) => response.data),
+    queryKey: ["projects", accountName, projectName, "figures", ref, "all"],
+    queryFn: async () => {
+      const all: Figure[] = []
+      for (;;) {
+        const page = await ProjectsService.getProjectFigures({
+          owner_name: accountName,
+          project_name: projectName,
+          ref,
+          limit: FIGURES_PAGE_LIMIT,
+          offset: all.length,
+          include_content: false,
+        }).then((response) => response.data)
+        if (!page?.items?.length) break
+        all.push(...page.items)
+        if (all.length >= page.total) break
+      }
+      return all
+    },
   })
   return { figuresRequest }
 }
@@ -223,6 +249,32 @@ const useProjectPresentations = (
       }).then((response) => response.data),
   })
   return { presentationsRequest }
+}
+
+const useProjectTables = (
+  accountName: string,
+  projectName: string,
+  ref?: string,
+  includeContent = true,
+) => {
+  const tablesRequest = useQuery({
+    queryKey: [
+      "projects",
+      accountName,
+      projectName,
+      "tables",
+      ref,
+      includeContent,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectTables({
+        owner_name: accountName,
+        project_name: projectName,
+        ref,
+        include_content: includeContent,
+      }).then((response) => response.data),
+  })
+  return { tablesRequest }
 }
 
 const useProjectIssues = (accountName: string, projectName: string) => {
@@ -386,6 +438,7 @@ export {
   useProjectResults,
   useProjectPublications,
   useProjectPresentations,
+  useProjectTables,
   useProjectReadme,
   useProjectDatasets,
   useProjectEnvironments,

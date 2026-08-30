@@ -1,21 +1,21 @@
 import {
+  Code,
   Heading,
+  Link,
   ListItem,
   OrderedList,
-  UnorderedList,
   Text,
-  Code,
-  Link,
+  UnorderedList,
   useColorModeValue,
 } from "@chakra-ui/react"
+import { Box } from "@chakra-ui/react"
+import React from "react"
 import ReactMarkdown from "react-markdown"
+import rehypeKatex from "rehype-katex"
+import rehypeRaw from "rehype-raw"
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import remarkMath from "remark-math"
-import React from "react"
-import { Box } from "@chakra-ui/react"
-import rehypeRaw from "rehype-raw"
-import rehypeKatex from "rehype-katex"
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize"
 import "katex/dist/katex.min.css"
 
 // Preserve the class names remark-math emits (`math`, `math-inline`,
@@ -32,6 +32,10 @@ const sanitizeSchema = {
 
 interface MarkdownProps {
   children: string
+  /** Render user-controlled short text without block elements or links. */
+  inline?: boolean
+  /** Truncate with an ellipsis after this many lines. */
+  noOfLines?: number
 }
 
 interface codeProps extends React.HTMLAttributes<HTMLElement> {
@@ -68,12 +72,11 @@ const pre = ({ children, ...props }: any) => {
 const code = ({ insidePre = false, ...props }: codeProps) => {
   if (insidePre) {
     return <Code my={2} whiteSpace={"pre"} display={"block"} p={2} {...props} />
-  } else {
-    return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
   }
+  return <Code my={0} whiteSpace={"pre"} px={1} {...props} />
 }
 
-const Markdown = ({ children }: MarkdownProps) => {
+const Markdown = ({ children, inline = false, noOfLines }: MarkdownProps) => {
   const tableBorderColor = useColorModeValue("gray.200", "whiteAlpha.300")
   const tableHeaderBg = useColorModeValue("gray.50", "whiteAlpha.100")
   const tableHeaderText = useColorModeValue("gray.700", "gray.100")
@@ -138,8 +141,42 @@ const Markdown = ({ children }: MarkdownProps) => {
     )
   }
 
+  const inlineParagraph = ({ children, ...props }: any) => {
+    return (
+      <Text as="span" my={0} {...props}>
+        {children}
+      </Text>
+    )
+  }
+
+  const components = {
+    h1: H1,
+    h2: H2,
+    h3: H3,
+    li: ListItem,
+    ol: OrderedList,
+    ul: UnorderedList,
+    p: inline ? inlineParagraph : p,
+    pre,
+    code,
+    a: BlueLink,
+    table,
+    tr,
+    th,
+    td,
+  }
+
   return (
     <Box
+      // Inline rendering must not introduce a block-level wrapper, or short text
+      // like a title or description would break onto its own line.
+      as={inline ? "span" : "div"}
+      // Clamping needs the block-level -webkit-box display that noOfLines sets,
+      // so don't also ask for an inline one and rely on which of the two wins.
+      display={inline && !noOfLines ? "inline" : undefined}
+      // The clamp has to live on this wrapper rather than on a descendant `p`,
+      // since inline rendering emits paragraphs as spans.
+      noOfLines={noOfLines}
       /*
        * Chakra's CSS reset sets img { display: block }, which makes README badges
        * stack vertically. Override within markdown so images (and linked images)
@@ -163,22 +200,13 @@ const Markdown = ({ children }: MarkdownProps) => {
       }}
     >
       <ReactMarkdown
-        components={{
-          h1: H1,
-          h2: H2,
-          h3: H3,
-          li: ListItem,
-          ol: OrderedList,
-          ul: UnorderedList,
-          p: p,
-          pre: pre,
-          code: code,
-          a: BlueLink,
-          table: table,
-          tr: tr,
-          th: th,
-          td: td,
-        }}
+        components={components}
+        allowedElements={
+          inline
+            ? ["p", "span", "em", "strong", "del", "code", "br"]
+            : undefined
+        }
+        unwrapDisallowed={inline}
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
           rehypeRaw,

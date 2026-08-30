@@ -1,11 +1,13 @@
 """Functionality related to environments."""
 
+import functools
 import glob
 import hashlib
 import json
 import os
 import platform
 import re
+import socket
 import subprocess
 import tempfile
 from pathlib import Path
@@ -23,11 +25,15 @@ DOCKER_ARCHS = [
     "arm64",
     "arm-v7",
     "arm-v6",
+    "arm-v5",
     "ppc64le",
     "s390x",
     "386",
     "riscv64",
 ]
+# Architectures Docker environments are locked for by default, so that
+# moving a project between them doesn't invalidate every stage
+DEFAULT_DOCKER_LOCK_ARCHS = ["amd64", "arm64"]
 DEFAULT_PYTHON_VERSION = "3.14"
 CONDA_VENV_ARCHS = [
     "osx-arm64",
@@ -38,7 +44,111 @@ CONDA_VENV_ARCHS = [
     "win-64",
 ]
 ENV_CHECK_CACHE_TTL_SECONDS = 3600
-KINDS_NO_CHECK = ["_system", "ssh"]
+# Scheduler environment keys that govern how a job is dispatched rather than
+# what it computes. They are excluded from the environment lock file, so
+# changing them does not invalidate cached results: pacing submissions to be
+# polite to a shared queue must not force every simulation to rerun.
+SCHEDULER_DISPATCH_ONLY_KEYS = {"max_concurrent_jobs"}
+# Environment kinds with nothing to build or verify. Note this matches on
+# ``kind``; the special ``_system`` environment is excluded by name instead,
+# since names starting with an underscore are filtered out of the pipeline's
+# environment list before we get here. ``system`` is not listed: checking one
+# means writing its lock file, so it has to go through ``check_environment``.
+# No kind is unconditionally uncheckable. A ``system`` env on another host
+# comes close, but that depends on the env's host rather than its kind, and
+# ``check_environment`` handles it: with nothing locked there is nothing to
+# check, and locking a machine we can't observe is an error.
+KINDS_NO_CHECK: list[str] = []
+
+# Kinds whose check must not be cached. Caching exists to skip rebuilding
+# something expensive, but checking a ``system`` env *is* reading the
+# machine -- there is nothing to skip. Caching it means a locked property
+# can change and be missed until the cache expires, which is precisely the
+# drift ``lock`` exists to catch.
+KINDS_NO_CACHE = ["system"]
+
+
+def cacheable(env: dict) -> bool:
+    """Whether an environment's check is worth remembering."""
+    return env.get("kind") not in KINDS_NO_CACHE
+
+
+# Maps the kebab-case properties a ``system`` environment can lock onto the
+# keys ``get_system_info`` returns. Not a mechanical transformation, hence
+# the explicit table: note ``Rscript_version``'s capital R.
+SYSTEM_LOCK_PROPERTIES = {
+    "os": "os",
+    "os-version": "os_version",
+    "platform": "platform",
+    "machine": "machine",
+    "processor": "processor",
+    "hostname": "hostname",
+    "machine-id": "machine_id",
+    "cpu-count": "cpu_count",
+    "memory-gb": "memory_gb",
+    "python-version": "python_version",
+    "python-implementation": "python_implementation",
+    "git-version": "git_version",
+    "docker-version": "docker_version",
+    "conda-version": "conda_version",
+    "mamba-version": "mamba_version",
+    "uv-version": "uv_version",
+    "pixi-version": "pixi_version",
+    "julia-version": "julia_version",
+    "juliaup-version": "juliaup_version",
+    "rscript-version": "Rscript_version",
+    "brew-version": "brew_version",
+}
+
+# What each lockable property means, for the published documentation. Kept
+# beside the table above so the two can be checked against each other; a
+# property nobody can describe is one nobody can decide whether to lock.
+SYSTEM_LOCK_PROPERTY_DESCRIPTIONS = {
+    "os": "Operating system name, e.g. 'Linux' or 'Darwin'.",
+    "os-version": "Operating system release, e.g. a kernel version.",
+    "platform": "Full platform string, which folds in most of the above.",
+    "machine": "Machine architecture, e.g. 'x86_64' or 'arm64'.",
+    "processor": "Processor name, where the OS reports one.",
+    "hostname": "The machine's name. Pins results to one specific host, "
+    "but only by name: renaming the machine breaks the pin, and a machine "
+    "elsewhere with the same name satisfies it. Prefer 'machine-id'.",
+    "machine-id": "A stable identifier for the machine itself, read from "
+    "the platform. Pins results to one specific machine, and unlike "
+    "'hostname' survives renaming it. Declaring a 'machine_id' on the "
+    "environment says where to run, not that results depend on it, so "
+    "lock this to also rerun stages when the machine changes.",
+    "cpu-count": "Number of CPUs, which can change what a run produces "
+    "where results depend on how work was divided.",
+    "memory-gb": "Total memory in GB.",
+    "python-version": "Version of the Python running Calkit.",
+    "python-implementation": "Python implementation, e.g. 'CPython'.",
+    "git-version": "Installed Git version.",
+    "docker-version": "Installed Docker version.",
+    "conda-version": "Installed Conda version.",
+    "mamba-version": "Installed Mamba version.",
+    "uv-version": "Installed uv version.",
+    "pixi-version": "Installed Pixi version.",
+    "julia-version": "Installed Julia version.",
+    "juliaup-version": "Installed Juliaup version.",
+    "rscript-version": "Installed Rscript version.",
+    "brew-version": "Installed Homebrew version.",
+}
+
+# How precisely a property is worth recording. Total memory is reported as
+# a bare division of bytes by 1024**3, so a machine describes itself as
+# having 15.492069244384766 GB, and a firmware or kernel update that
+# reserves a little more or less moves that without changing anything a
+# result could depend on. Rounding it is the difference between pinning how
+# much memory the machine has and pinning what it happened to report.
+# Everything else is recorded as given: an OS version or a CPU count means
+# exactly what it says.
+SYSTEM_LOCK_PROPERTY_PRECISION = {"memory-gb": lambda v: round(float(v), 1)}
+
+# Properties only one platform can supply, since ``get_system_info`` collects
+# package manager versions per OS. Locking one from another platform raises
+# in ``get_system_lock_data`` rather than recording nothing, so this table is
+# documentation (and a test hook), not a second gate.
+SYSTEM_LOCK_PROPERTY_PLATFORMS = {"brew-version": "Darwin"}
 
 
 def _as_posix_path(path: str) -> str:
@@ -46,7 +156,119 @@ def _as_posix_path(path: str) -> str:
 
 
 COMPOSITE_ENV_SEP = ":"
-VALID_OUTER_ENV_KINDS = ["slurm", "pbs"]
+# Kinds that say *where* a stage runs rather than what it runs in, so they
+# can wrap an inner runtime env as ``<outer>:<inner>``.
+VALID_OUTER_ENV_KINDS = ["slurm", "pbs", "system"]
+
+
+def host_is_local(host: str | None) -> bool:
+    """Whether ``host`` names the machine we're running on.
+
+    Environments that name a host (``system``, ``slurm``, ``pbs``) are
+    declarations of where the work belongs, not instructions to connect:
+    when we're already on that machine there is nothing to reach out to.
+
+    A machine reports itself as a bare name or a fully qualified one
+    depending on how it's configured, and projects write it either way, so
+    the two are matched across that difference. A domain is only dropped
+    from one side at a time, so two different machines that share a short
+    name under different domains stay distinct.
+    """
+    if not host or host == "localhost":
+        return True
+    current_host = socket.gethostname()
+    current_fqdn = socket.getfqdn()
+    if host in (current_host, current_fqdn):
+        return True
+    if "." not in host:
+        # A bare env host matches this machine's short name, however this
+        # machine happens to report itself.
+        if host in (
+            current_host.split(".")[0],
+            current_fqdn.split(".")[0],
+        ):
+            return True
+    elif "." not in current_fqdn:
+        # A qualified env host can still name a machine that only knows its
+        # own short name; there is no domain here to contradict it.
+        if host.split(".")[0] in (current_host, current_fqdn):
+            return True
+    # Names are not the only way to write a machine down. A host given as
+    # an IP address never matches a hostname, and a machine reached at one
+    # address may call itself something else entirely -- so ask whether any
+    # address this host resolves to is one of ours.
+    return _resolves_to_this_machine(host)
+
+
+@functools.lru_cache(maxsize=128)
+def _host_addresses(host: str) -> tuple[tuple[int, str], ...]:
+    """The addresses ``host`` resolves to, as (family, address) pairs."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_DGRAM)
+    except (socket.gaierror, UnicodeError, OSError):
+        return ()
+    return tuple(
+        {(family, sockaddr[0]) for family, _, _, _, sockaddr in infos}
+    )
+
+
+def _address_is_local(family: int, address: str) -> bool:
+    """Whether an address belongs to an interface on this machine.
+
+    Binding is the question itself rather than a proxy for it: an address
+    can only be bound where it is actually configured, which is exactly
+    what "this is my address" means. Reading interfaces directly would need
+    a dependency and would still have to answer the same question.
+    """
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as sock:
+            sock.bind((address, 0))
+        return True
+    except OSError:
+        return False
+
+
+def _resolves_to_this_machine(host: str) -> bool:
+    if any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host)
+    ):
+        return True
+    # A bare name can be one only mDNS knows, which is not in the resolver's
+    # search list the way a DNS domain is -- so it resolves under '.local'
+    # and nowhere else. This is the name macOS shows the user as theirs (in
+    # Sharing, and from 'scutil --get LocalHostName'), so it is the name
+    # they are most likely to write down, and it would otherwise be the one
+    # name for this machine that fails to match it.
+    if "." in host:
+        return False
+    return any(
+        _address_is_local(family, address)
+        for family, address in _host_addresses(host + ".local")
+    )
+
+
+def env_is_local(env: dict) -> bool:
+    """Whether an environment's machine is the one we're running on.
+
+    A declared ``machine_id`` is the answer when there is one: it is a
+    stronger claim than a name, so a host that resolves here while the ID
+    says otherwise is a machine that was rebuilt or a name that now points
+    somewhere else -- both cases where running here would be wrong.
+
+    That only holds while we can tell which machine this is. Where no ID
+    can be read, a declared one can never match, and taking that as "not
+    this machine" would send a user off to SSH into the box they are
+    sitting at; the name is what's left to go on, so it decides.
+    """
+    declared = env.get("machine_id")
+    if declared:
+        declared = os.path.expandvars(declared)
+    if declared:
+        current = calkit.get_machine_id()
+        if current is not None:
+            return calkit.machine_ids_match(declared, current)
+    return host_is_local(os.path.expandvars(env.get("host") or ""))
 
 
 def get_julia_packages_dir() -> str:
@@ -187,7 +409,7 @@ def _conda_venv_platform() -> str:
     return f"{sys}-{mach}"
 
 
-def _docker_platform() -> str:
+def get_docker_arch() -> str:
     """Get Docker platform string (arch part only)."""
     mach = platform.machine().lower()
     # Map common platform.machine() outputs to Docker arch names
@@ -311,7 +533,7 @@ def get_env_lock_fpath(
             lock_fpath += ".json"
         else:
             lock_fpath = os.path.join(
-                env_lock_dir, env_name, _docker_platform() + ".json"
+                env_lock_dir, env_name, get_docker_arch() + ".json"
             )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
@@ -394,6 +616,17 @@ def get_env_lock_fpath(
         # flake.lock is generated by ``nix flake lock`` next to flake.nix.
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "flake.lock")
+    elif env_kind == "system":
+        # A system env's "lock" records the machine properties it declared it
+        # depends on. With nothing locked there is nothing to depend on, so
+        # no lock file and no DVC dep.
+        if not env.get("lock"):
+            return None
+        # Written by ``write_system_env_lock`` during environment checks, and
+        # referenced as a DVC dep by stage compilation. Note this is the file
+        # itself even when ``for_dvc``: there's exactly one of them, so
+        # there's no reason to make a stage depend on the whole directory.
+        lock_fpath = os.path.join(env_lock_dir, env_name, "info.json")
     elif env_kind in ("slurm", "pbs"):
         # Job-scheduler envs have no external dependency manifest, so the
         # "lock" is just a JSON dump of the env config. The file is
@@ -421,6 +654,8 @@ def write_scheduler_env_lock(
     config so DVC can use it as a stage dependency: when the env's
     ``default_options``, ``default_setup``, ``host``, etc. change, the
     lock file changes and any stage that depends on it is invalidated.
+    Keys in ``SCHEDULER_DISPATCH_ONLY_KEYS`` are left out, since they change
+    only when a job is submitted, not what it computes.
 
     Parameters
     ----------
@@ -434,23 +669,23 @@ def write_scheduler_env_lock(
     Returns
     -------
     str | None
-        The lock file path (relative to ``wdir`` if provided), or ``None``
-        if the env kind has no scheduler lock file.
+        The lock file path, already prefixed with ``wdir`` if provided, or
+        ``None`` if the env kind has no scheduler lock file.
     """
     if env.get("kind") not in ("slurm", "pbs"):
         return None
+    # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
     )
     if lock_fpath is None:
         return None
-    full_path = (
-        os.path.join(wdir, lock_fpath) if wdir is not None else lock_fpath
-    )
-    parent = os.path.dirname(full_path)
+    parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)
-    lock_data = dict(env)
+    lock_data = {
+        k: v for k, v in env.items() if k not in SCHEDULER_DISPATCH_ONLY_KEYS
+    }
     # Record when the scheduler is mocked so switching between a mocked run
     # (executed locally) and a real scheduler run changes the lock file and
     # invalidates the cached result
@@ -459,12 +694,106 @@ def write_scheduler_env_lock(
     if _mock_enabled():
         lock_data["mocked"] = True
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
-    if os.path.isfile(full_path):
-        with open(full_path, "r") as f:
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
             existing = f.read()
         if existing == content:
             return lock_fpath
-    with open(full_path, "w") as f:
+    with open(lock_fpath, "w") as f:
+        f.write(content)
+    return lock_fpath
+
+
+def get_system_lock_data(
+    lock: list[str], system_info: dict | None = None
+) -> dict:
+    """Read the machine properties a ``system`` environment locks.
+
+    Raises if a locked property isn't available on the machine, e.g., a
+    tool that isn't installed. Recording it as null would quietly claim the
+    stage is pinned to something it isn't, which is worse than not pinning
+    it at all.
+
+    ``system_info`` describes a machine other than this one, for an
+    environment whose host is somewhere else: what the results depend on is
+    the machine the stage runs on, so that is what gets pinned.
+    """
+    if system_info is None:
+        system_info = calkit.get_system_info()
+    data = {}
+    for prop in lock:
+        key = SYSTEM_LOCK_PROPERTIES.get(prop)
+        if key is None:
+            raise ValueError(
+                f"Unknown system property to lock: '{prop}'; valid options "
+                f"are {', '.join(sorted(SYSTEM_LOCK_PROPERTIES))}"
+            )
+        value = system_info.get(key)
+        if value is None:
+            hint = ""
+            if prop == "machine-id":
+                # The one lockable property that can be supplied by hand,
+                # and the one most likely to be locked implicitly -- so the
+                # way out is worth naming rather than leaving to the docs
+                hint = (
+                    "; no identifier could be read from the platform, so "
+                    "give it one with 'calkit config set machine_id <id>'"
+                )
+            raise ValueError(
+                f"System property '{prop}' is not available on this machine"
+                + hint
+            )
+        data[prop] = SYSTEM_LOCK_PROPERTY_PRECISION.get(prop, lambda v: v)(
+            value
+        )
+    return data
+
+
+def write_system_env_lock(
+    env_name: str,
+    env: dict,
+    wdir: str | None = None,
+    system_info: dict | None = None,
+) -> str | None:
+    """Write a JSON lock file for a ``system`` environment.
+
+    Unlike the other lock files, this one describes the machine rather than
+    a spec the project controls, so it changes when the project moves to a
+    different machine. That is the intent: a stage that declared it depends
+    on, say, the Julia version should not reuse a cached result from a box
+    with a different one.
+
+    Returns the lock file path, already prefixed with ``wdir`` if provided,
+    or None if the environment locks nothing.
+    """
+    lock = env.get("lock") or []
+    if not lock:
+        return None
+    # Already prefixed with wdir, so it must not be joined with it again
+    lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, wdir=wdir, as_posix=True
+    )
+    if lock_fpath is None:
+        return None
+    # Read before anything is created: a misspelled property or a tool
+    # that isn't installed raises here, and an env that failed to lock
+    # shouldn't leave a directory behind suggesting it did
+    content = (
+        json.dumps(
+            get_system_lock_data(lock, system_info=system_info),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    parent = os.path.dirname(lock_fpath)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    if os.path.isfile(lock_fpath):
+        with open(lock_fpath, "r") as f:
+            if f.read() == content:
+                return lock_fpath
+    with open(lock_fpath, "w") as f:
         f.write(content)
     return lock_fpath
 
@@ -604,6 +933,15 @@ def check_cache(
         time_diff = calkit.utcnow() - cached_checked_at
         if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
             return False
+    # A Docker environment's image can be deleted without anything the cache
+    # hashes changing, and the pipeline can't run in an image that isn't
+    # there, so its absence has to invalidate the check
+    if env.get("kind") == "docker":
+        from calkit.docker import get_image_name, image_exists
+
+        image = get_image_name(env, env_name, wdir=wdir)
+        if image and not image_exists(image):
+            return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)
     if env.get("path") and not current_data["hashes"]["env_path_hash"]:
@@ -654,11 +992,28 @@ def check_all_in_pipeline(
     # First get a list of environments used in the pipeline
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
+    # Markdown stages carry no environment of their own; the stages their
+    # blocks declare do, so expand before looking for environments to check.
+    import calkit.markdown
+
+    md_stages = calkit.markdown.get_markdown_stages(ck_info)
+    ck_info = calkit.markdown.expand_ck_info(ck_info).ck_info
     stages = ck_info.get("pipeline", {}).get("stages", {})
     if targets:
         # Split targets by "@" to handle sub-stages from iterations
         targets = [t.split("@")[0] for t in targets]
-        stages = {k: v for k, v in stages.items() if k in targets}
+        # A target naming a markdown stage covers every stage its file
+        # declares, which are named '<stage>/<block>'
+        prefixes = [
+            t + calkit.markdown.STAGE_NAME_SEPARATOR
+            for t in targets
+            if t in md_stages
+        ]
+        stages = {
+            k: v
+            for k, v in stages.items()
+            if k in targets or any(k.startswith(p) for p in prefixes)
+        }
     envs_in_pipeline = [stage.get("environment") for stage in stages.values()]
     envs_in_pipeline = [
         e for e in envs_in_pipeline if e and not (str(e)).startswith("_")
@@ -679,7 +1034,9 @@ def check_all_in_pipeline(
         if env.get("kind") in KINDS_NO_CHECK:
             continue
         if not force:
-            up_to_date = check_cache(env_name=env_name, env=env, wdir=wdir)
+            up_to_date = cacheable(env) and check_cache(
+                env_name=env_name, env=env, wdir=wdir
+            )
             if up_to_date:
                 res[env_name] = {"success": True, "cached": True}
                 continue
@@ -1359,13 +1716,19 @@ if isempty(registries)
 end
 
 for pkg in packages
-    entry = nothing
     for reg in registries
-        entry = Pkg.Registry.find(reg, pkg)
-        if entry !== nothing
-            println(pkg * "=" * string(entry.uuid))
-            break
+        found = false
+        # Scan the registry's own package table rather than calling a
+        # lookup helper; Pkg.Registry.find was removed in Julia 1.12, and
+        # calling it failed for every package, silently.
+        for (uuid, entry) in reg.pkgs
+            if entry.name == pkg
+                println(pkg * "=" * string(uuid))
+                found = true
+                break
+            end
         end
+        found && break
     end
 end
 """
@@ -1410,6 +1773,45 @@ end
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         # If Julia is not available or times out, return empty dict
         return {}
+
+
+def create_conda_environment_content(
+    dependencies: list[str],
+    project_name: str | None = None,
+    python_version: str = DEFAULT_PYTHON_VERSION,
+) -> str:
+    """Generate a minimal environment.yml for a conda environment.
+
+    Parameters
+    ----------
+    dependencies : list[str]
+        List of package names.
+    project_name : str | None
+        Name of the environment. If None, uses the detected project name.
+    python_version : str
+        Python version to request.
+
+    Returns
+    -------
+    str
+        The environment.yml file content.
+    """
+    if project_name is None:
+        project_name = calkit.detect_project_name(prepend_owner=False)
+    content = f"name: {project_name}\n"
+    content += "channels:\n  - conda-forge\n"
+    content += "dependencies:\n"
+    content += f"  - python={python_version}\n"
+    for dep in sorted(dependencies):
+        if dep.lower().startswith("python") and dep[6:7] in (
+            "",
+            "=",
+            ">",
+            "<",
+        ):
+            continue
+        content += f"  - {dep}\n"
+    return content
 
 
 def create_julia_project_file_content(

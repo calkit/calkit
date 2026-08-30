@@ -9,8 +9,11 @@ import { client } from "./client/client.gen"
 import NotFound from "./components/Common/NotFound"
 import { initAnalytics } from "./lib/analytics"
 import { getValidAccessToken } from "./lib/auth"
+import { reloadOnStaleChunk } from "./lib/staleChunks"
 import { routeTree } from "./routeTree.gen"
 import theme from "./theme"
+
+reloadOnStaleChunk(window)
 
 client.setConfig({ baseURL: import.meta.env.VITE_API_URL })
 // The token resolver needs the request URL to avoid refreshing recursively

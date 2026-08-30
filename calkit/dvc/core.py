@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import sys
+from itertools import groupby
 from pathlib import Path
 from typing import Any, Literal
 
@@ -95,6 +96,60 @@ def _tolerate_lock_release_failures() -> None:
 
 if sys.platform == "win32":
     _tolerate_lock_release_failures()
+
+
+def _hash_dirs_inside_nested_repos() -> None:
+    """Make DVC hash directories that live inside nested DVC repos.
+
+    DVC's ``DvcIgnoreFilter`` prunes nested DVC repos (e.g. isolated
+    subprojects) when walking, so the parent never indexes a subproject's
+    ``dvc.yaml`` and ``.dvc`` files as its own. The same walk hashes directory
+    deps and outs, though, and the subrepo check is order-dependent:
+    ``_get_trie_pattern`` hands the starting directory's ``dnames`` to every
+    ancestor it visits, so a walk that starts inside the nested repo never
+    registers it, while the root-level index walk does. Whichever touches the
+    ignore trie first wins for the rest of the process. In practice a parent
+    stage depending on a directory inside an isolated subproject hashes it as
+    *empty* on ``status`` but not always on ``repro``, so ``dvc.lock`` and
+    ``dvc status`` disagree and the stage is forever stale (or, worse, changes
+    in the subproject go unnoticed).
+
+    A walk that starts at or below a nested repo can only be a caller hashing
+    that path (the index walk always starts at the repo root), and the caller
+    named the path deliberately, so its contents must be hashed. Such walks
+    are routed through DVC's ``ignore_subrepos=False`` trie, which is built
+    separately, is deterministic, and still honors every ``.dvcignore`` on
+    the way down, including the nested repo's own.
+    """
+    from dvc.ignore import DvcIgnoreFilter
+    from dvc.repo import Repo
+
+    original_walk = DvcIgnoreFilter.walk
+
+    def in_nested_repo(dvcignore: Any, path: str) -> bool:
+        fs = dvcignore.fs
+        root_dir = dvcignore.root_dir
+        current = fs.abspath(path)
+        if not fs.isin(current, root_dir):
+            return False
+        while current != root_dir:
+            if fs.exists(fs.join(current, Repo.DVC_DIR)):
+                return True
+            parent = fs.parent(current)
+            if parent == current:
+                return False
+            current = parent
+        return False
+
+    def walk(self: Any, fs: Any, path: str, **kwargs: Any) -> Any:
+        if "ignore_subrepos" not in kwargs and in_nested_repo(self, path):
+            kwargs["ignore_subrepos"] = False
+        return original_walk(self, fs, path, **kwargs)
+
+    DvcIgnoreFilter.walk = walk
+
+
+_hash_dirs_inside_nested_repos()
 
 
 # Default seconds to wait for DVC's repo-level lock during a pipeline run.
@@ -354,6 +409,34 @@ def get_dvc_repo(wdir: str | None = None) -> dvc.repo.Repo:
     return dvc.repo.Repo(wdir)
 
 
+def commit_path(
+    dvc_repo: dvc.repo.Repo, path: str, allow_missing: bool = True
+) -> None:
+    """Commit a path to DVC, skipping the run cache.
+
+    This is like ``dvc_repo.commit(path, force=True)``, except stages are not
+    saved to the run cache, since doing so requires hashing all of their
+    dependencies, which will fail if any are missing from the workspace, e.g.,
+    if their data has never been pulled.
+    """
+    with dvc.repo.lock_repo(dvc_repo):
+        groups = groupby(
+            dvc_repo.stage.collect_granular(path),
+            key=lambda info: info.stage.dvcfile,
+        )
+        for dvcfile, stages_info_group in groups:
+            to_dump = []
+            for stage_info in stages_info_group:
+                stage = stage_info.stage
+                stage.save(allow_missing=allow_missing, run_cache=False)
+                stage.commit(
+                    filter_info=stage_info.filter_info,
+                    allow_missing=allow_missing,
+                )
+                to_dump.append(stage)
+            dvcfile.dump_stages(to_dump, update_pipeline=False)
+
+
 def ensure_dvc_lock_not_ignored(wdir: str | None = None) -> bool:
     """Ensure ``dvc.lock`` is not Git-ignored.
 
@@ -483,6 +566,80 @@ def get_dvc_lock_holder(wdir: str | None = None) -> dict | None:
     except Exception:
         return None
     return {"pid": pid, "cmd": cmd}
+
+
+def dvc_init_needs_subdir(wdir: str | None = None) -> bool:
+    """Return whether ``dvc init`` here needs ``--subdir``.
+
+    DVC refuses to initialize anywhere but the root of a Git repository
+    unless told the project is a subdirectory of one. It doesn't assume
+    so itself because a DVC repo in a subdirectory is its own project,
+    with its own cache, remotes and pipeline, rather than part of the
+    enclosing repo's; initializing one by accident in the wrong directory
+    would be hard to notice, so DVC asks for the flag. A self-contained
+    example living inside a larger repo is exactly that case.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(wdir) if wdir else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        # No Git repo at all; the caller creates one here, so this becomes
+        # the root and no --subdir is needed.
+        return False
+    root = repo.working_tree_dir
+    if root is None:
+        return False
+    if os.path.realpath(root) == os.path.realpath(base):
+        return False
+    # A directory the enclosing repo ignores is not part of it, so it gets
+    # its own repo and is therefore its own root. DVC refuses to
+    # initialize into an ignored path anyway.
+    return not enclosing_repo_ignores(base)
+
+
+def enclosing_repo_ignores(path: str | None = None) -> bool:
+    """Return whether the Git repo above ``path`` ignores it.
+
+    Scratch and test directories are routinely ignored by the repo that
+    contains them, and such a directory is not part of that repo: it
+    needs its own, rather than being treated as a subdirectory project.
+    """
+    import git
+    from git import InvalidGitRepositoryError, NoSuchPathError
+
+    base = os.path.abspath(path) if path else os.getcwd()
+    try:
+        repo = git.Repo(base, search_parent_directories=True)
+    except (InvalidGitRepositoryError, NoSuchPathError):
+        return False
+    root = repo.working_tree_dir
+    if root is None or os.path.realpath(root) == os.path.realpath(base):
+        return False
+    try:
+        return bool(repo.ignored(base))
+    except Exception:
+        return False
+
+
+def init(
+    wdir: str | None = None, force: bool = False, quiet: bool = False
+) -> int:
+    """Initialize a DVC repo in ``wdir``, returning the exit code.
+
+    Works out for itself whether DVC needs telling that the project is a
+    subdirectory of a larger Git repo.
+    """
+    args = ["init"]
+    if dvc_init_needs_subdir(wdir=wdir):
+        args.append("--subdir")
+    if force:
+        args.append("--force")
+    if quiet:
+        args.append("--quiet")
+    return run_dvc_command(args, cwd=wdir)
 
 
 def run_dvc_command(

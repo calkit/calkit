@@ -85,6 +85,7 @@ nav:
       - tutorials/runnable-readme.md
       - tutorials/vscode-slurm-notebook.md
       - tutorials/ai-agents.md
+      - tutorials/writing-first.md
   - CLI reference: cli-reference.md
   - Help and support: help.md
   - Reproducibility: reproducibility.md

@@ -29,6 +29,32 @@ def load(name: str, wdir: str = ".", ck_info: dict | None = None) -> Procedure:
     return load_file(entry, wdir=wdir)
 
 
+def definition_paths(
+    name: str, wdir: str = ".", ck_info: dict | None = None
+) -> list[str]:
+    """The files that define a procedure, relative to the project root.
+
+    Always ``calkit.yaml``, which names it, plus the file holding it when
+    it is kept in one. This is what has to be committed for a run to be a
+    record of carrying out an agreed procedure rather than one someone was
+    editing at the time.
+    """
+    from pydantic import TypeAdapter
+
+    if ck_info is None:
+        ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    paths = ["calkit.yaml"]
+    entry = (ck_info.get("procedures") or {}).get(name)
+    if entry is not None:
+        try:
+            validated = TypeAdapter(ProcedureEntry).validate_python(entry)
+        except Exception:
+            return paths
+        if isinstance(validated, ProcedureFile):
+            paths.append(validated.path)
+    return paths
+
+
 def load_file(entry: ProcedureFile, wdir: str = ".") -> Procedure:
     """Read the procedure a ``ProcedureFile`` entry points at."""
     fpath = os.path.join(wdir, entry.path)

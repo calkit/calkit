@@ -3962,6 +3962,7 @@
                 "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
+                "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
                 "r-script": "#/$defs/RScriptStage",
@@ -4029,6 +4030,9 @@
               },
               {
                 "$ref": "#/$defs/MarkdownStage"
+              },
+              {
+                "$ref": "#/$defs/ProcedureStage"
               }
             ]
           },
@@ -4277,6 +4281,180 @@
         }
       },
       "title": "ProcedureInput",
+      "type": "object"
+    },
+    "ProcedureStage": {
+      "additionalProperties": false,
+      "description": "A procedure carried out by a person, as a pipeline stage.\n\nNot everything can be automated. A sample prepared by hand, a rig\nswitched on and read off, a survey administered: the work is real and\neverything downstream rests on it, but nothing in the pipeline knows\nwhether it has happened. Declaring it as a stage puts a manual step\nwhere automated ones are: running the pipeline walks the person\nthrough the procedure's steps, prompting for whatever it asks them to\nrecord, and the run log becomes an output the next stage reads like\nany other.\n\nThe log is a directory of one CSV per run, kept in Git rather than\nDVC, and never cleared before a run: earlier runs are data, not stale\noutput. Declaring further ``outputs`` is allowed for a procedure that\nwrites something else too, e.g., a file the instrument saves.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "procedure",
+          "default": "procedure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "no_commit": {
+          "default": false,
+          "description": "Do not commit the run log after each step. The log is still written; only the commit per step is skipped.",
+          "title": "No Commit",
+          "type": "boolean"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "procedure_name": {
+          "description": "Name of the procedure to carry out, as it is keyed under 'procedures' in calkit.yaml.",
+          "title": "Procedure Name",
+          "type": "string"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "procedure_name"
+      ],
+      "title": "ProcedureStage",
       "type": "object"
     },
     "ProcedureStep": {

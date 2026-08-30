@@ -518,6 +518,32 @@ Model class: `MatlabScriptStage`
 | `script_path`           | str         | yes      |         | Path to the MATLAB script to run.                |
 | `matlab_path`           | str \| None | no       | null    | Directory added to the MATLAB path, recursively. |
 
+### `procedure`
+
+Model class: `ProcedureStage`
+
+A procedure carried out by a person, as a pipeline stage.
+
+Not everything can be automated. A sample prepared by hand, a rig
+switched on and read off, a survey administered: the work is real and
+everything downstream rests on it, but nothing in the pipeline knows
+whether it has happened. Declaring it as a stage puts a manual step
+where automated ones are: running the pipeline walks the person
+through the procedure's steps, prompting for whatever it asks them to
+record, and the run log becomes an output the next stage reads like
+any other.
+
+The log is a directory of one CSV per run, kept in Git rather than
+DVC, and never cleared before a run: earlier runs are data, not stale
+output. Declaring further `outputs` is allowed for a procedure that
+writes something else too, e.g., a file the instrument saves.
+
+| Kind-specific parameter | Type | Required | Default    | Description                                                                                               |
+| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage.                                                       |
+| `procedure_name`        | str  | yes      |            | Name of the procedure to carry out, as it is keyed under 'procedures' in calkit.yaml.                     |
+| `no_commit`             | bool | no       | False      | Do not commit the run log after each step. The log is still written; only the commit per step is skipped. |
+
 ### `python-script`
 
 Model class: `PythonScriptStage`

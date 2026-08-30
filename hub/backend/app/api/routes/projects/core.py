@@ -5478,8 +5478,12 @@ def get_project_document_components(
     ``built`` is false when no build has left a provenance record, in
     which case there is nothing to report and nothing is wrong: the
     document may simply never have been built with provenance turned on.
+
+    ``path`` names the document, by its source or its output, or the
+    folder holding it, for a caller that knows which folder a paper is in
+    but not which file in it is the paper. The resolved document comes
+    back in ``document``.
     """
-    document = _normalize_artifact_file_path(path)
     project = app.projects.get_project(
         owner_name=owner_name,
         project_name=project_name,
@@ -5499,6 +5503,9 @@ def get_project_document_components(
         project=project, repo=repo, ref=ref, read_only=True
     )
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
+    document = app.components.document_in(
+        _normalize_artifact_file_path(path), ck_info
+    )
     # Staleness is best-effort: a pipeline status that can't be computed
     # leaves components reading as unchecked, which is honest, rather than
     # failing the whole listing

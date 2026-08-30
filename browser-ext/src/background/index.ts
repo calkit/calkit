@@ -17,6 +17,7 @@ import {
 import type {
   CalkitYamlInfo,
   ContentsItem,
+  DocumentComponents,
   DvcOutput,
   TextDiff,
   Figure,
@@ -214,6 +215,12 @@ async function handle(message: Request): Promise<unknown> {
     case "project.figures":
       return request<Figure[]>(
         `${projectPath(message.owner, message.project)}/figures`,
+      );
+    case "project.documentComponents":
+      return request<DocumentComponents>(
+        `${projectPath(message.owner, message.project)}` +
+          "/publications/document-components",
+        { query: { path: message.path } },
       );
     case "content.imageDataUrl":
       return fetchDataUrl(message.url, { imageOnly: true });

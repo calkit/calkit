@@ -209,6 +209,25 @@ def candidate_documents(ck_info: dict) -> list[str]:
     return unique
 
 
+def document_in(path: str, ck_info: dict) -> str:
+    """The document a path names, whether it names the paper or its folder.
+
+    A caller with the paper in hand names it; one with only the folder --
+    the browser extension knows which folder syncs with an Overleaf
+    project, not which file in it is the paper -- names that, and the
+    project's own declarations say which document lives there. A folder
+    holding more than one paper resolves to the first, which is the same
+    choice made everywhere else a folder maps to several things.
+    """
+    if path.endswith((".tex", ".pdf", SIDECAR_SUFFIX)):
+        return path
+    prefix = path.strip("/")
+    for document in candidate_documents(ck_info):
+        if not prefix or document.startswith(prefix + "/"):
+            return document
+    return path
+
+
 def usages_of(
     artifact_path: str,
     tree: RepoTree,

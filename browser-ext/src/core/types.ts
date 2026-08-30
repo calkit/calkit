@@ -40,6 +40,45 @@ export interface StageStatus {
   missing_outputs: string[];
 }
 
+/**
+ * One piece of project content a document shows on the page: a value from
+ * a results file, a figure a stage plotted, a block of generated prose.
+ *
+ * Distinct from the files a publication's folder is made of: these are
+ * what the reader actually sees, and the ones that go quietly wrong when
+ * the project moves on without the paper being rebuilt.
+ */
+export interface DocumentComponent {
+  kind: "value" | "figure" | "text" | "block";
+  path: string;
+  key?: string | null;
+  pages?: number[];
+  stage?: string | null;
+  stage_inputs?: string[];
+  /** The stage's script or notebook, i.e., what to open to change it. */
+  script?: string | null;
+  provenance: "pipeline" | "imported" | "attested" | "project" | "undeclared";
+  build_value?: unknown;
+  current_value?: unknown;
+  build_hash?: string | null;
+  current_hash?: string | null;
+  status: "ok" | "stale" | "missing" | "unknown";
+  stale_reasons?: (
+    | "stage-out-of-date"
+    | "changed-since-build"
+    | "answer-stale"
+  )[];
+}
+
+export interface DocumentComponents {
+  document: string;
+  /** Whether a build left a provenance record to read at all. */
+  built: boolean;
+  items?: DocumentComponent[];
+  n_stale?: number;
+  n_undeclared?: number;
+}
+
 export interface OverleafSyncStatusFile {
   path: string;
   project_path: string;

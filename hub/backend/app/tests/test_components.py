@@ -5,6 +5,7 @@ import json
 from app.components import (
     candidate_documents,
     components_for_document,
+    document_in,
     sidecar_path,
     stale_stage_base_names,
     usages_of,
@@ -212,6 +213,19 @@ def test_usages_are_the_reverse_view():
         for u in usages_of("results/findings.json", tree, CK_INFO)
     ] == [("name", [1]), ("ratio", [1, 3])]
     assert usages_of("figures/unused.pdf", tree, CK_INFO) == []
+
+
+def test_document_in_a_folder():
+    # The browser extension knows which folder syncs with Overleaf, not
+    # which file in it is the paper
+    assert document_in("paper", CK_INFO) == "paper/main.pdf"
+    assert document_in("paper/", CK_INFO) == "paper/main.pdf"
+    # A caller with the paper in hand is taken at its word, by either name
+    assert document_in("paper/main.tex", CK_INFO) == "paper/main.tex"
+    assert document_in("paper/main.pdf", CK_INFO) == "paper/main.pdf"
+    # A folder the project declares nothing in stays as it was, so the
+    # lookup that follows simply finds no record
+    assert document_in("poster", CK_INFO) == "poster"
 
 
 def test_candidate_documents_finds_a_paper_once():

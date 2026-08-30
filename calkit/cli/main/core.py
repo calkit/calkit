@@ -484,8 +484,10 @@ def get_status(
             "--category",
             "-c",
             help=(
-                "Status categories to show. By default, all categories are "
-                "shown. Can be specified multiple times."
+                "Status categories to show. Can be specified multiple "
+                "times. Everything but questions is shown by default; ask "
+                "for those with '-c questions', or see them on their own "
+                "with 'calkit check questions'."
             ),
         ),
     ] = None,
@@ -546,6 +548,12 @@ def get_status(
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
     valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
+    # Questions are asked for rather than shown by default. Judging whether
+    # an answer still matches its evidence means reading calkit.yaml's
+    # history, which no other category needs, and the report is a page of
+    # its own once a project has a few of them. 'calkit check questions'
+    # is where it belongs; this keeps it reachable from status.
+    default_categories = [c for c in valid_categories if c != "questions"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -554,7 +562,7 @@ def get_status(
                     f"{valid_categories}"
                 )
     else:
-        categories = valid_categories
+        categories = default_categories
     pipeline_status = None
     running_status = None
     if "pipeline" in categories or "dvc" in categories:

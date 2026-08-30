@@ -235,8 +235,69 @@ def render_question(
 
 
 def _load_calkit_yaml_text(text: str) -> dict:
-    loaded = calkit.ryaml.load(io.StringIO(text))
+    """Parse a historical ``calkit.yaml``.
+
+    PyYAML rather than the round-trip parser: none of this is written back,
+    and history is read a commit at a time, where the round-trip parser's
+    comment and formatting bookkeeping is most of the cost.
+    """
+    import yaml
+
+    try:
+        loaded = yaml.safe_load(io.StringIO(text))
+    except yaml.YAMLError:
+        # A revision whose calkit.yaml uses something PyYAML refuses is
+        # still worth reading; the round-trip parser is more forgiving
+        loaded = calkit.ryaml.load(io.StringIO(text))
     return loaded if isinstance(loaded, dict) else {}
+
+
+class CalkitYamlHistory:
+    """``calkit.yaml`` as it was at each commit, read once and shared.
+
+    Finding the commit a question was last edited at walks the file's
+    history until the question differs, and every question walks the same
+    history. Without this each of them re-runs ``git show`` and re-parses
+    the same revisions: with Q questions and C commits that is Q x C
+    subprocesses to answer C commits' worth of history, which is what made
+    checking a handful of questions take double-digit seconds.
+    """
+
+    def __init__(self, repo: Any, wdir: str) -> None:
+        self.repo = repo
+        self.rel = os.path.relpath(
+            os.path.join(wdir, CALKIT_YAML), str(repo.working_dir)
+        ).replace(os.sep, "/")
+        self._shas: list[str] | None = None
+        self._parsed: dict[str, dict | None] = {}
+
+    @property
+    def shas(self) -> list[str]:
+        """Commits that touched the file, newest first."""
+        if self._shas is None:
+            try:
+                self._shas = str(
+                    self.repo.git.log("--format=%H", "--", self.rel)
+                ).split()
+            except Exception:
+                self._shas = []
+        return self._shas
+
+    def at(self, sha: str) -> dict | None:
+        """The file as of one commit, or None if it can't be read.
+
+        Read straight out of the object database rather than by shelling
+        out to ``git show`` per commit, which is twenty times the cost for
+        the same bytes.
+        """
+        if sha not in self._parsed:
+            try:
+                blob = self.repo.rev_parse(f"{sha}:{self.rel}")
+                text = blob.data_stream.read().decode("utf-8", "replace")
+                self._parsed[sha] = _load_calkit_yaml_text(text)
+            except Exception:
+                self._parsed[sha] = None
+        return self._parsed[sha]
 
 
 def _find_question(ck_info: dict, text: str) -> dict | None:
@@ -256,28 +317,30 @@ def _plain(value: Any) -> Any:
     return value
 
 
-def question_commit(question: dict, repo: Any, wdir: str) -> str | None:
+def question_commit(
+    question: dict,
+    repo: Any,
+    wdir: str,
+    history: CalkitYamlHistory | None = None,
+) -> str | None:
     """The commit at which ``question`` last changed.
 
     Walks ``calkit.yaml``'s history back from HEAD while the question's
     entry is identical to the working tree's, and returns the oldest such
     commit. None means the working tree's version is not committed yet,
     or the file has no history.
+
+    ``history`` is shared across questions when there is more than one, so
+    each revision is read and parsed once rather than once per question.
     """
-    rel = os.path.relpath(
-        os.path.join(wdir, CALKIT_YAML), str(repo.working_dir)
-    ).replace(os.sep, "/")
-    try:
-        shas = str(repo.git.log("--format=%H", "--", rel)).split()
-    except Exception:
-        return None
+    if history is None:
+        history = CalkitYamlHistory(repo, wdir)
     text = question.get("question", "")
     current = _plain(question)
     found: str | None = None
-    for sha in shas:
-        try:
-            old = _load_calkit_yaml_text(str(repo.git.show(f"{sha}:{rel}")))
-        except Exception:
+    for sha in history.shas:
+        old = history.at(sha)
+        if old is None:
             break
         old_q = _find_question(old, text)
         if old_q is None or _plain(old_q) != current:
@@ -519,6 +582,7 @@ def check_question(
     ck_info: dict,
     wdir: str,
     repo: Any = None,
+    history: CalkitYamlHistory | None = None,
 ) -> QuestionCheck:
     """Check one question, as it appears in ``calkit.yaml``."""
     if isinstance(question, str):
@@ -536,7 +600,11 @@ def check_question(
         return QuestionCheck(
             index=index, question=text, answered=True, status="no-evidence"
         )
-    since = question_commit(question, repo, wdir) if repo is not None else None
+    since = (
+        question_commit(question, repo, wdir, history)
+        if repo is not None
+        else None
+    )
     checks = [
         check_evidence(ev, ck_info, wdir, repo, since) for ev in evidence
     ]
@@ -594,9 +662,11 @@ def check_questions(
     except Exception:
         repo = None
     questions = ck_info.get("questions", []) or []
+    # One reading of calkit.yaml's history for all of them
+    history = CalkitYamlHistory(repo, wdir) if repo is not None else None
     return QuestionsStatus(
         questions=[
-            check_question(n, q, ck_info, wdir, repo)
+            check_question(n, q, ck_info, wdir, repo, history)
             for n, q in enumerate(questions, start=1)
         ]
     )

@@ -1117,7 +1117,12 @@ def test_check_questions(tmp_dir):
     )
     assert "Questions" in out
     assert "1 stale" in out
+    # Questions are asked for rather than shown by default, in JSON too
     out = subprocess.check_output(["calkit", "status", "--json"], text=True)
+    assert "questions" not in json.loads(out)
+    out = subprocess.check_output(
+        ["calkit", "status", "--json", "-c", "questions"], text=True
+    )
     assert json.loads(out)["questions"]["questions"][0]["status"] == "stale"
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "answer: 0 of eight do." in out

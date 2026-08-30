@@ -73,6 +73,70 @@ def _write_yaml(ck_info: dict) -> None:
         calkit.ryaml.dump(ck_info, f)
 
 
+def test_history_is_read_once_for_all_questions(tmp_dir):
+    """A long calkit.yaml history costs one reading, not one per question.
+
+    Every question walks the same history looking for the commit it was
+    last edited at. Reading it per question turned checking a handful of
+    them into double-digit seconds on a project with any history at all.
+    """
+    import json
+    import subprocess
+
+    import calkit
+    from calkit.questions import CalkitYamlHistory, check_questions
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("results")
+    with open("results/findings.json", "w") as f:
+        json.dump({f"k{i}": i for i in range(4)}, f)
+    ck_info = {
+        "questions": [
+            {
+                "question": f"Q{i}?",
+                "answer": "It is {v}.",
+                "evidence": [
+                    {
+                        "kind": "value",
+                        "path": "results/findings.json",
+                        "key": f"k{i}",
+                        "name": "v",
+                    }
+                ],
+            }
+            for i in range(4)
+        ]
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
+    # Later commits that touch the file without touching the questions, so
+    # every question's walk runs the whole way back
+    for i in range(5):
+        ck_info["description"] = f"rev {i}"
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+        subprocess.check_call(["git", "commit", "-q", "-am", f"r{i}"])
+    reads: list[str] = []
+    original = CalkitYamlHistory.at
+
+    def counted(self, sha):
+        reads.append(sha)
+        return original(self, sha)
+
+    CalkitYamlHistory.at = counted  # type: ignore[method-assign]
+    try:
+        status = check_questions()
+    finally:
+        CalkitYamlHistory.at = original  # type: ignore[method-assign]
+    assert [q.status for q in status.questions] == ["ok"] * 4
+    # Four questions over six commits: each revision is parsed once, not
+    # once per question, so the distinct count is what bounds the work
+    assert len(set(reads)) == 6
+    assert len(reads) == 24
+
+
 def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "init", "-q"])
     os.makedirs("results")

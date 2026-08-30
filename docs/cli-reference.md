@@ -120,11 +120,11 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                                                  |
-| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
-| `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
-| `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                       |
+| Option             | Type    | Required | Default | Description                                                                                                                                                                                          |
+| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--category`, `-c` | text    | no       |         | Status categories to show. Can be specified multiple times. Everything but questions is shown by default; ask for those with '-c questions', or see them on their own with 'calkit check questions'. |
+| `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed.                                                                         |
+| `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                                                                                               |
 
 <a id="top-command-diff"></a>
 

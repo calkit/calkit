@@ -437,8 +437,14 @@ def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
         # for the one the lock describes and written into the migrated lock,
         # which is what taking a legacy lock for another architecture's did:
         # its image is never checked against the lock, since it isn't
-        # expected to be here
-        subprocess.check_call(["docker", "tag", "alpine:3.18", image])
+        # expected to be here. It's built rather than tagged from an
+        # existing image, since another test running alongside this one is
+        # free to delete whatever that image was
+        with open("Other.dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo something-else > /hi.txt\n")
+        subprocess.check_call(
+            ["docker", "build", "-t", image, "-f", "Other.dockerfile", "."]
+        )
         subprocess.check_call(check_argv)
         assert not os.path.isfile(legacy_lock_fpath)
         with open(lock_fpath) as f:

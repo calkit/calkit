@@ -820,7 +820,20 @@ class DockerEnvironment(Environment):
     model_config = ConfigDict(
         populate_by_name=True,
         json_schema_extra={
-            "anyOf": [{"required": ["image"]}, {"required": ["path"]}]
+            # Both fields are nullable, and 'required' only asks that the
+            # key is there, so each branch asks for a string as well:
+            # 'image: null' says no more about what to run in than leaving
+            # it out does
+            "anyOf": [
+                {
+                    "required": ["image"],
+                    "properties": {"image": {"type": "string"}},
+                },
+                {
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+            ]
         },
     )
     kind: Literal["docker"] = "docker"
@@ -910,6 +923,15 @@ class DockerEnvironment(Environment):
             "'ir' for R images."
         ),
     )
+
+    @model_validator(mode="after")
+    def check_image_or_path(self) -> "DockerEnvironment":
+        if not self.image and not self.path:
+            raise ValueError(
+                "A Docker environment must define 'image', naming an image "
+                "to run in, or 'path', naming a Dockerfile to build one from"
+            )
+        return self
 
 
 class REnvironment(Environment):

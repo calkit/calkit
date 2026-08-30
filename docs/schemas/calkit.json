@@ -632,11 +632,21 @@
     "DockerEnvironment": {
       "anyOf": [
         {
+          "properties": {
+            "image": {
+              "type": "string"
+            }
+          },
           "required": [
             "image"
           ]
         },
         {
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
           "required": [
             "path"
           ]

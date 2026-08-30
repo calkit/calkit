@@ -1057,19 +1057,20 @@ def get_github_username() -> str:
 def prompt_for_packages_token() -> str | None:
     """Walk the user through creating a token that can push packages.
 
-    The token Calkit holds for the GitHub API is issued by its GitHub App,
-    whose permissions don't extend to the container registry, so pushing
-    needs one the user creates themselves.
+    Only reached once the tokens Calkit already holds have been refused.
+    The one it uses for the GitHub API can usually push, since its GitHub
+    App can be granted permission to write packages, so a token the user
+    creates is what's left when that permission isn't there.
     """
     import webbrowser
 
     import typer
 
     typer.echo(
-        "\nPushing to the GitHub Container Registry needs a token with the "
-        "'write:packages' scope, which the one Calkit uses for the GitHub "
-        "API doesn't have.\n\nOpening GitHub to create one with the right "
-        "scopes already selected:\n"
+        "\nPushing to the GitHub Container Registry needs permission to "
+        "write packages, which the token Calkit uses for the GitHub API "
+        "was refused.\n\nOpening GitHub to create one with the "
+        "'write:packages' scope already selected:\n"
         f"  {GITHUB_PACKAGES_TOKEN_URL}\n"
     )
     try:

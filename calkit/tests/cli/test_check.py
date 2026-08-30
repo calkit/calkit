@@ -1006,6 +1006,7 @@ def _project() -> None:
             "A value read from the pipeline: \\result[DragCoefficient].\n"
             "The same value typed by hand: 0.42.\n"
             "A value with nothing behind it: 3.14.\n"
+            "\\ckfigure[width=0.75\\textwidth]{f.pdf}\n"
             "\\end{document}\n"
         )
     # The check reads the compiled pipeline, which is where the commands
@@ -1021,27 +1022,46 @@ def test_check_repro_literals(tmp_dir):
         text=True,
         check=True,
     )
-    # 3.14 is not in any results file, so nothing accounts for it
-    assert "Untraceable literals: 1" in result.stdout
-    # The summary stays a summary: the findings themselves would bury the
-    # line that says what to do next, so it points at them instead
+    # 0.42 is computed by the pipeline and typed into the document anyway:
+    # right today, wrong the next time that stage runs. That is the copy
+    # and paste worth catching, and it counts against the project.
+    assert "Values typed out rather than read from the pipeline: 1" in (
+        result.stdout
+    )
+    # 3.14 has nothing behind it, which is worth a look but is not a
+    # defect: most numbers in a paper are not results
+    assert "Numbers with nothing recorded behind them: 1" in result.stdout
+    assert "worth a look" in result.stdout
+    # The summary stays a summary and points at the findings
     assert "3.14" not in result.stdout
+    assert "0.42" not in result.stdout
     assert "calkit check repro -c" in result.stdout
-    assert "literals" in result.stdout.rsplit("\n", 2)[-2]
-    result = subprocess.run(
-        ["calkit", "check", "repro", "-c", "literals"],
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "retyped"], text=True
+    )
+    assert "0.42" in out
+    assert "results.json:DragCoefficient" in out
+    assert "main.tex:5" in out
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "numbers"], text=True
+    )
+    assert "3.14" in out
+    assert "0.42" not in out
+    # A figure width is layout, not a result, whether the macro is
+    # LaTeX's or Calkit's
+    assert "0.75" not in out
+    result_json = subprocess.run(
+        ["calkit", "check", "repro", "--json"],
         capture_output=True,
         text=True,
         check=True,
     )
-    assert "Untraceable literals (1)" in result.stdout
-    assert "3.14" in result.stdout
-    assert "main.tex:6" in result.stdout
-    # 0.42 is in the results file, so it reads as traceable even though it
-    # was typed here. The check under-flags on purpose: a value the project
-    # computes is not evidence of a mistake, and a false positive on a real
-    # number costs more than a missed one.
-    assert "0.42" not in result.stdout
+    parsed = json.loads(result_json.stdout)
+    assert [f["value"] for f in parsed["retyped_values"]] == ["0.42"]
+    assert parsed["retyped_values"][0]["source"] == (
+        "results.json:DragCoefficient"
+    )
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
     # A category with nothing behind it says so rather than printing an
     # empty table, and one that isn't a category is an error
     out = subprocess.check_output(
@@ -1055,35 +1075,16 @@ def test_check_repro_literals(tmp_dir):
     )
     assert bad.returncode != 0
     assert "Invalid category" in bad.stderr
-    result_json = subprocess.run(
-        ["calkit", "check", "repro", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    parsed = json.loads(result_json.stdout)
-    assert len(parsed["untraceable_literals"]) == 1
-    finding = parsed["untraceable_literals"][0]
-    assert finding["value"] == "3.14"
-    assert finding["file"] == "main.tex"
-    assert finding["line"] == 6
-    # The fix points at the stage kind, not at a hand-written DVC command
-    assert "json-to-latex" in finding["suggestion"]
     # The file a json-to-latex stage writes is full of the very numbers
-    # the check is looking for, and reporting them would flag the fix
-    # itself, so it is not scanned
+    # the check looks for, and reporting them would flag the fix itself
     with open("results.tex", "w") as f:
         f.write("\\newcommand\\result[1][all]{0.42 1.23 9.99}\n")
-    result = subprocess.run(
-        ["calkit", "check", "repro", "--json"],
-        capture_output=True,
-        text=True,
-        check=True,
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "--json"], text=True
     )
-    values = [
-        f["value"] for f in json.loads(result.stdout)["untraceable_literals"]
-    ]
-    assert values == ["3.14"]
+    parsed = json.loads(out)
+    assert [f["value"] for f in parsed["retyped_values"]] == ["0.42"]
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
 
 
 def test_check_questions(tmp_dir):

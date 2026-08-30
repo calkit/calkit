@@ -357,26 +357,23 @@ def check_repro(
         if not items:
             calkit.echo(f"{category}: nothing to report")
             continue
-        if category == "literals":
-            _echo_literals(items)
+        if category == "retyped":
+            _echo_retyped(items)
+        elif category == "numbers":
+            _echo_unattributed(items)
         else:
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
                 calkit.echo(f"  {item}")
 
 
-def _echo_literals(findings: list[dict]) -> None:
-    """List numbers in a manuscript that no pipeline output accounts for.
-
-    The fix is the same for every one of them, so it is said once rather
-    than repeated down a column, which is what left no room for the
-    context that tells you whether a finding is really a result.
-    """
+def _echo_retyped(findings: list[dict]) -> None:
+    """Values the pipeline produces that a document typed out instead."""
     from rich.console import Console
     from rich.table import Table
 
     table = Table(
-        title=f"Untraceable literals ({len(findings)})",
+        title=f"Typed out rather than read from the pipeline ({len(findings)})",
         title_justify="left",
         show_header=True,
         header_style="bold",
@@ -384,22 +381,55 @@ def _echo_literals(findings: list[dict]) -> None:
     # file:line:column in one column, which most terminals make clickable
     table.add_column("Where", style="cyan", no_wrap=True)
     table.add_column("Value", style="red", no_wrap=True)
+    table.add_column("Computed in", style="green", no_wrap=True)
     table.add_column("Context")
     for finding in findings:
         table.add_row(
             f"{finding['file']}:{finding['line']}:{finding['column']}",
             finding["value"],
+            finding["source"],
             finding["context"],
         )
     Console().print(table)
     calkit.echo(
-        "\nEach of these is a number typed into the document. If it is a "
-        "result, compute it in a pipeline stage, write it to a results "
-        "JSON file, add a 'json-to-latex' stage over that file, and "
-        "reference the generated command instead. If it is a constant, a "
-        "tolerance, or a quantity that belongs in the text as written, "
-        "leave it: the check under-flags on purpose and still catches "
-        "things that are not results."
+        "\nEach of these is a number the project already computes, typed "
+        "into the document. It is right today and wrong the next time that "
+        "stage runs. Reference the command the 'json-to-latex' stage "
+        "generates for that key instead."
+    )
+
+
+def _echo_unattributed(findings: list[dict]) -> None:
+    """Result-like numbers with nothing recorded behind them."""
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(
+        title=f"Numbers with nothing recorded behind them ({len(findings)})",
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("Where", style="cyan", no_wrap=True)
+    table.add_column("Value", style="yellow", no_wrap=True)
+    # A number in a sentence that cites somebody is usually theirs
+    table.add_column("Note", style="dim", no_wrap=True)
+    table.add_column("Context")
+    for finding in findings:
+        table.add_row(
+            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            finding["value"],
+            "quoted?" if finding.get("cited") else "",
+            finding["context"],
+        )
+    Console().print(table)
+    calkit.echo(
+        "\nMost numbers in a paper are not results, so this is a list to "
+        "look over rather than one to fix. A quantity quoted from a "
+        "reference (marked [cited]), a threshold you chose, or a tolerance "
+        "has nothing to be traced to, and writing it down as a structured "
+        "value would be work for no gain. What this is good for is "
+        "spotting the one that is a result and never got templated in."
     )
 
 

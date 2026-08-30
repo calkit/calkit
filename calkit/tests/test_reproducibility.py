@@ -8,7 +8,7 @@ from calkit.dvc import run_dvc_command
 from calkit.reproducibility import (
     ReproCheck,
     check_reproducibility,
-    find_untraceable_literals,
+    find_retyped_values,
 )
 
 
@@ -205,63 +205,58 @@ def test_check_call():
     assert "yo" in out
 
 
-def test_find_untraceable_literals():
-    def values(tex, from_json=None):
+def test_find_retyped_values():
+    def values(tex, project_values=None):
         return [
-            f["value"]
-            for f in find_untraceable_literals(tex, "main.tex", from_json)
+            (f["value"], f["line"], f["column"])
+            for f in find_retyped_values(tex, "main.tex", project_values)
         ]
 
-    # A result-like number typed into the document, in each of the forms
-    # one gets written in
-    assert values("Here is a hardcoded decimal: 3.14.") == ["3.14"]
-    assert values("And another one in math mode: $0.42$.") == ["0.42"]
-    assert values(r"Uncertainty $0.42 \pm 0.03$ is flagged.") == [
-        r"0.42 \pm 0.03"
+    project = {"0.42": "results.json:Cd", "1.25e-05": "results.json:Nu"}
+    # The problem worth solving: a value the pipeline produces, typed into
+    # the prose, correct today and wrong the next time the stage runs
+    assert values("The drag coefficient is 0.42.", project) == [
+        ("0.42", 1, 25)
     ]
-    assert values("Scientific $1.2e-3$ is flagged.") == ["1.2e-3"]
-    assert values(r"But this 12.7\% is flagged.") == [r"12.7\%"]
-    # The check under-flags on purpose: a false positive on a number that
-    # belongs in the text as written costs more than a missed one. So a
-    # reference, a citation, a link, a year, a page range, a layout length
-    # and a bare integer are all left alone.
-    for tex in [
-        r"reported \resultCd in the text",
-        r"\cite{smith2020}",
-        r"\href{https://example.com}{the value 1.2}",
-        r"\url{http://9.8.7.6/data}",
-        "10.1017/jfm.2020.123",
-        "2023",
-        r"pp.\ 123--145",
-        "we ran 12 simulations",
-        "% ... 9.81 ...",
-        r"\begin{thebibliography} 4.56 \end{thebibliography}",
-        r"\includegraphics[width=0.8\textwidth]{fig.pdf}",
-        r"\setlength{\parindent}{0.5in}",
-        r"\geometry{margin=1.5cm}",
-        r"See Fig.~\ref{fig:1} and Eq.~\eqref{eq:2}",
-    ]:
-        assert values(tex) == [], tex
-    # A value the project computes is accounted for, whatever spacing the
-    # document wrote it with, and whether it is offered as a set or a dict
-    assert values("... 1.23 ...", {"1.23": None}) == []
-    assert values("... 1.23 ...", {"1.23"}) == []
-    assert values(r"$0.42 \pm 0.03$", {r"0.42\pm0.03"}) == []
-    # A finding says what it is and where, so an editor can jump to it
-    findings = find_untraceable_literals(
-        "line one\nand then 3.14 here\n", "paper/main.tex"
+    assert values("$\\nu = 1.25e-05$", project) == [("1.25e-05", 1, 8)]
+    # Every occurrence, since each one goes stale separately
+    assert len(values("0.42 and again 0.42", project)) == 2
+    # A number the project does not produce is not the paper's problem: a
+    # quantity quoted from a reference, chosen by the author, or written
+    # as prose has nothing to be traced to
+    assert values("Others report 4.75 at that Reynolds number.", project) == []
+    assert values("a coefficient of order 0.03", project) == []
+    # Not a substring of a longer number
+    assert values("10.425 and 0.4251", project) == []
+    # Somewhere a number can appear without being a result: a citation, a
+    # link, a label, and the options of a figure macro, Calkit's included
+    widths = {"0.55": "results.json:Width"}
+    assert values(r"\\ckfigure[width=0.55\\textwidth]{../f.pdf}", widths) == []
+    assert (
+        values(r"\\includegraphics[width=0.55\\textwidth]{f.pdf}", widths)
+        == []
+    )
+    assert values(r"\\cite{smith0.42}", project) == []
+    assert values(r"\\href{https://x.org/0.42}{link}", project) == []
+    assert values("% a comment with 0.42", project) == []
+    assert values(r"\\setlength{\\parindent}{0.55in}", widths) == []
+    # A value has to be distinctive before its appearance means anything:
+    # a small integer or a one-digit decimal turns up in every paper
+    assert values("we ran 3 cases", {"3": "results.json:NCases"}) == []
+    assert values("about 0.5 of them", {"0.5": "results.json:Frac"}) == []
+    assert values("a value of 0.50", {"0.50": "results.json:Frac"}) == [
+        ("0.50", 1, 12)
+    ]
+    # Nothing to compare against means nothing to say
+    assert values("The drag coefficient is 0.42.") == []
+    # A finding names where the value came from, so the fix is obvious
+    findings = find_retyped_values(
+        "line one\nand then 0.42 here\n", "paper/main.tex", project
     )
     assert len(findings) == 1
-    assert findings[0]["value"] == "3.14"
+    assert findings[0]["source"] == "results.json:Cd"
     assert findings[0]["file"] == "paper/main.tex"
     assert findings[0]["line"] == 2
-    assert findings[0]["column"] == 10
-    assert findings[0]["context"] == "and then 3.14 here"
-    assert findings[0]["reason"]
-    # The fix points at the stage kind, not at a hand-written DVC command
+    assert findings[0]["context"] == "and then 0.42 here"
+    assert "results.json:Cd" in findings[0]["reason"]
     assert "json-to-latex" in findings[0]["suggestion"]
-    # Reported in the order someone reads the file
-    assert [
-        f["line"]
-        for f in find_untraceable_literals("9.99\n1.11\n", "main.tex")
-    ] == [1, 2]

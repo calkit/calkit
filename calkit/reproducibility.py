@@ -101,7 +101,8 @@ def _bool_to_check_x(val: bool | int) -> str:
 #: holding it. The summary counts them; asking for a category lists them,
 #: since a wall of findings buries the one line that says what to do next.
 DETAIL_CATEGORIES = {
-    "literals": "untraceable_literals",
+    "retyped": "retyped_values",
+    "numbers": "unattributed_numbers",
     "scripts": "scripts_not_in_pipeline",
     "environments": "stages_without_env",
     "provenance": "misc_needing_provenance",
@@ -141,8 +142,14 @@ class ReproCheck(BaseModel):
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
     n_dvc_remotes: int
-    # Numbers typed into a manuscript that no pipeline output accounts for
-    untraceable_literals: list[dict] = Field(default_factory=list)
+    # Values the project computes that a manuscript typed out instead,
+    # which go stale the next time the stage behind them runs
+    retyped_values: list[dict] = Field(default_factory=list)
+    # Result-like numbers with nothing recorded behind them. Advisory:
+    # most numbers in a paper are not results, so this is a prompt to look
+    # rather than a list of defects, and it is not counted against the
+    # project.
+    unattributed_numbers: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -323,13 +330,17 @@ class ReproCheck(BaseModel):
             f"{self.n_misc_needing_provenance} "
             f"{_bool_to_check_x(self.n_misc_needing_provenance == 0)}\n"
         )
-        if self.untraceable_literals:
+        txt += (
+            "Values typed out rather than read from the pipeline: "
+            f"{len(self.retyped_values)} "
+            f"{_bool_to_check_x(not self.retyped_values)}\n"
+        )
+        # No check mark either way: these are worth a look, not a verdict
+        if self.unattributed_numbers:
             txt += (
-                f"Untraceable literals: {len(self.untraceable_literals)} "
-                f"{_bool_to_check_x(False)}\n"
+                "Numbers with nothing recorded behind them: "
+                f"{len(self.unattributed_numbers)} (worth a look)\n"
             )
-        else:
-            txt += f"Untraceable literals: 0 {_bool_to_check_x(True)}\n"
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
@@ -431,14 +442,12 @@ def _mask_match(match: re.Match) -> str:
 
 
 def _mask_exclusion_zones(tex_source: str) -> str:
-    """Mask out LaTeX constructs where numeric literals should be ignored."""
+    """Blank the places a number can appear without being a result."""
     masked = tex_source
     # Comments: % to end of line, but not an escaped \%
     masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
     # Environments whose contents are never results
-    environments_to_mask = ["thebibliography"]
-    for env in environments_to_mask:
-        # Match \begin{env} ... \end{env} across multiple lines
+    for env in ["thebibliography"]:
         pattern = (
             r"\\begin\{"
             + re.escape(env)
@@ -448,7 +457,8 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         )
         masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
     # Macros whose arguments are references, layout, or links rather than
-    # anything computed
+    # anything the project computed. \ckfigure and \ckinput are Calkit's
+    # own, and their options carry widths and scales.
     macros_to_mask = [
         r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
         r"\\bibitem\{[^}]*\}",
@@ -462,7 +472,11 @@ def _mask_exclusion_zones(tex_source: str) -> str:
         r"\\input\{[^}]*\}",
         r"\\include\{[^}]*\}",
         r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\ckfigure(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\ckinput\{[^}]*\}",
         r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\documentclass(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\setlength\{[^}]*\}\{[^}]*\}",
         r"\\vspace\*?\{[^}]*\}",
         r"\\hspace\*?\{[^}]*\}",
@@ -471,22 +485,42 @@ def _mask_exclusion_zones(tex_source: str) -> str:
     ]
     for macro_pattern in macros_to_mask:
         masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
-    # Bare DOIs
-    masked = re.sub(r"10\.\d{4,}/[^\s]+", _mask_match, masked)
-    # Years, 1500 to 2100
-    masked = re.sub(r"\b(1[5-9]\d{2}|20\d{2}|2100)\b", _mask_match, masked)
-    # Page ranges, e.g., 123--145 and pp. 123
-    masked = re.sub(r"\b\d+\s*--\s*\d+\b", _mask_match, masked)
-    masked = re.sub(r"\bpp\.\s*\d+\b", _mask_match, masked)
     return masked
 
 
-def find_untraceable_literals(
+#: A value the project computes has to be this distinctive before its
+#: appearance in prose means anything. "3" is a number that turns up in
+#: every paper; "0.42" is one somebody copied.
+MIN_SIGNIFICANT_DIGITS = 2
+
+
+def _is_distinctive(text: str) -> bool:
+    """Whether seeing this number in prose says anything.
+
+    Only decimals and scientific notation, and only with enough digits to
+    be somebody's result rather than a quantity any sentence might carry.
+    """
+    if not re.fullmatch(r"-?\d*\.\d+(?:[eE][+-]?\d+)?", text):
+        return False
+    digits = re.sub(r"[^0-9]", "", text.split("e")[0].split("E")[0]).lstrip(
+        "0"
+    )
+    return len(digits) >= MIN_SIGNIFICANT_DIGITS
+
+
+def find_retyped_values(
     tex_source: str,
     filepath: str,
-    from_json_values: set[str] | dict[str, str | None] | None = None,
+    project_values: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Find numbers in LaTeX source that no pipeline output accounts for.
+    """Values the project computes that a document typed out instead.
+
+    This is the copy-paste that goes stale: a number the pipeline produces,
+    typed into the prose, correct today and wrong the next time the stage
+    runs. It is found by looking for the project's own values in the text,
+    rather than by looking for numbers in general -- most numbers in a
+    paper are not results, and a quantity quoted from a reference or chosen
+    by the author has nothing to be traced to.
 
     Parameters
     ----------
@@ -494,116 +528,145 @@ def find_untraceable_literals(
         The contents of the LaTeX file to scan.
     filepath : str
         The path of the LaTeX file, for reporting.
-    from_json_values : set[str] | dict[str, str | None] | None
-        Values the pipeline produces, which a literal matching one of them
-        is therefore traceable to. A dict is accepted for callers that
-        carry something alongside each value; only its keys are read.
+    project_values : dict[str, str] | None
+        Value as it is written in a results file, mapped to where it came
+        from, e.g., ``{"0.42": "results/drag.json:DragCoefficient"}``.
 
     Returns
     -------
     list[dict[str, Any]]
-        One finding per literal, each with keys:
-        - value: the matched literal string
+        One finding per occurrence, each with keys:
+        - value: the number as the document wrote it
+        - source: the results file and key it duplicates
         - file: the filepath
         - line: 1-indexed line number
         - column: 1-indexed column number
-        - context: the line the literal is on
+        - context: the line the value is on
         - reason: why it was flagged
-        - suggestion: how to make it traceable
+        - suggestion: how to make it come from the pipeline
     """
-    from_json: dict[str, str | None]
-    if from_json_values is None:
-        from_json = {}
-    elif isinstance(from_json_values, set):
-        from_json = {v: None for v in from_json_values}
-    else:
-        from_json = from_json_values
-    findings = []
+    if not project_values:
+        return []
     masked_source = _mask_exclusion_zones(tex_source)
-    # What a result looks like, most specific first, so a value with
-    # uncertainty is read whole rather than as a bare decimal. Group 1 is
-    # the literal itself.
-    result_like_patterns = [
-        # Values with uncertainty, e.g., 0.42 \pm 0.03
-        r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
-        # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
-        r"(\b\d+(?:\.\d+)?"
-        r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
-        # Percentages, e.g., 12.7\%
-        r"(\b\d+(?:\.\d+)?\s*\\%)",
-        # Plain decimals, e.g., 0.42
-        r"(\b\d+\.\d+\b)",
-    ]
-    # Searched one pattern at a time rather than combined, so an earlier,
-    # more specific pattern claims its span and a later one can't re-report
-    # part of the same literal
-    matched_intervals: list[tuple[int, int]] = []
-
-    def is_overlapping(start: int, end: int) -> bool:
-        for s, e in matched_intervals:
-            if max(start, s) < min(end, e):
-                return True
-        return False
-
     lines = tex_source.splitlines()
-    for pattern in result_like_patterns:
+    findings: list[dict[str, Any]] = []
+    for text, source in project_values.items():
+        if not _is_distinctive(text):
+            continue
+        # Bounded so 0.42 doesn't match inside 10.425 or 0.4251, while a
+        # value ending a sentence still does
+        pattern = r"(?<![\d.])" + re.escape(text) + r"(?!\d)(?!\.\d)"
         for match in re.finditer(pattern, masked_source):
-            start, end = match.span(1)
-            if is_overlapping(start, end):
-                continue
-            matched_intervals.append((start, end))
-            matched_str = match.group(1).strip()
-            # A value the project computes is accounted for, whatever
-            # spacing the document wrote it with
-            cmp_str = matched_str.replace(" ", "")
-            if any(
-                cmp_str == tracked.replace(" ", "") for tracked in from_json
-            ):
-                continue
-            # Where it is, counted on the unmasked source so the position
-            # is the one someone opening the file will see
+            start = match.start()
             preceding = tex_source[:start]
             line_idx = preceding.count("\n")
-            col_idx = (
-                len(preceding) - preceding.rfind("\n") - 1
-                if "\n" in preceding
-                else len(preceding)
-            )
-            context = lines[line_idx].strip() if line_idx < len(lines) else ""
+            col_idx = len(preceding) - preceding.rfind("\n") - 1
             findings.append(
                 {
-                    "value": matched_str,
+                    "value": text,
+                    "source": source,
                     "file": filepath,
                     "line": line_idx + 1,
                     "column": col_idx + 1,
-                    "context": context,
-                    "reason": (
-                        "result-like decimal not traceable to a pipeline "
-                        "output"
+                    "context": (
+                        lines[line_idx].strip()
+                        if line_idx < len(lines)
+                        else ""
                     ),
+                    "reason": (f"the project computes this value in {source}"),
                     "suggestion": (
-                        "Compute this in a pipeline stage, write it to a "
-                        "results JSON file, add a 'json-to-latex' stage "
-                        "over that file, and reference the generated "
-                        "command instead of typing the number."
+                        "Reference the generated command from the "
+                        "'json-to-latex' stage over that file instead of "
+                        "typing the number, so the paper follows the "
+                        "analysis when it changes."
                     ),
                 }
             )
-    # In the order someone reads the file
-    findings.sort(key=lambda x: (x["line"], x["column"]))
+    findings.sort(key=lambda f: (f["line"], f["column"]))
     return findings
 
 
-def _traceable_values(wdir: str, stages: dict) -> set[str]:
-    """Every value a ``json-to-latex`` stage puts within the document's reach.
+#: What a result looks like when it is written out, most specific first,
+#: so a value with uncertainty is read whole rather than as a bare decimal
+_RESULT_LIKE_PATTERNS = [
+    # Values with uncertainty, e.g., 0.42 \pm 0.03
+    r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+    # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
+    r"(\b\d+(?:\.\d+)?"
+    r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
+    # Percentages, e.g., 12.7\%
+    r"(\b\d+(?:\.\d+)?\s*\\%)",
+    # Plain decimals, e.g., 0.42
+    r"(\b\d+\.\d+\b)",
+]
+#: A number in a sentence that cites somebody is usually theirs, not this
+#: project's, and there is nothing to trace it to
+_CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{")
+
+
+def find_unattributed_numbers(
+    tex_source: str,
+    filepath: str,
+    project_values: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Result-like numbers in a document with nothing recorded behind them.
+
+    Weaker than :func:`find_retyped_values`, and offered as something to
+    look over rather than something to fix: most numbers in a paper are
+    not results. A quantity quoted from a reference, a threshold the
+    author chose, a tolerance -- none of them have anything to be traced
+    to, and writing them down as structured values would be a lot of work
+    for no gain. What this is good for is the number that *is* a result
+    and was never templated in.
+
+    ``project_values`` are values the project computes; anything matching
+    one is left to :func:`find_retyped_values`, which has more to say
+    about it.
+    """
+    known = set(project_values or {})
+    masked_source = _mask_exclusion_zones(tex_source)
+    lines = tex_source.splitlines()
+    findings: list[dict[str, Any]] = []
+    matched: list[tuple[int, int]] = []
+    for pattern in _RESULT_LIKE_PATTERNS:
+        for match in re.finditer(pattern, masked_source):
+            start, end = match.span(1)
+            # An earlier, more specific pattern claims its span, so a later
+            # one can't re-report part of the same literal
+            if any(max(start, s) < min(end, e) for s, e in matched):
+                continue
+            matched.append((start, end))
+            text = match.group(1).strip()
+            if text.replace(" ", "") in {v.replace(" ", "") for v in known}:
+                continue
+            preceding = tex_source[:start]
+            line_idx = preceding.count("\n")
+            line = lines[line_idx] if line_idx < len(lines) else ""
+            findings.append(
+                {
+                    "value": text,
+                    "file": filepath,
+                    "line": line_idx + 1,
+                    "column": len(preceding) - preceding.rfind("\n"),
+                    "context": line.strip(),
+                    "cited": bool(_CITE_RE.search(line)),
+                }
+            )
+    findings.sort(key=lambda f: (f["line"], f["column"]))
+    return findings
+
+
+def _project_values(wdir: str, stages: dict) -> dict[str, str]:
+    """Every value a ``json-to-latex`` stage puts within a document's reach.
 
     Read from the results files those stages consume rather than from the
     LaTeX they generate: the results file is what the value actually is,
-    and the generated commands are one rendering of it.
+    and the generated commands are one rendering of it. Mapped back to
+    where it came from, so a finding can name the key to reference.
     """
     import json
 
-    values: set[str] = set()
+    values: dict[str, str] = {}
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
         if "calkit latex from-json" not in cmd:
@@ -616,10 +679,13 @@ def _traceable_values(wdir: str, stages: dict) -> set[str]:
                     data = json.load(f)
             except (OSError, ValueError):
                 continue
-            if isinstance(data, dict):
-                for value in data.values():
-                    if isinstance(value, (int, float, str)):
-                        values.add(str(value))
+            if not isinstance(data, dict):
+                continue
+            for key, value in data.items():
+                if isinstance(value, (int, float)) and not isinstance(
+                    value, bool
+                ):
+                    values.setdefault(str(value), f"{dep}:{key}")
     return values
 
 
@@ -678,29 +744,29 @@ def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
     return found
 
 
-def find_untraceable_literals_in_project(
+def find_literals_in_project(
     wdir: str, ck_info: dict, stages: dict
-) -> list[dict]:
-    """Numbers typed into a manuscript that no pipeline output accounts for.
+) -> dict[str, list[dict]]:
+    """Numbers in a project's documents, in two kinds.
 
-    A result typed into prose is a number nobody can check, and it goes
-    stale the moment the stage behind it reruns. This reads the manuscript
-    and everything it inputs, skipping the files the pipeline generates,
-    and reports what it finds that no results file explains.
+    ``retyped`` are values the pipeline produces that a document typed out
+    instead, which is the copy-paste that goes stale. ``unattributed`` are
+    result-like numbers with nothing recorded behind them, which is a
+    weaker signal offered as something to look over.
     """
-    traceable = _traceable_values(wdir, stages)
+    values = _project_values(wdir, stages)
     generated = _generated_tex_paths(wdir, stages)
-    findings: list[dict] = []
+    out: dict[str, list[dict]] = {"retyped": [], "unattributed": []}
     for path in sorted(_tex_sources(wdir, ck_info, stages) - generated):
         try:
             with open(path, encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except OSError:
             continue
-        findings += find_untraceable_literals(
-            content, os.path.relpath(path, wdir), traceable
-        )
-    return findings
+        rel = os.path.relpath(path, wdir)
+        out["retyped"] += find_retyped_values(content, rel, values)
+        out["unattributed"] += find_unattributed_numbers(content, rel, values)
+    return out
 
 
 def check_reproducibility(
@@ -785,7 +851,9 @@ def check_reproducibility(
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)
-    res["untraceable_literals"] = find_untraceable_literals_in_project(
+    literals = find_literals_in_project(
         wdir=wdir, ck_info=ck_info, stages=stages
     )
+    res["retyped_values"] = literals["retyped"]
+    res["unattributed_numbers"] = literals["unattributed"]
     return ReproCheck.model_validate(res)

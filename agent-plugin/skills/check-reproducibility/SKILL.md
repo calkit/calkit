@@ -22,8 +22,9 @@ hand:
 - which stages run outside a declared environment;
 - which artifacts have no `stage`, `imported_from`, or `created_by`;
 - which scripts no stage refers to;
-- which numbers in the manuscript no results file explains
-  (`untraceable_literals`).
+- which numbers in the manuscript duplicate a value the pipeline already
+  computes (`retyped_values`), and which result-like numbers have nothing
+  recorded behind them at all (`unattributed_numbers`).
 
 Judgment, done here:
 
@@ -42,15 +43,23 @@ Judgment, done here:
    traceable until there is a pipeline to make it. See the
    `create-pipeline` and `add-pipeline-stage` skills.
 
-3. **For each untraceable literal**, decide before you touch anything
-   whether it is a result. The check is tuned to under-flag rather than be
-   noisy, but a number in prose can still be a constant from the
-   literature, a tolerance the author chose, or a quantity that belongs in
-   the text as written. Say which ones you're leaving and why; do not
-   rewrite a sentence to make a check pass.
+3. **Every `retyped_values` finding is worth fixing.** Each is a number
+   the pipeline already computes, typed into the document: right today and
+   wrong the next time that stage runs. The finding names the results file
+   and key, so the fix is mechanical.
 
-   For one that is a result, the number must reach the page through the
-   pipeline rather than through the author's fingers:
+4. **`unattributed_numbers` is a list to read, not a list to fix.** Most
+   numbers in a paper are not results. A quantity quoted from a reference
+   (`cited` is true when the sentence carries a citation), a threshold the
+   author chose, a tolerance, a count -- none of them have anything to be
+   traced to, and turning them into structured values would be work for no
+   gain. What the list is good for is spotting the one that _is_ a result
+   and never got templated in. Say which ones you're leaving and why; never
+   rewrite a sentence to make a check pass, and never invent a stage to
+   compute a number somebody else measured.
+
+   For a number that is this project's result, it must reach the page
+   through the pipeline rather than through the author's fingers:
 
    ```yaml
    pipeline:
@@ -84,11 +93,11 @@ Judgment, done here:
    a raw `stages:` block with `cmd: calkit latex from-json`; the stage kind
    is what keeps `calkit.yaml` the single source of truth.
 
-4. **Run the pipeline** (`calkit run`) and check again. Do not run the
+5. **Run the pipeline** (`calkit run`) and check again. Do not run the
    script yourself and paste the number in: that is the failure this whole
    check exists to catch.
 
-5. **Report what you left.** A literal you decided was not a result is a
+6. **Report what you left.** A number you decided was not a result is a
    judgment the user should see, not one to bury.
 
 ## Related

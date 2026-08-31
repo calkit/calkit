@@ -398,11 +398,44 @@ goes to a journal.
 Each build installs `calkit.sty` beside the document (commit it, so the
 paper builds on Overleaf and anywhere else without Calkit), writes a
 per-build artifact table `calkit-provenance.tex` (do not commit it), and
-turns the build's log into `<document>.provenance.json`: every value,
+turns the build's log into `<artifact>.provenance.json`: every value,
 figure and text block the document took from the project, the pages it
 appears on, the stage that produced it, that stage's inputs, the hash
 recorded in `dvc.lock`, and, for a value, the value itself. That file is
 the trail in machine-readable form, for editors, the hub, and checks.
+
+### What a record says
+
+```json
+{
+  "$schema": "https://docs.calkit.org/schemas/provenance.json",
+  "_note": "Written by 'calkit latex build --provenance'. Do not edit...",
+  "artifact": "paper/main.pdf",
+  "source": "paper/main.tex",
+  "kind": "publication",
+  "components": [ ... ]
+}
+```
+
+The record is named after the **artifact** --- what the build produced and
+what a reader reads --- rather than after its source, because not every
+kind of artifact has a source to edit. A publication has one, and it is
+where a person writes and where a position in the editor resolves, so it
+is named separately as `source`. `kind` says which positional vocabulary
+the components use: a publication has pages.
+
+A component names the artifact its value came _from_, not the file it
+passed through. A number reaches the page as
+`results/findings.json` → `paper/generated-numbers.tex` → `paper/main.pdf`,
+and the record names the results file, because that is what a reader
+cares about and the generated `.tex` is plumbing.
+
+The schema is published at
+[docs.calkit.org/schemas/provenance.json](https://docs.calkit.org/schemas/provenance.json),
+the same way the [`calkit.yaml` schema](calkit-yaml.md) is, so an editor
+validates a record without any per-user configuration. Records are written
+by the build and read by tools; nothing in one should be edited by hand,
+which is what the `_note` says to anything that might try.
 
 ### Reaching one value in a big results file
 

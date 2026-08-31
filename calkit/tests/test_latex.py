@@ -141,7 +141,15 @@ def test_provenance(tmp_dir):
             '"key": "ratio", "page": 3}\n'
         )
     sidecar = collect_provenance("paper/main.tex", ck_info, ".")
-    assert sidecar["document"] == "paper/main.tex"
+    # The artifact is what the build produced; the source is where a
+    # person edits it, and only some kinds of artifact have one
+    assert sidecar["artifact"] == "paper/main.pdf"
+    assert sidecar["source"] == "paper/main.tex"
+    assert sidecar["kind"] == "publication"
+    assert sidecar["$schema"].endswith("/schemas/provenance.json")
+    assert "falsifies" in sidecar["_note"]
+    # The build log is scratch and does not survive the read
+    assert not os.path.isfile("paper/main.ckprov")
     by = {(i["kind"], i["path"]): i for i in sidecar["components"]}
     fig = by[("figure", "figures/plot.pdf")]
     assert fig["stage"] == "plot"

@@ -5155,6 +5155,11 @@ LATEX_BUILD_EXTS = {
     ".toc",
     ".nav",
     ".snm",
+    # Calkit's own: the build log a provenance run appends to, and the
+    # record it turns into. Neither is a source of the publication, and
+    # both would otherwise sync into Overleaf with the rest of the folder.
+    ".ckprov",
+    ".provenance.json",
 }
 # Files that could be a copy of one of the project's figures
 PUBLICATION_FIGURE_EXTS = {

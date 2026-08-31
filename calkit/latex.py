@@ -298,6 +298,18 @@ def _is_immutable_ref(repo: git.Repo, ref: str | None) -> bool:
 STYLE_FNAME = "calkit.sty"
 PROVENANCE_TEX_FNAME = "calkit-provenance.tex"
 PROVENANCE_LOG_EXT = ".ckprov"
+#: Published alongside the calkit.yaml schema, so an editor validates a
+#: provenance record the same way it validates the project file
+PROVENANCE_SCHEMA_URL = "https://docs.calkit.org/schemas/provenance.json"
+#: JSON carries no comments, so the warning that belongs at the top of a
+#: file nothing should hand-edit goes in a field of its own
+PROVENANCE_NOTE = (
+    "Written by 'calkit latex build --provenance'. Do not edit. These "
+    "hashes and values are evidence of what a build actually used; "
+    "changing them to resolve an error or make a check pass falsifies "
+    "that evidence. If something here looks wrong, say so rather than "
+    "correcting it: regenerate the artifact instead."
+)
 _TEX_SPECIALS = {
     "\\": r"\textbackslash{}",
     "&": r"\&",
@@ -508,7 +520,11 @@ def provenance_sidecar_path(target_path: str) -> str:
 
 
 def collect_provenance(
-    target_path: str, ck_info: dict, wdir: str | None = None
+    target_path: str,
+    ck_info: dict,
+    wdir: str | None = None,
+    artifact_path: str | None = None,
+    kind: str = "publication",
 ) -> dict:
     """Turn the build's ``.ckprov`` log into the document's provenance record.
 
@@ -586,7 +602,18 @@ def collect_provenance(
             entry["value"] = view.current_value(use["path"], use["key"])
         components.append(entry)
     components.sort(key=lambda u: (u["kind"], u["path"], u["key"] or ""))
-    sidecar = {"document": target_path, "components": components}
+    # The artifact is what the build produced and what a reader reads; the
+    # source is where a person edits it and where a position resolves. A
+    # figure or a dataset has only the first, which is why they are named
+    # apart rather than one standing in for the other.
+    from calkit.components import ProvenanceRecord
+
+    sidecar = ProvenanceRecord(
+        artifact=artifact_path or (os.path.splitext(target_path)[0] + ".pdf"),
+        source=target_path,
+        kind=kind,
+        components=components,
+    ).model_dump(mode="json", by_alias=True)
     with open(
         os.path.join(wdir, provenance_sidecar_path(target_path)),
         "w",
@@ -594,6 +621,15 @@ def collect_provenance(
     ) as f:
         json.dump(sidecar, f, indent=2)
         f.write("\n")
+    # The log is scratch: LaTeX appends to it a line at a time during the
+    # build, and once it has been read there is nothing in it the sidecar
+    # does not hold. Left behind it litters the document's folder and
+    # syncs to Overleaf along with everything else there.
+    if os.path.isfile(log_path):
+        try:
+            os.remove(log_path)
+        except OSError:
+            pass
     return sidecar
 
 

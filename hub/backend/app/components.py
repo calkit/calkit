@@ -255,7 +255,11 @@ def usages_of(
                 continue
             usages.append(
                 {
-                    "document": sidecar.get("document") or document,
+                    # Named by the artifact a reader would open, which
+                    # is what the record is about
+                    "document": sidecar.get("artifact")
+                    or sidecar.get("document")
+                    or document,
                     "kind": component.get("kind"),
                     "key": component.get("key"),
                     "pages": component.get("pages") or [],

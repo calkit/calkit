@@ -393,7 +393,16 @@ def build(
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
     if provenance:
-        sidecar = calkit.latex.collect_provenance(tex_file, ck_info)
+        # latexmk writes the PDF into --output-dir when one is given, so
+        # the artifact the record describes is not always beside its source
+        stem = os.path.splitext(os.path.basename(tex_file))[0]
+        artifact_path = Path(
+            os.path.join(output_dir or os.path.dirname(tex_file), stem)
+            + ".pdf"
+        ).as_posix()
+        sidecar = calkit.latex.collect_provenance(
+            tex_file, ck_info, artifact_path=artifact_path
+        )
         n = len(sidecar["components"])
         typer.echo(
             f"Wrote {calkit.latex.provenance_sidecar_path(tex_file)} "

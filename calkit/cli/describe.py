@@ -108,13 +108,32 @@ def describe_schema(
             help="Path at which to write the schema instead of printing it.",
         ),
     ] = None,
+    which: Annotated[
+        str,
+        typer.Option(
+            "--for",
+            help=(
+                "Which schema: 'calkit.yaml', or 'provenance' for the "
+                "record a build writes beside each artifact."
+            ),
+        ),
+    ] = "calkit.yaml",
 ) -> None:
-    """Print the JSON schema for calkit.yaml.
+    """Print a JSON schema.
 
-    Editors can use this to validate and autocomplete the file. See
-    https://docs.calkit.org/calkit-yaml for how to set that up.
+    Editors can use these to validate and autocomplete the files they
+    describe. See https://docs.calkit.org/calkit-yaml for how to set that
+    up.
     """
-    txt = calkit.schema.generate_json()
+    if which not in ("calkit.yaml", "provenance"):
+        raise_error(
+            f"Unknown schema: {which}. Choose calkit.yaml or provenance."
+        )
+    txt = (
+        calkit.schema.generate_json()
+        if which == "calkit.yaml"
+        else calkit.schema.generate_provenance_json()
+    )
     if output is None:
         typer.echo(txt, nl=False)
         return
@@ -274,7 +293,7 @@ def describe_components(
             document=document,
             check_stages=check_stages,
         )
-        result = {"document": document, "components": components}
+        result = {"source": document, "components": components}
     else:
         described = calkit.components.describe_document(
             document, check_stages=check_stages
@@ -283,7 +302,9 @@ def describe_components(
         if page is not None:
             components = [c for c in components if page in c.pages]
         result = {
-            "document": described.document,
+            "artifact": described.artifact,
+            "source": described.source,
+            "kind": described.kind,
             "built": described.built,
             "components": components,
         }

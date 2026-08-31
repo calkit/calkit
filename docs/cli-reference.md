@@ -2205,7 +2205,7 @@ Describe things.
 | [`system`](#subcommand-describe-desc-system)                              | Describe the system.                                               |
 | [`environment\|env`](#subcommand-describe-desc-environment-env)           | Describe a single environment, including spec and lock file paths. |
 | [`environments\|envs`](#subcommand-describe-desc-environments-envs)       | Describe all environments, including spec and lock file paths.     |
-| [`schema`](#subcommand-describe-desc-schema)                              | Print the JSON schema for calkit.yaml.                             |
+| [`schema`](#subcommand-describe-desc-schema)                              | Print a JSON schema.                                               |
 | [`components\|component`](#subcommand-describe-desc-components-component) | Describe the project content a document uses.                      |
 
 <a id="subcommand-describe-desc-system"></a>
@@ -2267,9 +2267,9 @@ Options:
 
 #### `calkit describe|desc schema`
 
-Print the JSON schema for calkit.yaml.
+Print a JSON schema.
 
-Editors can use this to validate and autocomplete the file. See https://docs.calkit.org/calkit-yaml for how to set that up.
+Editors can use these to validate and autocomplete the files they describe. See https://docs.calkit.org/calkit-yaml for how to set that up.
 
 Usage:
 
@@ -2279,9 +2279,10 @@ calkit describe|desc schema [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                                               |
-| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
+| Option           | Type | Required | Default     | Description                                                                                      |
+| ---------------- | ---- | -------- | ----------- | ------------------------------------------------------------------------------------------------ |
+| `--output`, `-o` | str  | no       |             | Path at which to write the schema instead of printing it.                                        |
+| `--for`          | str  | no       | calkit.yaml | Which schema: 'calkit.yaml', or 'provenance' for the record a build writes beside each artifact. |
 
 <a id="subcommand-describe-desc-components-component"></a>
 

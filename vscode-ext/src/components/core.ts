@@ -48,7 +48,11 @@ export interface Component {
 }
 
 export interface DocumentComponents {
-  document: string;
+  /** What the build produced, e.g., the compiled PDF. */
+  artifact?: string;
+  /** Where a person edits it, for kinds of artifact that have one. */
+  source?: string;
+  kind?: string;
   built?: boolean;
   components: Component[];
 }

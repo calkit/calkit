@@ -43,9 +43,10 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 import calkit
+from calkit.latex import PROVENANCE_NOTE, PROVENANCE_SCHEMA_URL
 
 ComponentKind = Literal["value", "figure", "text", "block"]
 #: Where a component's source file came from, strongest first. A pipeline
@@ -130,6 +131,76 @@ class Component(BaseModel):
         return self.path + (f":{self.key}" if self.key else "")
 
 
+class ProvenanceComponent(BaseModel):
+    """One component as a build recorded it, before anything is checked.
+
+    What the sidecar holds. :class:`Component` is this plus everything the
+    project can say about it now, which is why the two are not one model:
+    a record is what was true at build time and does not change.
+    """
+
+    kind: ComponentKind
+    #: Project-relative path of the file the content came from
+    path: str
+    #: Results key for a value, question number for a block
+    key: str | None = None
+    #: Pages of the artifact it appears on
+    pages: list[int] = Field(default_factory=list)
+    stage: str | None = None
+    stage_inputs: list[str] = Field(default_factory=list)
+    #: Hash of ``path`` as the pipeline recorded it at build time
+    hash: str | None = None
+    #: The raw value the build used, for a value component. Raw, since one
+    #: value can be typeset several ways and a difference in formatting is
+    #: not a difference in the result.
+    value: Any = None
+
+
+class ProvenanceRecord(BaseModel):
+    """What a build wrote down about one artifact.
+
+    Named after the artifact rather than its source, because the artifact
+    is what a reader reads and what the record sits beside, and because
+    not every kind of artifact has a source to edit.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+    schema_url: str = Field(
+        default=PROVENANCE_SCHEMA_URL,
+        alias="$schema",
+        description="The schema this record follows.",
+    )
+    note: str = Field(
+        default=PROVENANCE_NOTE,
+        alias="_note",
+        description=(
+            "A warning to anything editing this file. JSON carries no "
+            "comments, so it lives in a field."
+        ),
+    )
+    artifact: str = Field(
+        description="What the build produced, e.g., the compiled PDF."
+    )
+    source: str | None = Field(
+        default=None,
+        description=(
+            "Where a person edits the artifact and where a position "
+            "resolves, for kinds of artifact that have one."
+        ),
+    )
+    kind: str = Field(
+        default="publication",
+        description=(
+            "Which positional vocabulary the components use. A publication "
+            "has pages."
+        ),
+    )
+    components: list[ProvenanceComponent] = Field(
+        default_factory=list,
+        description="Everything the artifact took from the project.",
+    )
+
+
 class Location(BaseModel):
     """Where a component is written in a document's source."""
 
@@ -141,9 +212,16 @@ class Location(BaseModel):
 
 
 class DocumentComponents(BaseModel):
-    """Every component of one document."""
+    """Every component of one artifact."""
 
-    document: str
+    #: What the build produced and a reader reads, e.g., the PDF
+    artifact: str
+    #: Where a person edits it and where a position resolves, for formats
+    #: that have one. A figure or a dataset does not.
+    source: str | None = None
+    #: Which positional vocabulary applies: a publication has pages, and
+    #: other kinds of artifact will have something else
+    kind: str = "publication"
     #: Whether a build has left a provenance sidecar to read
     built: bool = False
     components: list[Component] = Field(default_factory=list)
@@ -704,7 +782,7 @@ def describe_document(
     sidecar = read_sidecar(document, wdir)
     view = LocalProject(ck_info, wdir, check_stages)
     if sidecar is not None:
-        target = sidecar.get("document", source_path(document))
+        target = sidecar.get("source") or source_path(document)
         # The build says what the document shows; only the source says
         # where it is written, which is what an editor needs to put a
         # marker on the right line. A component with no location is one
@@ -723,13 +801,17 @@ def describe_document(
             for rec in sidecar.get("components", [])
         ]
         return DocumentComponents(
-            document=target,
+            artifact=sidecar.get("artifact")
+            or (os.path.splitext(target)[0] + ".pdf"),
+            source=target,
+            kind=sidecar.get("kind", "publication"),
             built=True,
             components=enrich(components, view),
         )
     target = source_path(document)
     return DocumentComponents(
-        document=target,
+        artifact=os.path.splitext(target)[0] + ".pdf",
+        source=target,
         built=False,
         components=enrich(_source_components(target, wdir), view),
     )

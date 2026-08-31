@@ -4733,7 +4733,8 @@ def post_project_dataset(
     if fetch_kind in ("url", "doi", "git"):
         wdir = str(repo.working_dir)
         assert req.imported_from is not None
-        if os.path.exists(os.path.join(wdir, req.path)):
+        dest = os.path.join(wdir, req.path)
+        if fetch_kind != "url" and os.path.exists(dest):
             raise HTTPException(400, f"'{req.path}' already exists")
         # A multi-file record lands in a folder even when a file name was
         # given, so the path written to calkit.yaml is the one that exists
@@ -4741,7 +4742,13 @@ def post_project_dataset(
         if fetch_kind == "url":
             url = str(req.imported_from.url)
             name = posixpath.basename(urlparse(url).path) or "download"
-            landed, _ = app.imports.fetch_files({name: url}, wdir, req.path)
+            if os.path.exists(dest):
+                app.imports.verify_or_download_url(url, dest)
+                landed = req.path
+            else:
+                landed, _ = app.imports.fetch_files(
+                    {name: url}, wdir, req.path
+                )
         elif fetch_kind == "doi":
             files = app.imports.resolve_doi_files(str(req.imported_from.doi))
             landed, _ = app.imports.fetch_files(files, wdir, req.path)
@@ -5477,6 +5484,13 @@ def post_project_misc(
         ]
     if req.imported_from is not None:
         entry["imported_from"] = req.imported_from
+        url = (
+            (req.imported_from or {}).get("url")
+            if isinstance(req.imported_from, dict)
+            else None
+        )
+        if url and os.path.isfile(os.path.join(wdir, path)):
+            app.imports.verify_or_download_url(url, os.path.join(wdir, path))
     # Validated against the model that owns calkit.yaml, which is where
     # the rules live, e.g., made here or imported but not both, and at
     # least one person named

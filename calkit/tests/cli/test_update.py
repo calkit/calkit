@@ -177,6 +177,126 @@ def test_update_dataset(tmp_dir):
     assert info.datasets[0].imported_from.date == date(2026, 1, 2)
 
 
+def _mock_requests_get(content: bytes):
+    from unittest.mock import MagicMock
+
+    resp = MagicMock()
+    resp.raise_for_status = MagicMock()
+    resp.iter_content = MagicMock(return_value=iter([content]))
+    resp.__enter__ = MagicMock(return_value=resp)
+    resp.__exit__ = MagicMock(return_value=False)
+    return resp
+
+
+def test_update_dataset_imported_from_url_downloads(tmp_dir, monkeypatch):
+    import requests
+
+    subprocess.check_call(["calkit", "init"])
+    content = b"a,b\n1,2\n"
+    monkeypatch.setattr(
+        requests, "get", lambda *a, **kw: _mock_requests_get(content)
+    )
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/input.csv",
+            "--imported-from-url",
+            "https://x.org/input.csv",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert os.path.isfile("data/input.csv")
+    with open("data/input.csv", "rb") as f:
+        assert f.read() == content
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][0]["imported_from"] == {
+        "url": "https://x.org/input.csv"
+    }
+    assert "Downloaded" in result.output
+
+
+def test_update_dataset_imported_from_url_existing_match(tmp_dir, monkeypatch):
+    import requests
+
+    subprocess.check_call(["calkit", "init"])
+    content = b"a,b\n1,2\n"
+    os.makedirs("data", exist_ok=True)
+    with open("data/input.csv", "wb") as f:
+        f.write(content)
+    monkeypatch.setattr(
+        requests, "get", lambda *a, **kw: _mock_requests_get(content)
+    )
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/input.csv",
+            "--imported-from-url",
+            "https://x.org/input.csv",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["datasets"][0]["imported_from"] == {
+        "url": "https://x.org/input.csv"
+    }
+    assert "Verified" in result.output
+
+
+def test_update_dataset_imported_from_url_existing_mismatch(
+    tmp_dir, monkeypatch
+):
+    import requests
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("data", exist_ok=True)
+    with open("data/input.csv", "wb") as f:
+        f.write(b"old")
+    monkeypatch.setattr(
+        requests, "get", lambda *a, **kw: _mock_requests_get(b"new content")
+    )
+    result = runner.invoke(
+        update_app,
+        [
+            "dataset",
+            "data/input.csv",
+            "--imported-from-url",
+            "https://x.org/input.csv",
+        ],
+    )
+    assert result.exit_code != 0
+    with open("data/input.csv", "rb") as f:
+        assert f.read() == b"old"
+    ck_info = calkit.load_calkit_info()
+    assert not ck_info.get("datasets")
+
+
+def test_update_figure_imported_from_url_downloads(tmp_dir, monkeypatch):
+    import requests
+
+    subprocess.check_call(["calkit", "init"])
+    content = b"\x89PNG\r\n"
+    monkeypatch.setattr(
+        requests, "get", lambda *a, **kw: _mock_requests_get(content)
+    )
+    result = runner.invoke(
+        update_app,
+        [
+            "figure",
+            "figs/fig1.png",
+            "--imported-from-url",
+            "https://x.org/fig1.png",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert os.path.isfile("figs/fig1.png")
+    ck_info = calkit.load_calkit_info()
+    assert ck_info["figures"][0]["imported_from"] == {
+        "url": "https://x.org/fig1.png"
+    }
+
+
 def test_update_github_actions(tmp_dir):
     subprocess.check_call(["calkit", "init"])
     workflow_dir = os.path.join(".github", "workflows")

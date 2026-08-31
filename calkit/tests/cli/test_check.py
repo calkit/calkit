@@ -1154,7 +1154,7 @@ def test_check_questions(tmp_dir):
     assert "answer: 0 of eight do." in out
     # Reviewing the answer is an edit to the question, which clears it
     ck_info = calkit.load_calkit_info()
-    ck_info["questions"][0]["reviewed"] = "2026-08-29"
+    ck_info["questions"][0]["notes"] = "Reread against the new value."
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     subprocess.check_call(["git", "commit", "-q", "-am", "Review"])

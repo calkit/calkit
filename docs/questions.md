@@ -89,20 +89,14 @@ judging whether an answer still matches its evidence means reading
 
 A stale question is not fixed by re-running anything; it is fixed by
 reading the rendered answer against the new evidence.
-If it still holds, set `reviewed` to today's date:
+If it still holds, say so by editing the question. Any edit to it counts:
+the check anchors on the commit where the question last changed, so
+re-reading the answer and then touching it is what marks it current.
 
-```yaml
-reviewed: 2026-08-29
-```
-
-Any edit to the question marks it current once committed, so this is the
-way to say an answer survived without rewording it.
-A second review on the same day needs a timestamp
-(`reviewed: 2026-08-29T15:40:00`), since setting the same date again is
-not an edit.
-If it no longer holds, rewrite it.
-The `check-questions` [agent skill](ai-tools.md) walks through exactly
-that, using the check's report to know which questions to read.
+This is the weakest part of the mechanism, and it is being replaced. See
+[issue #1606](https://github.com/calkit/calkit/issues/1606) for the design:
+a review record that says what was confirmed, by whom, rather than a commit
+that says something changed.
 
 ## Pointing at the publication
 

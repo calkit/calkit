@@ -41,10 +41,11 @@ Judgment, done here:
    and the commit the answer dates from. Read the rendered answer
    (`calkit list questions`) against the current evidence, and if it helps,
    the old evidence (`git show <commit>:<path>`). Decide:
-   - **The claim still holds**: say so, and set `reviewed` on the question
-     to the current date, or a timestamp if it was already reviewed today
-     (an unchanged value is not an edit). That edit is what marks it
-     current.
+   - **The claim still holds**: say so, and edit the question to record
+     that you read it again. Any edit counts: the check anchors on the
+     commit where the question last changed. Adding or refining `notes` is
+     usually the honest edit to make, since it is where you say what you
+     checked.
    - **The claim no longer holds**: draft a corrected answer, show the user
      the old and new text side by side with the values that changed, and
      only after they agree, edit `calkit.yaml`.
@@ -59,9 +60,10 @@ Judgment, done here:
    evidence carries into a `{name:...}` placeholder on a `value` entry, so
    it is read from the results file rather than retyped.
 
-Never set `reviewed` on a stale question without reading it. It is the act
-of declaring the answer current, which is a claim the user has to be
-willing to make.
+Never edit a stale question just to clear the check. It is the act of
+reading the answer against the evidence that the edit is meant to record,
+and an edit made without doing that is a false statement about the
+project, not a tidy-up.
 
 ## Writing answers
 

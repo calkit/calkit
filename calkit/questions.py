@@ -18,7 +18,8 @@ last changed. If any of its evidence changed after that commit -- in Git
 history for Git-tracked outputs, in ``dvc.lock`` for DVC-tracked ones --
 the answer was written against evidence that no longer exists, and the
 check reports it as stale until someone reads it again and edits the
-question, which for an answer that still holds means setting ``reviewed``.
+question, which for an answer that still holds means editing it after
+reading it again.
 
 Both checks are deterministic and cheap. Judging whether the prose still
 follows from changed evidence is neither, and is left to the reader or to
@@ -635,7 +636,7 @@ def check_question(
         status = "stale"
         messages.append(
             "evidence changed since the answer was last edited; re-read it "
-            "and set 'reviewed' if it still holds"
+            "and edit the question if it still holds"
         )
     if since is None and repo is not None:
         messages.append("not yet committed, so history cannot be checked")

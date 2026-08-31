@@ -1546,8 +1546,8 @@ class Question(BaseModel):
     An answer is a claim about the evidence as it was when the answer was
     last edited, and Git records when that was. ``calkit check questions``
     reports a question as stale when any of its evidence has changed since
-    that commit; setting ``reviewed`` after re-reading the answer against
-    the new evidence is how to say it still holds.
+    that commit, so editing the question after re-reading it against the
+    new evidence is how to say it still holds.
     """
 
     question: str
@@ -1560,17 +1560,6 @@ class Question(BaseModel):
             "would answer it. Unlike an answer, notes make no claim, so a "
             "question with notes and no answer is reported as unanswered "
             "rather than as an answer lacking evidence."
-        ),
-    )
-    reviewed: datetime | date_type | None = Field(
-        default=None,
-        description=(
-            "When the answer was last read against its evidence, as a date "
-            "or a timestamp. Any edit to the question, this field included, "
-            "marks it current, so this is the way to say an answer still "
-            "holds after its evidence changed without rewording it. Use a "
-            "timestamp when reviewing more than once in a day, since "
-            "setting the same date again is not an edit."
         ),
     )
     evidence: (

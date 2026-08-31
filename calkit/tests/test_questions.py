@@ -270,7 +270,7 @@ def test_check_questions(tmp_dir):
     assert not status.ok
     report = format_status(status)
     assert "[stale] Do the top structures use the rectifier?" in report
-    assert "set 'reviewed'" in report
+    assert "edit the question" in report
     assert "1 stale" in report
     assert "1 answered without evidence" in report
     assert "2 unanswered" in report
@@ -278,9 +278,9 @@ def test_check_questions(tmp_dir):
         render_question(ck_info["questions"][3], ck_info, ".")["answer"]
         == "0 of eight do, a 5.1x gain."
     )
-    # Reading it again and setting reviewed is an edit, which marks it
-    # current once committed; before the commit it is simply uncommitted
-    ck_info["questions"][3]["reviewed"] = "2026-08-29"
+    # Reading it again and editing the question marks it current once
+    # committed; before the commit it is simply uncommitted
+    ck_info["questions"][3]["notes"] = "Reread against the new value."
     _write_yaml(ck_info)
     ck_info = calkit.load_calkit_info()
     status = check_questions(ck_info=ck_info, wdir=".")
@@ -297,8 +297,8 @@ def test_check_questions(tmp_dir):
     assert status.questions[3].status == "stale"
     assert "now 1" in (status.questions[3].evidence[0].message or "")
     _commit("Change it again")
-    # A second review the same day is a timestamp, so it is a real edit
-    ck_info["questions"][3]["reviewed"] = "2026-08-29T15:40:00"
+    # A second review has to be a real edit, so it says something new
+    ck_info["questions"][3]["notes"] = "Reread again after the rerun."
     _write_yaml(ck_info)
     ck_info = calkit.load_calkit_info()
     _commit("Review again")
@@ -314,7 +314,7 @@ def test_check_questions(tmp_dir):
     assert status.questions[3].status == "stale"
     assert "dvc.lock" in (status.questions[3].evidence[5].message or "")
     # Broken references and templates are errors, not staleness
-    ck_info["questions"][3]["reviewed"] = "2026-08-31"
+    ck_info["questions"][3]["notes"] = "Reread after the fit changed."
     _write_yaml(ck_info)
     ck_info = calkit.load_calkit_info()
     _commit("Review once more")

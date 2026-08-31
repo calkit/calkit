@@ -5071,7 +5071,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit; setting ``reviewed`` after re-reading the answer against\nthe new evidence is how to say it still holds.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit, so editing the question after re-reading it against the\nnew evidence is how to say it still holds.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -5144,24 +5144,6 @@
         "question": {
           "title": "Question",
           "type": "string"
-        },
-        "reviewed": {
-          "anyOf": [
-            {
-              "format": "date-time",
-              "type": "string"
-            },
-            {
-              "format": "date",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "When the answer was last read against its evidence, as a date or a timestamp. Any edit to the question, this field included, marks it current, so this is the way to say an answer still holds after its evidence changed without rewording it. Use a timestamp when reviewing more than once in a day, since setting the same date again is not an edit.",
-          "title": "Reviewed"
         }
       },
       "required": [

@@ -1047,6 +1047,13 @@ def test_check_repro_literals(tmp_dir):
     )
     assert "3.14" in out
     assert "0.42" not in out
+    # Both detail views say what they do not catch, since a check offered
+    # as guidance is only useful if its blind spots are known
+    assert "What this does not catch" in out
+    retyped = subprocess.check_output(
+        ["calkit", "check", "repro", "-c", "retyped"], text=True
+    )
+    assert "What this does not catch" in retyped
     # A figure width is layout, not a result, whether the macro is
     # LaTeX's or Calkit's
     assert "0.75" not in out

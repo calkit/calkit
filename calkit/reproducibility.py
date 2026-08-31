@@ -489,17 +489,20 @@ def _mask_exclusion_zones(tex_source: str) -> str:
 
 
 #: A value the project computes has to be this distinctive before its
-#: appearance in prose means anything. "3" is a number that turns up in
-#: every paper; "0.42" is one somebody copied.
+#: appearance in prose means anything. "3" turns up in every paper; "0.42"
+#: is one somebody copied.
 MIN_SIGNIFICANT_DIGITS = 2
+#: Small integers are counts, indices and quantities any sentence might
+#: carry, so only larger ones are distinctive enough to mean something. A
+#: bare "500" in prose is very likely the 500 the config names; a bare "8"
+#: is not.
+MIN_DISTINCTIVE_INTEGER = 100
 
 
 def _is_distinctive(text: str) -> bool:
-    """Whether seeing this number in prose says anything.
-
-    Only decimals and scientific notation, and only with enough digits to
-    be somebody's result rather than a quantity any sentence might carry.
-    """
+    """Whether seeing this number in prose says anything."""
+    if re.fullmatch(r"-?\d+", text):
+        return abs(int(text)) >= MIN_DISTINCTIVE_INTEGER
     if not re.fullmatch(r"-?\d*\.\d+(?:[eE][+-]?\d+)?", text):
         return False
     digits = re.sub(r"[^0-9]", "", text.split("e")[0].split("E")[0]).lstrip(

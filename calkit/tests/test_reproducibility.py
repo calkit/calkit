@@ -247,6 +247,12 @@ def test_find_retyped_values():
     assert values("a value of 0.50", {"0.50": "results.json:Frac"}) == [
         ("0.50", 1, 12)
     ]
+    # A larger integer is distinctive: a bare 500 in prose is very likely
+    # the 500 the config names, where a bare 8 is not
+    assert values("500 random restarts", {"500": "results.json:NRandom"}) == [
+        ("500", 1, 1)
+    ]
+    assert values("we used 99 seeds", {"99": "results.json:NSeeds"}) == []
     # Nothing to compare against means nothing to say
     assert values("The drag coefficient is 0.42.") == []
     # A finding names where the value came from, so the fix is obvious

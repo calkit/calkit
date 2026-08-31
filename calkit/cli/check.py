@@ -396,6 +396,12 @@ def _echo_retyped(findings: list[dict]) -> None:
         "into the document. It is right today and wrong the next time that "
         "stage runs. Reference the command the 'json-to-latex' stage "
         "generates for that key instead."
+        "\n\nWhat this does not catch: a value under two significant "
+        "digits (0.5) or an integer under 100 (8), which would match too "
+        "much ordinary prose to be worth reporting; a value the document "
+        "rounds or reformats before typing, since it is compared as "
+        "written; and anything in a results file no 'json-to-latex' stage "
+        "reads, or nested inside one."
     )
 
 
@@ -426,10 +432,17 @@ def _echo_unattributed(findings: list[dict]) -> None:
     calkit.echo(
         "\nMost numbers in a paper are not results, so this is a list to "
         "look over rather than one to fix. A quantity quoted from a "
-        "reference (marked [cited]), a threshold you chose, or a tolerance "
-        "has nothing to be traced to, and writing it down as a structured "
-        "value would be work for no gain. What this is good for is "
-        "spotting the one that is a result and never got templated in."
+        "reference (marked 'quoted?'), a threshold you chose, or a "
+        "tolerance has nothing to be traced to, and writing it down as a "
+        "structured value would be work for no gain. What this is good "
+        "for is spotting the one that is a result and never got templated "
+        "in."
+        "\n\nWhat this does not catch: an integer, since counts and "
+        "indices are indistinguishable from results in prose; a number "
+        "inside a citation, a link, a label, or a figure macro's options, "
+        "which are masked; and anything in a file the document does not "
+        "read. It is tuned to under-report: a false alarm on a number "
+        "that belongs in the text costs more than a missed one."
     )
 
 

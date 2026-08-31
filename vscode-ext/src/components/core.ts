@@ -232,6 +232,42 @@ export function lensTitle(components: Component[]): string | undefined {
   return `$(go-to-file) ${stages.join(", ")}`;
 }
 
+/**
+ * A figure reference in a source Calkit can't resolve fully, as a component.
+ *
+ * A Quarto or Markdown document has no provenance record and no generated
+ * commands, so there is nothing to ask the resolver. What is still knowable
+ * is which stage produces the file a figure reference points at, which is
+ * enough for a lens that names the stage and offers to run it. Everything a
+ * record would add -- pages, values, whether it is current -- is genuinely
+ * unknown here, and says so.
+ */
+export function figureComponent(
+  path: string,
+  stage: string | undefined,
+  source: string,
+  line: number,
+): Component {
+  return {
+    kind: "figure",
+    path,
+    key: null,
+    pages: [],
+    stage: stage ?? null,
+    stage_inputs: [],
+    script: null,
+    provenance: stage ? "pipeline" : "undeclared",
+    document_value: null,
+    build_value: null,
+    current_value: null,
+    build_hash: null,
+    current_hash: null,
+    status: "unknown",
+    stale_reasons: [],
+    locations: [{ source, line, column: 1 }],
+  };
+}
+
 // Group a document's components by the line of one source file they are
 // written on, so a lens can be put on each such line from a single listing
 // rather than by asking about every line in the document. Lines come back

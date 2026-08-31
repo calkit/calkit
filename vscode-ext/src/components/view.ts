@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   componentsByLine,
+  figureComponent,
   definitionLine,
   hoverLines,
   isLatexDocument,
@@ -9,6 +10,12 @@ import {
   withCheckedStatus,
 } from "./core";
 import type { Component, DocumentComponents } from "./core";
+import {
+  extractLatexImageRefs,
+  extractMarkdownImageRefs,
+  resolveFigureRefStage,
+  resolveImageRefToRepoRelative,
+} from "../figures/core";
 
 // Editor surfaces for the project content a document injects: what is under
 // the cursor, where it came from, and whether it still matches the project.
@@ -28,6 +35,10 @@ export interface ComponentsDeps {
     args: string[],
   ) => Promise<DocumentComponents | undefined>;
   runStageCommand: string;
+  // Output path -> producing stage, for documents the resolver can't read
+  buildOutputToStageMap: (
+    workspaceRoot: string,
+  ) => Promise<Map<string, string>>;
   log: (message: string) => void;
 }
 
@@ -231,16 +242,15 @@ export class ComponentsProvider
     document: vscode.TextDocument,
   ): Promise<vscode.CodeLens[]> {
     const workspaceRoot = this.deps.getWorkspaceRoot();
-    if (
-      !workspaceRoot ||
-      !isLatexDocument(document.uri.fsPath, document.languageId)
-    ) {
+    if (!workspaceRoot) {
       return [];
     }
     const relPath = vscode.workspace
       .asRelativePath(document.uri, false)
       .replace(/\\/g, "/");
-    const components = await this.listing(workspaceRoot, relPath);
+    const components = isLatexDocument(document.uri.fsPath, document.languageId)
+      ? await this.listing(workspaceRoot, relPath)
+      : await this.figureComponents(workspaceRoot, document, relPath);
     if (!components || components.length === 0) {
       return [];
     }
@@ -262,5 +272,43 @@ export class ComponentsProvider
       );
     }
     return lenses;
+  }
+
+  // Quarto and Markdown have no provenance record to read, so the figures
+  // they reference are resolved the only way available: by asking which
+  // stage produces the path. Same lens, less to say on it.
+  private async figureComponents(
+    workspaceRoot: string,
+    document: vscode.TextDocument,
+    relPath: string,
+  ): Promise<Component[]> {
+    const text = document.getText();
+    const refs = /\.tex$/i.test(document.uri.fsPath)
+      ? extractLatexImageRefs(text)
+      : extractMarkdownImageRefs(text);
+    if (refs.length === 0) {
+      return [];
+    }
+    const outputToStage = await this.deps.buildOutputToStageMap(workspaceRoot);
+    const components: Component[] = [];
+    for (const ref of refs) {
+      const path = resolveImageRefToRepoRelative(
+        document.uri.fsPath,
+        ref.target,
+        workspaceRoot,
+      );
+      if (!path) {
+        continue;
+      }
+      components.push(
+        figureComponent(
+          path,
+          resolveFigureRefStage(path, outputToStage),
+          relPath,
+          ref.line + 1,
+        ),
+      );
+    }
+    return components;
   }
 }

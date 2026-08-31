@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   componentsByLine,
+  figureComponent,
   definitionLine,
   displayValue,
   hoverLines,
@@ -251,4 +252,29 @@ test("finds the line a results key is on", () => {
   // A key that would otherwise be a regex is matched literally
   assert.equal(definitionLine('{\n  "a+b": 1\n}\n', "a+b"), 1);
   assert.equal(definitionLine('{\n  "axb": 1\n}\n', "a+b"), undefined);
+});
+
+test("a figure reference becomes a component the same lens can render", () => {
+  // Quarto and Markdown have no provenance record, so a figure is resolved
+  // by asking which stage produces the path. The lens is the same one; it
+  // just has less to say.
+  const made = figureComponent("figures/plot.png", "plot", "notes.qmd", 4);
+  assert.equal(made.kind, "figure");
+  assert.equal(made.stage, "plot");
+  assert.equal(made.provenance, "pipeline");
+  assert.deepEqual(made.locations, [
+    { source: "notes.qmd", line: 4, column: 1 },
+  ]);
+  // Everything a record would add is genuinely unknown here, and says so
+  // rather than reading as current
+  assert.equal(made.status, "unknown");
+  assert.deepEqual(made.pages, []);
+  assert.match(lensTitle([made]) ?? "", /plot/);
+  // A figure no stage produces is the same gap it is in a LaTeX document
+  const orphan = figureComponent("img/hand.png", undefined, "notes.qmd", 9);
+  assert.equal(orphan.provenance, "undeclared");
+  assert.equal(orphan.stage, null);
+  assert.match(lensTitle([orphan]) ?? "", /No provenance/);
+  // And it lands on the line it was written on, 0-based for the editor
+  assert.deepEqual([...componentsByLine([orphan], "notes.qmd").keys()], [8]);
 });

@@ -47,10 +47,7 @@ import {
   splitMarkdownStageName,
 } from "./markdown/core";
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
-import {
-  FigureSourceCodeLensProvider,
-  openFiguresCarousel,
-} from "./figures/view";
+import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
 import type { DocumentComponents } from "./components/core";
 
@@ -1337,35 +1334,29 @@ export function activate(context: vscode.ExtensionContext): void {
   void refreshActiveFileStageContext(vscode.window.activeTextEditor?.document);
   void refreshActiveFileFigureOutputContext();
 
-  // Surfaces "Source: <stage>" CodeLenses on figure references in Quarto
-  // (![](...)) and LaTeX (\includegraphics{...}) documents.
-  const figureCodeLensProvider = new FigureSourceCodeLensProvider({
-    getWorkspaceRoot,
-    buildOutputToStageMap,
-    goToFigureSourceCommand: COMMAND_GO_TO_FIGURE_SOURCE,
-  });
-  context.subscriptions.push(
-    vscode.languages.registerCodeLensProvider(
-      [
-        { scheme: "file", pattern: "**/*.qmd" },
-        { scheme: "file", pattern: "**/*.tex" },
-      ],
-      figureCodeLensProvider,
-    ),
-  );
-
   // Hover, go-to-definition/declaration and CodeLenses over the project
   // content a LaTeX document injects: where a value or figure came from, the
   // stage and script behind it, and whether the project has moved on since.
   const componentsProvider = new ComponentsProvider({
     getWorkspaceRoot,
     describeComponents,
+    buildOutputToStageMap,
     runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
     log,
   });
   const texSelector: vscode.DocumentSelector = [
     { scheme: "file", language: "latex" },
     { scheme: "file", pattern: "**/*.tex" },
+  ];
+  // Hover and navigation need the resolver, which reads a LaTeX document.
+  // The lens also covers Quarto and Markdown, where it falls back to
+  // resolving figure references against the pipeline's outputs -- one lens
+  // provider rather than two saying overlapping things on the same line.
+  const lensSelector: vscode.DocumentSelector = [
+    { scheme: "file", language: "latex" },
+    { scheme: "file", pattern: "**/*.tex" },
+    { scheme: "file", pattern: "**/*.qmd" },
+    { scheme: "file", pattern: "**/*.md" },
   ];
   context.subscriptions.push(
     vscode.languages.registerHoverProvider(texSelector, componentsProvider),
@@ -1377,7 +1368,7 @@ export function activate(context: vscode.ExtensionContext): void {
       texSelector,
       componentsProvider,
     ),
-    vscode.languages.registerCodeLensProvider(texSelector, componentsProvider),
+    vscode.languages.registerCodeLensProvider(lensSelector, componentsProvider),
     vscode.commands.registerCommand(
       COMMAND_RUN_COMPONENT_STAGE,
       (stageName?: string) => {
@@ -1419,7 +1410,6 @@ export function activate(context: vscode.ExtensionContext): void {
   // Watch for changes to dvc.yaml/calkit.yaml to keep pipeline output context fresh.
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
-    figureCodeLensProvider.refresh();
     componentsProvider.refresh();
     // A file only gets stage lenses once calkit.yaml declares it, so these
     // have to be recomputed when that changes

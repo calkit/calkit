@@ -10,7 +10,7 @@ import type {
   GithubRepo,
   OverleafLookup,
   OverleafSyncResponse,
-  DocumentComponents,
+  PublicationComponents,
   OverleafSyncStatus,
   ProjectPublic,
   PullRequestRefs,
@@ -152,7 +152,7 @@ export type Request =
       bibKey: string;
     }
   | {
-      type: "project.documentComponents";
+      type: "project.publicationComponents";
       owner: string;
       project: string;
       /** The document, or the folder holding it. */
@@ -184,7 +184,7 @@ export interface ResponseMap {
   "project.dvcOutputs": DvcOutput[];
   "project.textDiff": TextDiff;
   "project.figures": Figure[];
-  "project.documentComponents": DocumentComponents;
+  "project.publicationComponents": PublicationComponents;
   "content.imageDataUrl": string;
   "content.dataUrl": string;
   "overleaf.lookup": OverleafLookup;

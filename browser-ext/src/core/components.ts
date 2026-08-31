@@ -1,17 +1,17 @@
-import type { DocumentComponent } from "./types";
+import type { PublicationComponent } from "./types";
 
 // Pure helpers for the project content a document shows on the page, so
 // they can be unit-tested without a page or an extension around them. The
 // panel that renders them lives in content/overleaf.ts.
 //
-// Everything comes from the hub's document-components endpoint, which is
+// Everything comes from the hub's publication components endpoint, which is
 // the same resolver the CLI and the VS Code extension read, so a number in
 // a paper has one account of where it came from wherever you ask.
 
 // Worst first, since that's what needs doing; a component nothing could be
 // checked about is not a problem, but it isn't a clean bill of health
 // either, so it sits between.
-const STATUS_RANK: Record<DocumentComponent["status"], number> = {
+const STATUS_RANK: Record<string, number> = {
   missing: 0,
   stale: 1,
   unknown: 2,
@@ -20,10 +20,10 @@ const STATUS_RANK: Record<DocumentComponent["status"], number> = {
 
 /** Sort components worst first, then by the file they came from. */
 export function sortComponents(
-  items: DocumentComponent[],
-): DocumentComponent[] {
-  const rank = (item: DocumentComponent) =>
-    STATUS_RANK[item.status] ?? STATUS_RANK.unknown;
+  items: PublicationComponent[],
+): PublicationComponent[] {
+  const rank = (item: PublicationComponent) =>
+    STATUS_RANK[item.status ?? "unknown"] ?? STATUS_RANK.unknown;
   return [...items].sort(
     (a, b) =>
       rank(a) - rank(b) ||
@@ -33,7 +33,7 @@ export function sortComponents(
 }
 
 /** How to name a component: the file, and the key within it. */
-export function componentLabel(item: DocumentComponent): string {
+export function componentLabel(item: PublicationComponent): string {
   return item.key ? `${item.path}: ${item.key}` : item.path;
 }
 
@@ -47,7 +47,7 @@ const STALE_EXPLANATIONS: Record<string, string> = {
  * What is wrong with a component, in terms someone editing a paper can act
  * on, or an empty string when nothing is.
  */
-export function componentProblem(item: DocumentComponent): string {
+export function componentProblem(item: PublicationComponent): string {
   if (item.status === "missing") {
     return "the project no longer has this file";
   }
@@ -69,7 +69,7 @@ export function componentProblem(item: DocumentComponent): string {
  * what needs attention shouldn't shout about what doesn't.
  */
 export function componentBadge(
-  item: DocumentComponent,
+  item: PublicationComponent,
 ): { text: string; level: "danger" | "warn" | "dim" } | null {
   if (item.status === "missing") return { text: "missing", level: "danger" };
   if (item.status === "stale") return { text: "out of date", level: "warn" };
@@ -83,7 +83,7 @@ export function componentBadge(
  * A line summarizing what a document's components need, for the panel
  * header. Empty when there is nothing to say.
  */
-export function componentsSummary(items: DocumentComponent[]): string {
+export function componentsSummary(items: PublicationComponent[]): string {
   const stale = items.filter(
     (item) => item.status === "stale" || item.status === "missing",
   ).length;
@@ -106,7 +106,7 @@ export function editUrl(
   hubWebUrl: string,
   owner: string,
   project: string,
-  item: DocumentComponent,
+  item: PublicationComponent,
 ): string {
   const base = `${hubWebUrl}/${owner}/${project}`;
   if (item.script) {

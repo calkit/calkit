@@ -120,8 +120,6 @@ from app.models import (
     Dataset,
     DatasetForImport,
     DatasetPublic,
-    DocumentComponent,
-    DocumentComponents,
     Figure,
     FileLock,
     GitRef,
@@ -5185,7 +5183,11 @@ def get_project_publication_components(
     path: str,
     ref: str | None = None,
 ) -> PublicationComponents:
-    """List the files a publication is made of, each with its provenance.
+    """List what a publication is made of, each with its provenance.
+
+    Two kinds of component, in one list. A value a stage computed is as
+    much a part of the publication as the file it lands in, so both are
+    here and both name the stage to open.
 
     A component is any file in the publication's folder, i.e., the
     directory of ``path``, at ``ref``, whether tracked by Git or DVC, other
@@ -5194,7 +5196,7 @@ def get_project_publication_components(
     outside that folder, with ``from_stage_outputs`` inputs expanded and
     directories walked (``via`` is ``input``). Each is one of:
 
-    - ``produced``: an output of a pipeline stage, whether declared in its
+    - ``pipeline``: an output of a pipeline stage, whether declared in its
       ``outputs`` or as the destination of a map-paths mapping (a file, or
       anything under a directory destination). ``stage`` names it, and
       ``stage_kind`` says whether that's a copy (``map-paths``) or
@@ -5204,12 +5206,20 @@ def get_project_publication_components(
     - ``imported``: declared likewise with ``imported_from``.
     - ``authored``: a LaTeX or text source, edited in Overleaf when the
       folder is synced with one (``source``), otherwise in Git.
-    - ``unknown``: anything else. A figure-like file at or under 20 MB is
+    - ``undeclared``: anything else. A figure-like file at or under 20 MB is
       compared byte-for-byte against the project's declared figures, and
       ``matching_figure`` names one with identical content, which is what
       a copy made without a map-paths stage looks like.
 
-    ``n_unknown`` counts the ``unknown`` items.
+    The second kind is the project content the document typesets: every
+    value, figure and generated block it took from the project rather than
+    copied, with the pages it lands on and whether it is still current.
+    These come from the document's provenance record, so ``built`` is
+    false and none are listed when the document has never been built with
+    ``provenance: true``, which is not a problem to report.
+
+    ``n_undeclared`` counts the components nothing accounts for, and
+    ``n_stale`` those known to be out of date or missing.
     """
 
     def walk(tree: RepoTree, dirname: str, found: list[str]) -> None:
@@ -5382,8 +5392,9 @@ def get_project_publication_components(
         if stage is not None:
             items.append(
                 PublicationComponent(
+                    kind="file",
                     path=p,
-                    kind="produced",
+                    provenance="pipeline",
                     via=via,
                     stage=stage,
                     stage_kind=stage_kinds.get(stage),
@@ -5394,7 +5405,11 @@ def get_project_publication_components(
         if p in declared:
             items.append(
                 PublicationComponent(
-                    path=p, kind=declared[p], via=via, size=size
+                    kind="file",
+                    path=p,
+                    provenance=declared[p],
+                    via=via,
+                    size=size,
                 )
             )
             continue
@@ -5402,8 +5417,9 @@ def get_project_publication_components(
         if ext in PUBLICATION_SOURCE_EXTS:
             items.append(
                 PublicationComponent(
+                    kind="file",
                     path=p,
-                    kind="authored",
+                    provenance="authored",
                     via=via,
                     source=authored_source,
                     size=size,
@@ -5427,100 +5443,30 @@ def get_project_publication_components(
                     break
         items.append(
             PublicationComponent(
+                kind="file",
                 path=p,
-                kind="unknown",
+                provenance="undeclared",
                 via=via,
                 matching_figure=matching_figure,
                 size=size,
             )
         )
-    return PublicationComponents(
-        folder=folder,
-        items=items,
-        n_unknown=sum(1 for item in items if item.kind == "unknown"),
-    )
-
-
-@router.get(
-    "/projects/{owner_name}/{project_name}/publications/document-components"
-)
-def get_project_document_components(
-    owner_name: str,
-    project_name: str,
-    current_user: CurrentUserOptional,
-    session: SessionDep,
-    path: str,
-    ref: str | None = None,
-) -> DocumentComponents:
-    """What a document takes from the project, and whether it is current.
-
-    The other half of ``publications/components``: that lists the files a
-    publication's folder is made of, this lists the values, figures and
-    generated blocks the document typeset on the page, each with the file
-    it came from, the stage and script that produce it, the pages it lands
-    on, and its state.
-
-    A component is out of date for reasons that are not the same and are
-    not fixed the same way:
-
-    - ``stage-out-of-date``: the pipeline would rerun the stage that makes
-      it, so the artifact itself is behind. Run the stage.
-    - ``changed-since-build``: the project has moved on since the document
-      was built, so the PDF shows something the project no longer
-      produces, whatever the pipeline's state. Rebuild the document.
-
-    ``answer-stale`` is judged from Git history and so is not reported
-    here; a generated question block reads as ``unknown`` rather than as
-    current. ``provenance`` says where the source file came from, and
-    ``undeclared`` means nothing produces it and nobody has said where it
-    came from, which running the pipeline will not fix.
-
-    ``built`` is false when no build has left a provenance record, in
-    which case there is nothing to report and nothing is wrong: the
-    document may simply never have been built with provenance turned on.
-
-    ``path`` names the document, by its source or its output, or the
-    folder holding it, for a caller that knows which folder a paper is in
-    but not which file in it is the paper. The resolved document comes
-    back in ``document``.
-    """
-    project = app.projects.get_project(
-        owner_name=owner_name,
-        project_name=project_name,
-        session=session,
-        current_user=current_user,
-        min_access_level="read",
-    )
-    repo = get_repo(
-        project=project,
-        user=current_user,
-        session=session,
-        ttl=DEFAULT_REPO_TTL,
-        ref=ref,
-    )
-    tree = get_repo_tree_for_ref(repo, ref)
-    ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=ref, read_only=True
-    )
-    dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
-    document = app.components.document_in(
-        _normalize_artifact_file_path(path), ck_info
-    )
-    # Staleness is best-effort: a pipeline status that can't be computed
-    # leaves components reading as unchecked, which is honest, rather than
-    # failing the whole listing
+    # The other half of what a publication is made of: the values, figures
+    # and blocks the document typesets rather than holds as files. A value
+    # a stage computed is as much a component as the file it lands in.
+    document = app.components.document_in(pub_path, ck_info)
     stale_stage_names: set[str] | None = None
     try:
         dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
             dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
-        dvc_lock: dict[str, Any] = {}
+        dvc_lock_full: dict[str, Any] = {}
         if tree.is_file("dvc.lock"):
-            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
+            dvc_lock_full = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         stale_stage_names = app.components.stale_stage_base_names(
             compute_stage_statuses(
                 dvc_yaml=dvc_yaml,
-                dvc_lock=dvc_lock,
+                dvc_lock=dvc_lock_full,
                 tree=tree,
                 owner_name=project.owner_account_name,
                 project_name=project.name,
@@ -5543,7 +5489,7 @@ def get_project_document_components(
             current_user=current_user,
         )
 
-    components, built = app.components.components_for_document(
+    content, built = app.components.components_for_document(
         document=document,
         tree=tree,
         ck_info=ck_info,
@@ -5551,21 +5497,43 @@ def get_project_document_components(
         stale_stage_names=stale_stage_names,
         read_file=read_file,
     )
-    items = [
-        DocumentComponent.model_validate(
-            component.model_dump(mode="json"),
+    stages_by_name = (ck_info.get("pipeline") or {}).get("stages") or {}
+    for component in content:
+        dumped = component.model_dump(mode="json")
+        stage_cfg = stages_by_name.get(dumped.get("stage"))
+        items.append(
+            PublicationComponent(
+                kind=dumped["kind"],
+                path=dumped["path"],
+                provenance=dumped["provenance"],
+                stage=dumped.get("stage"),
+                stage_kind=(
+                    stage_cfg.get("kind")
+                    if isinstance(stage_cfg, dict)
+                    else None
+                ),
+                stage_inputs=dumped.get("stage_inputs") or [],
+                script=dumped.get("script"),
+                key=dumped.get("key"),
+                pages=dumped.get("pages") or [],
+                build_value=dumped.get("build_value"),
+                current_value=dumped.get("current_value"),
+                build_hash=dumped.get("build_hash"),
+                current_hash=dumped.get("current_hash"),
+                status=dumped.get("status", "unknown"),
+                stale_reasons=dumped.get("stale_reasons") or [],
+            )
         )
-        for component in components
-    ]
-    return DocumentComponents(
+    return PublicationComponents(
+        folder=folder,
         document=document,
         built=built,
         items=items,
-        n_stale=sum(
-            1 for item in items if item.status in ("stale", "missing")
-        ),
         n_undeclared=sum(
             1 for item in items if item.provenance == "undeclared"
+        ),
+        n_stale=sum(
+            1 for item in items if item.status in ("stale", "missing")
         ),
     )
 
@@ -5581,7 +5549,7 @@ def get_project_artifact_usages(
 ) -> ArtifactUsages:
     """Which of the project's documents show this artifact, and where.
 
-    The reverse of ``publications/document-components``: given a figure or
+    The reverse of ``publications/components``: given a figure or
     a results file, the papers that typeset it and the pages it lands on,
     so a change to a result shows what it touches. Read from the documents'
     provenance records, so a document that has never been built with

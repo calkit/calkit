@@ -41,28 +41,40 @@ export interface StageStatus {
 }
 
 /**
- * One piece of project content a document shows on the page: a value from
- * a results file, a figure a stage plotted, a block of generated prose.
+ * One thing a publication is made of: a file its folder holds or its build
+ * reads, or a piece of project content the document typesets -- a value
+ * from a results file, a figure a stage plotted, a block of generated
+ * prose.
  *
- * Distinct from the files a publication's folder is made of: these are
- * what the reader actually sees, and the ones that go quietly wrong when
- * the project moves on without the paper being rebuilt.
+ * A value a stage computed is as much a component as the file it lands in,
+ * which is why they share a list.
  */
-export interface DocumentComponent {
-  kind: "value" | "figure" | "text" | "block";
+export interface PublicationComponent {
+  kind: "file" | "value" | "figure" | "text" | "block";
   path: string;
-  key?: string | null;
-  pages?: number[];
+  provenance:
+    | "pipeline"
+    | "authored"
+    | "attested"
+    | "imported"
+    | "project"
+    | "undeclared";
+  via?: "folder" | "input" | null;
   stage?: string | null;
+  stage_kind?: string | null;
   stage_inputs?: string[];
   /** The stage's script or notebook, i.e., what to open to change it. */
   script?: string | null;
-  provenance: "pipeline" | "imported" | "attested" | "project" | "undeclared";
+  source?: "overleaf" | "git" | null;
+  matching_figure?: string | null;
+  size?: number | null;
+  key?: string | null;
+  pages?: number[];
   build_value?: unknown;
   current_value?: unknown;
   build_hash?: string | null;
   current_hash?: string | null;
-  status: "ok" | "stale" | "missing" | "unknown";
+  status?: "ok" | "stale" | "missing" | "unknown";
   stale_reasons?: (
     | "stage-out-of-date"
     | "changed-since-build"
@@ -70,13 +82,14 @@ export interface DocumentComponent {
   )[];
 }
 
-export interface DocumentComponents {
-  document: string;
-  /** Whether a build left a provenance record to read at all. */
-  built: boolean;
-  items?: DocumentComponent[];
-  n_stale?: number;
+export interface PublicationComponents {
+  folder: string;
+  document?: string | null;
+  /** Whether a build left a provenance record to read. */
+  built?: boolean;
+  items?: PublicationComponent[];
   n_undeclared?: number;
+  n_stale?: number;
 }
 
 export interface OverleafSyncStatusFile {

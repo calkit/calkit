@@ -9,11 +9,11 @@ import {
   sortComponents,
   valueText,
 } from "./components";
-import type { DocumentComponent } from "./types";
+import type { PublicationComponent } from "./types";
 
 function component(
-  overrides: Partial<DocumentComponent> = {},
-): DocumentComponent {
+  overrides: Partial<PublicationComponent> = {},
+): PublicationComponent {
   return {
     kind: "value",
     path: "results/findings.json",

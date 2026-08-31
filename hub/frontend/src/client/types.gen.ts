@@ -990,105 +990,6 @@ export type DiscountCodePublic = {
 }
 
 /**
- * DocumentComponent
- *
- * One piece of project content a document shows on the page.
- *
- * A publication's *components* in the file sense (see
- * :class:`PublicationComponent`) are the files its folder is made of.
- * These are the other half: the values, figures and generated blocks the
- * document took from the project and typeset, each with where it came
- * from and whether the reader is looking at something the project still
- * produces.
- */
-export type DocumentComponent = {
-  /**
-   * Kind
-   */
-  kind: "value" | "figure" | "text" | "block"
-  /**
-   * Path
-   */
-  path: string
-  /**
-   * Key
-   */
-  key?: string | null
-  /**
-   * Pages
-   */
-  pages?: Array<number>
-  /**
-   * Stage
-   */
-  stage?: string | null
-  /**
-   * Stage Inputs
-   */
-  stage_inputs?: Array<string>
-  /**
-   * Script
-   */
-  script?: string | null
-  /**
-   * Provenance
-   */
-  provenance: "pipeline" | "imported" | "attested" | "project" | "undeclared"
-  /**
-   * Build Value
-   */
-  build_value?: unknown
-  /**
-   * Current Value
-   */
-  current_value?: unknown
-  /**
-   * Build Hash
-   */
-  build_hash?: string | null
-  /**
-   * Current Hash
-   */
-  current_hash?: string | null
-  /**
-   * Status
-   */
-  status: "ok" | "stale" | "missing" | "unknown"
-  /**
-   * Stale Reasons
-   */
-  stale_reasons?: Array<
-    "stage-out-of-date" | "changed-since-build" | "answer-stale"
-  >
-}
-
-/**
- * DocumentComponents
- */
-export type DocumentComponents = {
-  /**
-   * Document
-   */
-  document: string
-  /**
-   * Built
-   */
-  built: boolean
-  /**
-   * Items
-   */
-  items?: Array<DocumentComponent>
-  /**
-   * N Stale
-   */
-  n_stale?: number
-  /**
-   * N Undeclared
-   */
-  n_undeclared?: number
-}
-
-/**
  * DvcForeachStage
  */
 export type DvcForeachStage = {
@@ -3940,21 +3841,38 @@ export type Publication = {
 /**
  * PublicationComponent
  *
- * One file a publication is made of and where it comes from.
+ * One thing a publication is made of, and where it came from.
+ *
+ * Either a file -- a source in its folder, or an input its build stage
+ * reads from elsewhere in the project -- or a piece of project content
+ * the document typesets: a value from a results file, a figure a stage
+ * plotted, a block of generated prose. A value a stage computed is as
+ * much a component of the publication as the file it lands in, which is
+ * why they share a list.
  */
 export type PublicationComponent = {
+  /**
+   * Kind
+   */
+  kind: "file" | "value" | "figure" | "text" | "block"
   /**
    * Path
    */
   path: string
   /**
-   * Kind
+   * Provenance
    */
-  kind: "produced" | "authored" | "attested" | "imported" | "unknown"
+  provenance:
+    | "pipeline"
+    | "authored"
+    | "attested"
+    | "imported"
+    | "project"
+    | "undeclared"
   /**
    * Via
    */
-  via?: "folder" | "input"
+  via?: "folder" | "input" | null
   /**
    * Stage
    */
@@ -3963,6 +3881,14 @@ export type PublicationComponent = {
    * Stage Kind
    */
   stage_kind?: string | null
+  /**
+   * Stage Inputs
+   */
+  stage_inputs?: Array<string>
+  /**
+   * Script
+   */
+  script?: string | null
   /**
    * Source
    */
@@ -3975,6 +3901,40 @@ export type PublicationComponent = {
    * Size
    */
   size?: number | null
+  /**
+   * Key
+   */
+  key?: string | null
+  /**
+   * Pages
+   */
+  pages?: Array<number>
+  /**
+   * Build Value
+   */
+  build_value?: unknown
+  /**
+   * Current Value
+   */
+  current_value?: unknown
+  /**
+   * Build Hash
+   */
+  build_hash?: string | null
+  /**
+   * Current Hash
+   */
+  current_hash?: string | null
+  /**
+   * Status
+   */
+  status?: "ok" | "stale" | "missing" | "unknown"
+  /**
+   * Stale Reasons
+   */
+  stale_reasons?: Array<
+    "stage-out-of-date" | "changed-since-build" | "answer-stale"
+  >
 }
 
 /**
@@ -3986,13 +3946,25 @@ export type PublicationComponents = {
    */
   folder: string
   /**
+   * Document
+   */
+  document?: string | null
+  /**
+   * Built
+   */
+  built?: boolean
+  /**
    * Items
    */
-  items: Array<PublicationComponent>
+  items?: Array<PublicationComponent>
   /**
-   * N Unknown
+   * N Undeclared
    */
-  n_unknown: number
+  n_undeclared?: number
+  /**
+   * N Stale
+   */
+  n_stale?: number
 }
 
 /**
@@ -10183,51 +10155,6 @@ export type GetProjectPublicationComponentsResponses = {
 
 export type GetProjectPublicationComponentsResponse =
   GetProjectPublicationComponentsResponses[keyof GetProjectPublicationComponentsResponses]
-
-export type GetProjectDocumentComponentsData = {
-  body?: never
-  path: {
-    /**
-     * Owner Name
-     */
-    owner_name: string
-    /**
-     * Project Name
-     */
-    project_name: string
-  }
-  query: {
-    /**
-     * Path
-     */
-    path: string
-    /**
-     * Ref
-     */
-    ref?: string | null
-  }
-  url: "/projects/{owner_name}/{project_name}/publications/document-components"
-}
-
-export type GetProjectDocumentComponentsErrors = {
-  /**
-   * Validation Error
-   */
-  422: HttpValidationError
-}
-
-export type GetProjectDocumentComponentsError =
-  GetProjectDocumentComponentsErrors[keyof GetProjectDocumentComponentsErrors]
-
-export type GetProjectDocumentComponentsResponses = {
-  /**
-   * Successful Response
-   */
-  200: DocumentComponents
-}
-
-export type GetProjectDocumentComponentsResponse =
-  GetProjectDocumentComponentsResponses[keyof GetProjectDocumentComponentsResponses]
 
 export type GetProjectArtifactUsagesData = {
   body?: never

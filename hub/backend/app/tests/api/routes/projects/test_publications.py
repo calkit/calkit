@@ -318,7 +318,13 @@ def test_get_project_publication_components(
         assert resp.status_code == 200, resp.text
         body = resp.json()
         assert body["folder"] == "paper"
-        by_path = {item["path"]: item for item in body["items"]}
+        # Files and page content share one list now, so a path can appear
+        # as both; the file rows are what this test is about
+        by_path = {
+            item["path"]: item
+            for item in body["items"]
+            if item["kind"] == "file"
+        }
         assert sorted(by_path) == [
             "data/table.csv",
             "data/tables/t1.csv",
@@ -332,46 +338,45 @@ def test_get_project_publication_components(
             "paper/refs.bib",
             "paper/results.tex",
         ]
-        assert by_path["paper/figures/gen.png"] == {
-            "path": "paper/figures/gen.png",
-            "kind": "produced",
-            "via": "folder",
-            "stage": "figs-to-paper",
-            "stage_kind": "map-paths",
-            "source": None,
-            "matching_figure": None,
-            "size": 3,
-        }
-        assert by_path["paper/figures/sub/a.png"]["kind"] == "produced"
+        gen = by_path["paper/figures/gen.png"]
+        assert gen["kind"] == "file"
+        assert gen["provenance"] == "pipeline"
+        assert gen["via"] == "folder"
+        assert gen["stage"] == "figs-to-paper"
+        assert gen["stage_kind"] == "map-paths"
+        assert gen["source"] is None
+        assert gen["matching_figure"] is None
+        assert gen["size"] == 3
+        assert by_path["paper/figures/sub/a.png"]["provenance"] == "pipeline"
         assert by_path["paper/figures/sub/a.png"]["stage"] == "figs-to-paper"
-        assert by_path["paper/results.tex"]["kind"] == "produced"
+        assert by_path["paper/results.tex"]["provenance"] == "pipeline"
         assert by_path["paper/results.tex"]["stage"] == "results-to-tex"
         assert by_path["paper/results.tex"]["stage_kind"] == "json-to-latex"
         # The build stage's inputs from outside the folder are components
         # too, classified the same way
         assert by_path["data/table.csv"]["via"] == "input"
-        assert by_path["data/table.csv"]["kind"] == "imported"
+        assert by_path["data/table.csv"]["provenance"] == "imported"
         assert by_path["data/tables/t1.csv"]["via"] == "input"
-        assert by_path["data/tables/t1.csv"]["kind"] == "unknown"
+        assert by_path["data/tables/t1.csv"]["provenance"] == "undeclared"
         assert all(
             item["via"] == "folder"
             for p, item in by_path.items()
             if p.startswith("paper/")
         )
-        assert by_path["paper/photo.jpg"]["kind"] == "attested"
-        assert by_path["paper/logo.png"]["kind"] == "imported"
+        assert by_path["paper/photo.jpg"]["provenance"] == "attested"
+        assert by_path["paper/logo.png"]["provenance"] == "imported"
         for authored in ["paper/paper.tex", "paper/refs.bib"]:
-            assert by_path[authored]["kind"] == "authored"
+            assert by_path[authored]["provenance"] == "authored"
             assert by_path[authored]["source"] == "git"
-        assert by_path["paper/figures/x.png"]["kind"] == "unknown"
+        assert by_path["paper/figures/x.png"]["provenance"] == "undeclared"
         assert (
             by_path["paper/figures/x.png"]["matching_figure"]
             == "figures/x.png"
         )
         assert by_path["paper/figures/x.png"]["size"] == len(png)
-        assert by_path["paper/figures/hand.png"]["kind"] == "unknown"
+        assert by_path["paper/figures/hand.png"]["provenance"] == "undeclared"
         assert by_path["paper/figures/hand.png"]["matching_figure"] is None
-        assert body["n_unknown"] == 3
+        assert body["n_undeclared"] == 3
         # A folder synced with Overleaf is where its sources are edited
         ck_info["overleaf_sync"] = {
             "paper": {"url": "https://www.overleaf.com/project/abc123"}
@@ -384,7 +389,11 @@ def test_get_project_publication_components(
             headers=normal_user_token_headers,
         )
         assert resp.status_code == 200, resp.text
-        by_path = {item["path"]: item for item in resp.json()["items"]}
+        by_path = {
+            item["path"]: item
+            for item in resp.json()["items"]
+            if item["kind"] == "file"
+        }
         assert by_path["paper/paper.tex"]["source"] == "overleaf"
         assert by_path["paper/figures/x.png"]["source"] is None
         # A path leaving the project is refused

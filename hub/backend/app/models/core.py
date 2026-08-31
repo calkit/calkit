@@ -1435,79 +1435,78 @@ class Publication(BaseModel):
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
 
 
+#: What a component is. A publication is made of files -- the sources in
+#: its folder, the inputs its build reads -- and of the project content the
+#: document typesets on the page. Both are components of the publication;
+#: only the first kind is a file.
+ComponentKind = Literal["file", "value", "figure", "text", "block"]
+#: Where a component came from. "pipeline" is the only one that is checked
+#: rather than claimed; "undeclared" is the gap. Spelled apart from the
+#: status vocabulary, where "unknown" already means nothing checked it.
+ComponentProvenance = Literal[
+    "pipeline", "authored", "attested", "imported", "project", "undeclared"
+]
+ComponentStatus = Literal["ok", "stale", "missing", "unknown"]
+ComponentStaleReason = Literal[
+    "stage-out-of-date", "changed-since-build", "answer-stale"
+]
+
+
 class PublicationComponent(BaseModel):
-    """One file a publication is made of and where it comes from."""
+    """One thing a publication is made of, and where it came from.
 
-    # Repo-relative
-    path: str
-    kind: Literal["produced", "authored", "attested", "imported", "unknown"]
-    # In the publication's folder, or read by its build stage from
-    # elsewhere in the project
-    via: Literal["folder", "input"] = "folder"
-    # For "produced": the stage that makes it, and that stage's kind, so a
-    # map-paths copy can be told from something computed
-    stage: str | None = None
-    stage_kind: str | None = None
-    # For "authored": where the source is edited
-    source: Literal["overleaf", "git"] | None = None
-    # For "unknown": a project figure with identical bytes, if any
-    matching_figure: str | None = None
-    size: int | None = None
-
-
-class PublicationComponents(BaseModel):
-    folder: str
-    items: list[PublicationComponent]
-    n_unknown: int
-
-
-class DocumentComponent(BaseModel):
-    """One piece of project content a document shows on the page.
-
-    A publication's *components* in the file sense (see
-    :class:`PublicationComponent`) are the files its folder is made of.
-    These are the other half: the values, figures and generated blocks the
-    document took from the project and typeset, each with where it came
-    from and whether the reader is looking at something the project still
-    produces.
+    Either a file -- a source in its folder, or an input its build stage
+    reads from elsewhere in the project -- or a piece of project content
+    the document typesets: a value from a results file, a figure a stage
+    plotted, a block of generated prose. A value a stage computed is as
+    much a component of the publication as the file it lands in, which is
+    why they share a list.
     """
 
-    kind: Literal["value", "figure", "text", "block"]
-    # Repo-relative path of the file the content came from
+    kind: ComponentKind
+    # Repo-relative path of the file, or of the file the content came from
     path: str
-    # Results key for a value, question number for a block
-    key: str | None = None
-    # Pages of the built document it appears on
-    pages: list[int] = Field(default_factory=list)
+    provenance: ComponentProvenance
+    # Files only: in the publication's folder, or read by its build stage
+    # from elsewhere in the project
+    via: Literal["folder", "input"] | None = None
+    # For "pipeline": the stage that makes it, that stage's kind so a
+    # map-paths copy can be told from something computed, what it reads,
+    # and what to open to change it
     stage: str | None = None
+    stage_kind: str | None = None
     stage_inputs: list[str] = Field(default_factory=list)
-    # The stage's script or notebook, i.e., what to open to change it
     script: str | None = None
-    # Where the source file came from. "pipeline" is the only one that is
-    # checked rather than claimed; "undeclared" is the gap.
-    provenance: Literal[
-        "pipeline", "imported", "attested", "project", "undeclared"
-    ]
-    # The raw value behind it when the document was built, and now
+    # For "authored": where the source is edited
+    source: Literal["overleaf", "git"] | None = None
+    # For an undeclared file: a project figure with identical bytes, if any
+    matching_figure: str | None = None
+    size: int | None = None
+    # Content only: the results key or question number, and the pages of
+    # the built document it appears on
+    key: str | None = None
+    pages: list[int] = Field(default_factory=list)
+    # Content only: the raw value behind it when the document was built and
+    # now, and the hash of its source file then and now
     build_value: Any = None
     current_value: Any = None
     build_hash: str | None = None
     current_hash: str | None = None
-    status: Literal["ok", "stale", "missing", "unknown"]
-    stale_reasons: list[
-        Literal["stage-out-of-date", "changed-since-build", "answer-stale"]
-    ] = Field(default_factory=list)
+    status: ComponentStatus = "unknown"
+    stale_reasons: list[ComponentStaleReason] = Field(default_factory=list)
 
 
-class DocumentComponents(BaseModel):
-    document: str
-    # Whether a build left a provenance record to read. Without one there
-    # is nothing to show, and nothing is wrong: the document may simply
-    # never have been built with provenance turned on.
-    built: bool
-    items: list[DocumentComponent] = Field(default_factory=list)
-    n_stale: int = 0
+class PublicationComponents(BaseModel):
+    folder: str
+    # The document whose page content was read, and whether a build left a
+    # provenance record to read it from. Without one there is nothing to
+    # show and nothing is wrong: the document may simply never have been
+    # built with provenance turned on.
+    document: str | None = None
+    built: bool = False
+    items: list[PublicationComponent] = Field(default_factory=list)
     n_undeclared: int = 0
+    n_stale: int = 0
 
 
 class ArtifactUsage(BaseModel):

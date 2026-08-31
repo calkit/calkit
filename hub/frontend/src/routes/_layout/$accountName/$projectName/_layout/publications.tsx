@@ -55,7 +55,6 @@ import PdfAnnotator, {
   commentToHighlight,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
-import DocumentComponents from "../../../../../components/Publications/DocumentComponents"
 import PublicationComponents from "../../../../../components/Publications/PublicationComponents"
 import PublicationView from "../../../../../components/Publications/PublicationView"
 import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
@@ -78,8 +77,6 @@ const pubSearchSchema = z.object({
   compare_ref: z.string().optional(),
   editor_open: z.boolean().optional(),
   components_open: z.boolean().optional(),
-  // The other components panel: what the document shows on the page
-  page_components_open: z.boolean().optional(),
   // Which file of unknown origin is being resolved, and how
   resolve_path: z.string().optional(),
   resolve_as: z.enum(["figure", "attest", "import"]).optional(),
@@ -312,12 +309,6 @@ function PubInfo({
         publication={publication}
         gitRef={gitRef}
         userHasWriteAccess={userHasWriteAccess}
-      />
-      <DocumentComponents
-        ownerName={ownerName}
-        projectName={projectName}
-        publication={publication}
-        gitRef={gitRef}
       />
       {publication.overleaf?.project_id && (
         <Box mt={2}>

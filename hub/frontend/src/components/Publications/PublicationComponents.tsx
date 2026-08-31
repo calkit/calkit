@@ -68,31 +68,76 @@ import {
 } from "../Figures/UploadFigure"
 import { isTemplatePublication } from "./ImportOverleaf"
 
-// What the folder holds, by origin
+// What a publication is made of, worst first
 
-// Unknowns first, since they're what needs doing; then in the order a
-// reader wants: what the pipeline made, what people wrote, vouched for,
-// or brought in
+// A component nothing accounts for is what needs doing; after that, order
+// by what the thing is, so a file's siblings stay together and the page
+// content reads as its own group.
+const STATUS_RANK: Record<string, number> = {
+  missing: 0,
+  stale: 1,
+  unknown: 2,
+  ok: 3,
+}
 const KIND_RANK: Record<PublicationComponent["kind"], number> = {
-  unknown: 0,
-  produced: 1,
-  authored: 2,
-  attested: 3,
-  imported: 4,
+  file: 0,
+  value: 1,
+  figure: 2,
+  text: 3,
+  block: 4,
 }
 
 /**
- * Sort components for the table: by kind as ranked above, then by path
- * within a kind. An unrecognized kind reads as unknown.
+ * Sort for the table: anything undeclared or out of date first, then by
+ * kind, then by path and key.
  */
 export function sortComponents(
   items: PublicationComponent[],
 ): PublicationComponent[] {
+  const needsAttention = (item: PublicationComponent) =>
+    item.provenance === "undeclared" ||
+    item.status === "stale" ||
+    item.status === "missing"
+      ? 0
+      : 1
   const rank = (item: PublicationComponent) =>
-    KIND_RANK[item.kind] ?? KIND_RANK.unknown
+    STATUS_RANK[item.status ?? "unknown"] ?? STATUS_RANK.unknown
   return [...items].sort(
-    (a, b) => rank(a) - rank(b) || a.path.localeCompare(b.path),
+    (a, b) =>
+      needsAttention(a) - needsAttention(b) ||
+      rank(a) - rank(b) ||
+      (KIND_RANK[a.kind] ?? 0) - (KIND_RANK[b.kind] ?? 0) ||
+      a.path.localeCompare(b.path) ||
+      (a.key ?? "").localeCompare(b.key ?? ""),
   )
+}
+
+/** How a component is named in the table: the path, and the key within it. */
+export function componentLabel(
+  item: PublicationComponent,
+  folder: string,
+): string {
+  const shown = relativeComponentPath(item.path, folder)
+  return item.key ? `${shown}:${item.key}` : shown
+}
+
+/** "pp. 3, 7", or nothing for a component that reached no page. */
+export function pagesText(pages: number[] | undefined): string {
+  if (!pages || pages.length === 0) return ""
+  return `${pages.length === 1 ? "p." : "pp."} ${pages.join(", ")}`
+}
+
+const STALE_EXPLANATIONS: Record<string, string> = {
+  "stage-out-of-date": "its stage needs a rerun",
+  "changed-since-build": "the project has moved on since this was built",
+  "answer-stale": "the answer no longer matches its evidence",
+}
+
+/** Why a component is not current, in a reader's terms. */
+export function staleExplanation(item: PublicationComponent): string {
+  return (item.stale_reasons ?? [])
+    .map((reason) => STALE_EXPLANATIONS[reason] ?? reason)
+    .join(", and ")
 }
 
 /** A component's path as shown inside its folder, e.g., `figures/a.png`. */
@@ -347,12 +392,9 @@ function ResolveRowForm({
 // The modal: every file in the folder and where it came from
 
 function OriginCell({ item }: { item: PublicationComponent }) {
-  if (item.kind === "produced")
+  if (item.provenance === "pipeline")
     return (
       <>
-        {item.stage_kind === "map-paths"
-          ? "Copied in by stage"
-          : "Pipeline stage"}{" "}
         <Link
           as={RouterLink}
           to="../pipeline"
@@ -362,19 +404,25 @@ function OriginCell({ item }: { item: PublicationComponent }) {
             {item.stage}
           </Code>
         </Link>
+        <Text fontSize="xs" color="ui.dim">
+          {item.stage_kind === "map-paths"
+            ? "copied in by this stage"
+            : item.script ?? "pipeline stage"}
+        </Text>
       </>
     )
-  if (item.kind === "authored")
+  if (item.provenance === "authored")
     return item.source === "overleaf"
       ? "Written in Overleaf"
       : "Written in this repo"
-  if (item.kind === "attested") return "Made by hand or with AI"
-  if (item.kind === "imported") return "Imported from elsewhere"
+  if (item.provenance === "attested") return "Made by hand or with AI"
+  if (item.provenance === "imported") return "Imported from elsewhere"
+  if (item.provenance === "project") return "The project's own words"
   return (
     <>
-      <Badge colorScheme="orange">Unknown</Badge>
+      <Badge colorScheme="orange">No provenance</Badge>
       {item.matching_figure ? (
-        <Text as="span" ml={2}>
+        <Text fontSize="xs" color="ui.dim">
           Same bytes as figure <Code fontSize="xs">{item.matching_figure}</Code>
         </Text>
       ) : null}
@@ -382,11 +430,27 @@ function OriginCell({ item }: { item: PublicationComponent }) {
   )
 }
 
+function StateCell({ item }: { item: PublicationComponent }) {
+  if (item.status === "missing") return <Badge colorScheme="red">Missing</Badge>
+  if (item.status === "stale")
+    return (
+      <>
+        <Badge colorScheme="orange">Out of date</Badge>
+        <Text fontSize="xs" color="ui.dim">
+          {staleExplanation(item)}
+        </Text>
+      </>
+    )
+  if (item.kind === "file") return null
+  if (item.status === "ok") return <Badge colorScheme="green">Current</Badge>
+  return <Badge>Unchecked</Badge>
+}
+
 function ComponentsModal({
   isOpen,
   onClose,
   items,
-  nUnknown,
+  nUndeclared,
   canResolve,
   resolvePath,
   resolveAs,
@@ -400,7 +464,7 @@ function ComponentsModal({
   isOpen: boolean
   onClose: () => void
   items: PublicationComponent[]
-  nUnknown: number
+  nUndeclared: number
   canResolve: boolean
   resolvePath?: string
   resolveAs?: ResolveMode
@@ -425,10 +489,10 @@ function ComponentsModal({
         <ModalCloseButton />
         <ModalBody pb={4}>
           <Text fontSize="sm" color="ui.dim" mb={3}>
-            Everything in <Code fontSize="xs">{folder}</Code>, plus what its
-            build stage reads from elsewhere in the project, and where each came
-            from. A reader can only trust a figure or table whose origin is
-            recorded.
+            Everything in <Code fontSize="xs">{folder}</Code>, what its build
+            stage reads from elsewhere in the project, and the values, figures
+            and blocks the document takes from the project rather than copies. A
+            reader can only trust a number or figure whose origin is recorded.
           </Text>
           {sorted.length === 0 ? (
             <Text fontSize="sm">
@@ -438,8 +502,10 @@ function ComponentsModal({
             <Table size="sm">
               <Thead>
                 <Tr>
-                  <Th>File</Th>
-                  <Th>Origin</Th>
+                  <Th>What</Th>
+                  <Th>From</Th>
+                  <Th>Where</Th>
+                  <Th>State</Th>
                   <Th w="1%" />
                 </Tr>
               </Thead>
@@ -447,7 +513,8 @@ function ComponentsModal({
                 {sorted.map((item) => {
                   const expanded =
                     canResolve &&
-                    item.kind === "unknown" &&
+                    item.kind === "file" &&
+                    item.provenance === "undeclared" &&
                     resolvePath === item.path &&
                     resolveAs
                   const linking =
@@ -457,6 +524,9 @@ function ComponentsModal({
                     <Fragment key={item.path}>
                       <Tr>
                         <Td>
+                          {item.kind !== "file" ? (
+                            <Badge mr={1}>{item.kind}</Badge>
+                          ) : null}
                           <Link
                             as={RouterLink}
                             to="../files"
@@ -467,7 +537,7 @@ function ComponentsModal({
                               cursor="pointer"
                               wordBreak="break-all"
                             >
-                              {relativeComponentPath(item.path, folder)}
+                              {componentLabel(item, folder)}
                             </Code>
                           </Link>
                           {item.via === "input" ? (
@@ -475,12 +545,27 @@ function ComponentsModal({
                               input
                             </Text>
                           ) : null}
+                          {item.kind === "value" &&
+                          item.current_value !== null &&
+                          item.current_value !== undefined ? (
+                            <Text fontSize="xs" color="ui.dim">
+                              {String(item.current_value)}
+                            </Text>
+                          ) : null}
                         </Td>
                         <Td>
                           <OriginCell item={item} />
                         </Td>
+                        <Td fontSize="xs" color="ui.dim" whiteSpace="nowrap">
+                          {pagesText(item.pages)}
+                        </Td>
+                        <Td>
+                          <StateCell item={item} />
+                        </Td>
                         <Td whiteSpace="nowrap" px={2}>
-                          {canResolve && item.kind === "unknown" ? (
+                          {canResolve &&
+                          item.kind === "file" &&
+                          item.provenance === "undeclared" ? (
                             <ButtonGroup size="xs" variant="outline">
                               <Button
                                 isActive={expanded === "figure"}
@@ -514,7 +599,7 @@ function ComponentsModal({
                       </Tr>
                       {expanded ? (
                         <Tr>
-                          <Td colSpan={3} pt={0}>
+                          <Td colSpan={5} pt={0}>
                             <ResolveRowForm
                               key={`${item.path}:${expanded}`}
                               item={item}
@@ -535,7 +620,7 @@ function ComponentsModal({
         <ModalFooter>
           <Flex w="100%" align="center" justify="space-between">
             <Text fontSize="sm" color="ui.dim">
-              {nUnknown} of {items.length} still unknown
+              {nUndeclared} of {items.length} with no provenance
             </Text>
             <Button onClick={onClose}>Close</Button>
           </Flex>
@@ -593,11 +678,14 @@ export default function PublicationComponents({
   })
   const canResolve = userHasWriteAccess && !gitRef
   const data = componentsQuery.data
+  const items = data?.items ?? []
   if (!publication.path || !data) return null
-  const nItems = data.items.length
-  const nUnknown = data.n_unknown
+  const nFiles = items.filter((item) => item.kind === "file").length
+  const nContent = items.length - nFiles
+  const nUndeclared = data.n_undeclared ?? 0
+  const nStale = data.n_stale ?? 0
   // A placeholder from the template has nothing worth raising
-  const raise = nUnknown > 0 && !isTemplatePublication(publication)
+  const raise = nUndeclared > 0 && !isTemplatePublication(publication)
   const openModal = () =>
     navigate({ search: (prev) => ({ ...prev, components_open: true }) })
   const closeModal = () =>
@@ -615,17 +703,21 @@ export default function PublicationComponents({
         Components:
       </Text>{" "}
       <Link onClick={openModal}>
-        {nItems} {nItems === 1 ? "file" : "files"} in{" "}
+        {nFiles} {nFiles === 1 ? "file" : "files"} in{" "}
         <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
           {data.folder}
         </Code>
-        {data.items.some((item) => item.via === "input")
-          ? " and its inputs"
-          : ""}
+        {items.some((item) => item.via === "input") ? " and its inputs" : ""}
+        {nContent > 0 ? `, ${nContent} from the project` : ""}
       </Link>
+      {nStale > 0 ? (
+        <Badge colorScheme="orange" ml={1}>
+          {nStale} out of date
+        </Badge>
+      ) : null}
       {raise ? (
         <Badge colorScheme="orange" ml={1}>
-          {nUnknown} of unknown origin
+          {nUndeclared} with no provenance
         </Badge>
       ) : null}
       {raise && canResolve ? (
@@ -636,8 +728,8 @@ export default function PublicationComponents({
       <ComponentsModal
         isOpen={Boolean(componentsOpen)}
         onClose={closeModal}
-        items={data.items}
-        nUnknown={nUnknown}
+        items={items}
+        nUndeclared={nUndeclared}
         canResolve={canResolve}
         resolvePath={resolvePath}
         resolveAs={resolveAs}

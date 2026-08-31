@@ -17,8 +17,8 @@ import {
   valueText,
 } from "../core/components";
 import type {
-  DocumentComponent,
-  DocumentComponents,
+  PublicationComponent,
+  PublicationComponents,
   GithubRepo,
   OverleafLinkPublic,
   OverleafSyncStatus,
@@ -76,7 +76,7 @@ function fileRow(file: OverleafSyncStatusFile): HTMLElement {
  * producing script.
  */
 function componentRow(
-  item: DocumentComponent,
+  item: PublicationComponent,
   link: OverleafLinkPublic,
 ): HTMLElement {
   const badge = componentBadge(item);
@@ -141,10 +141,10 @@ async function renderComponents(
   } else {
     body.append(section);
   }
-  let data: DocumentComponents;
+  let data: PublicationComponents;
   try {
     data = await send({
-      type: "project.documentComponents",
+      type: "project.publicationComponents",
       owner: link.project_owner_name,
       project: link.project_name,
       path,
@@ -162,7 +162,9 @@ async function renderComponents(
     }
     return;
   }
-  const items = data.items ?? [];
+  // The panel is about what the paper shows, not what its folder holds:
+  // the file listing belongs to the hub's own components view
+  const items = (data.items ?? []).filter((item) => item.kind !== "file");
   if (!data.built || items.length === 0) {
     return;
   }

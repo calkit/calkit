@@ -684,6 +684,28 @@
       "type": "object"
     },
     "DockerEnvironment": {
+      "anyOf": [
+        {
+          "properties": {
+            "image": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "image"
+          ]
+        },
+        {
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ],
       "properties": {
         "args": {
           "anyOf": [
@@ -700,6 +722,22 @@
           "default": null,
           "description": "Extra arguments passed to 'docker run'.",
           "title": "Args"
+        },
+        "build_platforms": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64'], as opposed to 'platform', which is the one it's pulled and run as. Building for more than one requires a registry, since a multi-platform image can only be kept in one.",
+          "title": "Build Platforms"
         },
         "command_mode": {
           "default": "shell",
@@ -754,9 +792,17 @@
           "title": "Gpus"
         },
         "image": {
-          "description": "Name of the Docker image.",
-          "title": "Image",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.",
+          "title": "Image"
         },
         "inputs": {
           "anyOf": [
@@ -851,6 +897,19 @@
           "description": "Ports to expose, e.g., '8080:80'.",
           "title": "Ports"
         },
+        "registry": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null.",
+          "title": "Registry"
+        },
         "shell": {
           "default": "sh",
           "description": "Shell used to run commands in the image.",
@@ -888,9 +947,6 @@
           "title": "Wdir"
         }
       },
-      "required": [
-        "image"
-      ],
       "title": "DockerEnvironment",
       "type": "object"
     },

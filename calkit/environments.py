@@ -25,11 +25,15 @@ DOCKER_ARCHS = [
     "arm64",
     "arm-v7",
     "arm-v6",
+    "arm-v5",
     "ppc64le",
     "s390x",
     "386",
     "riscv64",
 ]
+# Architectures Docker environments are locked for by default, so that
+# moving a project between them doesn't invalidate every stage
+DEFAULT_DOCKER_LOCK_ARCHS = ["amd64", "arm64"]
 DEFAULT_PYTHON_VERSION = "3.14"
 CONDA_VENV_ARCHS = [
     "osx-arm64",
@@ -405,7 +409,7 @@ def _conda_venv_platform() -> str:
     return f"{sys}-{mach}"
 
 
-def _docker_platform() -> str:
+def get_docker_arch() -> str:
     """Get Docker platform string (arch part only)."""
     mach = platform.machine().lower()
     # Map common platform.machine() outputs to Docker arch names
@@ -529,7 +533,7 @@ def get_env_lock_fpath(
             lock_fpath += ".json"
         else:
             lock_fpath = os.path.join(
-                env_lock_dir, env_name, _docker_platform() + ".json"
+                env_lock_dir, env_name, get_docker_arch() + ".json"
             )
             if for_dvc:
                 lock_fpath = os.path.dirname(lock_fpath)
@@ -955,6 +959,15 @@ def check_cache(
             return False
         time_diff = calkit.utcnow() - cached_checked_at
         if time_diff.total_seconds() > ENV_CHECK_CACHE_TTL_SECONDS:
+            return False
+    # A Docker environment's image can be deleted without anything the cache
+    # hashes changing, and the pipeline can't run in an image that isn't
+    # there, so its absence has to invalidate the check
+    if env.get("kind") == "docker":
+        from calkit.docker import get_image_name, image_exists
+
+        image = get_image_name(env, env_name, wdir=wdir)
+        if image and not image_exists(image):
             return False
     # Check if this environment is up-to-date
     current_data = calc_data_for_env(env_name=env_name, env=env, wdir=wdir)

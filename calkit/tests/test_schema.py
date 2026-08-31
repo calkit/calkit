@@ -57,6 +57,14 @@ def test_validate_bad_projects() -> None:
 
     # An environment missing a required field for its kind
     assert errors({"environments": {"e": {"kind": "docker"}}})
+    # 'image' and 'path' are both nullable, so requiring the key alone lets
+    # 'image: null' through, which says no more about what to run in than
+    # leaving it out does
+    assert errors({"environments": {"e": {"kind": "docker", "image": None}}})
+    assert errors({"environments": {"e": {"kind": "docker", "path": None}}})
+    assert not errors(
+        {"environments": {"e": {"kind": "docker", "image": "alpine:3.18"}}}
+    )
     # An environment with an unknown kind, since the kinds are a closed set
     # even though their properties are not
     assert errors({"environments": {"e": {"kind": "not-a-kind"}}})

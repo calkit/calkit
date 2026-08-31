@@ -173,8 +173,11 @@ def get_staged_files_with_status(
     for pathi in paths:
         # Make sure line is not empty, e.g., a trailing newline
         if pathi:
-            status, p = pathi.split("\t")
-            res.append({"status": status, "path": p})
+            # A rename or copy is reported as 'R100\told\tnew', so the path
+            # the commit is about is the last field, not the second
+            fields = pathi.split("\t")
+            status = fields[0]
+            res.append({"status": status, "path": fields[-1]})
     return res
 
 

@@ -317,12 +317,28 @@ def escape_tex(text: str) -> str:
     return "".join(_TEX_SPECIALS.get(c, c) for c in str(text))
 
 
+def unwrap_singleton(value: Any) -> Any:
+    """A one-element list of a scalar, as that scalar.
+
+    MATLAB and NumPy write a scalar as a one-element array, so a results
+    file exported from either has ``[3.54]`` where the author means 3.54.
+    Left alone it prints with its brackets into the prose, and a numeric
+    format spec raises rather than formatting it.
+    """
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        inner = value[0]
+        if isinstance(inner, (int, float, str, bool)):
+            return inner
+    return value
+
+
 def format_value(value: Any, spec: str | None = None) -> str:
     """A value as plain text for a document, with an optional format spec.
 
     Not escaped for TeX: callers escape once, after formatting, so a
     string value is not escaped twice.
     """
+    value = unwrap_singleton(value)
     if spec:
         return format(value, spec)
     if isinstance(value, float):

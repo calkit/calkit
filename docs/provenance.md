@@ -404,6 +404,43 @@ appears on, the stage that produced it, that stage's inputs, the hash
 recorded in `dvc.lock`, and, for a value, the value itself. That file is
 the trail in machine-readable form, for editors, the hub, and checks.
 
+### Reaching one value in a big results file
+
+Without `keys`, every top-level key in the input becomes available as
+`\result[Key]`. That suits a results file written for the paper. A file
+exported wholesale from an analysis is a different matter: one exported
+from a MATLAB table can hold hundreds of thousands of values, and turning
+all of them into LaTeX commands produces a multi-megabyte `.tex` the
+document never reads.
+
+Name what the paper uses instead, dotted to reach into nested output:
+
+```yaml
+pipeline:
+  stages:
+    paper-numbers-to-latex:
+      kind: json-to-latex
+      command_name: result
+      inputs: [results/energy-flux.json]
+      keys:
+        - c_eps_collapse.slope
+        - summary.rmse
+        - stations.0.cf
+```
+
+which gives `\result[c_eps_collapse.slope]` and the rest, and nothing
+else. Dotted keys are read the same way question evidence reads them: a
+key that exists literally wins, so one containing dots keeps working, and
+an integer part indexes into a list. A key that isn't in the input stops
+the stage rather than quietly going missing from the paper.
+
+Two more things that bite when results come out of MATLAB or NumPy. A
+scalar written as a one-element array, `[3.54]`, is read as the scalar it
+stands for, so it prints as `3.54` rather than with its brackets and a
+numeric format applies to it. And when a stage merges several input files
+that disagree about a key, the stage stops: taking whichever file was read
+last would put a number in the paper that nobody could trace.
+
 The questions commands are `\ckquestion[n]`, `\ckhypothesis[n]`,
 `\ckanswer[n]`, `\cknotes[n]`, `\ckevidence[n]`, numbered as in
 `calkit list questions`, and `\ckfindings` for every answered question.

@@ -132,14 +132,15 @@ def test_from_json(tmp_dir):
     assert get_value(tex, "sup") == "5.555"
 
 
-def test_from_json_keys(tmp_dir):
+def test_from_json_keys_and_collisions(tmp_dir):
     with open("nested.json", "w") as f:
         json.dump(
             {
                 "top": 1.5,
                 "cases": {"a": {"cp": 0.42}},
                 "stations": [{"cf": 0.003}],
-                "unused": 9.9,
+                # MATLAB and NumPy write a scalar as a one-element array
+                "scale": [3.54],
             },
             f,
         )
@@ -170,7 +171,27 @@ def test_from_json_keys(tmp_dir):
     assert get_value(tex, "stations.0.cf") == "0.003"
     # Only what was named, so a results file exported wholesale doesn't
     # drag its whole structure into the document
-    assert "unused" not in tex
+    assert "scale" not in tex
+    # A one-element array is the scalar it stands for, printed and
+    # formatted as one rather than with its brackets
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "nested.json",
+            "-o",
+            "scaled.tex",
+            "--command",
+            "result",
+            "--format-json",
+            json.dumps({"scaled": "{scale:.1f}"}),
+        ]
+    )
+    with open("scaled.tex") as f:
+        tex = f.read()
+    assert get_value(tex, "scale") == "3.54"
+    assert get_value(tex, "scaled") == "3.5"
     # A key that isn't there is a typo, not something to leave out
     out = subprocess.run(
         [
@@ -188,6 +209,60 @@ def test_from_json_keys(tmp_dir):
     )
     assert out.returncode != 0
     assert "not in nested.json" in out.stderr
+    # Merging files that disagree about a key would put a number in the
+    # paper from whichever file happened to be read last
+    with open("one.json", "w") as f:
+        json.dump({"shared": 1}, f)
+    with open("two.json", "w") as f:
+        json.dump({"shared": 2}, f)
+    out = subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "one.json",
+            "two.json",
+            "-o",
+            "y.tex",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert out.returncode != 0
+    assert "defined differently" in out.stderr
+    # Agreeing about it is fine
+    with open("three.json", "w") as f:
+        json.dump({"shared": 1}, f)
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "one.json",
+            "three.json",
+            "-o",
+            "z.tex",
+        ]
+    )
+    # A format spec that cannot apply says so instead of raising
+    with open("list.json", "w") as f:
+        json.dump({"many": [1, 2, 3]}, f)
+    out = subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "list.json",
+            "-o",
+            "w.tex",
+            "--format-json",
+            json.dumps({"bad": "{many:.2f}"}),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert out.returncode != 0
+    assert "Cannot format 'bad'" in out.stderr
 
 
 @skipif_windows_docker

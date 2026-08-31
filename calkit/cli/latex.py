@@ -96,9 +96,17 @@ def from_json(
                 data_i = json.load(f)
             except json.JSONDecodeError:
                 raise_error("Input JSON file is not valid JSON")
-        data.update(data_i)
+        # Several files merged into one command can define the same key.
+        # Taking the last silently means a number in the paper comes from
+        # a file nobody would guess, so say so instead.
         for k in data_i:
+            if k in source and data[k] != data_i[k]:
+                raise_error(
+                    f"Key '{k}' is defined differently in {source[k]} and "
+                    f"{input_fpath}; rename one, or drop an input"
+                )
             source[k] = input_fpath
+        data.update(data_i)
     # Named keys are looked up wherever they are, so a nested value can
     # reach the document without exposing everything around it
     if keys:
@@ -135,9 +143,18 @@ def from_json(
                 raise_error(
                     f"Error evaluating expression '{t}' for formatting"
                 )
-        formatted[tex_var_name] = calkit.latex.escape_tex(
-            fmt_string.format(**data_for_formatting)
-        )
+        try:
+            rendered = fmt_string.format(
+                **{
+                    k: calkit.latex.unwrap_singleton(v)
+                    for k, v in data_for_formatting.items()
+                }
+            )
+        except (TypeError, ValueError) as e:
+            raise_error(
+                f"Cannot format '{tex_var_name}' with '{fmt_string}': {e}"
+            )
+        formatted[tex_var_name] = calkit.latex.escape_tex(rendered)
         # A formatted expression comes from whichever file its first
         # token came from
         for t in tokens:

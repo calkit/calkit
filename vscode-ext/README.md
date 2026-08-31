@@ -44,8 +44,8 @@ project in a plain folder.
 - **Figure source links**: right-click a figure reference for **Go to Figure
   Source**. (From a compiled PDF, LaTeX Workshop's reverse-SyncTeX takes you to
   the `\includegraphics` line, where these actions take over.) The CodeLens
-  that used to sit above each reference is now part of the document-components
-  lens below, so a line carries one lens rather than two.
+  that used to sit above each reference is now part of the components lens
+  below, so a line carries one lens rather than two.
 - **Document components**: In a LaTeX document that injects project content
   (`\result[…]`, `\ckfigure{…}`, `\ckfindings`), hover any of it to see the
   value, the file and key it came from, the stage and script behind it, the

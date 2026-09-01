@@ -106,17 +106,15 @@ difference between an open question and an oversight.
 calkit run
 calkit check repro
 calkit check questions
-calkit describe components paper/main.tex
 ```
 
 `check repro` reads the manuscript back and reports any number in it that
 the pipeline already computes --- which catches a hole closed by typing
 rather than by building. It summarizes; run `calkit check repro -c retyped`
 to see them, and `-c numbers` for the weaker list of result-like numbers
-with nothing recorded behind them, most of which will not be results. `check questions` tells you whether each
-answer still follows from its evidence. `describe components` lists every
-value and figure the document takes from the project, with the stage behind
-it and whether it is current --- see [provenance](../provenance.md).
+with nothing recorded behind them, most of which will not be results.
+`check questions` tells you whether each answer still follows from its
+evidence.
 
 Then read the paper. This is the part that matters: the agent has made the
 sentences true, but only you can decide whether they are worth saying, and

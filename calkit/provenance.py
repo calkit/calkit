@@ -6,9 +6,17 @@ import functools
 import os
 import re
 
-# The artifact kinds whose provenance is checked. Each entry must say where
-# it came from: a pipeline stage, an import, or the person who created it,
-# e.g., by collecting or measuring the data or drawing the figure.
+# The artifact kinds whose provenance is *checked*. Each entry must say
+# where it came from: a pipeline stage, an import, or the person who
+# created it, e.g., by collecting or measuring the data or drawing the
+# figure.
+#
+# Deliberately not the same set as the kinds an import can be *recorded*
+# in, which is read off the models by ``get_artifact_types_with_imports``.
+# A notebook can carry an ``imported_from`` and be refreshed like anything
+# else, but notebooks are usually written by a project's own authors, so
+# holding every one of them to a provenance record would report gaps that
+# aren't.
 PROVENANCE_ARTIFACT_TYPES = [
     "datasets",
     "figures",
@@ -17,6 +25,40 @@ PROVENANCE_ARTIFACT_TYPES = [
     "presentations",
     "misc",
 ]
+
+
+@functools.cache
+def get_artifact_types_with_imports() -> list[str]:
+    """The ``calkit.yaml`` lists whose entries can record an import.
+
+    Read off the models, so a kind that gains ``imported_from`` is
+    searched without anything here changing. Wider than
+    :data:`PROVENANCE_ARTIFACT_TYPES`, which is about which kinds are held
+    to having provenance at all --- an entry that says where it came from
+    is honored wherever it is written, whether or not its kind is one we
+    would report for staying silent.
+    """
+    from typing import get_args
+
+    from pydantic import BaseModel
+
+    from calkit.models.core import ProjectInfo
+
+    types = []
+    for kind, field in ProjectInfo.model_fields.items():
+        for arg in get_args(field.annotation):
+            for model in (arg, *get_args(arg)):
+                if (
+                    isinstance(model, type)
+                    and issubclass(model, BaseModel)
+                    and "imported_from" in model.model_fields
+                ):
+                    types.append(kind)
+                    break
+            else:
+                continue
+            break
+    return types
 
 
 @functools.cache
@@ -269,7 +311,7 @@ def find_artifact(ck_info: dict, path: str) -> tuple[str, dict] | None:
     Returns the list's name and the entry, so the caller can edit it in
     place.
     """
-    for kind in PROVENANCE_ARTIFACT_TYPES:
+    for kind in get_artifact_types_with_imports():
         for entry in ck_info.get(kind, []) or []:
             if isinstance(entry, dict) and entry.get("path") == path:
                 return kind, entry

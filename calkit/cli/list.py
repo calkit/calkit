@@ -543,8 +543,8 @@ def list_imports(
     'locked', so both halves of the record are in one listing.
     """
     from calkit.provenance import (
-        PROVENANCE_ARTIFACT_TYPES,
         describe_source,
+        get_artifact_types_with_imports,
         read_import_locks,
     )
 
@@ -554,7 +554,7 @@ def list_imports(
     # reader opening two files.
     locks = read_import_locks()
     imports = []
-    for kind in PROVENANCE_ARTIFACT_TYPES:
+    for kind in get_artifact_types_with_imports():
         for obj in ck_info.get(kind, []) or []:
             if not isinstance(obj, dict) or not obj.get("imported_from"):
                 continue

@@ -530,3 +530,37 @@ def test_import_record_accepts_the_shapes_people_write():
     ]:
         with pytest.raises(ValidationError):
             ta.validate_python(bad)
+
+
+def test_import_search_is_wider_than_provenance_scoring():
+    # Two different questions, so two different lists. Which kinds are
+    # held to having provenance is a judgement about what a project owes
+    # a reader; which kinds can carry an import is a fact about the
+    # models. A notebook is usually written by the project's own authors,
+    # so it isn't scored --- but an entry that does say where it came from
+    # is honored rather than dropped.
+    from calkit.models.core import Notebook
+    from calkit.provenance import (
+        PROVENANCE_ARTIFACT_TYPES,
+        get_artifact_types_with_imports,
+        get_importable_artifact_kinds,
+    )
+
+    searched = get_artifact_types_with_imports()
+    assert "notebooks" in searched
+    assert "notebooks" not in PROVENANCE_ARTIFACT_TYPES
+    # ...and no 'calkit import path --kind notebook', since taking someone
+    # else's notebook as a starting point is a different thing from
+    # importing a file, and isn't designed yet
+    assert "notebook" not in get_importable_artifact_kinds()
+    # The field is real, not silently dropped
+    nb = Notebook.model_validate(
+        {"path": "nb.ipynb", "imported_from": {"git": {"repo_url": "u"}}}
+    )
+    assert nb.imported_from is not None
+    # Every scored kind that can record an import is searched too, so
+    # nothing is scored for provenance it has no way to express
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        if kind in searched:
+            continue
+        assert kind in ("tables", "presentations"), kind

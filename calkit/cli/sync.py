@@ -271,7 +271,7 @@ def sync_import(
     """
     from calkit.provenance import (
         IMPORT_LOCK_FPATH,
-        PROVENANCE_ARTIFACT_TYPES,
+        get_artifact_types_with_imports,
     )
 
     if update_all and path is not None:
@@ -302,7 +302,7 @@ def sync_import(
         return
     targets = [
         entry["path"]
-        for kind in PROVENANCE_ARTIFACT_TYPES
+        for kind in get_artifact_types_with_imports()
         for entry in ck_info.get(kind, []) or []
         if isinstance(entry, dict)
         and entry.get("path")

@@ -1404,6 +1404,16 @@ class Notebook(BaseModel):
         description="Name of the environment in which to run this notebook, "
         "if it is not part of the pipeline.",
     )
+    imported_from: ImportedFromType | None = Field(
+        default=None,
+        description=(
+            "Where this came from, if it was taken from somewhere else. "
+            "Notebooks are usually written by a project's own authors, so "
+            "there is no 'calkit import notebook'; this is here so an "
+            "entry that does say where it came from is kept rather than "
+            "dropped, and so 'calkit sync import' can refresh it."
+        ),
+    )
 
 
 class ProcedureInput(BaseModel):

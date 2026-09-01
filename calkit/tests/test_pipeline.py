@@ -3407,6 +3407,10 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
         "environments": {
             "sys": {
                 "kind": "system",
+                # A locked property, so the env writes a lock file --- the
+                # one thing under .calkit that is both committed and
+                # hashed, and so the reason the rule is written at all
+                "lock": ["os"],
                 "default_setup": ["source scripts/env.sh"],
                 "inputs": ["scripts/env.sh"],
             }
@@ -3441,15 +3445,30 @@ def test_compiled_pipeline_is_platform_stable(tmp_dir):
     # .gitattributes rule outranks that setting, so it holds whatever the
     # user configured.
     with open(".gitattributes") as f:
-        assert "/.calkit/**/*.json text eol=lf" in f.read()
+        assert "/.calkit/** text eol=lf" in f.read()
+    # Extension-agnostic, because locks are .json, .yml and .txt depending
+    # on the environment kind, and managed envs keep a uv.lock and a
+    # .python-version under .calkit too
+    os.makedirs(os.path.join(".calkit", "envs", "v"), exist_ok=True)
+    for name in ["env-locks/sys/info.json", "envs/v/uv.lock"]:
+        path = os.path.join(".calkit", *name.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "a").close()
     attrs = subprocess.run(
-        ["git", "check-attr", "eol", "--", ".calkit/env-locks/e/info.json"],
+        [
+            "git",
+            "check-attr",
+            "eol",
+            "--",
+            ".calkit/env-locks/sys/info.json",
+            ".calkit/envs/v/uv.lock",
+        ],
         capture_output=True,
         text=True,
         check=True,
     ).stdout
-    assert "eol: lf" in attrs
+    assert attrs.count("eol: lf") == 2, attrs
     # Recompiling replaces the managed block rather than stacking copies
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open(".gitattributes") as f:
-        assert f.read().count("/.calkit/**/*.json text eol=lf") == 1
+        assert f.read().count("/.calkit/** text eol=lf") == 1

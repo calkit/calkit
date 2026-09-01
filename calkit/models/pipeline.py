@@ -334,6 +334,11 @@ class Stage(BaseModel):
     # the compiled command dispatches there first. Also resolved by
     # set_stage_scheduler_options.
     _system_env: str | None = PrivateAttr(default=None)
+    # The setup commands this stage actually runs, with the environment's
+    # 'default_setup' already merged in per 'env_default_setup'. Resolved
+    # when the pipeline is compiled, so the command in dvc.yaml says
+    # everything that runs and DVC reruns the stage when any of it changes.
+    _system_env_setup: list[str] = PrivateAttr(default_factory=list)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -506,17 +511,13 @@ class Stage(BaseModel):
             # from the snapshot and from what the workspace says the run
             # produced, so it can't fall out of step with the pipeline
             cmd = f"calkit xenv -n {self._system_env} --no-check"
-            # Only the stage's own setup commands and the mode are baked
-            # in. The env's 'default_setup' is merged by 'calkit xenv' when
-            # the stage runs, the way 'calkit scheduler batch' merges a
-            # scheduler env's, so editing the env's defaults doesn't mean
-            # recompiling the pipeline. It still reruns the stage: the
-            # defaults are recorded in the env's lock file, which the stage
-            # depends on.
-            for setup_cmd in self.setup or []:
+            # The whole chain, the environment's defaults included, already
+            # merged. The command in dvc.yaml is therefore the whole story
+            # of what runs, and editing either list changes it, so DVC
+            # reruns the stage without the environment's lock file having
+            # to carry a copy of the setup commands.
+            for setup_cmd in self._system_env_setup:
                 cmd += f" --setup {shlex.quote(setup_cmd)}"
-            if self.env_default_setup != "replace":
-                cmd += f" --env-default-setup {self.env_default_setup}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -1975,11 +1976,17 @@ class Pipeline(BaseModel):
         ``stage.scheduler`` so the stage's ``xenv_cmd`` emits
         ``calkit scheduler batch``.
 
-        Environment-level ``default_options`` and ``default_setup`` are NOT
-        merged into the stage here; the batch CLI applies them at submission
-        time so the pipeline does not need to be recompiled when env defaults
-        change.
+        Environment-level ``default_options`` are NOT merged into the stage
+        here; the batch CLI applies them at submission time, which for a
+        scheduler is the last moment before the job script is written.
+
+        ``default_setup`` is merged here for a ``system`` environment,
+        which has no submission step: compilation is the last moment before
+        such a stage runs, so the merged chain goes into the command DVC
+        records. A scheduler env's is still left to the batch CLI.
         """
+        from calkit.environments import merge_setup_commands
+
         # Stage kinds that don't require a separate inner runtime, so they
         # can run on a plain (non-composite) scheduler env. Anything else
         # must use a composite env like ``<scheduler-env>:<inner-env>``.
@@ -2033,6 +2040,15 @@ class Pipeline(BaseModel):
                 # A system env names the machine, so it can wrap an inner
                 # runtime the same way a scheduler env does.
                 stage._system_env = stage.outer_environment
+                # Merged here rather than by 'calkit xenv' at run time: a
+                # system env has no submission step, so compilation is the
+                # last moment before the stage runs, and resolving it here
+                # puts the whole chain in the command DVC records.
+                stage._system_env_setup = merge_setup_commands(
+                    env.get("default_setup"),
+                    stage.setup,
+                    stage.env_default_setup,
+                )
                 if stage.inner_environment == stage.outer_environment:
                     continue
                 inner_env = environments.get(stage.inner_environment)

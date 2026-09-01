@@ -520,16 +520,18 @@ SYSTEM_ENV_DEFAULT_SHELL = "bash"
 def system_env_locks_anything(env: dict) -> bool:
     """Return whether a ``system`` environment has anything to lock.
 
-    Machine properties under ``lock`` and ``default_setup`` both go in the
-    lock file. So does a ``shell`` that isn't the default, since it changes
-    how a stage's own setup commands run and those are compiled into the
-    stage command without it. Compared by value rather than presence:
-    writing ``shell: bash`` says exactly what leaving it out says, so it
-    must not be what decides whether stages gain a dependency.
+    The machine properties under ``lock``, and a ``shell`` that isn't the
+    default. Not ``default_setup``: the pipeline compiler merges that into
+    the stage's command, so DVC already reruns the stage when it changes
+    and a copy here would only add a second reason. The shell isn't in the
+    command, so it stays.
+
+    ``shell`` is compared by value rather than presence: writing
+    ``shell: bash`` says exactly what leaving it out says, so it must not
+    be what decides whether stages gain a dependency.
     """
     return bool(
         env.get("lock")
-        or env.get("default_setup")
         or env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
         != SYSTEM_ENV_DEFAULT_SHELL
     )
@@ -730,6 +732,32 @@ def write_scheduler_env_lock(
     return lock_fpath
 
 
+def merge_setup_commands(
+    env_setup: list[str] | None,
+    stage_setup: list[str] | None,
+    mode: str = "replace",
+) -> list[str]:
+    """Combine an environment's default setup commands with a stage's.
+
+    ``replace`` (the default) uses the environment's only when the stage
+    names none of its own; ``merge`` runs the environment's first, then the
+    stage's; ``ignore`` never runs the environment's.
+
+    The one implementation of the rule. A system env's stages have this
+    resolved when the pipeline is compiled, so the merged list ends up in
+    the stage's command; a scheduler env's is resolved by ``calkit
+    scheduler batch`` when the job script is written, which is the last
+    moment before that kind of stage runs.
+    """
+    stage_cmds = [c for c in (stage_setup or []) if c.strip()]
+    env_cmds = [c for c in (env_setup or []) if c.strip()]
+    if mode == "merge":
+        return env_cmds + stage_cmds
+    if mode == "replace" and not stage_cmds:
+        return env_cmds
+    return stage_cmds
+
+
 # Warned once per process, not once per reader: compiling a pipeline reads
 # an environment's inputs several times -- the DVC dep list, the
 # environment check, the run itself -- and a project is only asked to
@@ -835,11 +863,12 @@ def write_system_env_lock(
     on, say, the Julia version should not reuse a cached result from a box
     with a different one.
 
-    ``default_setup`` and the ``shell`` it runs in are recorded alongside
-    the machine properties. They aren't properties of the machine -- they
-    say what was done to the shell before the stage ran -- but they feed
-    the same question: a stage built against a different toolchain should
-    not reuse the old result.
+    A non-default ``shell`` is recorded alongside the machine properties.
+    It isn't a property of the machine, but it feeds the same question: a
+    stage whose setup commands ran under a different shell should not
+    reuse the old result. The setup commands themselves aren't here --
+    they are compiled into the stage's command, where DVC already watches
+    them.
 
     Returns the lock file path, already prefixed with ``wdir`` if provided,
     or None if the environment locks nothing.
@@ -856,15 +885,14 @@ def write_system_env_lock(
     lock_data = get_system_lock_data(
         env.get("lock") or [], system_info=system_info
     )
-    # Named so they can't collide with a locked property, now or when the
-    # set of them grows. The shell matters to a stage's own setup commands
-    # too, which the environment can't see, so it's recorded whenever it
-    # isn't the default -- a stage compiled with setup commands depends on
-    # this file, so changing the shell out from under it reruns it.
-    if env.get("default_setup"):
-        lock_data["default_setup"] = list(env["default_setup"])
+    # Named so it can't collide with a locked property, now or when the set
+    # of them grows. The setup commands themselves are not recorded: they
+    # go into the stage's command when the pipeline is compiled, so DVC
+    # sees them change. The shell they run in doesn't, so it does -- and
+    # only when it isn't the default, since writing the default says
+    # nothing that leaving it out doesn't.
     shell = env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
-    if env.get("default_setup") or shell != SYSTEM_ENV_DEFAULT_SHELL:
+    if shell != SYSTEM_ENV_DEFAULT_SHELL:
         lock_data["shell"] = shell
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     parent = os.path.dirname(lock_fpath)

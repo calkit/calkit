@@ -589,26 +589,23 @@ def test_run_in_env_system(tmp_dir):
     assert "hi" in out
     with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
         assert set(json.load(f)) == {"os"}
-    # 'default_setup' runs in the same shell as the stage's command, so
-    # what it exports is visible there, and it runs in bash by default so
-    # 'source' works---the reason most of these exist
+    # '--setup' runs its commands in the same shell as the command, so
+    # what they set is visible there, and it runs in bash by default so
+    # 'source' works---the reason most of these exist. What to run is
+    # decided by the pipeline compiler, which merges the environment's
+    # 'default_setup' with the stage's own; 'calkit xenv' just runs what
+    # it is handed.
     with open("setup_env.sh", "w") as f:
         f.write("export CK_TEST_SETUP=from-setup\n")
-    _write_ck_info(
-        {
-            "sys2": {
-                "kind": "system",
-                "default_setup": ["source setup_env.sh"],
-                "inputs": ["setup_env.sh"],
-            }
-        }
-    )
+    _write_ck_info({"sys2": {"kind": "system", "inputs": ["setup_env.sh"]}})
     out = subprocess.check_output(
         [
             "calkit",
             "xenv",
             "-n",
             "sys2",
+            "--setup",
+            "source setup_env.sh",
             "--",
             "python",
             "-c",
@@ -617,57 +614,31 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert "from-setup" in out
-    # The setup commands are recorded even though nothing about the
-    # machine is locked, so changing them invalidates cached results
-    with open(os.path.join(".calkit", "env-locks", "sys2", "info.json")) as f:
-        assert json.load(f)["default_setup"] == ["source setup_env.sh"]
-    # A stage's own '--setup' combines with the env's default_setup the
-    # way a scheduler stage's does: 'replace' (the default) uses the env's
-    # only when the stage names none, 'merge' runs the env's first, and
-    # 'ignore' leaves them out
-    _write_ck_info(
-        {
-            "sys3": {
-                "kind": "system",
-                "default_setup": ["export CK_TEST_ORDER=env"],
-            }
-        }
-    )
-    show = ["python", "-c", "import os; print(os.environ['CK_TEST_ORDER'])"]
-    base = ["calkit", "xenv", "-n", "sys3"]
-    assert (
-        subprocess.check_output(base + ["--"] + show, text=True).strip()
-        == "env"
-    )
-    stage_setup = ["--setup", "export CK_TEST_ORDER=stage"]
-    assert (
-        subprocess.check_output(
-            base + stage_setup + ["--"] + show, text=True
-        ).strip()
-        == "stage"
-    )
-    assert (
-        subprocess.check_output(
-            base + stage_setup + ["--env-default-setup", "merge", "--"] + show,
-            text=True,
-        ).strip()
-        == "stage"
-    )
-    res = subprocess.run(
-        base + ["--env-default-setup", "ignore", "--"] + show,
-        capture_output=True,
+    # Several are chained in order, into the one shell
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup",
+            "export CK_TEST_ORDER=first",
+            "--setup",
+            "export CK_TEST_ORDER=$CK_TEST_ORDER-second",
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_ORDER'])",
+        ],
         text=True,
     )
-    assert res.returncode != 0
-    assert "CK_TEST_ORDER" in res.stdout + res.stderr
-    # An unknown mode is reported rather than treated as the default
-    res = subprocess.run(
-        base + ["--env-default-setup", "nope", "--", "echo", "hi"],
-        capture_output=True,
-        text=True,
+    assert out.strip() == "first-second"
+    # Nothing about the machine is locked and the shell is the default, so
+    # there is no lock file: the setup commands live in the stage's
+    # command, where DVC already watches them
+    assert not os.path.isfile(
+        os.path.join(".calkit", "env-locks", "sys2", "info.json")
     )
-    assert res.returncode != 0
-    assert "'nope' is not one of" in res.stdout + res.stderr
     # Setup commands are refused for an env kind that has nowhere to run
     # them, rather than silently dropped
     _write_ck_info({"img": {"kind": "docker", "image": "x"}})
@@ -677,12 +648,23 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert res.returncode != 0
-    assert "only apply to a 'system' environment" in res.stdout + res.stderr
+    assert "only applies to a 'system' environment" in res.stdout + res.stderr
     # A failing setup command stops the stage rather than running it
     # without whatever the setup was meant to provide
-    _write_ck_info({"bad": {"kind": "system", "default_setup": ["exit 3"]}})
+    _write_ck_info({"bad": {"kind": "system"}})
     res = subprocess.run(
-        ["calkit", "xenv", "-n", "bad", "--", "python", "-c", "print('ran')"],
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "bad",
+            "--setup",
+            "exit 3",
+            "--",
+            "python",
+            "-c",
+            "print('ran')",
+        ],
         capture_output=True,
         text=True,
     )

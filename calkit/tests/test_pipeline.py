@@ -830,20 +830,26 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
             },
         }
     )
+    # A system env has no submission step, so the merge happens when the
+    # pipeline compiles and the command says everything that will run
     assert stages["build"]["cmd"].startswith(
         "calkit xenv -n gpu --no-check --setup 'module load cuda' --"
     )
-    # The env's own default_setup is merged when the stage runs, not baked
-    # into the compiled command, so editing it needs no recompile
+    # 'replace' is the default, so a stage with its own setup doesn't run
+    # the env's -- and the command shows that, so editing the env's
+    # defaults doesn't rerun this stage
     assert "scripts/env.sh" not in stages["build"]["cmd"]
-    # The mode is only emitted when it isn't the default
+    # The mode is resolved here rather than passed along
     assert "--env-default-setup" not in stages["build"]["cmd"]
-    assert "--env-default-setup merge" in stages["merged"]["cmd"]
-    # A stage with no setup of its own carries no flags at all
-    assert stages["plain"]["cmd"].startswith(
-        "calkit xenv -n gpu --no-check -- "
+    assert "--env-default-setup" not in stages["merged"]["cmd"]
+    assert (
+        "--setup 'source scripts/env.sh' --setup 'module load cuda'"
+        in stages["merged"]["cmd"]
     )
-    assert "--setup" not in stages["plain"]["cmd"]
+    # A stage with no setup of its own still gets the env's, under the
+    # default 'replace'
+    assert "--setup 'source scripts/env.sh'" in stages["plain"]["cmd"]
+    assert "module load cuda" not in stages["plain"]["cmd"]
     # The legacy spelling is hoisted onto the stage on load
     assert "--setup 'module load gcc'" in stages["legacy"]["cmd"]
     # The even older 'slurm' block reaches the same place, and a scheduler
@@ -3246,3 +3252,50 @@ def test_env_defaults_mode_choice_matches_the_model():
     assert {m.value for m in EnvDefaultsModeChoice} == set(
         get_args(EnvDefaultsMode)
     )
+
+
+def test_system_env_default_setup_reaches_the_stage(tmp_dir):
+    # End to end: the environment's setup commands are merged in when the
+    # pipeline compiles, so running the compiled command is what applies
+    # them. Nothing reads 'default_setup' at run time any more, so this is
+    # the path that has to work.
+    import subprocess
+
+    import calkit
+
+    subprocess.run(["calkit", "init"], check=True, capture_output=True)
+    with open("setup_env.sh", "w") as f:
+        f.write("export CK_E2E=from-env\n")
+    ck_info = {
+        "environments": {
+            "sys": {
+                "kind": "system",
+                "default_setup": ["source setup_env.sh"],
+                "inputs": ["setup_env.sh"],
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "show": {
+                    "kind": "shell-command",
+                    "command": (
+                        'python -c "import os; '
+                        "open('out.txt','w').write(os.environ['CK_E2E'])\""
+                    ),
+                    "environment": "sys",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    calkit.save_calkit_info(ck_info)
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    cmd = stages["show"]["cmd"]
+    # The environment's setup is in the command, not looked up later
+    assert "--setup 'source setup_env.sh'" in cmd
+    # And running that command delivers it to the stage
+    subprocess.run(cmd, shell=True, check=True)
+    with open("out.txt") as f:
+        assert f.read() == "from-env"
+    # The env declares the file its setup reads, so the stage depends on it
+    assert "setup_env.sh" in stages["show"]["deps"]

@@ -420,16 +420,15 @@ Arguments:
 
 Options:
 
-| Option                | Type                           | Required | Default | Description                                                                                                                                                                          |
-| --------------------- | ------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`        | text                           | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                     |
-| `--env-path`, `-p`    | text                           | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                       |
-| `--wdir`              | text                           | no       |         | Working directory. By default will run current working directory.                                                                                                                    |
-| `--no-check`          | boolean                        | no       | False   | Don't check the environment is valid before running in it.                                                                                                                           |
-| `--relaxed`           | boolean                        | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                               |
-| `--setup`             | text                           | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). Combined with a 'system' environment's 'default_setup' per --env-default-setup.                    |
-| `--env-default-setup` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses them only when no setup commands were given here; 'merge' runs them first; 'ignore' never runs them. |
-| `--verbose`, `-v`     | boolean                        | no       | False   | Print verbose output.                                                                                                                                                                |
+| Option             | Type    | Required | Default | Description                                                                                                                                                                                                               |
+| ------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                                                          |
+| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                                                            |
+| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                                                                                                                         |
+| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                                                                                                                                |
+| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                                                                    |
+| `--setup`          | text    | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). A pipeline stage gets these from its own 'setup' and its environment's 'default_setup', already combined when the pipeline is compiled. |
+| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                     |
 
 <a id="top-command-install"></a>
 

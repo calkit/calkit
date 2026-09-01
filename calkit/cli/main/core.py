@@ -36,7 +36,6 @@ from calkit import (
 )
 from calkit.cli import (
     AliasGroup,
-    EnvDefaultsModeChoice,
     complete_stage_names,
     print_sep,
     raise_error,
@@ -3147,23 +3146,13 @@ def run_in_env(
             "--setup",
             help=(
                 "Shell command to run before the command, in the same "
-                "shell (repeat for multiple). Combined with a 'system' "
-                "environment's 'default_setup' per --env-default-setup."
+                "shell (repeat for multiple). A pipeline stage gets these "
+                "from its own 'setup' and its environment's "
+                "'default_setup', already combined when the pipeline is "
+                "compiled."
             ),
         ),
     ] = [],
-    env_default_setup: Annotated[
-        EnvDefaultsModeChoice,
-        typer.Option(
-            "--env-default-setup",
-            help=(
-                "How to apply the environment's default setup commands: "
-                "'replace' (default) uses them only when no setup commands "
-                "were given here; 'merge' runs them first; 'ignore' never "
-                "runs them."
-            ),
-        ),
-    ] = EnvDefaultsModeChoice.replace,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3195,12 +3184,10 @@ def run_in_env(
     # command to a runtime with no shell of its own to prepare. Refused
     # rather than dropped, since a stage whose setup silently never ran is
     # a stage that ran against the wrong toolchain.
-    if (setup_cmds or env_default_setup != "replace") and env.get(
-        "kind"
-    ) != "system":
+    if setup_cmds and env.get("kind") != "system":
         raise_error(
-            "--setup and --env-default-setup only apply to a 'system' "
-            f"environment, and '{env_name}' is of kind '{env.get('kind')}'"
+            "--setup only applies to a 'system' environment, and "
+            f"'{env_name}' is of kind '{env.get('kind')}'"
         )
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
@@ -3214,9 +3201,10 @@ def run_in_env(
 
         The setup commands and the stage share one shell, so a variable the
         setup sets or a function it defines is in scope for the stage,
-        exported or not -- only a child process needs that. The stage's own ``--setup`` commands
-        and the environment's ``default_setup`` are combined the way
-        ``calkit scheduler batch`` combines a scheduler env's. The chain
+        exported or not -- only a child process needs that. What to run is
+        decided before this point: a pipeline stage arrives with its own
+        ``setup`` and its environment's ``default_setup`` already combined
+        by the compiler, so this just runs what it was given. The chain
         runs in the environment's shell (bash by default) rather than the
         platform's, since ``source`` is a bashism and sourcing a setup
         script is the case this exists for.
@@ -3227,14 +3215,7 @@ def run_in_env(
         is a POSIX shell, but locally on Windows it would be cmd.exe, which
         reads single quotes as ordinary characters.
         """
-        stage_setup = [c for c in setup_cmds if c.strip()]
-        env_setup = [c for c in (env.get("default_setup") or []) if c.strip()]
-        if env_default_setup == "merge":
-            setup = env_setup + stage_setup
-        elif env_default_setup == "replace" and not stage_setup:
-            setup = env_setup
-        else:
-            setup = stage_setup
+        setup = [c for c in setup_cmds if c.strip()]
         if not setup:
             return None
         chained = " && ".join([*setup, shell_cmd])

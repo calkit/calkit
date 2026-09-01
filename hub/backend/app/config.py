@@ -142,6 +142,18 @@ class Settings(BaseSettings):
             path=self.POSTGRES_DB,
         )  # type: ignore
 
+    # What to leave out of a clone. A research project keeps its results in
+    # Git, so most of what a full clone downloads is old revisions of files
+    # nobody is looking at: for one real project, 739 MB of the 957 MB was
+    # history. ``blob:none`` fetches every commit and tree but only the file
+    # contents actually asked for, which took that clone from ~350 s to 26 s
+    # and 957 MB to 274 MB with byte-identical responses, including reads at
+    # old refs. The cost is that reading a file at an old revision fetches it
+    # then (about a second, once, then it is local for good), so a
+    # deployment that needs reads to work without reaching the remote should
+    # set this empty for full clones.
+    GIT_CLONE_FILTER: str = "blob:none"
+
     # Object storage configuration
     # The root under which this hub stores all of its objects, usually
     # just a bucket; project DVC data lives in a folder within it (see

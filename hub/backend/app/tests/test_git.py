@@ -2,6 +2,7 @@
 
 import concurrent.futures
 import json
+import os
 import random
 from pathlib import Path
 
@@ -282,3 +283,180 @@ def test_git_tree_is_thread_safe(tmp_path):
     assert len(results) == len(expected)
     for path, content in results:
         assert content == expected[path], f"{path} came back corrupted"
+
+
+class _StubProject:
+    def __init__(self, name: str) -> None:
+        self.owner_github_name = "ck-test-owner"
+        self.name = name
+        self.git_repo_url = "https://github.com/ck-test-owner/" + name
+        self.github_repo = "ck-test-owner/" + name
+        self.is_public = True
+        self.id = None
+
+
+def test_get_repo_requires_a_completed_clone(tmp_path, monkeypatch):
+    import shutil as _shutil
+
+    from filelock import Timeout
+
+    project = _StubProject(f"ck-repo-ready-{random.randint(0, 10**9)}")
+    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+    clones: list[list[str]] = []
+    # Captured before patching: everything else get_repo shells out to (the
+    # `touch` of the marker file) still has to really run.
+    real_check_call = app.git.subprocess.check_call
+
+    # Stand in for the network clone: make a real repo where one was asked
+    # for, so everything downstream of the clone behaves normally.
+    def fake_check_call(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            clones.append(cmd)
+            target = cmd[-1]
+            os.makedirs(target, exist_ok=True)
+            r = git.Repo.init(target)
+            r.git.config(["user.name", "CI Test"])
+            r.git.config(["user.email", "ci-test@example.com"])
+            (Path(target) / "notes.txt").write_text("one\n")
+            r.git.add(["notes.txt"])
+            r.git.commit(["-m", "Init"])
+            return 0
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(app.git.subprocess, "check_call", fake_check_call)
+    try:
+        # A first read clones, and the marker that says so is written
+        repo = app.git.get_repo(
+            project=project, user=None, session=None, ttl=600
+        )
+        assert os.path.isfile(updated_fpath)
+        assert len(clones) == 1
+        assert repo.head.commit is not None
+        # A second read within the TTL reuses that clone rather than
+        # re-cloning
+        app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert len(clones) == 1
+        # A tree left behind by a clone that died partway has no marker, so
+        # it is thrown away and fetched again rather than read as if it were
+        # complete
+        os.remove(updated_fpath)
+        (Path(repo_dir) / "half-written.txt").write_text("junk\n")
+        app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert len(clones) == 2
+        assert not (Path(repo_dir) / "half-written.txt").exists()
+        # While another worker holds the lock for its own first clone, there
+        # is nothing safe to read: say so rather than serving an empty tree
+        os.remove(updated_fpath)
+
+        class _HeldLock:
+            def __init__(self, *args, **kwargs) -> None:
+                pass
+
+            def __enter__(self):
+                raise Timeout("held")
+
+            def __exit__(self, *args) -> None:
+                pass
+
+        monkeypatch.setattr(app.git, "FileLock", _HeldLock)
+        with pytest.raises(HTTPException) as excinfo:
+            app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert excinfo.value.status_code == 503
+    finally:
+        _shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def test_get_repo_clone_failures_leave_nothing_readable(tmp_path, monkeypatch):
+    import shutil as _shutil
+    import subprocess as _subprocess
+
+    project = _StubProject(f"ck-repo-fail-{random.randint(0, 10**9)}")
+    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    repo_dir = os.path.join(base_dir, "repo")
+    updated_fpath = os.path.join(base_dir, "updated.txt")
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+    real_check_call = app.git.subprocess.check_call
+    outcome: dict[str, str] = {"mode": "timeout"}
+
+    # A clone that writes some of the repo and then fails, which is what a
+    # timeout or a dropped connection actually looks like on disk.
+    def fake_check_call(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            target = cmd[-1]
+            os.makedirs(target, exist_ok=True)
+            (Path(target) / "partial.pack").write_text("half a repo")
+            if outcome["mode"] == "timeout":
+                raise _subprocess.TimeoutExpired(cmd, 1)
+            raise _subprocess.CalledProcessError(128, cmd)
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(app.git.subprocess, "check_call", fake_check_call)
+    try:
+        # A repo too big to finish inside the budget reports that, rather
+        # than surfacing as a server error
+        with pytest.raises(HTTPException) as excinfo:
+            app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert excinfo.value.status_code == 504
+        # Nothing half-written is left where a reader would find it, so the
+        # next attempt starts clean instead of inheriting the wreckage
+        assert not os.path.isdir(repo_dir)
+        assert not os.path.isdir(repo_dir + ".cloning")
+        assert not os.path.isfile(updated_fpath)
+        # A repo that isn't there at all is still a 404
+        outcome["mode"] = "missing"
+        with pytest.raises(HTTPException) as excinfo:
+            app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert excinfo.value.status_code == 404
+        assert not os.path.isdir(repo_dir)
+    finally:
+        _shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def test_get_repo_applies_the_configured_clone_filter(monkeypatch):
+    import shutil as _shutil
+
+    from app.config import settings
+
+    project = _StubProject(f"ck-repo-filter-{random.randint(0, 10**9)}")
+    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+    real_check_call = app.git.subprocess.check_call
+    commands: list[list[str]] = []
+
+    def fake_check_call(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            commands.append(cmd)
+            target = cmd[-1]
+            os.makedirs(target, exist_ok=True)
+            r = git.Repo.init(target)
+            r.git.config(["user.name", "CI Test"])
+            r.git.config(["user.email", "ci-test@example.com"])
+            (Path(target) / "notes.txt").write_text("one")
+            r.git.add(["notes.txt"])
+            r.git.commit(["-m", "Init"])
+            return 0
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(app.git.subprocess, "check_call", fake_check_call)
+    try:
+        # Most of a full clone of a project that keeps its results in Git is
+        # old revisions nobody asked for, so the filter is passed through
+        monkeypatch.setattr(settings, "GIT_CLONE_FILTER", "blob:none")
+        app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert "--filter=blob:none" in commands[0]
+        # The clone lands at its final name only once git is done with it,
+        # so no reader ever sees a partly written tree
+        assert commands[0][-1].endswith(".cloning")
+        assert os.path.isdir(os.path.join(base_dir, "repo"))
+        assert not os.path.isdir(os.path.join(base_dir, "repo.cloning"))
+        # Empty means a full clone, for a deployment that needs reads to
+        # work without reaching the remote
+        _shutil.rmtree(base_dir, ignore_errors=True)
+        monkeypatch.setattr(settings, "GIT_CLONE_FILTER", "")
+        app.git.get_repo(project=project, user=None, session=None, ttl=600)
+        assert not any(a.startswith("--filter") for a in commands[1])
+    finally:
+        _shutil.rmtree(base_dir, ignore_errors=True)

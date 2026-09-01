@@ -26,6 +26,7 @@ from sqlmodel import Session, select
 
 import calkit
 from app import github, users
+from app.config import settings
 from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
 
@@ -34,8 +35,12 @@ _SYMLINK_MODE = 0o120000
 # Max seconds a single git network subprocess may run before being killed,
 # so a stalled remote can't wedge a worker indefinitely. Clone gets a
 # larger budget than fetch since initial clones of large repos are
-# legitimately slower.
-GIT_CLONE_TIMEOUT = 300
+# legitimately slower: a research project carrying its results in Git runs
+# to a gigabyte across a few thousand commits, which is several minutes on
+# a good connection. Anything under that is not a safety limit, it is a
+# project the hub can never open, because each attempt restarts from
+# nothing.
+GIT_CLONE_TIMEOUT = 900
 GIT_FETCH_TIMEOUT = 120
 
 
@@ -162,9 +167,15 @@ def get_repo(
     lock_fpath = os.path.join(base_dir, "updating.lock")
     lock = FileLock(lock_fpath, timeout=5)
     os.makedirs(base_dir, exist_ok=True)
-    if os.path.isdir(repo_dir) and fresh:
+    if fresh and os.path.isdir(repo_dir):
         logger.info("Deleting repo directory to clone a fresh copy")
         shutil.rmtree(repo_dir, ignore_errors=True)
+        # The marker is what says a complete checkout exists, so it has to go
+        # with the tree it described. Leaving it behind claims a repo that is
+        # no longer there, and the next read fails on the missing directory
+        # instead of cloning again.
+        if os.path.isfile(updated_fpath):
+            os.remove(updated_fpath)
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
     if user is not None:
@@ -245,42 +256,93 @@ def get_repo(
         git_plain_url += ".git"
     newly_cloned = False
     repo = None
-    if not os.path.isdir(repo_dir):
+    # `updated.txt` appears only after a clone has finished, so a repo
+    # directory without one is a clone that is still running or that died
+    # partway -- not something to read.
+    if not os.path.isfile(updated_fpath):
         newly_cloned = True
         logger.info(f"Git cloning into {repo_dir}")
         try:
             with lock:
-                try:
-                    clone_cmd = ["git", "clone", git_plain_url, repo_dir]
-                    env = (
-                        {**os.environ, **_make_git_auth_env(access_token)}
-                        if access_token
-                        else None
-                    )
-                    with _timed(
-                        "clone",
-                        repo=f"{owner_name}/{project_name}",
-                    ):
-                        subprocess.check_call(
-                            clone_cmd,
-                            env=env,
-                            timeout=GIT_CLONE_TIMEOUT,
+                # Whoever holds the lock owns this directory, so re-check
+                # inside it: another worker may have finished the clone while
+                # we waited, in which case there is nothing left to do.
+                if not os.path.isfile(updated_fpath):
+                    # Clone alongside the destination and move it into place
+                    # only once git says it finished. `repo_dir` then either
+                    # doesn't exist or holds a complete checkout -- never a
+                    # tree that a reader could mistake for a project with no
+                    # files in it. Anything left from an earlier attempt that
+                    # died is ours to clear, since we hold the lock.
+                    staging_dir = repo_dir + ".cloning"
+                    for stale in (staging_dir, repo_dir):
+                        if os.path.isdir(stale):
+                            logger.warning(f"Removing incomplete {stale}")
+                            shutil.rmtree(stale, ignore_errors=True)
+                    try:
+                        clone_cmd = ["git", "clone"]
+                        if settings.GIT_CLONE_FILTER:
+                            clone_cmd.append(
+                                f"--filter={settings.GIT_CLONE_FILTER}"
+                            )
+                        clone_cmd += [git_plain_url, staging_dir]
+                        env = (
+                            {**os.environ, **_make_git_auth_env(access_token)}
+                            if access_token
+                            else None
                         )
-                except subprocess.CalledProcessError:
-                    logger.error("Failed to clone repo")
-                    # It's possible another process cloned this repo just as
-                    # we were about to, so check again
-                    if not os.path.isdir(repo_dir):
+                        with _timed(
+                            "clone",
+                            repo=f"{owner_name}/{project_name}",
+                        ):
+                            subprocess.check_call(
+                                clone_cmd,
+                                env=env,
+                                timeout=GIT_CLONE_TIMEOUT,
+                            )
+                    except subprocess.CalledProcessError:
+                        logger.error("Failed to clone repo")
+                        shutil.rmtree(staging_dir, ignore_errors=True)
                         raise HTTPException(404, "Git repo not found")
-                # Touch a file so we can compute a TTL
-                subprocess.check_call(["touch", updated_fpath])
+                    except subprocess.TimeoutExpired:
+                        # Every retry starts this repo over from nothing, so
+                        # a repo too big to clone inside the budget never
+                        # converges however many times it is asked for. Say
+                        # so rather than letting it look like a server error.
+                        logger.error(
+                            f"Clone of {owner_name}/{project_name} exceeded "
+                            f"{GIT_CLONE_TIMEOUT}s"
+                        )
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                        raise HTTPException(
+                            504,
+                            "This project's repository took too long to "
+                            "download.",
+                        )
+                    os.rename(staging_dir, repo_dir)
+                    # Touch a file so we can compute a TTL
+                    subprocess.check_call(["touch", updated_fpath])
                 repo = git.Repo(repo_dir)
         except Timeout:
             logger.warning("Git repo lock timed out")
-    if os.path.isfile(updated_fpath):
-        last_updated = os.path.getmtime(updated_fpath)
-    else:
-        last_updated = 0
+    # `updated.txt` is only written once a clone has finished, so its absence
+    # means this checkout has never been complete -- either a first clone is
+    # running right now behind the lock we just gave up on, or one died
+    # partway. Reading the directory anyway hands callers a tree with no
+    # calkit.yaml and no files, which they cannot tell apart from a project
+    # that genuinely has neither: the request 200s with an empty list, or
+    # 404s on a file that does exist. Say "not ready yet" instead.
+    if not os.path.isfile(updated_fpath):
+        logger.warning(
+            f"Repo for {owner_name}/{project_name} is not ready "
+            "(no completed clone)"
+        )
+        raise HTTPException(
+            503,
+            "This project is still being prepared. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        )
+    last_updated = os.path.getmtime(updated_fpath)
     did_refresh = newly_cloned
     if not newly_cloned:
         # TODO: Only pull if we know we need to, perhaps with a call to GitHub

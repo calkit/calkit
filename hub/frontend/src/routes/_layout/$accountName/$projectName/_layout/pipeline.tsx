@@ -12,11 +12,7 @@ import {
   Text,
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import {
-  Link as RouterLink,
-  createFileRoute,
-  useNavigate,
-} from "@tanstack/react-router"
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import {
   type ReactNode,
   useCallback,
@@ -59,7 +55,42 @@ function makeRenderer(
   envTo: string,
   highlightRange: [number, number] | null,
   firstHighlightRef: React.RefObject<HTMLSpanElement>,
+  linkTo: (to: string, search: Record<string, string>) => void,
 ) {
+  // A plain anchor that navigates through the router on click.
+  //
+  // Not a router `<Link>`: a generated pipeline file mentions hundreds of
+  // paths and environments, and a Link apiece subscribes each one to router
+  // state and builds its location on every render, which is most of what
+  // makes this page lag. (It is also what fills the console with "Could not
+  // find match for from:" while navigating away.) An anchor costs nothing
+  // and still leaves the link right-clickable and openable in a new tab.
+  function NavSpan({
+    to,
+    search,
+    label,
+  }: {
+    to: string
+    search: Record<string, string>
+    label: string
+  }) {
+    const query = new URLSearchParams(search).toString()
+    return (
+      <a
+        href={query ? `${to}?${query}` : to}
+        style={{ textDecoration: "underline" }}
+        onClick={(e) => {
+          // Leave the modified clicks to the browser so "open in new tab"
+          // keeps working.
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+          e.preventDefault()
+          linkTo(to, search)
+        }}
+      >
+        {label}
+      </a>
+    )
+  }
   return ({
     rows,
     stylesheet,
@@ -82,9 +113,12 @@ function makeRenderer(
         const val = n.value ?? ""
         if (paths.has(val)) {
           return (
-            <RouterLink key={key} to={filesTo} search={{ path: val } as never}>
-              <span style={{ textDecoration: "underline" }}>{val}</span>
-            </RouterLink>
+            <NavSpan
+              key={key}
+              to={filesTo}
+              search={{ path: val }}
+              label={val}
+            />
           )
         }
         // Environment reference, possibly composite ("outer:inner"). Link each
@@ -97,9 +131,7 @@ function makeRenderer(
                 <React.Fragment key={`${key}-env-${i}`}>
                   {i > 0 ? ":" : null}
                   {envNames.has(seg) ? (
-                    <RouterLink to={envTo} search={{ name: seg } as never}>
-                      <span style={{ textDecoration: "underline" }}>{seg}</span>
-                    </RouterLink>
+                    <NavSpan to={envTo} search={{ name: seg }} label={seg} />
                   ) : (
                     seg
                   )}
@@ -204,6 +236,12 @@ function LinkedYaml({
   isFullShown?: boolean
   setIsFullShown?: (shown: boolean) => void
 }) {
+  const navigate = useNavigate()
+  const linkTo = useCallback(
+    (to: string, search: Record<string, string>) =>
+      navigate({ to, search: search as never }),
+    [navigate],
+  )
   const lines = useMemo(() => content.split("\n"), [content])
   // The window to render: the stage being looked at if there is one, so a
   // link to a stage still lands on it, and the head of the file otherwise.
@@ -245,8 +283,9 @@ function LinkedYaml({
         envTo,
         highlightRange,
         firstHighlightRef,
+        linkTo,
       ),
-    [paths, filesTo, envRefs, envNames, envTo, highlightRange],
+    [paths, filesTo, envRefs, envNames, envTo, highlightRange, linkTo],
   )
 
   useEffect(() => {

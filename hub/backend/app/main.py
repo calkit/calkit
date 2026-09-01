@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import sentry_sdk
 from fastapi import FastAPI, Request
@@ -77,12 +78,39 @@ app = FastAPI(
     generate_unique_id_function=custom_generate_unique_id,
 )
 
+# Paths that hand back a file's bytes to something that is not a browser.
+#
+# A project's app is a WASM Python runtime reading its own data files over
+# HTTP. The browser decompresses a gzipped response transparently, but the
+# in-browser Python stack passes the original Content-Encoding through to
+# pandas, which then tries to gunzip bytes that are already plain and fails
+# with "Not a gzipped file". Nothing on these paths is text worth shrinking
+# anyway -- it is app assets and data files.
+_NO_COMPRESS_PATHS = ("/apps/",)
+
+
+class SelectiveGZipMiddleware:
+    """GZip, except on the paths that serve files verbatim."""
+
+    def __init__(self, app: Any, minimum_size: int = 1000) -> None:
+        self.app = app
+        self.gzip_app = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and any(
+            part in scope.get("path", "") for part in _NO_COMPRESS_PATHS
+        ):
+            await self.app(scope, receive, send)
+            return
+        await self.gzip_app(scope, receive, send)
+
+
 # Compress responses. The project view returns large JSON documents -- a
 # references listing for a paper-heavy project runs to several megabytes of
 # BibTeX -- which are almost entirely repeated keys and prose, so they shrink
 # by roughly an order of magnitude. Added before CORS so CORS stays the
 # outermost layer and error responses still carry its headers.
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:

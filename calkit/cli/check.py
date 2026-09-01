@@ -307,50 +307,155 @@ def check_repro(
     wdir: Annotated[
         str, typer.Option("--wdir", help="Project working directory.")
     ] = ".",
+    categories: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--category",
+            "-c",
+            help=(
+                "Show the findings behind one summary line instead of the "
+                "summary. Can be specified multiple times."
+            ),
+        ),
+    ] = None,
     as_json: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
 ) -> None:
-    """Check the reproducibility of a project."""
-    from calkit.reproducibility import check_reproducibility
+    """Check the reproducibility of a project.
 
+    Reports one line per check. Where a line counts something, ask for
+    that category to see what it counted, e.g., 'calkit check repro -c
+    retyped' for values in a manuscript the pipeline already computes.
+
+    Exits with an error when the project types out a value its own
+    pipeline computes, which is a defect rather than a matter of taste.
+    Everything else here is advice and does not affect the exit code.
+    """
+    from calkit.reproducibility import DETAIL_CATEGORIES, check_reproducibility
+
+    valid = list(DETAIL_CATEGORIES)
+    for category in categories or []:
+        if category not in valid:
+            raise_error(
+                f"Invalid category: {category}. Valid categories are: {valid}"
+            )
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
+        if res.retyped_values:
+            raise typer.Exit(1)
         return
-    calkit.echo(res.to_pretty())
-    if res.untraceable_literals:
-        try:
-            from rich.console import Console
-            from rich.table import Table
-
-            console = Console()
-            table = Table(
-                title="Untraceable Literals",
-                title_justify="left",
-                show_header=True,
-                header_style="bold",
+    if not categories:
+        calkit.echo(res.to_pretty())
+        # The findings themselves are a page of their own, and printing
+        # them here buries the one line that says what to do next. Each
+        # line that has any names its own category, so the reader goes
+        # from the line that bothered them to the findings behind it.
+        if res.categories_with_detail:
+            calkit.echo(
+                "Add the '-c' shown beside a line above to see what it "
+                "counted, e.g., 'calkit check repro -c retyped'."
             )
-            table.add_column("File", style="cyan")
-            table.add_column("Line", justify="right")
-            table.add_column("Col", justify="right")
-            table.add_column("Value", style="red")
-            table.add_column("Context")
-            table.add_column("Suggestion")
-            # One row per finding, in the order the checker sorted them
-            for finding in res.untraceable_literals:
-                table.add_row(
-                    finding["file"],
-                    str(finding["line"]),
-                    str(finding["column"]),
-                    finding["value"],
-                    finding["context"],
-                    finding["suggestion"],
-                )
-            calkit.echo("")
-            console.print(table)
-        except ImportError:
-            pass
+        if res.retyped_values:
+            raise typer.Exit(1)
+        return
+    for category in categories:
+        items = res.details(category)
+        if not items:
+            calkit.echo(f"{category}: nothing to report")
+            continue
+        if category == "retyped":
+            _echo_retyped(items)
+        elif category == "numbers":
+            _echo_unattributed(items)
+        else:
+            calkit.echo(f"{category} ({len(items)}):")
+            for item in items:
+                calkit.echo(f"  {item}")
+    if res.retyped_values:
+        raise typer.Exit(1)
+
+
+def _echo_retyped(findings: list[dict]) -> None:
+    """Values the pipeline produces that a document typed out instead."""
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(
+        title=f"Typed out rather than read from the pipeline ({len(findings)})",
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+    )
+    # file:line:column in one column, which most terminals make clickable
+    table.add_column("Where", style="cyan", no_wrap=True)
+    table.add_column("Value", style="red", no_wrap=True)
+    table.add_column("Computed in", style="green", no_wrap=True)
+    table.add_column("Context")
+    for finding in findings:
+        table.add_row(
+            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            finding["value"],
+            finding["source"],
+            finding["context"],
+        )
+    Console().print(table)
+    calkit.echo(
+        "\nEach of these is a number the project already computes, typed "
+        "into the document. It is right today and wrong the next time that "
+        "stage runs. Reference the command the 'json-to-latex' stage "
+        "generates for that key instead."
+        "\n\nWhat this does not catch: a value under two significant "
+        "digits (0.5) or an integer under 100 (8), which would match too "
+        "much ordinary prose to be worth reporting; a value the document "
+        "rounds or reformats before typing, since it is compared as "
+        "written; and anything in a results file no 'json-to-latex' stage "
+        "reads, or in one whose stage names its 'keys' without naming "
+        "that value---the document has no command for it, so typing it "
+        "is what there is until the key is named."
+    )
+
+
+def _echo_unattributed(findings: list[dict]) -> None:
+    """Result-like numbers with nothing recorded behind them."""
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(
+        title=f"Numbers with nothing recorded behind them ({len(findings)})",
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+    )
+    table.add_column("Where", style="cyan", no_wrap=True)
+    table.add_column("Value", style="yellow", no_wrap=True)
+    # A number in a sentence that cites somebody is usually theirs
+    table.add_column("Note", style="dim", no_wrap=True)
+    table.add_column("Context")
+    for finding in findings:
+        table.add_row(
+            f"{finding['file']}:{finding['line']}:{finding['column']}",
+            finding["value"],
+            "quoted?" if finding.get("cited") else "",
+            finding["context"],
+        )
+    Console().print(table)
+    calkit.echo(
+        "\nMost numbers in a paper are not results, so this is a list to "
+        "look over rather than one to fix. A quantity quoted from a "
+        "reference (marked 'quoted?'), a threshold you chose, or a "
+        "tolerance has nothing to be traced to, and writing it down as a "
+        "structured value would be work for no gain. What this is good "
+        "for is spotting the one that is a result and never got templated "
+        "in."
+        "\n\nWhat this does not catch: an integer, since counts and "
+        "indices are indistinguishable from results in prose; a number "
+        "inside a citation, a link, a label, or a figure macro's options, "
+        "which are masked; and anything in a file the document does not "
+        "read. It is tuned to under-report: a false alarm on a number "
+        "that belongs in the text costs more than a missed one."
+    )
 
 
 @check_app.command(
@@ -1934,3 +2039,42 @@ def check_call(
             typer.echo("Fallback call succeeded")
         except subprocess.CalledProcessError:
             raise_error("Fallback call failed")
+
+
+@check_app.command(name="questions")
+def check_questions(
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Project working directory.")
+    ] = ".",
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List every answered question and its evidence, not only "
+            "the ones needing attention.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output the report as JSON.")
+    ] = False,
+) -> None:
+    """Check that answered questions are consistent with their evidence.
+
+    A question is stale if any of its evidence changed after the commit
+    that last edited the question, in Git history for Git-tracked outputs
+    or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value
+    keys must resolve, every placeholder in the text must render, and a
+    publication label must still be present in the LaTeX source. Exits
+    with an error if any answered question is stale or broken.
+    """
+    from calkit.questions import check_questions as _check_questions
+    from calkit.questions import format_status
+
+    status = _check_questions(wdir=wdir)
+    if json_output:
+        calkit.echo(json.dumps(status.model_dump(mode="json"), indent=2))
+    else:
+        calkit.echo(format_status(status, verbose=verbose))
+    if not status.ok:
+        raise typer.Exit(1)

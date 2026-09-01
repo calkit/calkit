@@ -1373,6 +1373,15 @@
           "description": "Arguments over which to run this stage multiple times.",
           "title": "Iterate Over"
         },
+        "keys": {
+          "default": [],
+          "description": "Keys to expose to the document, dotted to reach into nested output, e.g., 'cases.a.cp'. Without any, every top-level key is exposed, which is fine for a results file written for the paper and unwieldy for one exported wholesale from an analysis.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
         "kind": {
           "const": "json-to-latex",
           "default": "json-to-latex",
@@ -4302,6 +4311,7 @@
                 "markdown": "#/$defs/MarkdownStage",
                 "matlab-command": "#/$defs/MatlabCommandStage",
                 "matlab-script": "#/$defs/MatlabScriptStage",
+                "procedure": "#/$defs/ProcedureStage",
                 "python-script": "#/$defs/PythonScriptStage",
                 "quarto": "#/$defs/QuartoStage",
                 "r-script": "#/$defs/RScriptStage",
@@ -4369,6 +4379,9 @@
               },
               {
                 "$ref": "#/$defs/MarkdownStage"
+              },
+              {
+                "$ref": "#/$defs/ProcedureStage"
               }
             ]
           },
@@ -4619,6 +4632,180 @@
       "title": "ProcedureInput",
       "type": "object"
     },
+    "ProcedureStage": {
+      "additionalProperties": false,
+      "description": "A procedure carried out by a person, as a pipeline stage.\n\nNot everything can be automated. A sample prepared by hand, a rig\nswitched on and read off, a survey administered: the work is real and\neverything downstream rests on it, but nothing in the pipeline knows\nwhether it has happened. Declaring it as a stage puts a manual step\nwhere automated ones are: running the pipeline walks the person\nthrough the procedure's steps, prompting for whatever it asks them to\nrecord, and the run log becomes an output the next stage reads like\nany other.\n\nThe log is a directory of one CSV per run, kept in Git rather than\nDVC, and never cleared before a run: earlier runs are data, not stale\noutput. Declaring further ``outputs`` is allowed for a procedure that\nwrites something else too, e.g., a file the instrument saves.",
+      "properties": {
+        "always_run": {
+          "default": false,
+          "description": "Run this stage every time the pipeline is run, even if nothing has changed.",
+          "title": "Always Run",
+          "type": "boolean"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A description of what this stage does.",
+          "title": "Description"
+        },
+        "environment": {
+          "default": "_system",
+          "title": "Environment",
+          "type": "string"
+        },
+        "frozen": {
+          "default": false,
+          "description": "Never rerun this stage, treating its outputs as up-to-date.",
+          "title": "Frozen",
+          "type": "boolean"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathInput"
+                  },
+                  {
+                    "$ref": "#/$defs/InputsFromStageOutputs"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.",
+          "title": "Inputs"
+        },
+        "iterate_over": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/StageIteration"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Arguments over which to run this stage multiple times.",
+          "title": "Iterate Over"
+        },
+        "kind": {
+          "const": "procedure",
+          "default": "procedure",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The stage's name, which must match its key if set.",
+          "title": "Name"
+        },
+        "no_commit": {
+          "default": false,
+          "description": "Do not commit the run log after each step. The log is still written; only the commit per step is skipped.",
+          "title": "No Commit",
+          "type": "boolean"
+        },
+        "outputs": {
+          "anyOf": [
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/PathOutput"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": [],
+          "description": "Paths this stage produces.",
+          "title": "Outputs"
+        },
+        "procedure_name": {
+          "description": "Name of the procedure to carry out, as it is keyed under 'procedures' in calkit.yaml.",
+          "title": "Procedure Name",
+          "type": "string"
+        },
+        "scheduler": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Options for running this stage on a job scheduler (SLURM or PBS)."
+        },
+        "slurm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageSchedulerOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
+        },
+        "wdir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.",
+          "title": "Wdir"
+        }
+      },
+      "required": [
+        "procedure_name"
+      ],
+      "title": "ProcedureStage",
+      "type": "object"
+    },
     "ProcedureStep": {
       "properties": {
         "cmd": {
@@ -4807,7 +4994,7 @@
       "type": "object"
     },
     "PublicationEvidence": {
-      "description": "Evidence in the form of a publication.",
+      "description": "Evidence in the form of a publication.\n\nThe pointer to *where* in the publication the evidence lives is split in\ntwo, in the spirit of a W3C selector: ``section`` is for the reader, and\n``label`` is an anchor in the source (e.g., a LaTeX ``\\label``) that\n``calkit check questions`` can verify still exists, so the reference\ncannot rot when the document is reorganized.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -4827,9 +5014,35 @@
           "title": "Kind",
           "type": "string"
         },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Anchor for the section in the publication's source, e.g., a LaTeX label such as 'sec:results'. Checked against the source of the LaTeX stage that builds the publication.",
+          "title": "Label"
+        },
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "section": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Section or subsection of the publication where the evidence is presented, as a reader would find it, e.g., '4.2' or 'Results'.",
+          "title": "Section"
         }
       },
       "required": [
@@ -5261,7 +5474,7 @@
       "type": "object"
     },
     "Question": {
-      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.",
+      "description": "A question the project hopes to answer.\n\nEach piece of evidence defines what it points at inline, discriminated by\n``kind``, so citing something doesn't require declaring it at the top\nlevel first. The top-level collections are for the things worth naming or\nannotating, not a registry that evidence has to be registered in.\n\nKeep the answer to the claim itself and let the evidence carry the\nnumbers: a ``value`` evidence entry can be templated into the text by\nname, as in ``\"about {improvement:.1f}x\"``, so it is read from the\nresults file rather than retyped. Longer reasoning belongs in the\npublication, pointed at with a publication evidence entry and its\n``section``.\n\nAn answer is a claim about the evidence as it was when the answer was\nlast edited, and Git records when that was. ``calkit check questions``\nreports a question as stale when any of its evidence has changed since\nthat commit, so editing the question after re-reading it against the\nnew evidence is how to say it still holds.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -5285,6 +5498,9 @@
                   },
                   {
                     "$ref": "#/$defs/ResultsEvidence"
+                  },
+                  {
+                    "$ref": "#/$defs/ValueEvidence"
                   },
                   {
                     "$ref": "#/$defs/TableEvidence"
@@ -5314,6 +5530,19 @@
           ],
           "default": null,
           "title": "Hypothesis"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free-form notes, e.g., why a question is still open and what would answer it. Unlike an answer, notes make no claim, so a question with notes and no answer is reported as unanswered rather than as an answer lacking evidence.",
+          "title": "Notes"
         },
         "question": {
           "title": "Question",
@@ -6126,7 +6355,7 @@
       "type": "object"
     },
     "ResultsEvidence": {
-      "description": "Evidence in the form of a result.",
+      "description": "Evidence in the form of a results file: a set of values, a table, a\nmap, whatever the pipeline wrote. For one value inside such a file, use\n``value`` evidence, which can be templated into the answer.",
       "properties": {
         "explanation": {
           "anyOf": [
@@ -6150,6 +6379,7 @@
             }
           ],
           "default": null,
+          "description": "Deprecated: use 'value' evidence for a single value within a results file.",
           "title": "Key"
         },
         "kind": {
@@ -7922,6 +8152,57 @@
         "path"
       ],
       "title": "UvVenvEnvironment",
+      "type": "object"
+    },
+    "ValueEvidence": {
+      "description": "Evidence in the form of one value from a results file.\n\nThe value is never copied into ``calkit.yaml``: the pipeline owns it,\nand the entry only points at it. Under its ``name`` it can be templated\ninto the question's prose with Python format syntax, e.g.,\n``\"about {improvement:.1f}x\"``, so a number in an answer is read from\nthe results file when the question is displayed and cannot go stale.",
+      "properties": {
+        "explanation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Explanation"
+        },
+        "key": {
+          "description": "Key of the value within the results file. A key present at the top level is used as-is; otherwise it is split on dots and walked into nested objects, with integers indexing lists.",
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "value",
+          "default": "value",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name under which the value can be templated into the question's text, as in '{name:.2f}'. Defaults to the key. Must be unique within the question.",
+          "title": "Name"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "key"
+      ],
+      "title": "ValueEvidence",
       "type": "object"
     },
     "VenvEnvironment": {

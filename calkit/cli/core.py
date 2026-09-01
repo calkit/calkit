@@ -169,5 +169,12 @@ def raise_error(txt: str) -> NoReturn:
 
 def warn(txt: str, prefix: str = "Warning: ", err: bool = False):
     # Callers emitting machine-readable output on stdout should set err=True
-    # so warnings don't corrupt it
-    typer.echo(typer.style(prefix + str(txt), fg="yellow"), err=err)
+    # so warnings don't corrupt it. Imported here rather than at module
+    # scope, since calkit imports this module while it is still being
+    # defined.
+    from calkit.core import encode_safe
+
+    typer.echo(
+        typer.style(prefix + encode_safe(str(txt), err=err), fg="yellow"),
+        err=err,
+    )

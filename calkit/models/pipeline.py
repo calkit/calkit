@@ -253,6 +253,7 @@ class Stage(BaseModel):
         "map-paths",
         "marimo-html-wasm",
         "markdown",
+        "procedure",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -1259,6 +1260,16 @@ class JsonToLatexStage(Stage):
         default=None,
         description="Format strings for values, keyed by their JSON key.",
     )
+    keys: list[str] = Field(
+        default=[],
+        description=(
+            "Keys to expose to the document, dotted to reach into nested "
+            "output, e.g., 'cases.a.cp'. Without any, every top-level key "
+            "is exposed, which is fine for a results file written for the "
+            "paper and unwieldy for one exported wholesale from an "
+            "analysis."
+        ),
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1275,6 +1286,8 @@ class JsonToLatexStage(Stage):
             cmd += f" --output '{out_path}'"
         if self.command_name is not None:
             cmd += f" --command {self.command_name}"
+        for key in self.keys:
+            cmd += f" --key {shlex.quote(key)}"
         if self.format is not None:
             fmt_json = json.dumps(self.format)
             cmd += f" --format-json '{fmt_json}'"
@@ -1904,6 +1917,79 @@ class MarimoHtmlWasmStage(Stage):
         return cmd
 
 
+class ProcedureStage(Stage):
+    """A procedure carried out by a person, as a pipeline stage.
+
+    Not everything can be automated. A sample prepared by hand, a rig
+    switched on and read off, a survey administered: the work is real and
+    everything downstream rests on it, but nothing in the pipeline knows
+    whether it has happened. Declaring it as a stage puts a manual step
+    where automated ones are: running the pipeline walks the person
+    through the procedure's steps, prompting for whatever it asks them to
+    record, and the run log becomes an output the next stage reads like
+    any other.
+
+    The log is a directory of one CSV per run, kept in Git rather than
+    DVC, and never cleared before a run: earlier runs are data, not stale
+    output. Declaring further ``outputs`` is allowed for a procedure that
+    writes something else too, e.g., a file the instrument saves.
+    """
+
+    kind: Literal["procedure"] = "procedure"
+    # A person in a room, not a runtime; nothing to activate
+    environment: str = "_system"
+    procedure_name: str = Field(
+        description=(
+            "Name of the procedure to carry out, as it is keyed under "
+            "'procedures' in calkit.yaml."
+        )
+    )
+    no_commit: bool = Field(
+        default=False,
+        description=(
+            "Do not commit the run log after each step. The log is still "
+            "written; only the commit per step is skipped."
+        ),
+    )
+    # Set at compile time when the procedure is kept in its own file, so
+    # editing the steps means the procedure should be carried out again.
+    # Resolved rather than declared: which form a procedure takes is
+    # calkit.yaml's business, not the stage's.
+    _procedure_path: str | None = PrivateAttr(default=None)
+
+    @property
+    def log_dir(self) -> str:
+        """Where ``calkit xproc`` writes this procedure's run logs."""
+        return f".calkit/procedure-runs/{self.procedure_name}"
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit xproc {shlex.quote(self.procedure_name)}"
+        if self.no_commit:
+            cmd += " --no-commit"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        # A change to what the person is asked to do means it is a
+        # different procedure, and the old run no longer stands for it
+        deps = ["calkit.yaml"]
+        if self._procedure_path is not None:
+            deps.append(self._procedure_path)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = [
+            {self.log_dir: dict(cache=False, persist=True)}
+        ]
+        for out in super().dvc_outs:
+            path = out if isinstance(out, str) else next(iter(out))
+            if path != self.log_dir:
+                outs.append(out)
+        return outs
+
+
 class MarkdownStage(Stage):
     """A stage sourced from a Markdown file's annotated code blocks.
 
@@ -1994,6 +2080,7 @@ class Pipeline(BaseModel):
                 | MapPathsStage
                 | MarimoHtmlWasmStage
                 | MarkdownStage
+                | ProcedureStage
             ),
             Discriminator("kind"),
         ],
@@ -2236,6 +2323,23 @@ class Pipeline(BaseModel):
                 ]
             converted[name] = calkit_yaml_stage
         return converted
+
+    def resolve_procedure_paths(self, procedures: dict) -> None:
+        """Tell procedure stages where their procedure is written down.
+
+        A procedure is either inline in calkit.yaml or in a file of its
+        own, and only the second gives a stage anything extra to depend
+        on. Which form it takes is calkit.yaml's business, so the stage is
+        told rather than asked to declare it.
+        """
+        for stage in self.stages.values():
+            if not isinstance(stage, ProcedureStage):
+                continue
+            entry = (procedures or {}).get(stage.procedure_name)
+            path = entry.get("path") if isinstance(entry, dict) else None
+            # Assigned either way: a procedure moved back inline must not
+            # leave the stage depending on a file that is no longer there
+            stage._procedure_path = path if isinstance(path, str) else None
 
     def ensure_env_lock_paths_are_inputs(
         self, env_lock_fpaths: dict[str, list[str]]

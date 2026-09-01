@@ -1973,6 +1973,8 @@ Options:
 
 List the project's questions (1-indexed).
 
+Placeholders in the text, such as `{improvement:.1f}`, are filled from the question's value evidence, so numbers shown are read from the results files rather than retyped into `calkit.yaml`.
+
 Usage:
 
 ```text
@@ -1981,9 +1983,10 @@ calkit list|ls questions [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description            |
-| -------- | ------- | -------- | ------- | ---------------------- |
-| `--json` | boolean | no       | False   | Output result as JSON. |
+| Option   | Type    | Required | Default | Description                                                                                    |
+| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON.                                                                         |
+| `--raw`  | boolean | no       | False   | Show the text as written, with its {name} placeholders, instead of rendered from the evidence. |
 
 <a id="subcommand-list-ls-publications-pubs"></a>
 
@@ -2970,12 +2973,17 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
+| [`questions`](#subcommand-check-questions)                  | Check that answered questions are consistent with their evidence.                                            |
 
 <a id="subcommand-check-repro"></a>
 
 #### `calkit check repro`
 
 Check the reproducibility of a project.
+
+Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
+
+Exits with an error when the project types out a value its own pipeline computes, which is a defect rather than a matter of taste. Everything else here is advice and does not affect the exit code.
 
 Usage:
 
@@ -2985,10 +2993,11 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option   | Type    | Required | Default | Description                |
-| -------- | ------- | -------- | ------- | -------------------------- |
-| `--wdir` | str     | no       | .       | Project working directory. |
-| `--json` | boolean | no       | False   | Output result as JSON.     |
+| Option             | Type    | Required | Default | Description                                                                                        |
+| ------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------- |
+| `--wdir`           | str     | no       | .       | Project working directory.                                                                         |
+| `--category`, `-c` | str     | no       |         | Show the findings behind one summary line instead of the summary. Can be specified multiple times. |
+| `--json`           | boolean | no       | False   | Output result as JSON.                                                                             |
 
 <a id="subcommand-check-environment"></a>
 
@@ -3284,6 +3293,28 @@ Options:
 | ------------ | ---- | -------- | ------- | ------------------------------------ |
 | `--if-error` | str  | yes      |         | Command to run if there is an error. |
 
+<a id="subcommand-check-questions"></a>
+
+#### `calkit check questions`
+
+Check that answered questions are consistent with their evidence.
+
+A question is stale if any of its evidence changed after the commit that last edited the question, in Git history for Git-tracked outputs or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value keys must resolve, every placeholder in the text must render, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+
+Usage:
+
+```text
+calkit check questions [OPTIONS]
+```
+
+Options:
+
+| Option            | Type    | Required | Default | Description                                                                         |
+| ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--wdir`          | str     | no       | .       | Project working directory.                                                          |
+| `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention. |
+| `--json`          | boolean | no       | False   | Output the report as JSON.                                                          |
+
 <a id="command-group-latex-tex"></a>
 
 ### `calkit latex|tex`
@@ -3318,11 +3349,12 @@ Arguments:
 
 Options:
 
-| Option           | Type | Required | Default | Description                                                                                              |
-| ---------------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | str  | yes      |         | Output LaTeX file path(s).                                                                               |
-| `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                     |
-| `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
+| Option           | Type | Required | Default | Description                                                                                                                     |
+| ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o` | str  | yes      |         | Output LaTeX file path(s).                                                                                                      |
+| `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                                            |
+| `--key`          | str  | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-build"></a>
 

@@ -1748,6 +1748,9 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Tell procedure stages where their procedure is written down, which
+    # only calkit.yaml knows
+    pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
     if write:
         # The resolved setup commands each stage runs, written beside the
         # pipeline so the compiled command can name a path instead of

@@ -295,7 +295,7 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
     import calkit
 
     # Value lengths near the wrap width are what trigger it
-    for n in range(60, 80):
+    for n in range(60, 92):
         buf = io.StringIO()
         data = {"stages": {"s": {"cmd": "python " + "a" * n}}}
         calkit.ryaml.dump(data, buf)

@@ -222,9 +222,59 @@ def list_questions(
     json_output: Annotated[
         bool, typer.Option("--json", help="Output result as JSON.")
     ] = False,
+    raw: Annotated[
+        bool,
+        typer.Option(
+            "--raw",
+            help="Show the text as written, with its {name} placeholders, "
+            "instead of rendered from the evidence.",
+        ),
+    ] = False,
 ):
-    """List the project's questions (1-indexed)."""
-    questions = calkit.load_calkit_info().get("questions", []) or []
+    """List the project's questions (1-indexed).
+
+    Placeholders in the text, such as ``{improvement:.1f}``, are filled from
+    the question's value evidence, so numbers shown are read from the
+    results files rather than retyped into ``calkit.yaml``.
+    """
+    from calkit.questions import (
+        TEMPLATED_FIELDS,
+        placeholders,
+        render_question,
+    )
+
+    def _texts(question: dict) -> list[str]:
+        evidence = question.get("evidence") or []
+        return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
+            ev.get("explanation") or ""
+            for ev in evidence
+            if isinstance(ev, dict)
+        ]
+
+    ck_info = calkit.load_calkit_info()
+    questions = ck_info.get("questions", []) or []
+    if not raw:
+        rendered = [render_question(q, ck_info) for q in questions]
+        # A placeholder left as written looks exactly like text somebody
+        # meant literally, so say when one could not be filled rather than
+        # let a fresh clone read as a project that types its braces. Any
+        # placeholder left standing counts, whether it names evidence that
+        # could not be read or names nothing at all: a brace meant to stay
+        # in the text is written '{{' and never reaches here.
+        unfilled = any(
+            placeholders(text)
+            for q in rendered
+            if isinstance(q, dict)
+            for text in _texts(q)
+        )
+        if unfilled:
+            warn(
+                "Some placeholders could not be filled from the evidence. "
+                "Run 'calkit check questions' to see why; 'calkit pull' if "
+                "the results files are not here yet.",
+                err=json_output,
+            )
+        questions = rendered
     if json_output:
         echo_json(questions)
         return

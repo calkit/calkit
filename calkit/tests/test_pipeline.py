@@ -3299,3 +3299,71 @@ def test_system_env_default_setup_reaches_the_stage(tmp_dir):
         assert f.read() == "from-env"
     # The env declares the file its setup reads, so the stage depends on it
     assert "setup_env.sh" in stages["show"]["deps"]
+
+
+def test_system_env_inputs_are_stage_deps(tmp_dir):
+    # An environment's declared inputs become DVC deps of every stage using
+    # it, so DVC hashes them itself and the env's lock file doesn't have to
+    # carry copies. This has to hold even when the env has no lock file at
+    # all, which is the case for one that only has setup commands -- those
+    # go into the stage's command, so nothing else needs locking.
+    import calkit
+
+    with open("setup.sh", "w") as f:
+        f.write("export X=1\n")
+    envs = {
+        "sys": {
+            "kind": "system",
+            "default_setup": ["source setup.sh"],
+            "inputs": ["setup.sh"],
+        },
+        "sysl": {
+            "kind": "system",
+            "lock": ["os"],
+            "inputs": ["setup.sh"],
+        },
+        "py": {"kind": "uv", "path": "pyproject.toml"},
+    }
+    with open("pyproject.toml", "w") as f:
+        f.write(
+            '[project]\nname = "p"\nversion = "0"\n'
+            'requires-python = ">=3.10"\ndependencies = []\n'
+        )
+    stages = calkit.pipeline.to_dvc(
+        ck_info={
+            "environments": envs,
+            "pipeline": {
+                "stages": {
+                    "plain": {
+                        "kind": "shell-command",
+                        "command": "echo a",
+                        "environment": "sys",
+                        "outputs": ["a.txt"],
+                    },
+                    "locked": {
+                        "kind": "shell-command",
+                        "command": "echo b",
+                        "environment": "sysl",
+                        "outputs": ["b.txt"],
+                    },
+                    "composite": {
+                        "kind": "shell-command",
+                        "command": "echo c",
+                        "environment": "sys:py",
+                        "outputs": ["c.txt"],
+                    },
+                }
+            },
+        },
+        write=False,
+    )
+    # No lock file for an env that only has setup commands, but the file
+    # its setup reads is still tracked
+    assert "setup.sh" in stages["plain"]["deps"]
+    assert not any("env-locks" in dep for dep in stages["plain"]["deps"])
+    # Alongside the lock file when the env locks machine properties too
+    assert "setup.sh" in stages["locked"]["deps"]
+    assert ".calkit/env-locks/sysl/info.json" in stages["locked"]["deps"]
+    # The outer half of a composite env contributes its inputs as well
+    assert "setup.sh" in stages["composite"]["deps"]
+    assert "uv.lock" in stages["composite"]["deps"]

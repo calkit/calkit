@@ -3153,6 +3153,19 @@ def run_in_env(
             ),
         ),
     ] = [],
+    setup_file: Annotated[
+        str | None,
+        typer.Option(
+            "--setup-file",
+            help=(
+                "Path to a JSON list of setup commands, used instead of "
+                "--setup. This is what a compiled pipeline stage carries, "
+                "since a path survives being parsed by cmd.exe on Windows "
+                "and by a POSIX shell elsewhere, and quoted commands "
+                "don't."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3184,6 +3197,16 @@ def run_in_env(
     # command to a runtime with no shell of its own to prepare. Refused
     # rather than dropped, since a stage whose setup silently never ran is
     # a stage that ran against the wrong toolchain.
+    if setup_file is not None:
+        if setup_cmds:
+            raise_error("Give --setup or --setup-file, not both")
+        try:
+            with open(setup_file) as f:
+                setup_cmds = json.load(f)
+        except (OSError, ValueError) as e:
+            raise_error(
+                f"Could not read setup commands from {setup_file}: {e}"
+            )
     if setup_cmds and env.get("kind") != "system":
         raise_error(
             "--setup only applies to a 'system' environment, and "

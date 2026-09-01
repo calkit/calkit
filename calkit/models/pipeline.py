@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import posixpath
+import re
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -447,8 +448,53 @@ class Stage(BaseModel):
         raise NotImplementedError
 
     @property
+    def setup_file_path(self) -> str | None:
+        """Where this stage's resolved setup commands are written.
+
+        The compiled command names this path rather than carrying the
+        commands themselves. DVC runs a stage's command through cmd.exe on
+        Windows and through ``$SHELL`` elsewhere, and no one quoting
+        survives both: single quotes are literal to cmd.exe, and double
+        quotes let a POSIX shell expand ``$(...)`` at the wrong time. A
+        path has no spaces or metacharacters, so it survives either.
+
+        It is a DVC dep, so editing either list reruns the stage. It is
+        not committed: unlike an import's lock file, nothing here is
+        unrecoverable -- it is derived from ``calkit.yaml`` and rewritten
+        by every compile, which is to say by every ``calkit run`` and
+        ``calkit status``, the same way a cleaned notebook is.
+        """
+        if not self._system_env_setup:
+            return None
+        # Stage names can carry characters a path shouldn't, e.g. the '@'
+        # DVC gives an iterated stage
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name)
+        return posixpath.join(".calkit", "stage-setup", f"{safe}.json")
+
+    def write_setup_file(self, wdir: str | None = None) -> str | None:
+        """Write the resolved setup commands, returning the path."""
+        import json
+
+        rel_path = self.setup_file_path
+        if rel_path is None:
+            return None
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = json.dumps(self._system_env_setup, indent=2) + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        with open(fpath, "w") as f:
+            f.write(content)
+        return rel_path
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
+        setup_file = self.setup_file_path
+        if setup_file is not None:
+            deps.append(setup_file)
         for i in self.inputs:
             if isinstance(i, InputsFromStageOutputs):
                 continue
@@ -511,13 +557,14 @@ class Stage(BaseModel):
             # from the snapshot and from what the workspace says the run
             # produced, so it can't fall out of step with the pipeline
             cmd = f"calkit xenv -n {self._system_env} --no-check"
-            # The whole chain, the environment's defaults included, already
-            # merged. The command in dvc.yaml is therefore the whole story
-            # of what runs, and editing either list changes it, so DVC
-            # reruns the stage without the environment's lock file having
-            # to carry a copy of the setup commands.
-            for setup_cmd in self._system_env_setup:
-                cmd += f" --setup {shlex.quote(setup_cmd)}"
+            # The whole chain, the environment's defaults included, is
+            # already merged and written beside the pipeline; the command
+            # names the file rather than carrying the commands, since no
+            # shell quoting survives both cmd.exe and a POSIX shell. The
+            # file is a dep, so editing either list still reruns the stage.
+            setup_file = self.setup_file_path
+            if setup_file is not None:
+                cmd += f" --setup-file {setup_file}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here

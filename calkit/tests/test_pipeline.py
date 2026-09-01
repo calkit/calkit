@@ -795,11 +795,23 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
         "py": {"kind": "uv", "path": "pyproject.toml"},
     }
 
+    import json
+    import subprocess
+
+    # Compiling with write=True puts the resolved setup on disk, and that
+    # path manages .gitignore, so it needs a repo
+    subprocess.run(["git", "init", "-q", "."], check=True)
+
     def compile_stages(stages):
         return calkit.pipeline.to_dvc(
             ck_info={"environments": envs, "pipeline": {"stages": stages}},
-            write=False,
+            write=True,
         )
+
+    def resolved(name):
+        # The merged setup commands, as written beside the pipeline
+        with open(os.path.join(".calkit", "stage-setup", f"{name}.json")) as f:
+            return json.load(f)
 
     stages = compile_stages(
         {
@@ -831,27 +843,27 @@ def test_stage_setup_is_not_a_scheduler_option(tmp_dir):
         }
     )
     # A system env has no submission step, so the merge happens when the
-    # pipeline compiles and the command says everything that will run
+    # pipeline compiles. The command names a file rather than carrying the
+    # commands, since no one shell quoting survives both cmd.exe and a
+    # POSIX shell, and DVC runs a stage's command through either.
+    for name in ["build", "merged", "plain", "legacy"]:
+        prefix = stages[name]["cmd"].split(" -- ")[0]
+        assert "'" not in prefix and '"' not in prefix, name
+        assert "--env-default-setup" not in stages[name]["cmd"], name
     assert stages["build"]["cmd"].startswith(
-        "calkit xenv -n gpu --no-check --setup 'module load cuda' --"
+        "calkit xenv -n gpu --no-check "
+        "--setup-file .calkit/stage-setup/build.json --"
     )
-    # 'replace' is the default, so a stage with its own setup doesn't run
-    # the env's -- and the command shows that, so editing the env's
-    # defaults doesn't rerun this stage
-    assert "scripts/env.sh" not in stages["build"]["cmd"]
-    # The mode is resolved here rather than passed along
-    assert "--env-default-setup" not in stages["build"]["cmd"]
-    assert "--env-default-setup" not in stages["merged"]["cmd"]
-    assert (
-        "--setup 'source scripts/env.sh' --setup 'module load cuda'"
-        in stages["merged"]["cmd"]
-    )
+    # The file is a dep, so editing either list still reruns the stage
+    assert ".calkit/stage-setup/build.json" in stages["build"]["deps"]
+    # What each stage actually runs, with the modes resolved
+    assert resolved("build") == ["module load cuda"]
+    assert resolved("merged") == ["source scripts/env.sh", "module load cuda"]
     # A stage with no setup of its own still gets the env's, under the
     # default 'replace'
-    assert "--setup 'source scripts/env.sh'" in stages["plain"]["cmd"]
-    assert "module load cuda" not in stages["plain"]["cmd"]
+    assert resolved("plain") == ["source scripts/env.sh"]
     # The legacy spelling is hoisted onto the stage on load
-    assert "--setup 'module load gcc'" in stages["legacy"]["cmd"]
+    assert resolved("legacy") == ["module load gcc"]
     # The even older 'slurm' block reaches the same place, and a scheduler
     # block that held nothing but setup is not written back as an empty
     # one, which would leave a reader wondering what belonged in it
@@ -3259,6 +3271,7 @@ def test_system_env_default_setup_reaches_the_stage(tmp_dir):
     # pipeline compiles, so running the compiled command is what applies
     # them. Nothing reads 'default_setup' at run time any more, so this is
     # the path that has to work.
+    import json
     import subprocess
 
     import calkit
@@ -3289,16 +3302,26 @@ def test_system_env_default_setup_reaches_the_stage(tmp_dir):
         },
     }
     calkit.save_calkit_info(ck_info)
-    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     cmd = stages["show"]["cmd"]
-    # The environment's setup is in the command, not looked up later
-    assert "--setup 'source setup_env.sh'" in cmd
+    # The command names the resolved setup rather than carrying it, so
+    # nothing in it needs shell quoting
+    assert "--setup-file .calkit/stage-setup/show.json" in cmd
+    with open(".calkit/stage-setup/show.json") as f:
+        assert json.load(f) == ["source setup_env.sh"]
     # And running that command delivers it to the stage
     subprocess.run(cmd, shell=True, check=True)
     with open("out.txt") as f:
         assert f.read() == "from-env"
-    # The env declares the file its setup reads, so the stage depends on it
+    # The env declares the file its setup reads, so the stage depends on
+    # it -- and on the resolved setup itself
     assert "setup_env.sh" in stages["show"]["deps"]
+    assert ".calkit/stage-setup/show.json" in stages["show"]["deps"]
+    # Derived from calkit.yaml and rewritten by every compile, so it is
+    # ignored rather than committed -- the same treatment as a cleaned
+    # notebook. DVC still hashes it as a dep.
+    with open(".gitignore") as f:
+        assert "/.calkit/stage-setup/" in f.read()
 
 
 def test_system_env_inputs_are_stage_deps(tmp_dir):

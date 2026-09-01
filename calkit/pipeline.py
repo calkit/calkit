@@ -1748,6 +1748,27 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    if write:
+        # The resolved setup commands each stage runs, written beside the
+        # pipeline so the compiled command can name a path instead of
+        # carrying shell-quoted text, which no single quoting survives on
+        # both cmd.exe and a POSIX shell. Written after the merge above,
+        # which is what works out the list.
+        setup_files = [
+            path
+            for stage in pipeline.stages.values()
+            if (path := stage.write_setup_file(wdir=wdir)) is not None
+        ]
+        # Not committed: unlike an import's lock, this is derived from
+        # calkit.yaml and rewritten by every compile, which is to say by
+        # every 'calkit run' and 'calkit status' -- the same reason a
+        # cleaned notebook isn't committed either.
+        if manage_gitignore and setup_files:
+            _write_managed_gitignore_block(
+                os.path.join(wdir, ".gitignore") if wdir else ".gitignore",
+                marker="calkit stage setup",
+                lines=["/.calkit/stage-setup/"],
+            )
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages

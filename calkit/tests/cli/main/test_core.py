@@ -633,6 +633,49 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert out.strip() == "first-second"
+    # A compiled stage passes a file rather than quoted commands, since a
+    # path survives cmd.exe on Windows and a POSIX shell elsewhere while
+    # quoted text survives neither
+    os.makedirs(os.path.join(".calkit", "stage-setup"), exist_ok=True)
+    setup_json = os.path.join(".calkit", "stage-setup", "s.json")
+    with open(setup_json, "w") as f:
+        json.dump(["source setup_env.sh"], f)
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup-file",
+            setup_json,
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_SETUP'])",
+        ],
+        text=True,
+    )
+    assert "from-setup" in out
+    # Saying it twice in two ways is refused rather than one winning
+    res = subprocess.run(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup-file",
+            setup_json,
+            "--setup",
+            "true",
+            "--",
+            "echo",
+            "hi",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not both" in res.stdout + res.stderr
     # Nothing about the machine is locked and the shell is the default, so
     # there is no lock file: the setup commands live in the stage's
     # command, where DVC already watches them

@@ -366,11 +366,9 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind.csv",
                 "imported_from": {
-                    "git": {
-                        "repo_url": str(tmp_path / "src"),
-                        "rev": rev,
-                        "path": "data/wind.csv",
-                    }
+                    "git_repo_url": str(tmp_path / "src"),
+                    "git_ref": rev,
+                    "path": "data/wind.csv",
                 },
             },
             headers=normal_user_token_headers,
@@ -386,10 +384,8 @@ def test_post_project_dataset_fetches_imports(
             json={
                 "path": "data/wind-head.csv",
                 "imported_from": {
-                    "git": {
-                        "repo_url": str(tmp_path / "src"),
-                        "path": "data/wind.csv",
-                    }
+                    "git_repo_url": str(tmp_path / "src"),
+                    "path": "data/wind.csv",
                 },
             },
             headers=normal_user_token_headers,
@@ -415,10 +411,8 @@ def test_post_project_dataset_fetches_imports(
         assert by_path["data/zenodo-via-url"]["imported_from"] == {
             "doi": "10.5281/zenodo.1234567"
         }
-        assert by_path["data/wind.csv"]["imported_from"]["git"]["rev"] == rev
-        assert (
-            by_path["data/wind-head.csv"]["imported_from"]["git"]["rev"] == rev
-        )
+        assert by_path["data/wind.csv"]["imported_from"]["git_rev"] == rev
+        assert by_path["data/wind-head.csv"]["imported_from"]["git_rev"] == rev
         assert "data/multi" in by_path and "data/multi.csv" not in by_path
         # Importing from another Calkit project copies Git-tracked files
         # and pins the source revision. (get_project/get_repo are patched to

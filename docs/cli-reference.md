@@ -2878,10 +2878,11 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                                           |
-| --------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
-| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                     |
-| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure. |
+| Option                | Type | Required | Default | Description                                                                                                                                                                           |
+| --------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
+| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
 
 <a id="subcommand-update-dataset"></a>
 
@@ -2903,15 +2904,16 @@ Arguments:
 
 Options:
 
-| Option                     | Type     | Required | Default | Description                                                                                                                                     |
-| -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                              |
-| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                       |
-| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                        |
-| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here. |
-| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                             |
-| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                          |
-| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                          |
+| Option                     | Type     | Required | Default | Description                                                                                                                                                                           |
+| -------------------------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`          | str      | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                                                                    |
+| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
+| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
+| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
+| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
+| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
+| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
 
 <a id="command-group-check"></a>
 

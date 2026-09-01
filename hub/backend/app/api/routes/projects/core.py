@@ -4407,14 +4407,6 @@ def get_project_dataset(
         return DatasetForImport.model_validate(ds)
 
 
-class GitSourcePost(BaseModel):
-    repo_url: str
-    # None means the default branch's current head, which is fetched and
-    # then recorded by its commit, so the entry is pinned either way
-    rev: str | None = None
-    path: str | None = None
-
-
 class CreatorPost(BaseModel):
     """Someone credited with creating a dataset.
 
@@ -4446,7 +4438,14 @@ class ImportedFromPost(BaseModel):
     git_rev: str | None = None
     url: str | None = None
     doi: str | None = None
-    git: GitSourcePost | None = None
+    # A Git repo that isn't a Calkit project. Flat, like the project
+    # fields above and like calkit.yaml: 'path' is inside imported_from
+    # either way, and the source-naming key beside it says what it is a
+    # path within.
+    git_repo_url: str | None = None
+    # None means the default branch's current head, which is fetched and
+    # then recorded by its commit, so the entry is pinned either way
+    git_ref: str | None = None
     # Aliased type: the field is also called `date`, and under Python 3.14's
     # lazy annotations a bare `date` here resolves to this field's default.
     date: date_type | None = None
@@ -4476,7 +4475,7 @@ class ImportedFromPost(BaseModel):
         """
         kinds = [
             k
-            for k in ["project", "url", "doi", "git"]
+            for k in ["project", "url", "doi", "git_repo_url"]
             if getattr(self, k) is not None
         ]
         if len(kinds) != 1:
@@ -4485,7 +4484,7 @@ class ImportedFromPost(BaseModel):
                 "An imported dataset must name exactly one source: a "
                 "project, a URL, a DOI, or a Git repo",
             )
-        return kinds[0]
+        return "git" if kinds[0] == "git_repo_url" else kinds[0]
 
     def to_ck_dict(self) -> dict[str, Any]:
         """Render the calkit.yaml form of this source."""
@@ -4505,8 +4504,13 @@ class ImportedFromPost(BaseModel):
         elif kind == "doi":
             out["doi"] = self.doi
         else:
-            assert self.git is not None
-            out["git"] = self.git.model_dump(exclude_none=True)
+            out["git_repo_url"] = self.git_repo_url
+            if self.path:
+                out["path"] = self.path
+            if self.git_ref:
+                out["git_ref"] = self.git_ref
+            if self.git_rev:
+                out["git_rev"] = self.git_rev
         if self.date is not None:
             out["date"] = self.date.isoformat()
         return out
@@ -4746,17 +4750,21 @@ def post_project_dataset(
             files = app.imports.resolve_doi_files(str(req.imported_from.doi))
             landed, _ = app.imports.fetch_files(files, wdir, req.path)
         else:
-            git_src = req.imported_from.git
-            assert git_src is not None
+            src = req.imported_from
+            assert src.git_repo_url is not None
             commit = app.imports.fetch_git_path(
-                git_src.repo_url, git_src.rev, git_src.path, wdir, req.path
+                src.git_repo_url,
+                src.git_ref or src.git_rev,
+                src.path,
+                wdir,
+                req.path,
             )
             # What's recorded is the commit that was fetched: a request
             # without one (the default branch's head) is pinned from here
             # on, like any other
-            git_entry = (ds.get("imported_from") or {}).get("git")
-            if isinstance(git_entry, dict):
-                git_entry["rev"] = commit
+            entry = ds.get("imported_from")
+            if isinstance(entry, dict):
+                entry["git_rev"] = commit
         if landed != req.path:
             if landed in [d.get("path") for d in datasets] or os.path.exists(
                 os.path.join(wdir, landed + ".dvc")

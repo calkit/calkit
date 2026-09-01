@@ -94,7 +94,7 @@ function NotebookInfo({
           to={`/${accountName}/${projectName}/files`}
           search={{ path: notebook.path, ref: gitRef } as any}
         >
-          <Code fontSize="xs" cursor="pointer">
+          <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
             {notebook.path}
           </Code>
         </Link>
@@ -107,7 +107,7 @@ function NotebookInfo({
             to={`/${accountName}/${projectName}/pipeline`}
             search={{ stage: notebook.stage, ref: gitRef } as any}
           >
-            <Code fontSize="xs" cursor="pointer">
+            <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
               {notebook.stage}
             </Code>
           </Link>

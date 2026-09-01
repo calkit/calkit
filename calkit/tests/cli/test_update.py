@@ -9,6 +9,7 @@ import pytest
 from typer.testing import CliRunner
 
 import calkit
+import calkit.docker
 import calkit.resources
 from calkit.cli.update import update_app
 
@@ -461,3 +462,35 @@ def test_update_agent_skills_can_be_run_twice(fake_home):
     assert result2.exit_code == 0
     # Existing custom files should be preserved by copytree dirs_exist_ok.
     assert (skills_dir / "calkit-conventions" / "SKILL.md").exists()
+
+
+def test_update_docker_env_registry(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {"kind": "docker", "path": "Dockerfile", "image": "img"}
+    }
+    calkit.save_calkit_info(ck_info)
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "ghcr.io"]
+    )
+    assert result.exit_code == 0, result.output
+    assert (
+        calkit.load_calkit_info()["environments"]["main"]["registry"]
+        == "ghcr.io"
+    )
+    # A shell can't pass YAML's null, so 'none' is how it's asked for, but
+    # what lands in calkit.yaml is the null the field is documented with,
+    # not a string that only happens to be read as one
+    result = runner.invoke(
+        update_app, ["docker-env", "-n", "main", "--registry", "none"]
+    )
+    assert result.exit_code == 0, result.output
+    env = calkit.load_calkit_info()["environments"]["main"]
+    assert env["registry"] is None
+    assert calkit.docker.resolve_registry_prefix(env) is None
+    with open("calkit.yaml") as f:
+        assert "registry: none" not in f.read()
+    # Nothing to update is a mistake worth reporting, not a no-op
+    result = runner.invoke(update_app, ["docker-env", "-n", "main"])
+    assert result.exit_code != 0

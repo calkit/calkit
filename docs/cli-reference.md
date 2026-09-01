@@ -17,7 +17,7 @@
 | [`commit`](#top-command-commit)                  | Commit a change to the repo.                                                                                 |
 | [`save\|sv`](#top-command-save-sv)               | Save paths by committing and pushing.                                                                        |
 | [`pull`](#top-command-pull)                      | Pull with both Git and DVC.                                                                                  |
-| [`push`](#top-command-push)                      | Push with both Git and DVC.                                                                                  |
+| [`push`](#top-command-push)                      | Push to Git, DVC, and any Docker registries.                                                                 |
 | [`ignore`](#top-command-ignore)                  | Ignore a file, i.e., keep it out of version control.                                                         |
 | [`local-server`](#top-command-local-server)      | Run the local server to interact over HTTP.                                                                  |
 | [`run`](#top-command-run)                        | Check requirements and run the pipeline.                                                                     |
@@ -186,16 +186,24 @@ Commit a change to the repo.
 Usage:
 
 ```text
-calkit commit [OPTIONS]
+calkit commit [OPTIONS] [PATHS...]
 ```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                                                                          |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
+| `paths`  | text | no       |         | Paths to commit. If not provided, will default to any changed files that have been added previously. |
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------ |
-| `--all`, `-a`     | boolean | no       | False   | Automatically stage all changed files.     |
-| `--message`, `-m` | text    | no       |         | Commit message.                            |
-| `--push`          | boolean | no       | False   | Push to both Git and DVC after committing. |
+| Option                        | Type    | Required | Default | Description                                |
+| ----------------------------- | ------- | -------- | ------- | ------------------------------------------ |
+| `--all`, `-a`                 | boolean | no       | False   | Automatically stage all changed files.     |
+| `--message`, `-m`             | text    | no       |         | Commit message.                            |
+| `--auto-commit-message`, `-M` | boolean | no       | False   | Automatically generate a commit message.   |
+| `--push`                      | boolean | no       | False   | Push to both Git and DVC after committing. |
+| `--verbose`                   | boolean | no       | False   | Print verbose output.                      |
 
 <a id="top-command-save-sv"></a>
 
@@ -260,24 +268,31 @@ Options:
 
 ### `calkit push`
 
-Push with both Git and DVC.
+Push to Git, DVC, and any Docker registries.
 
 Usage:
 
 ```text
-calkit push [OPTIONS]
+calkit push [OPTIONS] [TARGETS...]
 ```
+
+Arguments:
+
+| Argument  | Type | Required | Default | Description                                                      |
+| --------- | ---- | -------- | ------- | ---------------------------------------------------------------- |
+| `targets` | text | no       |         | What to push: 'git', 'dvc', 'docker', or 'all'. Defaults to all. |
 
 Options:
 
-| Option            | Type    | Required | Default | Description                |
-| ----------------- | ------- | -------- | ------- | -------------------------- |
-| `--no-check-auth` | boolean | no       | False   |                            |
-| `--no-dvc`        | boolean | no       | False   |                            |
-| `--no-git`        | boolean | no       | False   |                            |
-| `--git-arg`       | text    | no       |         | Additional Git args.       |
-| `--dvc-arg`       | text    | no       |         | Additional DVC args.       |
-| `--no-recursive`  | boolean | no       | False   | Do not push to submodules. |
+| Option            | Type    | Required | Default | Description                                    |
+| ----------------- | ------- | -------- | ------- | ---------------------------------------------- |
+| `--no-check-auth` | boolean | no       | False   | Do not check DVC remote authentication.        |
+| `--no-dvc`        | boolean | no       | False   | Do not push to DVC remotes.                    |
+| `--no-git`        | boolean | no       | False   | Do not push to Git remote.                     |
+| `--git-arg`       | text    | no       |         | Additional Git args.                           |
+| `--dvc-arg`       | text    | no       |         | Additional DVC args.                           |
+| `--no-docker`     | boolean | no       | False   | Do not push Docker images to their registries. |
+| `--no-recursive`  | boolean | no       | False   | Do not push to submodules.                     |
 
 <a id="top-command-ignore"></a>
 
@@ -1019,26 +1034,28 @@ calkit new|create docker-env [OPTIONS]
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                 |
-| ------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                           |
-| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                      |
-| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                       |
-| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                       |
-| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                        |
-| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                              |
-| `--gpus`            | text    | no       |         |                                                                                                                             |
-| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                    |
-| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                 |
-| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                          |
-| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint. |
-| `--user`            | text    | no       |         | User account to use to run the container.                                                                                   |
-| `--platform`        | text    | no       |         | Which platform(s) to build for.                                                                                             |
-| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                         |
-| `--description`     | text    | no       |         | Description.                                                                                                                |
-| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                          |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                      |
-| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                      |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                            |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                                                                                                      |
+| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                                                                                                 |
+| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                                                                                                  |
+| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                                                                                                  |
+| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                                                                                                   |
+| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                                                                                                         |
+| `--gpus`            | text    | no       |         |                                                                                                                                                                                                        |
+| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                                                                                               |
+| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                                                                                            |
+| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                                                                                                     |
+| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                                            |
+| `--user`            | text    | no       |         | User account to use to run the container.                                                                                                                                                              |
+| `--platform`        | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'.                                                                                                                                            |
+| `--registry`        | text    | no       |         | Registry prefix to push built images to and pull them from instead of rebuilding, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. |
+| `--platform-build`  | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry.                                      |
+| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                                                                                                    |
+| `--description`     | text    | no       |         | Description.                                                                                                                                                                                           |
+| `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                                                                                                     |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                                                                                                 |
+| `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                                                                                                 |
 
 <a id="subcommand-new-create-foreach-stage"></a>
 
@@ -1642,6 +1659,7 @@ Options:
 | `--kind`                  | text    | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
 | `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
 | `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                                                                                      |
+| `--no-docker-images`      | boolean | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                |
 | `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
 | `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
 | `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
@@ -2672,10 +2690,12 @@ calkit update docker-env [OPTIONS]
 
 Options:
 
-| Option         | Type | Required | Default | Description            |
-| -------------- | ---- | -------- | ------- | ---------------------- |
-| `--name`, `-n` | text | yes      |         | Environment name.      |
-| `--image`      | text | no       |         | Docker image name/tag. |
+| Option         | Type    | Required | Default | Description                                                                                                                                                          |
+| -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n` | text    | yes      |         | Environment name.                                                                                                                                                    |
+| `--image`      | text    | no       |         | Docker image name/tag.                                                                                                                                               |
+| `--registry`   | text    | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
+| `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
 
 <a id="subcommand-update-slurm-env"></a>
 
@@ -2868,9 +2888,10 @@ calkit check repro [OPTIONS]
 
 Options:
 
-| Option   | Type | Required | Default | Description                |
-| -------- | ---- | -------- | ------- | -------------------------- |
-| `--wdir` | text | no       | .       | Project working directory. |
+| Option   | Type    | Required | Default | Description                |
+| -------- | ------- | -------- | ------- | -------------------------- |
+| `--wdir` | text    | no       | .       | Project working directory. |
+| `--json` | boolean | no       | False   | Output result as JSON.     |
 
 <a id="subcommand-check-environment"></a>
 
@@ -2994,21 +3015,24 @@ Arguments:
 
 Options:
 
-| Option            | Type    | Required | Default | Description                                                                                                                                                   |
-| ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-i`, `--input`   | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                      |
-| `--output`, `-o`  | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`         | text    | no       |         | Alternative lock file input paths to read.                                                                                                                    |
-| `--input-delete`  | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                    |
-| `--platform`      | text    | no       |         | Which platform(s) to build for.                                                                                                                               |
-| `--user`          | text    | no       |         | Which user to run the container as.                                                                                                                           |
-| `--wdir`          | text    | no       |         | Working directory inside the container.                                                                                                                       |
-| `--dep`, `-d`     | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                         |
-| `--env-var`, `-e` | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                   |
-| `--port`, `-p`    | text    | no       |         | Declare an explicit port for the container.                                                                                                                   |
-| `--gpus`, `-g`    | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                        |
-| `--arg`, `-a`     | text    | no       |         | Declare an explicit run argument for the container.                                                                                                           |
-| `--quiet`, `-q`   | boolean | no       | False   | Be quiet.                                                                                                                                                     |
+| Option             | Type    | Required | Default | Description                                                                                                                                                       |
+| ------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-i`, `--input`    | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                          |
+| `--output`, `-o`   | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension.     |
+| `--input`          | text    | no       |         | Alternative lock file input paths to read.                                                                                                                        |
+| `--input-delete`   | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                        |
+| `--platform`       | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'. Also used when building, unless --platform-build says otherwise.                                      |
+| `--user`           | text    | no       |         | Which user to run the container as.                                                                                                                               |
+| `--wdir`           | text    | no       |         | Working directory inside the container.                                                                                                                           |
+| `--dep`, `-d`      | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                             |
+| `--env-var`, `-e`  | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                       |
+| `--port`, `-p`     | text    | no       |         | Declare an explicit port for the container.                                                                                                                       |
+| `--gpus`, `-g`     | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                            |
+| `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                               |
+| `--platform-build` | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry. |
+| `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
+| `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
+| `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
 
 <a id="subcommand-check-conda-env"></a>
 

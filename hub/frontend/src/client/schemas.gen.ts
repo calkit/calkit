@@ -8697,6 +8697,14 @@ export const ReproCheckSchema = {
       type: "integer",
       title: "N Dvc Remotes",
     },
+    untraceable_literals: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Untraceable Literals",
+    },
     recommendation: {
       anyOf: [
         {
@@ -11004,6 +11012,14 @@ export const ReproCheckWritableSchema = {
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
+    },
+    untraceable_literals: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Untraceable Literals",
     },
   },
   type: "object",

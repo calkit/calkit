@@ -106,7 +106,7 @@ ck = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"
-calk9 = "calkit.cli:run"
+ck9 = "calkit.cli:run"
 ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
@@ -180,7 +180,7 @@ show_error_codes = true
 
 # Third-party modules that ship no type stubs.
 [[tool.mypy.overrides]]
-module = ["sqlitedict", "networkx", "yaml"]
+module = ["sqlitedict", "networkx", "yaml", "dvc", "dvc.*"]
 ignore_missing_imports = true
 
 # jsonschema's stubs come from the types-jsonschema dev dependency, which

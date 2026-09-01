@@ -6307,10 +6307,12 @@ async def post_project_overleaf_publication(
     subprocess.run(
         ["calkit", "check", "pipeline", "--compile"], cwd=repo.working_dir
     )
-    # Added after compiling, which manages the folder's .gitignore, so the
-    # commit holds what's on disk
+    # Added after compiling, which manages the folder's .gitignore and the
+    # repo's .gitattributes, so the commit holds what's on disk
     repo.git.add(path)
     repo.git.add("dvc.yaml")
+    if os.path.isfile(os.path.join(repo.working_dir, ".gitattributes")):
+        repo.git.add(".gitattributes")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")
         os.makedirs(workflow_dir, exist_ok=True)

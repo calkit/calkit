@@ -88,8 +88,8 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                          |
 | ---------- | ---- | -------- | ------- | ---------------------------------------------------- |
-| `url`      | text | yes      |         | Repo URL.                                            |
-| `location` | text | no       |         | Location to clone to (default will be ./{repo_name}) |
+| `url`      | str  | yes      |         | Repo URL.                                            |
+| `location` | str  | no       |         | Location to clone to (default will be ./{repo_name}) |
 
 Options:
 
@@ -116,13 +116,13 @@ Arguments:
 
 | Argument  | Type | Required | Default | Description                                                                            |
 | --------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------- |
-| `targets` | text | no       |         | Optional targets to check status for. These may be pipeline stage names or repo paths. |
+| `targets` | str  | no       |         | Optional targets to check status for. These may be pipeline stage names or repo paths. |
 
 Options:
 
 | Option             | Type    | Required | Default | Description                                                                                                                  |
 | ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `--category`, `-c` | text    | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
+| `--category`, `-c` | str     | no       |         | Status categories to show. By default, all categories are shown. Can be specified multiple times.                            |
 | `--no-env-check`   | boolean | no       | False   | Skip environment checks. Note that this may produce an inaccurate pipeline status if materialized environments have changed. |
 | `--json`           | boolean | no       | False   | Output status as JSON.                                                                                                       |
 
@@ -164,17 +164,17 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `paths`  | text | yes      |         |             |
+| `paths`  | str  | yes      |         |             |
 
 Options:
 
 | Option                   | Type    | Required | Default | Description                                          |
 | ------------------------ | ------- | -------- | ------- | ---------------------------------------------------- |
-| `-m`, `--commit-message` | text    | no       |         | Automatically commit and use this as a message.      |
+| `-m`, `--commit-message` | str     | no       |         | Automatically commit and use this as a message.      |
 | `--auto-message`, `-M`   | boolean | no       | False   | Commit with an automatically-generated message.      |
 | `--no-auto-ignore`       | boolean | no       | False   | Disable auto-ignore.                                 |
 | `--push`                 | boolean | no       | False   | Push after committing.                               |
-| `--to`, `-t`             | text    | no       |         | System with which to add (git, dvc, or dvc-zip).     |
+| `--to`, `-t`             | str     | no       |         | System with which to add (git, dvc, or dvc-zip).     |
 | `--dry-run`, `--dry`     | boolean | no       | False   | Show what would be added without actually adding it. |
 
 <a id="top-command-commit"></a>
@@ -193,14 +193,14 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                          |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths to commit. If not provided, will default to any changed files that have been added previously. |
+| `paths`  | str  | no       |         | Paths to commit. If not provided, will default to any changed files that have been added previously. |
 
 Options:
 
 | Option                        | Type    | Required | Default | Description                                |
 | ----------------------------- | ------- | -------- | ------- | ------------------------------------------ |
 | `--all`, `-a`                 | boolean | no       | False   | Automatically stage all changed files.     |
-| `--message`, `-m`             | text    | no       |         | Commit message.                            |
+| `--message`, `-m`             | str     | no       |         | Commit message.                            |
 | `--auto-commit-message`, `-M` | boolean | no       | False   | Automatically generate a commit message.   |
 | `--push`                      | boolean | no       | False   | Push to both Git and DVC after committing. |
 | `--verbose`                   | boolean | no       | False   | Print verbose output.                      |
@@ -223,19 +223,19 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                                  |
 | -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------ |
-| `paths`  | text | no       |         | Paths to add and commit. If not provided, will default to any changed files that have been added previously. |
+| `paths`  | str  | no       |         | Paths to add and commit. If not provided, will default to any changed files that have been added previously. |
 
 Options:
 
 | Option                 | Type    | Required | Default | Description                                            |
 | ---------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
 | `--all`, `-a`          | boolean | no       | False   | Save all, automatically handling staging and ignoring. |
-| `--message`, `-m`      | text    | no       |         | Commit message.                                        |
+| `--message`, `-m`      | str     | no       |         | Commit message.                                        |
 | `--auto-message`, `-M` | boolean | no       | False   | Commit with an automatically-generated message.        |
-| `--to`, `-t`           | text    | no       |         | System with which to add (git or dvc).                 |
+| `--to`, `-t`           | str     | no       |         | System with which to add (git or dvc).                 |
 | `--no-push`            | boolean | no       | False   | Do not push to Git and DVC after committing.           |
-| `--git-push`           | text    | no       |         | Additional Git args to pass when pushing.              |
-| `--dvc-push`           | text    | no       |         | Additional DVC args to pass when pushing.              |
+| `--git-push`           | str     | no       |         | Additional Git args to pass when pushing.              |
+| `--dvc-push`           | str     | no       |         | Additional DVC args to pass when pushing.              |
 | `--no-recursive`       | boolean | no       | False   | Do not push to submodules.                             |
 | `--overleaf`, `-O`     | boolean | no       | False   | Sync with Overleaf after saving.                       |
 | `--verbose`, `-v`      | boolean | no       | False   | Print verbose output.                                  |
@@ -259,8 +259,8 @@ Options:
 | `--no-check-auth` | boolean | no       | False   |                                                    |
 | `--no-dvc`        | boolean | no       | False   | Do not pull from DVC.                              |
 | `--no-git`        | boolean | no       | False   | Do not pull from Git.                              |
-| `--git-arg`       | text    | no       |         | Additional Git args.                               |
-| `--dvc-arg`       | text    | no       |         | Additional DVC args.                               |
+| `--git-arg`       | str     | no       |         | Additional Git args.                               |
+| `--dvc-arg`       | str     | no       |         | Additional DVC args.                               |
 | `--force`, `-f`   | boolean | no       | False   | Force pull, potentially overwriting local changes. |
 | `--no-recursive`  | boolean | no       | False   | Do not recursively pull from submodules.           |
 
@@ -280,7 +280,7 @@ Arguments:
 
 | Argument  | Type | Required | Default | Description                                                      |
 | --------- | ---- | -------- | ------- | ---------------------------------------------------------------- |
-| `targets` | text | no       |         | What to push: 'git', 'dvc', 'docker', or 'all'. Defaults to all. |
+| `targets` | str  | no       |         | What to push: 'git', 'dvc', 'docker', or 'all'. Defaults to all. |
 
 Options:
 
@@ -289,8 +289,8 @@ Options:
 | `--no-check-auth` | boolean | no       | False   | Do not check DVC remote authentication.        |
 | `--no-dvc`        | boolean | no       | False   | Do not push to DVC remotes.                    |
 | `--no-git`        | boolean | no       | False   | Do not push to Git remote.                     |
-| `--git-arg`       | text    | no       |         | Additional Git args.                           |
-| `--dvc-arg`       | text    | no       |         | Additional DVC args.                           |
+| `--git-arg`       | str     | no       |         | Additional Git args.                           |
+| `--dvc-arg`       | str     | no       |         | Additional DVC args.                           |
 | `--no-docker`     | boolean | no       | False   | Do not push Docker images to their registries. |
 | `--no-recursive`  | boolean | no       | False   | Do not push to submodules.                     |
 
@@ -310,7 +310,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description     |
 | -------- | ---- | -------- | ------- | --------------- |
-| `path`   | text | yes      |         | Path to ignore. |
+| `path`   | str  | yes      |         | Path to ignore. |
 
 Options:
 
@@ -346,7 +346,7 @@ Arguments:
 
 | Argument  | Type | Required | Default | Description    |
 | --------- | ---- | -------- | ------- | -------------- |
-| `targets` | text | no       |         | Stages to run. |
+| `targets` | str  | no       |         | Stages to run. |
 
 Options:
 
@@ -357,10 +357,10 @@ Options:
 | `-f`, `--force`          | boolean | no       | False   | Run even if stages or inputs have not changed.                                               |
 | `-i`, `--interactive`    | boolean | no       | False   | Ask for confirmation before running each stage.                                              |
 | `-s`, `--single-item`    | boolean | no       | False   | Run only a single stage without any dependents.                                              |
-| `-p`, `--pipeline`       | text    | no       |         |                                                                                              |
+| `-p`, `--pipeline`       | str     | no       |         |                                                                                              |
 | `-P`, `--all-pipelines`  | boolean | no       | False   | Run all pipelines in the repo.                                                               |
 | `-R`, `--recursive`      | boolean | no       | False   | Run pipelines in subdirectories.                                                             |
-| `--downstream`           | text    | no       |         | Start from the specified stage and run all downstream.                                       |
+| `--downstream`           | str     | no       |         | Start from the specified stage and run all downstream.                                       |
 | `--force-downstream`     | boolean | no       | False   | Force downstream stages to run even if they are still up-to-date.                            |
 | `--pull`                 | boolean | no       | False   | Try automatically pulling missing data.                                                      |
 | `--allow-missing`        | boolean | no       | False   | Skip stages with missing data.                                                               |
@@ -372,9 +372,9 @@ Options:
 | `--no-run-cache`         | boolean | no       | False   | Ignore the run cache.                                                                        |
 | `--log`, `-l`            | boolean | no       | False   | Log the run and system information.                                                          |
 | `--save`, `-S`           | boolean | no       | False   | Save the project after running.                                                              |
-| `--save-message`, `-m`   | text    | no       |         | Commit message for saving.                                                                   |
-| `--input`, `--dep`       | text    | no       |         | Run stages that depend on given input dependency path.                                       |
-| `--output`, `--out`      | text    | no       |         | Run stages that produce the given output path.                                               |
+| `--save-message`, `-m`   | str     | no       |         | Commit message for saving.                                                                   |
+| `--input`, `--dep`       | str     | no       |         | Run stages that depend on given input dependency path.                                       |
+| `--output`, `--out`      | str     | no       |         | Run stages that produce the given output path.                                               |
 | `--overleaf`, `-O`       | boolean | no       | False   | Sync with Overleaf before and after running.                                                 |
 | `--no-push`              | boolean | no       | False   | Do not push to Git and DVC after saving.                                                     |
 | `--mock-scheduler`, `-K` | boolean | no       | False   | Run job-scheduler (SLURM/PBS) stages locally instead of submitting them to a real scheduler. |
@@ -395,8 +395,8 @@ Options:
 
 | Option            | Type    | Required | Default | Description                     |
 | ----------------- | ------- | -------- | ------- | ------------------------------- |
-| `--message`, `-m` | text    | yes      |         | Message to display as a prompt. |
-| `--cmd`           | text    | no       |         | Command to run.                 |
+| `--message`, `-m` | str     | yes      |         | Message to display as a prompt. |
+| `--cmd`           | str     | no       |         | Command to run.                 |
 | `--show-stdout`   | boolean | no       | False   | Show stdout.                    |
 | `--show-stderr`   | boolean | no       | False   | Show stderr.                    |
 
@@ -416,15 +416,15 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                        |
 | -------- | ---- | -------- | ------- | ---------------------------------- |
-| `cmd`    | text | yes      |         | Command to run in the environment. |
+| `cmd`    | str  | yes      |         | Command to run in the environment. |
 
 Options:
 
 | Option             | Type    | Required | Default | Description                                                                                                      |
 | ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`     | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
-| `--env-path`, `-p` | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
-| `--wdir`           | text    | no       |         | Working directory. By default will run current working directory.                                                |
+| `--name`, `-n`     | str     | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
+| `--env-path`, `-p` | str     | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
+| `--wdir`           | str     | no       |         | Working directory. By default will run current working directory.                                                |
 | `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                       |
 | `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
 | `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
@@ -445,7 +445,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                              |
 | -------- | ---- | -------- | ------- | ---------------------------------------- |
-| `name`   | text | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
+| `name`   | str  | yes      |         | The app to install (e.g., 'pixi', 'uv'). |
 
 Options:
 
@@ -469,7 +469,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                |
 | -------- | ---- | -------- | ------- | -------------------------- |
-| `name`   | text | yes      |         | The name of the procedure. |
+| `name`   | str  | yes      |         | The name of the procedure. |
 
 Options:
 
@@ -493,13 +493,13 @@ Arguments:
 
 | Argument | Type | Required | Default | Description       |
 | -------- | ---- | -------- | ------- | ----------------- |
-| `name`   | text | yes      |         | Calculation name. |
+| `name`   | str  | yes      |         | Calculation name. |
 
 Options:
 
 | Option          | Type    | Required | Default | Description                               |
 | --------------- | ------- | -------- | ------- | ----------------------------------------- |
-| `--input`, `-i` | text    | no       |         | Inputs defined like x=1 (with no spaces.) |
+| `--input`, `-i` | str     | no       |         | Inputs defined like x=1 (with no spaces.) |
 | `--no-format`   | boolean | no       | False   | Do not format output before printing      |
 
 <a id="top-command-set-env-var"></a>
@@ -518,8 +518,8 @@ Arguments:
 
 | Argument | Type | Required | Default | Description            |
 | -------- | ---- | -------- | ------- | ---------------------- |
-| `name`   | text | yes      |         | Name of the variable.  |
-| `value`  | text | yes      |         | Value of the variable. |
+| `name`   | str  | yes      |         | Name of the variable.  |
+| `value`  | str  | yes      |         | Value of the variable. |
 
 <a id="top-command-upgrade"></a>
 
@@ -555,7 +555,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description  |
 | -------- | ---- | -------- | ------- | ------------ |
-| `name`   | text | yes      |         | Branch name. |
+| `name`   | str  | yes      |         | Branch name. |
 
 <a id="top-command-stash"></a>
 
@@ -623,10 +623,10 @@ Options:
 
 | Option                 | Type | Required | Default | Description                                                                                                                                                   |
 | ---------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--file-to-file`       | text | no       |         | Map a file to another file, e.g., --file-to-file 'results.tex->paper/results.tex'.                                                                            |
-| `--file-to-dir`        | text | no       |         | Map a file into a directory, e.g., --file-to-dir 'results.tex->paper/results'.                                                                                |
-| `--dir-to-dir-replace` | text | no       |         | Copy directory to another directory and replace it, e.g., --dir-to-dir-replace 'figures->paper/figures'.                                                      |
-| `--dir-to-dir-merge`   | text | no       |         | Merge directory into another directory. This is useful for merging contents of one directory into another, e.g., --dir-to-dir-merge 'figures->paper/figures'. |
+| `--file-to-file`       | str  | no       |         | Map a file to another file, e.g., --file-to-file 'results.tex->paper/results.tex'.                                                                            |
+| `--file-to-dir`        | str  | no       |         | Map a file into a directory, e.g., --file-to-dir 'results.tex->paper/results'.                                                                                |
+| `--dir-to-dir-replace` | str  | no       |         | Copy directory to another directory and replace it, e.g., --dir-to-dir-replace 'figures->paper/figures'.                                                      |
+| `--dir-to-dir-merge`   | str  | no       |         | Merge directory into another directory. This is useful for merging contents of one directory into another, e.g., --dir-to-dir-merge 'figures->paper/figures'. |
 
 <a id="top-command-xr"></a>
 
@@ -644,17 +644,17 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                                                                                                                           |
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cmd`    | text | yes      |         | Command to execute and record. If the first argument is a script, notebook or LaTeX file, it will be treated as a stage with that file as the target. Any command, including arguments, is supported. |
+| `cmd`    | str  | yes      |         | Command to execute and record. If the first argument is a script, notebook or LaTeX file, it will be treated as a stage with that file as the target. Any command, including arguments, is supported. |
 
 Options:
 
 | Option                | Type    | Required | Default | Description                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e` | text    | no       |         | Name of or path the spec file for the environment to use.                                                                                                                                                                                                                                                       |
-| `--input`, `-i`       | text    | no       |         | Input paths to record.                                                                                                                                                                                                                                                                                          |
-| `--output`, `-o`      | text    | no       |         | Output paths to record.                                                                                                                                                                                                                                                                                         |
+| `--environment`, `-e` | str     | no       |         | Name of or path the spec file for the environment to use.                                                                                                                                                                                                                                                       |
+| `--input`, `-i`       | str     | no       |         | Input paths to record.                                                                                                                                                                                                                                                                                          |
+| `--output`, `-o`      | str     | no       |         | Output paths to record.                                                                                                                                                                                                                                                                                         |
 | `--no-detect-io`      | boolean | no       | False   | Don't attempt to detect inputs and outputs from the command, script, or notebook.                                                                                                                                                                                                                               |
-| `--stage`             | text    | no       |         | Name of the DVC stage to create for this command. If not provided, a name will be generated automatically.                                                                                                                                                                                                      |
+| `--stage`             | str     | no       |         | Name of the DVC stage to create for this command. If not provided, a name will be generated automatically.                                                                                                                                                                                                      |
 | `--dry-run`, `-d`     | boolean | no       | False   | Print the environment and stage that would be created without modifying calkit.yaml or executing the command.                                                                                                                                                                                                   |
 | `--no-record`         | boolean | no       | False   | Execute without recording: run as usual, then restore calkit.yaml, dvc.yaml and .dvc and remove derived files, keeping only what the run produced (annotations, injected output, stage outputs) and the run log. Useful for checking that a Markdown file is runnable in a project that isn't a Calkit project. |
 | `--json`              | boolean | no       | False   | Print xr results as JSON.                                                                                                                                                                                                                                                                                       |
@@ -696,8 +696,8 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `key`    | text | yes      |         |             |
-| `value`  | text | yes      |         |             |
+| `key`    | str  | yes      |         |             |
+| `value`  | str  | yes      |         |             |
 
 <a id="subcommand-config-get"></a>
 
@@ -715,7 +715,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `key`    | text | yes      |         |             |
+| `key`    | str  | yes      |         |             |
 
 <a id="subcommand-config-unset"></a>
 
@@ -733,7 +733,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `key`    | text | yes      |         |             |
+| `key`    | str  | yes      |         |             |
 
 <a id="subcommand-config-remote"></a>
 
@@ -858,19 +858,19 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                  |
 | -------- | ---- | -------- | ------- | ---------------------------- |
-| `path`   | text | yes      |         | Where to create the project. |
+| `path`   | str  | yes      |         | Where to create the project. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                                                                                                                                                                                 |
 | ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
-| `--title`           | text    | no       |         | Project title.                                                                                                                                                                                              |
-| `--description`     | text    | no       |         | Project description.                                                                                                                                                                                        |
-| `--hub`, `--cloud`  | text    | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
+| `--name`, `-n`      | str     | no       |         | Project name. Will be inferred as kebab-cased directory name if not provided.                                                                                                                               |
+| `--title`           | str     | no       |         | Project title.                                                                                                                                                                                              |
+| `--description`     | str     | no       |         | Project description.                                                                                                                                                                                        |
+| `--hub`, `--cloud`  | str     | no       |         | Create this project on a Calkit hub (and GitHub). Optionally takes a hub URL; bare --hub (or the special value 'default') uses the default_hub config value, else calkit.io. --cloud is a deprecated alias. |
 | `--public`          | boolean | no       | False   | Create as a public project if --hub is selected.                                                                                                                                                            |
-| `--git-url`         | text    | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
-| `--template`, `-t`  | text    | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
+| `--git-url`         | str     | no       |         | Git repo URL. Usually https://github.com/{your_name}/{project_name}.                                                                                                                                        |
+| `--template`, `-t`  | str     | no       |         | Template from which to derive the project, e.g., 'calkit/example-basic'.                                                                                                                                    |
 | `--no-commit`       | boolean | no       |         | Do not commit changes to Git.                                                                                                                                                                               |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite project if one already exists.                                                                                                                                                                    |
 | `--verbose`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                                       |
@@ -891,22 +891,22 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
 | Option                   | Type    | Required | Default | Description                                                                               |
 | ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------- |
-| `--title`                | text    | yes      |         |                                                                                           |
-| `--description`          | text    | yes      |         |                                                                                           |
-| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this figure.                                    |
-| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                                                |
-| `--dep`                  | text    | no       |         | Path to stage dependency.                                                                 |
-| `--out`                  | text    | no       |         | Path to stage output. Figure path will be added automatically.                            |
-| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                     |
-| `--created-by-email`     | text    | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
-| `--created-by-orcid`     | text    | no       |         | ORCID of whoever made this figure.                                                        |
-| `--created-with-ai`      | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
+| `--title`                | str     | yes      |         |                                                                                           |
+| `--description`          | str     | yes      |         |                                                                                           |
+| `--stage`                | str     | no       |         | Name of the pipeline stage that generates this figure.                                    |
+| `--cmd`                  | str     | no       |         | Command to add to the stage, if specified.                                                |
+| `--dep`                  | str     | no       |         | Path to stage dependency.                                                                 |
+| `--out`                  | str     | no       |         | Path to stage output. Figure path will be added automatically.                            |
+| `--deps-from-stage-outs` | str     | no       |         | Stage name from which to add outputs as dependencies.                                     |
+| `--created-by-email`     | str     | no       |         | Email of whoever made this figure, for one drawn by hand rather than produced by a stage. |
+| `--created-by-orcid`     | str     | no       |         | ORCID of whoever made this figure.                                                        |
+| `--created-with-ai`      | str     | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                   |
 | `--no-commit`            | boolean | no       | False   |                                                                                           |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing figure if one exists.                                                  |
 
@@ -926,17 +926,17 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                                                                    |
 | ------------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
-| `--name`            | text    | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
-| `--title`           | text    | no       |         |                                                                                                |
-| `--key`             | text    | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
-| `--description`     | text    | no       |         |                                                                                                |
-| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this result.                                         |
+| `--name`            | str     | no       |         | Short handle for referring to this result, which stays stable if the file is renamed.          |
+| `--title`           | str     | no       |         |                                                                                                |
+| `--key`             | str     | no       |         | Path to the value within the file, e.g., 'metrics.mean'. Omit if the whole file is the result. |
+| `--description`     | str     | no       |         |                                                                                                |
+| `--stage`           | str     | no       |         | Name of the pipeline stage that generates this result.                                         |
 | `--no-commit`       | boolean | no       | False   |                                                                                                |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing result if one exists.                                                       |
 
@@ -956,16 +956,16 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                                  |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
-| `--title`           | text    | yes      |         |                                                              |
-| `--description`     | text    | no       |         |                                                              |
-| `--kind`            | text    | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
-| `--stage`           | text    | no       |         | Name of the pipeline stage that generates this presentation. |
+| `--title`           | str     | yes      |         |                                                              |
+| `--description`     | str     | no       |         |                                                              |
+| `--kind`            | str     | no       |         | Kind of presentation, either 'slides' or 'poster'.           |
+| `--stage`           | str     | no       |         | Name of the pipeline stage that generates this presentation. |
 | `--no-commit`       | boolean | no       | False   |                                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite existing presentation if one exists.               |
 
@@ -985,7 +985,7 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description |
 | ---------- | ---- | -------- | ------- | ----------- |
-| `question` | text | yes      |         |             |
+| `question` | str  | yes      |         |             |
 
 Options:
 
@@ -1009,15 +1009,15 @@ Arguments:
 
 | Argument | Type | Required | Default | Description              |
 | -------- | ---- | -------- | ------- | ------------------------ |
-| `path`   | text | yes      |         | Notebook path (relative) |
+| `path`   | str  | yes      |         | Notebook path (relative) |
 
 Options:
 
 | Option          | Type    | Required | Default | Description                                         |
 | --------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--title`       | text    | yes      |         |                                                     |
-| `--description` | text    | no       |         |                                                     |
-| `--stage`       | text    | no       |         | Name of the pipeline stage that runs this notebook. |
+| `--title`       | str     | yes      |         |                                                     |
+| `--description` | str     | no       |         |                                                     |
+| `--stage`       | str     | no       |         | Name of the pipeline stage that runs this notebook. |
 | `--commit`      | boolean | no       | False   |                                                     |
 
 <a id="subcommand-new-create-docker-env"></a>
@@ -1036,23 +1036,23 @@ Options:
 
 | Option              | Type    | Required | Default | Description                                                                                                                                                                                            |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |         | Environment name.                                                                                                                                                                                      |
-| `--image`           | text    | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                                                                                                 |
-| `--from`            | text    | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                                                                                                  |
-| `--path`            | text    | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                                                                                                  |
-| `--add-layer`       | text    | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                                                                                                   |
-| `--env-var`         | text    | no       |         | Environment variables to set in the container.                                                                                                                                                         |
-| `--gpus`            | text    | no       |         |                                                                                                                                                                                                        |
-| `--arg`             | text    | no       |         | Arguments to use when running container.                                                                                                                                                               |
-| `--dep`             | text    | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                                                                                            |
-| `--wdir`            | text    | no       | /work   | Working directory.                                                                                                                                                                                     |
-| `--command-mode`    | text    | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                                            |
-| `--user`            | text    | no       |         | User account to use to run the container.                                                                                                                                                              |
-| `--platform`        | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'.                                                                                                                                            |
-| `--registry`        | text    | no       |         | Registry prefix to push built images to and pull them from instead of rebuilding, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. |
-| `--platform-build`  | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry.                                      |
-| `--port`            | text    | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                                                                                                    |
-| `--description`     | text    | no       |         | Description.                                                                                                                                                                                           |
+| `--name`, `-n`      | str     | yes      |         | Environment name.                                                                                                                                                                                      |
+| `--image`           | str     | no       |         | Image identifier. Should be unique and descriptive. Will default to environment name if not specified.                                                                                                 |
+| `--from`            | str     | no       |         | Base image, e.g., 'ubuntu', if creating a Dockerfile.                                                                                                                                                  |
+| `--path`            | str     | no       |         | Dockerfile path. Will default to 'Dockerfile' if --from is specified.                                                                                                                                  |
+| `--add-layer`       | str     | no       |         | Add a layer (options: miniforge, foampy, uv, julia).                                                                                                                                                   |
+| `--env-var`         | str     | no       |         | Environment variables to set in the container.                                                                                                                                                         |
+| `--gpus`            | str     | no       |         |                                                                                                                                                                                                        |
+| `--arg`             | str     | no       |         | Arguments to use when running container.                                                                                                                                                               |
+| `--dep`             | str     | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                                                                                            |
+| `--wdir`            | str     | no       | /work   | Working directory.                                                                                                                                                                                     |
+| `--command-mode`    | str     | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                                            |
+| `--user`            | str     | no       |         | User account to use to run the container.                                                                                                                                                              |
+| `--platform`        | str     | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'.                                                                                                                                            |
+| `--registry`        | str     | no       |         | Registry prefix to push built images to and pull them from instead of rebuilding, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. |
+| `--platform-build`  | str     | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry.                                      |
+| `--port`            | str     | no       |         | Ports to expose in the container, e.g., '8080:80'. Can be specified multiple times.                                                                                                                    |
+| `--description`     | str     | no       |         | Description.                                                                                                                                                                                           |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.                                                                                                                                                     |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                                                                                                                                                                 |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation.                                                                                                                                                 |
@@ -1075,16 +1075,16 @@ Arguments:
 
 | Argument | Type | Required | Default | Description            |
 | -------- | ---- | -------- | ------- | ---------------------- |
-| `vals`   | text | yes      |         | Values to iterate over |
+| `vals`   | str  | yes      |         | Values to iterate over |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                              |
 | ------------------- | ------- | -------- | ------- | -------------------------------------------------------- |
-| `--cmd`             | text    | yes      |         | Command to run. Can include {var} to fill with variable. |
-| `--name`, `-n`      | text    | yes      |         | Stage name.                                              |
-| `--dep`             | text    | no       |         | Path to add as a dependency.                             |
-| `--out`             | text    | no       |         | Path to add as an output.                                |
+| `--cmd`             | str     | yes      |         | Command to run. Can include {var} to fill with variable. |
+| `--name`, `-n`      | str     | yes      |         | Stage name.                                              |
+| `--dep`             | str     | no       |         | Path to add as a dependency.                             |
+| `--out`             | str     | no       |         | Path to add as an output.                                |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite stage if one already exists.                   |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                   |
 
@@ -1104,22 +1104,22 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
 | Option                   | Type    | Required | Default | Description                                                                                                       |
 | ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------- |
-| `--title`                | text    | yes      |         |                                                                                                                   |
-| `--description`          | text    | yes      |         |                                                                                                                   |
-| `--stage`                | text    | no       |         | Name of the pipeline stage that generates this dataset.                                                           |
-| `--cmd`                  | text    | no       |         | Command to add to the stage, if specified.                                                                        |
-| `--dep`                  | text    | no       |         | Path to stage dependency.                                                                                         |
-| `--out`                  | text    | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
-| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                                             |
-| `--created-by-email`     | text    | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
-| `--created-by-orcid`     | text    | no       |         | ORCID of whoever collected this data.                                                                             |
-| `--created-with-ai`      | text    | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
+| `--title`                | str     | yes      |         |                                                                                                                   |
+| `--description`          | str     | yes      |         |                                                                                                                   |
+| `--stage`                | str     | no       |         | Name of the pipeline stage that generates this dataset.                                                           |
+| `--cmd`                  | str     | no       |         | Command to add to the stage, if specified.                                                                        |
+| `--dep`                  | str     | no       |         | Path to stage dependency.                                                                                         |
+| `--out`                  | str     | no       |         | Path to stage output. Dataset path will be added automatically.                                                   |
+| `--deps-from-stage-outs` | str     | no       |         | Stage name from which to add outputs as dependencies.                                                             |
+| `--created-by-email`     | str     | no       |         | Email of whoever collected this data for the project, which marks it as primary rather than imported or computed. |
+| `--created-by-orcid`     | str     | no       |         | ORCID of whoever collected this data.                                                                             |
+| `--created-with-ai`      | str     | no       |         | Generative AI tool they used, e.g. 'Claude Opus 5'. Repeat for several.                                           |
 | `--no-commit`            | boolean | no       | False   |                                                                                                                   |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing dataset if one exists.                                                                         |
 
@@ -1139,20 +1139,20 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                               |
 | -------- | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `path`   | text | yes      |         | Path for the publication. If using a template, this could be a directory. |
+| `path`   | str  | yes      |         | Path for the publication. If using a template, this could be a directory. |
 
 Options:
 
 | Option                   | Type    | Required | Default | Description                                                                            |
 | ------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------- |
-| `--title`                | text    | yes      |         | The title of the publication.                                                          |
-| `--kind`                 | text    | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
-| `--description`          | text    | no       |         | A description of the publication.                                                      |
-| `--stage`                | text    | no       |         | Name of the pipeline stage to build the output file.                                   |
-| `--dep`                  | text    | no       |         | Path to stage dependency.                                                              |
-| `--deps-from-stage-outs` | text    | no       |         | Stage name from which to add outputs as dependencies.                                  |
-| `--template`, `-t`       | text    | no       |         | Template with which to create the source files. Should be in the format {type}/{name}. |
-| `--environment`          | text    | no       |         | Name of the build environment to create, if desired.                                   |
+| `--title`                | str     | yes      |         | The title of the publication.                                                          |
+| `--kind`                 | str     | yes      |         | Kind of the publication, e.g., 'journal-article'.                                      |
+| `--description`          | str     | no       |         | A description of the publication.                                                      |
+| `--stage`                | str     | no       |         | Name of the pipeline stage to build the output file.                                   |
+| `--dep`                  | str     | no       |         | Path to stage dependency.                                                              |
+| `--deps-from-stage-outs` | str     | no       |         | Stage name from which to add outputs as dependencies.                                  |
+| `--template`, `-t`       | str     | no       |         | Template with which to create the source files. Should be in the format {type}/{name}. |
+| `--environment`          | str     | no       |         | Name of the build environment to create, if desired.                                   |
 | `--no-commit`            | boolean | no       | False   | Do not commit resulting changes to the repo.                                           |
 | `--overwrite`, `-f`      | boolean | no       | False   | Overwrite existing objects if they already exist.                                      |
 
@@ -1172,18 +1172,18 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| `packages` | str  | no       |         | Packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default         | Description                                                                                                                                                                                     |
 | ------------------- | ------- | -------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |                 | Environment name.                                                                                                                                                                               |
-| `--conda-name`      | text    | no       |                 | Name to use in the Conda environment file, if desired. Will be automatically generated if not provided. Note that these should be unique since Conda environments are a system-wide collection. |
-| `--path`            | text    | no       | environment.yml | Environment YAML file path.                                                                                                                                                                     |
-| `--pip`             | text    | no       |                 | Packages to install with pip.                                                                                                                                                                   |
-| `--prefix`          | text    | no       |                 | Prefix for environment location.                                                                                                                                                                |
-| `--description`     | text    | no       |                 | Description.                                                                                                                                                                                    |
+| `--name`, `-n`      | str     | yes      |                 | Environment name.                                                                                                                                                                               |
+| `--conda-name`      | str     | no       |                 | Name to use in the Conda environment file, if desired. Will be automatically generated if not provided. Note that these should be unique since Conda environments are a system-wide collection. |
+| `--path`            | str     | no       | environment.yml | Environment YAML file path.                                                                                                                                                                     |
+| `--pip`             | str     | no       |                 | Packages to install with pip.                                                                                                                                                                   |
+| `--prefix`          | str     | no       |                 | Prefix for environment location.                                                                                                                                                                |
+| `--description`     | str     | no       |                 | Description.                                                                                                                                                                                    |
 | `--overwrite`, `-f` | boolean | no       | False           | Overwrite any existing environment with this name.                                                                                                                                              |
 | `--no-commit`       | boolean | no       | False           | Do not commit changes.                                                                                                                                                                          |
 | `--no-check`        | boolean | no       | False           | Do not check environment is up-to-date after creation.                                                                                                                                          |
@@ -1204,15 +1204,15 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| `packages` | str  | no       |         | Packages to include in the environment. |
 
 Options:
 
 | Option           | Type    | Required | Default | Description                                            |
 | ---------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--name`, `-n`   | text    | no       | main    | Environment name.                                      |
-| `--path`         | text    | no       |         | Environment file path. Must end with 'pyproject.toml'. |
-| `--python`, `-p` | text    | no       |         | Python version.                                        |
+| `--name`, `-n`   | str     | no       | main    | Environment name.                                      |
+| `--path`         | str     | no       |         | Environment file path. Must end with 'pyproject.toml'. |
+| `--python`, `-p` | str     | no       |         | Python version.                                        |
 | `--no-check`     | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`    | boolean | no       | False   | Do not commit changes.                                 |
 
@@ -1232,12 +1232,12 @@ Options:
 
 | Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
 | ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
-| `--host`                | text    | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
-| `--default-option`      | text    | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
-| `--default-setup`       | text    | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
-| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
-| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--name`, `-n`          | str     | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | str     | no       | localhost | Host where SLURM commands should run.                                                                                                                                                                                   |
+| `--default-option`      | str     | no       |           | Default sbatch/srun option string (for example --gpus=1). Repeat for multiple options.                                                                                                                                  |
+| `--default-setup`       | str     | no       |           | Default shell setup command to run before SLURM jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                              |
+| `--max-concurrent-jobs` | int     | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | str     | no       |           | Description.                                                                                                                                                                                                            |
 | `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
 | `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
@@ -1257,12 +1257,12 @@ Options:
 
 | Option                  | Type    | Required | Default   | Description                                                                                                                                                                                                             |
 | ----------------------- | ------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | text    | yes      |           | Environment name.                                                                                                                                                                                                       |
-| `--host`                | text    | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
-| `--default-option`      | text    | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
-| `--default-setup`       | text    | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
-| `--max-concurrent-jobs` | integer | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
-| `--description`         | text    | no       |           | Description.                                                                                                                                                                                                            |
+| `--name`, `-n`          | str     | yes      |           | Environment name.                                                                                                                                                                                                       |
+| `--host`                | str     | no       | localhost | Host where PBS commands should run.                                                                                                                                                                                     |
+| `--default-option`      | str     | no       |           | Default qsub option string (for example --default-option=-l --default-option=walltime=01:00:00). Repeat for multiple options.                                                                                           |
+| `--default-setup`       | str     | no       |           | Default shell setup command to run before PBS jobs (for example 'module load julia/1.11'). Repeat for multiple commands.                                                                                                |
+| `--max-concurrent-jobs` | int     | no       |           | Maximum number of this project's jobs allowed in the queue at once, or 0 for no limit. Submissions beyond this wait for a slot, so an iterated stage does not take over a shared cluster's queue. Unlimited by default. |
+| `--description`         | str     | no       |           | Description.                                                                                                                                                                                                            |
 | `--overwrite`, `-f`     | boolean | no       | False     | Overwrite any existing environment with this name.                                                                                                                                                                      |
 | `--no-commit`           | boolean | no       | False     | Do not commit changes.                                                                                                                                                                                                  |
 
@@ -1282,17 +1282,17 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| `packages` | str  | no       |         | Packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default          | Description                                                                                                  |
 | ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
-| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
-| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
-| `--python`, `-p`    | text    | no       |                  | Python version.                                                                                              |
-| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--name`, `-n`      | str     | yes      |                  | Environment name.                                                                                            |
+| `--path`            | str     | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | str     | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--python`, `-p`    | str     | no       |                  | Python version.                                                                                              |
+| `--description`     | str     | no       |                  | Description.                                                                                                 |
 | `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
 | `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
 | `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
@@ -1313,16 +1313,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | yes      |         | Packages to include in the environment. |
+| `packages` | str  | yes      |         | Packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default          | Description                                                                                                  |
 | ------------------- | ------- | -------- | ---------------- | ------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |                  | Environment name.                                                                                            |
-| `--path`            | text    | no       | requirements.txt | Path for requirements file.                                                                                  |
-| `--prefix`          | text    | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
-| `--description`     | text    | no       |                  | Description.                                                                                                 |
+| `--name`, `-n`      | str     | yes      |                  | Environment name.                                                                                            |
+| `--path`            | str     | no       | requirements.txt | Path for requirements file.                                                                                  |
+| `--prefix`          | str     | no       |                  | Prefix for environment location (defaults to .venv, or .calkit/envs/<name>/.venv if .venv is already taken). |
+| `--description`     | str     | no       |                  | Description.                                                                                                 |
 | `--overwrite`, `-f` | boolean | no       | False            | Overwrite any existing environment with this name.                                                           |
 | `--no-commit`       | boolean | no       | False            | Do not commit changes.                                                                                       |
 | `--no-check`        | boolean | no       | False            | Do not check environment is up-to-date after creation.                                                       |
@@ -1343,16 +1343,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | yes      |         | Packages to include in the environment. |
+| `packages` | str  | yes      |         | Packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                            |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--name`, `-n`      | text    | yes      |         | Environment name.                                      |
-| `--pip`             | text    | no       |         | Packages to install with pip.                          |
-| `--description`     | text    | no       |         | Description.                                           |
-| `--platform`, `-p`  | text    | no       |         | Platform.                                              |
+| `--name`, `-n`      | str     | yes      |         | Environment name.                                      |
+| `--pip`             | str     | no       |         | Packages to install with pip.                          |
+| `--description`     | str     | no       |         | Description.                                           |
+| `--platform`, `-p`  | str     | no       |         | Platform.                                              |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
@@ -1373,16 +1373,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                      |
 | ---------- | ---- | -------- | ------- | ------------------------------------------------ |
-| `packages` | text | no       |         | Optional packages to include in the environment. |
+| `packages` | str  | no       |         | Optional packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                            |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
-| `--path`            | text    | no       |         | Path for Project.toml file.                            |
-| `--description`     | text    | no       |         | Description.                                           |
-| `--julia`, `-j`     | text    | no       |         | Julia version. Auto-detected if not supplied.          |
+| `--name`, `-n`      | str     | no       | main    | Environment name.                                      |
+| `--path`            | str     | no       |         | Path for Project.toml file.                            |
+| `--description`     | str     | no       |         | Description.                                           |
+| `--julia`, `-j`     | str     | no       |         | Julia version. Auto-detected if not supplied.          |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
@@ -1403,16 +1403,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                             |
 | ---------- | ---- | -------- | ------- | --------------------------------------- |
-| `packages` | text | no       |         | Packages to include in the environment. |
+| `packages` | str  | no       |         | Packages to include in the environment. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                            |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------ |
-| `--name`, `-n`      | text    | no       | main    | Environment name.                                      |
-| `--path`            | text    | no       |         | Environment file path. Must end with 'DESCRIPTION'.    |
-| `--r-version`, `-r` | text    | no       |         | R version.                                             |
-| `--description`     | text    | no       |         | Description.                                           |
+| `--name`, `-n`      | str     | no       | main    | Environment name.                                      |
+| `--path`            | str     | no       |         | Environment file path. Must end with 'DESCRIPTION'.    |
+| `--r-version`, `-r` | str     | no       |         | R version.                                             |
+| `--description`     | str     | no       |         | Description.                                           |
 | `--overwrite`, `-f` | boolean | no       | False   | Overwrite any existing environment with this name.     |
 | `--no-check`        | boolean | no       | False   | Do not check environment is up-to-date after creation. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                                 |
@@ -1433,16 +1433,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                            |
 | ---------- | ---- | -------- | ------- | ------------------------------------------------------ |
-| `packages` | text | yes      |         | Nixpkgs packages to include in the dev shell (e.g. R). |
+| `packages` | str  | yes      |         | Nixpkgs packages to include in the dev shell (e.g. R). |
 
 Options:
 
 | Option              | Type    | Required | Default                             | Description                                           |
 | ------------------- | ------- | -------- | ----------------------------------- | ----------------------------------------------------- |
-| `--name`, `-n`      | text    | yes      |                                     | Environment name.                                     |
-| `--path`            | text    | no       |                                     | Flake file path. Must end with 'flake.nix'.           |
-| `--nixpkgs-url`     | text    | no       | github:NixOS/nixpkgs/nixos-unstable | Flake input URL for nixpkgs.                          |
-| `--description`     | text    | no       |                                     | Description.                                          |
+| `--name`, `-n`      | str     | yes      |                                     | Environment name.                                     |
+| `--path`            | str     | no       |                                     | Flake file path. Must end with 'flake.nix'.           |
+| `--nixpkgs-url`     | str     | no       | github:NixOS/nixpkgs/nixos-unstable | Flake input URL for nixpkgs.                          |
+| `--description`     | str     | no       |                                     | Description.                                          |
 | `--overwrite`, `-f` | boolean | no       | False                               | Overwrite any existing environment with this name.    |
 | `--no-check`        | boolean | no       | False                               | Do not run 'nix flake lock' after creating the flake. |
 | `--no-commit`       | boolean | no       | False                               | Do not commit changes.                                |
@@ -1469,7 +1469,7 @@ Options:
 
 | Option            | Type    | Required | Default | Description                              |
 | ----------------- | ------- | -------- | ------- | ---------------------------------------- |
-| `--message`, `-m` | text    | no       |         | Optional message describing the status.  |
+| `--message`, `-m` | str     | no       |         | Optional message describing the status.  |
 | `--no-commit`     | boolean | no       | False   | Do not commit changes to the status log. |
 
 <a id="subcommand-new-create-python-script-stage"></a>
@@ -1486,23 +1486,23 @@ calkit new|create python-script-stage [OPTIONS]
 
 Options:
 
-| Option                         | Type        | Required | Default | Description                                                                                                    |
-| ------------------------------ | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text        | yes      |         | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text        | yes      |         | Environment to use to run the stage.                                                                           |
-| `--script-path`, `-s`          | text        | yes      |         | Path to script.                                                                                                |
-| `--arg`                        | text        | no       |         | Argument to pass to the script.                                                                                |
-| `--input`, `-i`                | text        | no       |         | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | text        | no       |         | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text        | no       |         | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text        | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text        | no       |         | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text        | no       |         | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text        | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
-| `--iter`                       | <text text> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
-| `--overwrite`, `--force`, `-f` | boolean     | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
-| `--no-check`                   | boolean     | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
-| `--no-commit`                  | boolean     | no       | False   | Do not commit changes to Git.                                                                                  |
+| Option                         | Type      | Required | Default | Description                                                                                                    |
+| ------------------------------ | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | str       | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str       | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | str       | yes      |         | Path to script.                                                                                                |
+| `--arg`                        | str       | no       |         | Argument to pass to the script.                                                                                |
+| `--input`, `-i`                | str       | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | str       | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str       | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str       | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str       | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str       | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str       | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--iter`                       | <str str> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
+| `--overwrite`, `--force`, `-f` | boolean   | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean   | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean   | no       | False   | Do not commit changes to Git.                                                                                  |
 
 <a id="subcommand-new-create-julia-script-stage"></a>
 
@@ -1518,22 +1518,22 @@ calkit new|create julia-script-stage [OPTIONS]
 
 Options:
 
-| Option                         | Type        | Required | Default | Description                                                                                                    |
-| ------------------------------ | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text        | yes      |         | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text        | yes      |         | Environment to use to run the stage.                                                                           |
-| `--script-path`, `-s`          | text        | yes      |         | Path to script.                                                                                                |
-| `--input`, `-i`                | text        | no       |         | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | text        | no       |         | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text        | no       |         | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text        | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text        | no       |         | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text        | no       |         | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text        | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
-| `--iter`                       | <text text> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
-| `--overwrite`, `--force`, `-f` | boolean     | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
-| `--no-check`                   | boolean     | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
-| `--no-commit`                  | boolean     | no       | False   | Do not commit changes to Git.                                                                                  |
+| Option                         | Type      | Required | Default | Description                                                                                                    |
+| ------------------------------ | --------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | str       | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str       | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | str       | yes      |         | Path to script.                                                                                                |
+| `--input`, `-i`                | str       | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | str       | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str       | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str       | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str       | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str       | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str       | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--iter`                       | <str str> | no       |         | Iterate over an argument with a comma-separated list, e.g., --iter-arg var_name val1,val2,val3.                |
+| `--overwrite`, `--force`, `-f` | boolean   | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean   | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean   | no       | False   | Do not commit changes to Git.                                                                                  |
 
 <a id="subcommand-new-create-matlab-script-stage"></a>
 
@@ -1551,16 +1551,16 @@ Options:
 
 | Option                         | Type    | Required | Default | Description                                                                                                    |
 | ------------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text    | yes      |         | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text    | yes      |         | Environment to use to run the stage.                                                                           |
-| `--script-path`, `-s`          | text    | yes      |         | Path to script.                                                                                                |
-| `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text    | no       |         | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text    | no       |         | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text    | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--name`, `-n`                 | str     | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str     | yes      |         | Environment to use to run the stage.                                                                           |
+| `--script-path`, `-s`          | str     | yes      |         | Path to script.                                                                                                |
+| `--input`, `-i`                | str     | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | str     | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str     | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str     | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str     | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str     | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str     | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
 | `--overwrite`, `--force`, `-f` | boolean | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
 | `--no-check`                   | boolean | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
 | `--no-commit`                  | boolean | no       | False   | Do not commit changes to Git.                                                                                  |
@@ -1581,21 +1581,21 @@ Options:
 
 | Option                         | Type    | Required | Default | Description                                                                                                    |
 | ------------------------------ | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text    | yes      |         | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text    | yes      |         | Environment to use to run the stage.                                                                           |
-| `--target`                     | text    | yes      |         | Target .tex file path.                                                                                         |
-| `--output-dir`                 | text    | no       |         | Directory for the compiled PDF (passed to latexmk as -outdir). Ignored when a latexmkrc is provided.           |
-| `--aux-dir`                    | text    | no       |         | Directory for auxiliary files (passed to latexmk as -auxdir). Ignored when a latexmkrc is provided.            |
-| `--latexmkrc`                  | text    | no       |         | Path to a latexmkrc file for compilation.                                                                      |
-| `--latexmk-arg`                | text    | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
-| `--input`, `-i`                | text    | no       |         | A path on which the stage depends.                                                                             |
+| `--name`, `-n`                 | str     | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str     | yes      |         | Environment to use to run the stage.                                                                           |
+| `--target`                     | str     | yes      |         | Target .tex file path.                                                                                         |
+| `--output-dir`                 | str     | no       |         | Directory for the compiled PDF (passed to latexmk as -outdir). Ignored when a latexmkrc is provided.           |
+| `--aux-dir`                    | str     | no       |         | Directory for auxiliary files (passed to latexmk as -auxdir). Ignored when a latexmkrc is provided.            |
+| `--latexmkrc`                  | str     | no       |         | Path to a latexmkrc file for compilation.                                                                      |
+| `--latexmk-arg`                | str     | no       |         | Extra argument passed through to latexmk. Repeat the option to pass more than one.                             |
+| `--input`, `-i`                | str     | no       |         | A path on which the stage depends.                                                                             |
 | `--no-detect-inputs`           | boolean | no       | False   | Don't add the class, style, bibliography, and figure files the document reads as inputs.                       |
-| `--output`, `-o`               | text    | no       |         | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text    | no       |         | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text    | no       |         | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text    | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--output`, `-o`               | str     | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str     | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str     | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str     | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str     | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str     | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
 | `--overwrite`, `--force`, `-f` | boolean | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
 | `--no-check`                   | boolean | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
 | `--no-commit`                  | boolean | no       | False   | Do not commit changes to Git.                                                                                  |
@@ -1616,16 +1616,16 @@ Options:
 
 | Option                         | Type                   | Required | Default             | Description                                                                                                    |
 | ------------------------------ | ---------------------- | -------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text                   | yes      |                     | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text                   | yes      |                     | Environment to use to run the stage.                                                                           |
-| `--notebook-path`              | text                   | yes      |                     | Path to notebook.                                                                                              |
-| `--input`, `-i`                | text                   | no       |                     | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | text                   | no       |                     | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text                   | no       |                     | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text                   | no       |                     | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text                   | no       |                     | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text                   | no       |                     | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text                   | no       |                     | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--name`, `-n`                 | str                    | yes      |                     | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str                    | yes      |                     | Environment to use to run the stage.                                                                           |
+| `--notebook-path`              | str                    | yes      |                     | Path to notebook.                                                                                              |
+| `--input`, `-i`                | str                    | no       |                     | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | str                    | no       |                     | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str                    | no       |                     | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str                    | no       |                     | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str                    | no       |                     | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str                    | no       |                     | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str                    | no       |                     | An output that should not be stored in version control, and should not be deleted before running.              |
 | `--html-storage`               | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the HTML output of the notebook.                                                       |
 | `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | NotebookStorage.git | In what system to store the cleaned ipynb output of the notebook.                                              |
 | `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the executed ipynb output of the notebook.                                             |
@@ -1649,25 +1649,25 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                     |
 | -------- | ---- | -------- | ------- | ----------------------------------------------- |
-| `path`   | text | no       | .       | The path to release; '.' for a project release. |
+| `path`   | str  | no       | .       | The path to release; '.' for a project release. |
 
 Options:
 
 | Option                    | Type    | Required | Default | Description                                                                                                                                                                               |
 | ------------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`            | text    | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                |
-| `--kind`                  | text    | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
-| `--description`, `--desc` | text    | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
-| `--date`                  | text    | no       |         | Release date. Will default to today.                                                                                                                                                      |
+| `--name`, `-n`            | str     | yes      |         | A name for the release, typically kebab-case or a semantic version. Will be used for the Git tag and GitHub release title.                                                                |
+| `--kind`                  | str     | no       |         | What kind of release to create. Will attempt to infer from path if not provided.                                                                                                          |
+| `--description`, `--desc` | str     | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                     |
+| `--date`                  | str     | no       |         | Release date. Will default to today.                                                                                                                                                      |
 | `--no-docker-images`      | boolean | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                |
 | `--dry-run`               | boolean | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                               |
 | `--no-commit`             | boolean | no       | False   | Do not commit changes to Git repo.                                                                                                                                                        |
 | `--no-push`               | boolean | no       | False   | Do not push to Git remote.                                                                                                                                                                |
 | `--internal`              | boolean | no       | False   | Create an internal release that is not published to an archival service. Still creates a Git tag and release record in calkit.yaml, but does not upload files or create a GitHub release. |
 | `--no-github`             | boolean | no       | False   | Do not create a GitHub release.                                                                                                                                                           |
-| `--to`                    | text    | no       | zenodo  | Archival service to use for external releases (zenodo or caltechdata); ignored for --internal releases.                                                                                   |
+| `--to`                    | str     | no       | zenodo  | Archival service to use for external releases (zenodo or caltechdata); ignored for --internal releases.                                                                                   |
 | `--draft`                 | boolean | no       | False   | Create draft record with reserved DOI but do not publish.                                                                                                                                 |
-| `--license`               | text    | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                  |
+| `--license`               | str     | no       |         | License ID (from https://spdx.org/licenses). Multiple can be specified. Will try to infer from LICENSE file, if present.                                                                  |
 | `--verbose`, `-v`         | boolean | no       | False   | Print verbose output.                                                                                                                                                                     |
 
 <a id="command-group-delete-rm"></a>
@@ -1694,9 +1694,9 @@ calkit delete|rm question INDEX
 
 Arguments:
 
-| Argument | Type    | Required | Default | Description                                                            |
-| -------- | ------- | -------- | ------- | ---------------------------------------------------------------------- |
-| `index`  | integer | yes      |         | 1-based index of the question to remove (see `calkit list questions`). |
+| Argument | Type | Required | Default | Description                                                            |
+| -------- | ---- | -------- | ------- | ---------------------------------------------------------------------- |
+| `index`  | int  | yes      |         | 1-based index of the question to remove (see `calkit list questions`). |
 
 <a id="command-group-notebooks-nb"></a>
 
@@ -1730,7 +1730,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
@@ -1772,9 +1772,9 @@ Options:
 
 | Option                         | Type    | Required | Default | Description                                                                              |
 | ------------------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------- |
-| `--environment`, `--env`, `-e` | text    | yes      |         | Environment name in which to run the notebook.                                           |
+| `--environment`, `--env`, `-e` | str     | yes      |         | Environment name in which to run the notebook.                                           |
 | `--no-check`                   | boolean | no       | False   | Do not check environment before executing.                                               |
-| `--language`, `-l`             | text    | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment.          |
+| `--language`, `-l`             | str     | no       |         | Notebook language; if 'matlab', MATLAB kernel must be available in environment.          |
 | `--verbose`, `-v`              | boolean | no       | False   | Print verbose output.                                                                    |
 | `--json`                       | boolean | no       | False   | Output result as JSON.                                                                   |
 | `--auto-add-deps`              | boolean | no       | False   | Automatically install missing kernel dependencies (e.g., IJulia for Julia environments). |
@@ -1797,19 +1797,19 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `path`   | text | yes      |         |             |
+| `path`   | str  | yes      |         |             |
 
 Options:
 
 | Option                  | Type    | Required | Default  | Description                                                                     |
 | ----------------------- | ------- | -------- | -------- | ------------------------------------------------------------------------------- |
-| `--environment`, `-e`   | text    | no       |          | Name or path to the spec of the environment in which to run the notebook.       |
-| `--to`                  | text    | no       | notebook | Output format ('html' or 'notebook').                                           |
+| `--environment`, `-e`   | str     | no       |          | Name or path to the spec of the environment in which to run the notebook.       |
+| `--to`                  | str     | no       | notebook | Output format ('html' or 'notebook').                                           |
 | `--no-check`            | boolean | no       | False    | Do not check environment before executing.                                      |
-| `--param`, `-p`         | text    | no       |          | Parameter to pass to the notebook in key=value format.                          |
-| `--params-json`, `-j`   | text    | no       |          | JSON string to parse as parameters to pass to the notebook.                     |
-| `--params-base64`, `-b` | text    | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.      |
-| `--language`, `-l`      | text    | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
+| `--param`, `-p`         | str     | no       |          | Parameter to pass to the notebook in key=value format.                          |
+| `--params-json`, `-j`   | str     | no       |          | JSON string to parse as parameters to pass to the notebook.                     |
+| `--params-base64`, `-b` | str     | no       |          | Base64-encoded JSON string to parse as parameters to pass to the notebook.      |
+| `--language`, `-l`      | str     | no       |          | Notebook language; if 'matlab', MATLAB kernel must be available in environment. |
 | `--no-replace`          | boolean | no       | False    | Do not replace notebook outputs from executed version.                          |
 | `--verbose`, `-v`       | boolean | no       | False    | Print verbose output.                                                           |
 
@@ -1829,18 +1829,18 @@ Arguments:
 
 | Argument | Type | Required | Default | Description    |
 | -------- | ---- | -------- | ------- | -------------- |
-| `path`   | text | yes      |         | Notebook path. |
+| `path`   | str  | yes      |         | Notebook path. |
 
 Options:
 
 | Option                | Type    | Required | Default | Description                                                                                                             |
 | --------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `-o`, `--output`      | text    | yes      |         | Output path for the app.                                                                                                |
-| `--environment`, `-e` | text    | no       |         | Name or path to the spec of the environment in which to export the notebook; must include marimo.                       |
-| `--mode`              | text    | no       | run     | Whether the app is read-only ('run') or editable.                                                                       |
+| `-o`, `--output`      | str     | yes      |         | Output path for the app.                                                                                                |
+| `--environment`, `-e` | str     | no       |         | Name or path to the spec of the environment in which to export the notebook; must include marimo.                       |
+| `--mode`              | str     | no       | run     | Whether the app is read-only ('run') or editable.                                                                       |
 | `--show-code`         | boolean | no       | False   | Show notebook code in the app.                                                                                          |
-| `--layout`            | text    | no       |         | Path to the layout file named in the notebook's marimo.App(layout_file=...) call.                                       |
-| `--include`           | text    | no       |         | Path to publish with the app, copied beneath 'public' at its project-relative path. May be a glob, and may be repeated. |
+| `--layout`            | str     | no       |         | Path to the layout file named in the notebook's marimo.App(layout_file=...) call.                                       |
+| `--include`           | str     | no       |         | Path to publish with the app, copied beneath 'public' at its project-relative path. May be a glob, and may be repeated. |
 | `--no-validate`       | boolean | no       | False   | Skip executing the notebook to check it works before exporting.                                                         |
 | `--no-check`          | boolean | no       | False   | Do not check environment before exporting.                                                                              |
 | `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                   |
@@ -2144,7 +2144,7 @@ Options:
 
 | Option         | Type    | Required | Default | Description             |
 | -------------- | ------- | -------- | ------- | ----------------------- |
-| `--kind`, `-k` | text    | no       |         | Filter stages by kind.  |
+| `--kind`, `-k` | str     | no       |         | Filter stages by kind.  |
 | `--stale`      | boolean | no       | False   | Show only stale stages. |
 | `--json`       | boolean | no       | False   | Output result as JSON.  |
 
@@ -2213,7 +2213,7 @@ Options:
 
 | Option         | Type    | Required | Default | Description            |
 | -------------- | ------- | -------- | ------- | ---------------------- |
-| `--name`, `-n` | text    | yes      |         | Environment name.      |
+| `--name`, `-n` | str     | yes      |         | Environment name.      |
 | `--json`       | boolean | no       | False   | Output result as JSON. |
 
 <a id="subcommand-describe-desc-environments-envs"></a>
@@ -2252,7 +2252,7 @@ Options:
 
 | Option           | Type | Required | Default | Description                                               |
 | ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | text | no       |         | Path at which to write the schema instead of printing it. |
+| `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
 
 <a id="command-group-import"></a>
 
@@ -2284,14 +2284,14 @@ Arguments:
 
 | Argument    | Type | Required | Default | Description                                                                                          |
 | ----------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `src_path`  | text | yes      |         | Location of dataset, including project owner and name, e.g., someone/some-project/data/some-data.csv |
-| `dest_path` | text | no       |         | Output path at which to save.                                                                        |
+| `src_path`  | str  | yes      |         | Location of dataset, including project owner and name, e.g., someone/some-project/data/some-data.csv |
+| `dest_path` | str  | no       |         | Output path at which to save.                                                                        |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                                                     |
 | ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------- |
-| `--filter-paths`    | text    | no       |         | Filter paths in target dataset if it's a folder.                                |
+| `--filter-paths`    | str     | no       |         | Filter paths in target dataset if it's a folder.                                |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                  |
 | `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.                                          |
 | `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists.                             |
@@ -2313,14 +2313,14 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                                         |
 | -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
-| `src`    | text | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
+| `src`    | str  | yes      |         | Environment location and name, e.g., someone/some-project:env-name. If not present, the Calkit API will be queried. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                         |
 | ------------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--path`            | text    | no       |         | Output path at which to save.                       |
-| `--name`, `-n`      | text    | no       |         | Name to use in the destination project.             |
+| `--path`            | str     | no       |         | Output path at which to save.                       |
+| `--name`, `-n`      | str     | no       |         | Name to use in the destination project.             |
 | `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists. |
 | `--no-commit`       | boolean | no       | False   | Do not commit changes.                              |
 
@@ -2340,17 +2340,17 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                             |
 | ---------- | ---- | -------- | ------- | ------------------------------------------------------- |
-| `src`      | text | yes      |         | Source URL or DOI.                                      |
-| `dest_dir` | text | yes      |         | Destination folder. Will be created if it doesn't exist |
+| `src`      | str  | yes      |         | Source URL or DOI.                                      |
+| `dest_dir` | str  | yes      |         | Destination folder. Will be created if it doesn't exist |
 
 Options:
 
 | Option            | Type    | Required | Default | Description                                                                          |
 | ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------ |
-| `--kind`, `-k`    | text    | no       |         | What kind of artifact is being imported, e.g., a figure, dataset, publication.       |
-| `--name-like`     | text    | no       |         | Filter for file names like this. Glob patterns accepted.                             |
-| `--name-not-like` | text    | no       |         | Exclude names matching pattern.                                                      |
-| `--storage`       | text    | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
+| `--kind`, `-k`    | str     | no       |         | What kind of artifact is being imported, e.g., a figure, dataset, publication.       |
+| `--name-like`     | str     | no       |         | Filter for file names like this. Glob patterns accepted.                             |
+| `--name-not-like` | str     | no       |         | Exclude names matching pattern.                                                      |
+| `--storage`       | str     | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
 | `--no-commit`     | boolean | no       | False   | Do not commit changes to project.                                                    |
 
 <a id="command-group-office"></a>
@@ -2380,15 +2380,15 @@ Arguments:
 
 | Argument       | Type | Required | Default | Description             |
 | -------------- | ---- | -------- | ------- | ----------------------- |
-| `input_fpath`  | text | yes      |         | Input Excel file path.  |
-| `output_fpath` | text | yes      |         | Output image file path. |
+| `input_fpath`  | str  | yes      |         | Input Excel file path.  |
+| `output_fpath` | str  | yes      |         | Output image file path. |
 
 Options:
 
-| Option          | Type    | Required | Default | Description        |
-| --------------- | ------- | -------- | ------- | ------------------ |
-| `--sheet`       | integer | no       | 1       | Sheet in workbook. |
-| `--chart-index` | integer | no       | 0       | Chart index.       |
+| Option          | Type | Required | Default | Description        |
+| --------------- | ---- | -------- | ------- | ------------------ |
+| `--sheet`       | int  | no       | 1       | Sheet in workbook. |
+| `--chart-index` | int  | no       | 0       | Chart index.       |
 
 <a id="subcommand-office-word-to-pdf"></a>
 
@@ -2406,13 +2406,13 @@ Arguments:
 
 | Argument      | Type | Required | Default | Description                    |
 | ------------- | ---- | -------- | ------- | ------------------------------ |
-| `input_fpath` | text | yes      |         | Input Word document file path. |
+| `input_fpath` | str  | yes      |         | Input Word document file path. |
 
 Options:
 
 | Option           | Type | Required | Default | Description                                                                          |
 | ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
-| `-o`, `--output` | text | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
+| `-o`, `--output` | str  | no       |         | Output file path. If not specified, will be the same as input with a .pdf extension. |
 
 <a id="command-group-update"></a>
 
@@ -2457,7 +2457,7 @@ Options:
 
 | Option        | Type    | Required | Default | Description                                                       |
 | ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
 | `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated devcontainer.          |
 
 <a id="subcommand-update-license"></a>
@@ -2476,7 +2476,7 @@ Options:
 
 | Option                     | Type    | Required | Default | Description                                         |
 | -------------------------- | ------- | -------- | ------- | --------------------------------------------------- |
-| `--copyright-holder`, `-c` | text    | yes      |         | Copyright holder, e.g., your full name.             |
+| `--copyright-holder`, `-c` | str     | yes      |         | Copyright holder, e.g., your full name.             |
 | `--no-commit`              | boolean | no       | False   | Do not create a Git commit for the updated license. |
 
 <a id="subcommand-update-release"></a>
@@ -2495,7 +2495,7 @@ Options:
 
 | Option           | Type    | Required | Default | Description                                |
 | ---------------- | ------- | -------- | ------- | ------------------------------------------ |
-| `--name`, `-n`   | text    | no       |         | Release name.                              |
+| `--name`, `-n`   | str     | no       |         | Release name.                              |
 | `--latest`       | boolean | no       | False   | Update latest release.                     |
 | `--delete`       | boolean | no       | False   | Delete release.                            |
 | `--publish`      | boolean | no       | False   | Publish the release.                       |
@@ -2519,7 +2519,7 @@ Options:
 
 | Option        | Type    | Required | Default | Description                                                       |
 | ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
 | `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated VS Code config.        |
 
 <a id="subcommand-update-github-actions"></a>
@@ -2540,7 +2540,7 @@ Options:
 
 | Option        | Type    | Required | Default | Description                                                       |
 | ------------- | ------- | -------- | ------- | ----------------------------------------------------------------- |
-| `--wdir`      | text    | no       |         | Working directory. By default will run current working directory. |
+| `--wdir`      | str     | no       |         | Working directory. By default will run current working directory. |
 | `--no-commit` | boolean | no       | False   | Do not create a Git commit for the updated GitHub Actions.        |
 
 <a id="subcommand-update-notebook"></a>
@@ -2561,13 +2561,13 @@ Arguments:
 
 | Argument        | Type | Required | Default | Description                                       |
 | --------------- | ---- | -------- | ------- | ------------------------------------------------- |
-| `notebook_path` | text | yes      |         | Path to the notebook file (relative to workspace) |
+| `notebook_path` | str  | yes      |         | Path to the notebook file (relative to workspace) |
 
 Options:
 
 | Option      | Type    | Required | Default | Description                                     |
 | ----------- | ------- | -------- | ------- | ----------------------------------------------- |
-| `--set-env` | text    | no       |         | Environment name to associate with the notebook |
+| `--set-env` | str     | no       |         | Environment name to associate with the notebook |
 | `--json`    | boolean | no       | False   | Output result as JSON.                          |
 
 <a id="subcommand-update-agent-skills"></a>
@@ -2604,9 +2604,9 @@ Options:
 
 | Option             | Type    | Required | Default | Description                                             |
 | ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
-| `--name`, `-n`     | text    | yes      |         | Environment name.                                       |
-| `--add`            | text    | no       |         | Add a package.                                          |
-| `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
+| `--name`, `-n`     | str     | yes      |         | Environment name.                                       |
+| `--add`            | str     | no       |         | Add a package.                                          |
+| `--remove`, `--rm` | str     | no       |         | Remove a package.                                       |
 | `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
 
 <a id="subcommand-update-pixi-env"></a>
@@ -2625,11 +2625,11 @@ Options:
 
 | Option                     | Type    | Required | Default | Description                                             |
 | -------------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
-| `--name`, `-n`             | text    | yes      |         | Environment name.                                       |
-| `--add`                    | text    | no       |         | Add a conda package.                                    |
-| `--remove`, `--rm`         | text    | no       |         | Remove a conda package.                                 |
-| `--add-pip`                | text    | no       |         | Add a PyPI package.                                     |
-| `--remove-pip`, `--rm-pip` | text    | no       |         | Remove a PyPI package.                                  |
+| `--name`, `-n`             | str     | yes      |         | Environment name.                                       |
+| `--add`                    | str     | no       |         | Add a conda package.                                    |
+| `--remove`, `--rm`         | str     | no       |         | Remove a conda package.                                 |
+| `--add-pip`                | str     | no       |         | Add a PyPI package.                                     |
+| `--remove-pip`, `--rm-pip` | str     | no       |         | Remove a PyPI package.                                  |
 | `--no-check`               | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
 
 <a id="subcommand-update-julia-env"></a>
@@ -2648,9 +2648,9 @@ Options:
 
 | Option             | Type    | Required | Default | Description                                             |
 | ------------------ | ------- | -------- | ------- | ------------------------------------------------------- |
-| `--name`, `-n`     | text    | yes      |         | Environment name.                                       |
-| `--add`            | text    | no       |         | Add a package.                                          |
-| `--remove`, `--rm` | text    | no       |         | Remove a package.                                       |
+| `--name`, `-n`     | str     | yes      |         | Environment name.                                       |
+| `--add`            | str     | no       |         | Add a package.                                          |
+| `--remove`, `--rm` | str     | no       |         | Remove a package.                                       |
 | `--no-check`       | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
 
 <a id="subcommand-update-conda-env"></a>
@@ -2669,11 +2669,11 @@ Options:
 
 | Option                     | Type    | Required | Default | Description                                             |
 | -------------------------- | ------- | -------- | ------- | ------------------------------------------------------- |
-| `--name`, `-n`             | text    | yes      |         | Environment name.                                       |
-| `--add`                    | text    | no       |         | Add a conda package.                                    |
-| `--remove`, `--rm`         | text    | no       |         | Remove a conda package.                                 |
-| `--add-pip`                | text    | no       |         | Add a pip package.                                      |
-| `--remove-pip`, `--rm-pip` | text    | no       |         | Remove a pip package.                                   |
+| `--name`, `-n`             | str     | yes      |         | Environment name.                                       |
+| `--add`                    | str     | no       |         | Add a conda package.                                    |
+| `--remove`, `--rm`         | str     | no       |         | Remove a conda package.                                 |
+| `--add-pip`                | str     | no       |         | Add a pip package.                                      |
+| `--remove-pip`, `--rm-pip` | str     | no       |         | Remove a pip package.                                   |
 | `--no-check`               | boolean | no       | False   | Skip checking (syncing) the environment after updating. |
 
 <a id="subcommand-update-docker-env"></a>
@@ -2692,9 +2692,9 @@ Options:
 
 | Option         | Type    | Required | Default | Description                                                                                                                                                          |
 | -------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n` | text    | yes      |         | Environment name.                                                                                                                                                    |
-| `--image`      | text    | no       |         | Docker image name/tag.                                                                                                                                               |
-| `--registry`   | text    | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
+| `--name`, `-n` | str     | yes      |         | Environment name.                                                                                                                                                    |
+| `--image`      | str     | no       |         | Docker image name/tag.                                                                                                                                               |
+| `--registry`   | str     | no       |         | Registry prefix to push images to and pull them from, or 'ghcr.io' for the project's own namespace in the GitHub Container Registry, or 'none' to keep images local. |
 | `--lock`       | boolean | no       | False   | Rebuild or repull the image and write fresh lock files for every architecture.                                                                                       |
 
 <a id="subcommand-update-slurm-env"></a>
@@ -2711,17 +2711,17 @@ calkit update slurm-env [OPTIONS]
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                   |
-| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | text    | yes      |         | Environment name.                                                                             |
-| `--host`                | text    | no       |         | SLURM host.                                                                                   |
-| `--add-default-option`  | text    | no       |         | Add a default sbatch option.                                                                  |
-| `--rm-default-option`   | text    | no       |         | Remove a default sbatch option.                                                               |
-| `--set-default-options` | text    | no       |         | Replace default options list.                                                                 |
-| `--add-default-setup`   | text    | no       |         | Add a default setup command.                                                                  |
-| `--rm-default-setup`    | text    | no       |         | Remove a default setup command.                                                               |
-| `--set-default-setup`   | text    | no       |         | Replace default setup list.                                                                   |
-| `--max-concurrent-jobs` | integer | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
+| Option                  | Type | Required | Default | Description                                                                                   |
+| ----------------------- | ---- | -------- | ------- | --------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | str  | yes      |         | Environment name.                                                                             |
+| `--host`                | str  | no       |         | SLURM host.                                                                                   |
+| `--add-default-option`  | str  | no       |         | Add a default sbatch option.                                                                  |
+| `--rm-default-option`   | str  | no       |         | Remove a default sbatch option.                                                               |
+| `--set-default-options` | str  | no       |         | Replace default options list.                                                                 |
+| `--add-default-setup`   | str  | no       |         | Add a default setup command.                                                                  |
+| `--rm-default-setup`    | str  | no       |         | Remove a default setup command.                                                               |
+| `--set-default-setup`   | str  | no       |         | Replace default setup list.                                                                   |
+| `--max-concurrent-jobs` | int  | no       |         | Maximum number of this project's jobs allowed in the queue at once, or 0 to remove the limit. |
 
 <a id="subcommand-update-env"></a>
 
@@ -2741,8 +2741,8 @@ Options:
 
 | Option                   | Type | Required | Default | Description                                                               |
 | ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-environment"></a>
 
@@ -2762,8 +2762,8 @@ Options:
 
 | Option                   | Type | Required | Default | Description                                                               |
 | ------------------------ | ---- | -------- | ------- | ------------------------------------------------------------------------- |
-| `--name`, `-n`           | text | yes      |         | Name of the environment to update                                         |
-| `--add`, `--add-package` | text | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
+| `--name`, `-n`           | str  | yes      |         | Name of the environment to update                                         |
+| `--add`, `--add-package` | str  | no       |         | Package to add to the environment. Repeat the flag for multiple packages. |
 
 <a id="subcommand-update-stage"></a>
 
@@ -2781,20 +2781,20 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `name`   | text | yes      |         | Stage name. |
+| `name`   | str  | yes      |         | Stage name. |
 
 Options:
 
 | Option                | Type | Required | Default | Description                                         |
 | --------------------- | ---- | -------- | ------- | --------------------------------------------------- |
-| `--environment`, `-e` | text | no       |         | Set environment.                                    |
-| `--add-input`         | text | no       |         | Add an input path.                                  |
-| `--rm-input`          | text | no       |         | Remove an input path.                               |
-| `--set-inputs`        | text | no       |         | Replace the inputs list.                            |
-| `--set-outputs`       | text | no       |         | Replace DVC outputs list (paths only, storage=dvc). |
-| `--set-outputs-git`   | text | no       |         | Replace Git-tracked outputs list.                   |
-| `--add-output`        | text | no       |         | Add a DVC-tracked output path.                      |
-| `--rm-output`         | text | no       |         | Remove an output path.                              |
+| `--environment`, `-e` | str  | no       |         | Set environment.                                    |
+| `--add-input`         | str  | no       |         | Add an input path.                                  |
+| `--rm-input`          | str  | no       |         | Remove an input path.                               |
+| `--set-inputs`        | str  | no       |         | Replace the inputs list.                            |
+| `--set-outputs`       | str  | no       |         | Replace DVC outputs list (paths only, storage=dvc). |
+| `--set-outputs-git`   | str  | no       |         | Replace Git-tracked outputs list.                   |
+| `--add-output`        | str  | no       |         | Add a DVC-tracked output path.                      |
+| `--rm-output`         | str  | no       |         | Remove an output path.                              |
 
 <a id="subcommand-update-figure"></a>
 
@@ -2812,14 +2812,14 @@ Arguments:
 
 | Argument | Type | Required | Default | Description              |
 | -------- | ---- | -------- | ------- | ------------------------ |
-| `path`   | text | yes      |         | Path to the figure file. |
+| `path`   | str  | yes      |         | Path to the figure file. |
 
 Options:
 
 | Option                | Type | Required | Default | Description                                           |
 | --------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
-| `--imported-from-url` | text | no       |         | URL the figure was imported from.                     |
-| `--stage`             | text | no       |         | Name of the pipeline stage that produces this figure. |
+| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                     |
+| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure. |
 
 <a id="subcommand-update-dataset"></a>
 
@@ -2837,19 +2837,19 @@ Arguments:
 
 | Argument | Type | Required | Default | Description               |
 | -------- | ---- | -------- | ------- | ------------------------- |
-| `path`   | text | yes      |         | Path to the dataset file. |
+| `path`   | str  | yes      |         | Path to the dataset file. |
 
 Options:
 
 | Option                     | Type     | Required | Default | Description                                                                         |
 | -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--imported-from-url`      | text     | no       |         | URL the dataset was imported from.                                                  |
-| `--imported-from-doi`      | text     | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                           |
-| `--imported-from-git-url`  | text     | no       |         | Clone URL of the Git repo the dataset was imported from.                            |
-| `--imported-from-git-rev`  | text     | no       |         | Commit hash it was taken from. A branch or tag isn't accepted, since it would move. |
-| `--imported-from-git-path` | text     | no       |         | Path within that repo, if it isn't the whole thing.                                 |
+| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                  |
+| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                           |
+| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                            |
+| `--imported-from-git-rev`  | str      | no       |         | Commit hash it was taken from. A branch or tag isn't accepted, since it would move. |
+| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                 |
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
-| `--stage`                  | text     | no       |         | Name of the pipeline stage that produces this dataset.                              |
+| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                              |
 
 <a id="command-group-check"></a>
 
@@ -2890,7 +2890,7 @@ Options:
 
 | Option   | Type    | Required | Default | Description                |
 | -------- | ------- | -------- | ------- | -------------------------- |
-| `--wdir` | text    | no       | .       | Project working directory. |
+| `--wdir` | str     | no       | .       | Project working directory. |
 | `--json` | boolean | no       | False   | Output result as JSON.     |
 
 <a id="subcommand-check-environment"></a>
@@ -2909,7 +2909,7 @@ Options:
 
 | Option         | Type    | Required | Default | Description                       |
 | -------------- | ------- | -------- | ------- | --------------------------------- |
-| `--name`, `-n` | text    | yes      |         | Name of the environment to check. |
+| `--name`, `-n` | str     | yes      |         | Name of the environment to check. |
 | `--verbose`    | boolean | no       | False   | Print verbose output.             |
 
 <a id="subcommand-check-julia-env"></a>
@@ -2928,13 +2928,13 @@ Arguments:
 
 | Argument   | Type | Required | Default      | Description                      |
 | ---------- | ---- | -------- | ------------ | -------------------------------- |
-| `env_path` | text | no       | Project.toml | Path to Julia Project.toml file. |
+| `env_path` | str  | no       | Project.toml | Path to Julia Project.toml file. |
 
 Options:
 
 | Option      | Type    | Required | Default | Description                            |
 | ----------- | ------- | -------- | ------- | -------------------------------------- |
-| `--julia`   | text    | no       |         | Julia version to enforce (e.g., 1.11). |
+| `--julia`   | str     | no       |         | Julia version to enforce (e.g., 1.11). |
 | `--verbose` | boolean | no       | False   | Print verbose output.                  |
 
 <a id="subcommand-check-environments"></a>
@@ -2987,7 +2987,7 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                             |
 | ---------- | ---- | -------- | ------- | ------------------------------------------------------- |
-| `env_path` | text | yes      |         | Path to DESCRIPTION file or renv environment directory. |
+| `env_path` | str  | yes      |         | Path to DESCRIPTION file or renv environment directory. |
 
 Options:
 
@@ -3011,27 +3011,27 @@ Arguments:
 
 | Argument | Type | Required | Default | Description |
 | -------- | ---- | -------- | ------- | ----------- |
-| `tag`    | text | yes      |         | Image tag.  |
+| `tag`    | str  | yes      |         | Image tag.  |
 
 Options:
 
 | Option             | Type    | Required | Default | Description                                                                                                                                                       |
 | ------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-i`, `--input`    | text    | no       |         | Path to input Dockerfile, if applicable.                                                                                                                          |
-| `--output`, `-o`   | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension.     |
-| `--input`          | text    | no       |         | Alternative lock file input paths to read.                                                                                                                        |
-| `--input-delete`   | text    | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                        |
-| `--platform`       | text    | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'. Also used when building, unless --platform-build says otherwise.                                      |
-| `--user`           | text    | no       |         | Which user to run the container as.                                                                                                                               |
-| `--wdir`           | text    | no       |         | Working directory inside the container.                                                                                                                           |
-| `--dep`, `-d`      | text    | no       |         | Declare an explicit dependency for this Docker image.                                                                                                             |
-| `--env-var`, `-e`  | text    | no       |         | Declare an explicit environment variable for the container.                                                                                                       |
-| `--port`, `-p`     | text    | no       |         | Declare an explicit port for the container.                                                                                                                       |
-| `--gpus`, `-g`     | text    | no       |         | Declare an explicit GPU requirement for the container.                                                                                                            |
-| `--arg`, `-a`      | text    | no       |         | Declare an explicit run argument for the container.                                                                                                               |
-| `--platform-build` | text    | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry. |
-| `--registry`       | text    | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
-| `--lock-arch`      | text    | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
+| `-i`, `--input`    | str     | no       |         | Path to input Dockerfile, if applicable.                                                                                                                          |
+| `--output`, `-o`   | str     | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension.     |
+| `--input`          | str     | no       |         | Alternative lock file input paths to read.                                                                                                                        |
+| `--input-delete`   | str     | no       |         | Alternative lock input file paths to read and remove (i.e., legacy paths).                                                                                        |
+| `--platform`       | str     | no       |         | Platform to pull and run the image as, e.g., 'linux/amd64'. Also used when building, unless --platform-build says otherwise.                                      |
+| `--user`           | str     | no       |         | Which user to run the container as.                                                                                                                               |
+| `--wdir`           | str     | no       |         | Working directory inside the container.                                                                                                                           |
+| `--dep`, `-d`      | str     | no       |         | Declare an explicit dependency for this Docker image.                                                                                                             |
+| `--env-var`, `-e`  | str     | no       |         | Declare an explicit environment variable for the container.                                                                                                       |
+| `--port`, `-p`     | str     | no       |         | Declare an explicit port for the container.                                                                                                                       |
+| `--gpus`, `-g`     | str     | no       |         | Declare an explicit GPU requirement for the container.                                                                                                            |
+| `--arg`, `-a`      | str     | no       |         | Declare an explicit run argument for the container.                                                                                                               |
+| `--platform-build` | str     | no       |         | Platform to build the image for, as opposed to --platform, which is the one it's pulled and run as. Repeat for a multi-platform image, which requires a registry. |
+| `--registry`       | str     | no       |         | Registry prefix to push built images to and pull them from, e.g., 'ghcr.io/someone/some-project', or 'none' to disable.                                           |
+| `--lock-arch`      | str     | no       |         | Architecture to write an additional lock file for, alongside this machine's, e.g., 'amd64'.                                                                       |
 | `--quiet`, `-q`    | boolean | no       | False   | Be quiet.                                                                                                                                                         |
 
 <a id="subcommand-check-conda-env"></a>
@@ -3050,10 +3050,10 @@ Options:
 
 | Option           | Type    | Required | Default         | Description                                                                                                                                                   |
 | ---------------- | ------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--file`, `-f`   | text    | no       | environment.yml | Path to conda environment YAML file.                                                                                                                          |
-| `--output`, `-o` | text    | no       |                 | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`        | text    | no       |                 | Alternative lock file input paths.                                                                                                                            |
-| `--input-delete` | text    | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
+| `--file`, `-f`   | str     | no       | environment.yml | Path to conda environment YAML file.                                                                                                                          |
+| `--output`, `-o` | str     | no       |                 | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`        | str     | no       |                 | Alternative lock file input paths.                                                                                                                            |
+| `--input-delete` | str     | no       |                 | Alternative lock file input paths to delete after use.                                                                                                        |
 | `--relaxed`      | boolean | no       | False           | Treat conda and pip dependencies as equivalent.                                                                                                               |
 | `--quiet`, `-q`  | boolean | no       | False           | Be quiet.                                                                                                                                                     |
 
@@ -3073,19 +3073,19 @@ Arguments:
 
 | Argument | Type | Required | Default          | Description                |
 | -------- | ---- | -------- | ---------------- | -------------------------- |
-| `path`   | text | no       | requirements.txt | Path to requirements file. |
+| `path`   | str  | no       | requirements.txt | Path to requirements file. |
 
 Options:
 
 | Option           | Type    | Required | Default | Description                                                                                                                                                   |
 | ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--prefix`       | text    | no       | .venv   | Prefix.                                                                                                                                                       |
-| `--output`, `-o` | text    | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
-| `--input`        | text    | no       |         | Alternative lock file input paths.                                                                                                                            |
-| `--input-delete` | text    | no       |         | Alternative lock file input paths to delete after use.                                                                                                        |
-| `--wdir`         | text    | no       |         | Working directory. Defaults to current working directory.                                                                                                     |
+| `--prefix`       | str     | no       | .venv   | Prefix.                                                                                                                                                       |
+| `--output`, `-o` | str     | no       |         | Path to which existing environment should be exported. If not specified, will have the same filename with '-lock' appended to it, keeping the same extension. |
+| `--input`        | str     | no       |         | Alternative lock file input paths.                                                                                                                            |
+| `--input-delete` | str     | no       |         | Alternative lock file input paths to delete after use.                                                                                                        |
+| `--wdir`         | str     | no       |         | Working directory. Defaults to current working directory.                                                                                                     |
 | `--uv`           | boolean | no       | True    | Use uv.                                                                                                                                                       |
-| `--python`       | text    | no       |         | Python version to specify if using uv.                                                                                                                        |
+| `--python`       | str     | no       |         | Python version to specify if using uv.                                                                                                                        |
 | `--quiet`        | boolean | no       | False   | Do not print any output                                                                                                                                       |
 | `--verbose`      | boolean | no       | False   | Print verbose output.                                                                                                                                         |
 
@@ -3105,8 +3105,8 @@ Options:
 
 | Option           | Type | Required | Default | Description                      |
 | ---------------- | ---- | -------- | ------- | -------------------------------- |
-| `--name`, `-n`   | text | yes      |         | Environment name in calkit.yaml. |
-| `--output`, `-o` | text | yes      |         |                                  |
+| `--name`, `-n`   | str  | yes      |         | Environment name in calkit.yaml. |
+| `--output`, `-o` | str  | yes      |         |                                  |
 
 <a id="subcommand-check-reqs-requirements"></a>
 
@@ -3179,13 +3179,13 @@ Arguments:
 
 | Argument | Type | Required | Default | Description       |
 | -------- | ---- | -------- | ------- | ----------------- |
-| `cmd`    | text | yes      |         | Command to check. |
+| `cmd`    | str  | yes      |         | Command to check. |
 
 Options:
 
 | Option       | Type | Required | Default | Description                          |
 | ------------ | ---- | -------- | ------- | ------------------------------------ |
-| `--if-error` | text | yes      |         | Command to run if there is an error. |
+| `--if-error` | str  | yes      |         | Command to run if there is an error. |
 
 <a id="command-group-latex-tex"></a>
 
@@ -3217,15 +3217,15 @@ Arguments:
 
 | Argument       | Type | Required | Default | Description              |
 | -------------- | ---- | -------- | ------- | ------------------------ |
-| `input_fpaths` | text | yes      |         | Input JSON file path(s). |
+| `input_fpaths` | str  | yes      |         | Input JSON file path(s). |
 
 Options:
 
 | Option           | Type | Required | Default | Description                                                                                              |
 | ---------------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | text | yes      |         | Output LaTeX file path(s).                                                                               |
-| `--command`      | text | no       |         | Command name to use in LaTeX output.                                                                     |
-| `--format-json`  | text | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
+| `--output`, `-o` | str  | yes      |         | Output LaTeX file path(s).                                                                               |
+| `--command`      | str  | no       |         | Command name to use in LaTeX output.                                                                     |
+| `--format-json`  | str  | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3245,18 +3245,18 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description               |
 | ---------- | ---- | -------- | ------- | ------------------------- |
-| `tex_file` | text | yes      |         | The .tex file to compile. |
+| `tex_file` | str  | yes      |         | The .tex file to compile. |
 
 Options:
 
 | Option               | Type    | Required | Default | Description                                                                                      |
 | -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | text    | no       |         | Environment in which to run latexmk, if applicable.                                              |
+| `--env`, `-e`        | str     | no       |         | Environment in which to run latexmk, if applicable.                                              |
 | `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | text    | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | text    | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | text    | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | text    | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
+| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
+| `--output-dir`       | str     | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
+| `--aux-dir`          | str     | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
+| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
 | `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
 | `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
 | `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
@@ -3283,17 +3283,17 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description               |
 | ---------- | ---- | -------- | ------- | ------------------------- |
-| `tex_file` | text | yes      |         | The .tex file to compare. |
+| `tex_file` | str  | yes      |         | The .tex file to compare. |
 
 Options:
 
 | Option            | Type    | Required | Default | Description                                                                                                                                                                                      |
 | ----------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--from`          | text    | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
-| `--to`            | text    | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
-| `--env`, `-e`     | text    | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
-| `--output`, `-o`  | text    | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
-| `--output-dir`    | text    | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
+| `--from`          | str     | no       |         | Older revision, whose removed text is struck through. Defaults to the merge base with the default branch.                                                                                        |
+| `--to`            | str     | no       |         | Newer revision, whose additions are marked. Defaults to the working tree.                                                                                                                        |
+| `--env`, `-e`     | str     | no       |         | Environment in which to run latexdiff and latexmk.                                                                                                                                               |
+| `--output`, `-o`  | str     | no       |         | Where to write the diff PDF. Defaults to a path under .calkit/latex-diffs, keeping it with the project's other derived files.                                                                    |
+| `--output-dir`    | str     | no       |         | Directory to write the diff into, keeping the document's own path inside it. Lets a pipeline name the location after the revisions as written while passing resolved commits to --from and --to. |
 | `--force`, `-f`   | boolean | no       | False   | Rebuild even if this comparison can't have changed and has already been built.                                                                                                                   |
 | `--keep-tex`      | boolean | no       | False   | Keep the generated diff .tex file for inspection.                                                                                                                                                |
 | `--no-check`      | boolean | no       | False   | Don't check the environment is valid before running.                                                                                                                                             |
@@ -3329,18 +3329,18 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                                                    |
 | ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------ |
-| `src_url`  | text | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
-| `dest_dir` | text | yes      |         | Directory at which to save in the project, e.g., 'paper'.                      |
+| `src_url`  | str  | yes      |         | Overleaf project URL, e.g., https://www.overleaf.com/project/6800005973cb2e35. |
+| `dest_dir` | str  | yes      |         | Directory at which to save in the project, e.g., 'paper'.                      |
 
 Options:
 
 | Option                | Type    | Required | Default | Description                                                                                                                |
 | --------------------- | ------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `--title`, `-t`       | text    | no       |         | Title of the publication.                                                                                                  |
-| `--target`, `-T`      | text    | no       |         | Target TeX file path inside Overleaf project.                                                                              |
-| `--description`, `-d` | text    | no       |         | Description of the publication.                                                                                            |
-| `--kind`              | text    | no       |         | What of the publication this is, e.g., 'journal-article'.                                                                  |
-| `--push-path`, `-p`   | text    | no       |         | Paths to push to the Overleaf project, e.g., 'figures'. Note that these are relative to the publication working directory. |
+| `--title`, `-t`       | str     | no       |         | Title of the publication.                                                                                                  |
+| `--target`, `-T`      | str     | no       |         | Target TeX file path inside Overleaf project.                                                                              |
+| `--description`, `-d` | str     | no       |         | Description of the publication.                                                                                            |
+| `--kind`              | str     | no       |         | What of the publication this is, e.g., 'journal-article'.                                                                  |
+| `--push-path`, `-p`   | str     | no       |         | Paths to push to the Overleaf project, e.g., 'figures'. Note that these are relative to the publication working directory. |
 | `--no-commit`         | boolean | no       | False   | Do not commit changes to repo.                                                                                             |
 | `--overwrite`, `-f`   | boolean | no       | False   | Force adding the publication even if it already exists.                                                                    |
 | `--push-only`, `-P`   | boolean | no       | False   | Push local files to Overleaf without pulling. Useful when initializing a new Overleaf project from local files.            |
@@ -3361,7 +3361,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                                      |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+| `paths`  | str  | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
 
 Options:
 
@@ -3393,7 +3393,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                     |
 | -------- | ---- | -------- | ------- | ----------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
+| `paths`  | str  | no       |         | Paths synced with Overleaf, e.g., 'paper'. If not provided, all Overleaf syncs will be checked. |
 
 <a id="subcommand-overleaf-ol-push"></a>
 
@@ -3413,13 +3413,13 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                          |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths to push to Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pushed. |
+| `paths`  | str  | no       |         | Paths to push to Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pushed. |
 
 Options:
 
 | Option           | Type    | Required | Default | Description                                                                                                      |
 | ---------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pushing.                                                                |
+| `--branch`, `-b` | str     | no       |         | Switch to (or create) this branch before pushing.                                                                |
 | `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                       |
 | `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                         |
 | `--allow-stale`  | boolean | no       | False   | Push even if the pipeline is out-of-date.                                                                        |
@@ -3445,13 +3445,13 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                            |
 | -------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------ |
-| `paths`  | text | no       |         | Paths to pull from Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pulled. |
+| `paths`  | str  | no       |         | Paths to pull from Overleaf, e.g., 'paper'. If not provided, all Overleaf publications will be pulled. |
 
 Options:
 
 | Option           | Type    | Required | Default | Description                                                                                                                                 |
 | ---------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--branch`, `-b` | text    | no       |         | Switch to (or create) this branch before pulling. Useful when the default branch is protected, since pulling from Overleaf creates commits. |
+| `--branch`, `-b` | str     | no       |         | Switch to (or create) this branch before pulling. Useful when the default branch is protected, since pulling from Overleaf creates commits. |
 | `--yes`, `-y`    | boolean | no       | False   | Answer yes to all prompts, e.g., to run non-interactively.                                                                                  |
 | `--no-pull`      | boolean | no       | False   | Do not pull from Git and DVC beforehand.                                                                                                    |
 | `--no-run`       | boolean | no       | False   | Do not run the pipeline after pulling.                                                                                                      |
@@ -3488,13 +3488,13 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description  |
 | ---------- | ---- | -------- | ------- | ------------ |
-| `endpoint` | text | yes      |         | API endpoint |
+| `endpoint` | str  | yes      |         | API endpoint |
 
 Options:
 
 | Option  | Type | Required | Default | Description                                                                                                                              |
 | ------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub` | text | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--hub` | str  | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 
 <a id="subcommand-hub-cloud-login"></a>
 
@@ -3514,7 +3514,7 @@ Options:
 
 | Option          | Type    | Required | Default | Description                                                                                                                              |
 | --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `--hub`         | text    | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
+| `--hub`         | str     | no       |         | URL of the hub to target, e.g., https://staging.calkit.io. Defaults to the working directory project's hub, if declared, else calkit.io. |
 | `--force`, `-f` | boolean | no       | False   | Force logging in again even if already authenticated. Will store a new token in your local config.                                       |
 
 <a id="subcommand-hub-cloud-config"></a>
@@ -3562,23 +3562,23 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                  |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------- |
-| `target` | text | yes      |         | The target to run. This can be a shell script or an executable.              |
-| `args`   | text | no       |         | Arguments for the target command, passed to the job script after the target. |
+| `target` | str  | yes      |         | The target to run. This can be a shell script or an executable.              |
+| `args`   | str  | no       |         | Arguments for the target command, passed to the job script after the target. |
 
 Options:
 
 | Option                  | Type    | Required | Default | Description                                                                                                                                                                                                                                                                             |
 | ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
-| `--environment`, `-e`   | text    | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
-| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
-| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
-| `--option`, `-s`        | text    | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
-| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
-| `--log-path`            | text    | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
+| `--name`, `-n`          | str     | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
+| `--environment`, `-e`   | str     | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
+| `--dep`, `-d`           | str     | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
+| `--out`, `-o`           | str     | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
+| `--option`, `-s`        | str     | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
+| `--setup`               | str     | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--log-path`            | str     | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
 | `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
-| `--env-default-options` | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
-| `--env-default-setup`   | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
+| `--env-default-options` | str     | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
+| `--env-default-setup`   | str     | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
 <a id="subcommand-scheduler-sch-queue-q"></a>
 
@@ -3608,7 +3608,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description              |
 | -------- | ---- | -------- | ------- | ------------------------ |
-| `names`  | text | yes      |         | Names of jobs to cancel. |
+| `names`  | str  | yes      |         | Names of jobs to cancel. |
 
 <a id="subcommand-scheduler-sch-logs"></a>
 
@@ -3628,7 +3628,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                        |
 | -------- | ---- | -------- | ------- | ---------------------------------- |
-| `names`  | text | no       |         | Names of the jobs to get logs for. |
+| `names`  | str  | no       |         | Names of the jobs to get logs for. |
 
 Options:
 
@@ -3748,7 +3748,7 @@ Arguments:
 
 | Argument | Type | Required | Default | Description                                                                                                      |
 | -------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `paths`  | text | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
+| `paths`  | str  | no       |         | Paths to sync with Overleaf, e.g., 'paper/paper.pdf'. If not provided, all Overleaf publications will be synced. |
 
 Options:
 

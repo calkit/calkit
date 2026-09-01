@@ -10,7 +10,6 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Union, cast, get_args, get_origin
 
-import click
 import typer
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
@@ -136,9 +135,14 @@ def _list_unique_commands(
     return commands
 
 
-def _type_name(param_type: click.ParamType) -> str:
-    if isinstance(param_type, click.types.Choice):
-        return "choice(" + ", ".join(str(c) for c in param_type.choices) + ")"
+def _type_name(param_type: Any) -> str:
+    # Asked for rather than type-checked: the parameter type is Click's
+    # Choice or Typer's vendored one depending on the version, and what
+    # the reference needs from either is the list of values. Without it
+    # the table says 'choice' and leaves the reader to guess them.
+    choices = getattr(param_type, "choices", None)
+    if choices is not None:
+        return "choice(" + ", ".join(str(c) for c in choices) + ")"
     return getattr(param_type, "name", str(param_type))
 
 

@@ -1189,18 +1189,16 @@ def test_check_questions(tmp_dir):
     )
     assert proc.returncode == 1
     assert json.loads(proc.stdout)["questions"][0]["status"] == "stale"
-    out = subprocess.check_output(
-        ["calkit", "status", "--category", "questions"], text=True
-    )
-    assert "Questions" in out
-    assert "Answers whose evidence changed since: 1" in out
-    # Questions are asked for rather than shown by default, in JSON too
+    # Questions are a check of their own, not part of status
     out = subprocess.check_output(["calkit", "status", "--json"], text=True)
     assert "questions" not in json.loads(out)
-    out = subprocess.check_output(
-        ["calkit", "status", "--json", "-c", "questions"], text=True
+    bad = subprocess.run(
+        ["calkit", "status", "-c", "questions"],
+        capture_output=True,
+        text=True,
     )
-    assert json.loads(out)["questions"]["questions"][0]["status"] == "stale"
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
     out = subprocess.check_output(["calkit", "list", "questions"], text=True)
     assert "answer: 0 of eight do." in out
     # Reviewing the answer is an edit to the question, which clears it
@@ -1232,11 +1230,6 @@ def test_check_questions(tmp_dir):
     )
     assert "Answers consistent with their evidence: 1/1" in out
     assert "\u2705" not in out
-    subprocess.check_call(
-        ["calkit", "status", "-c", "questions"],
-        env=env,
-        stdout=subprocess.DEVNULL,
-    )
     # The check can be pointed at a project somewhere else
     os.makedirs("elsewhere")
     out = subprocess.check_output(
@@ -1245,12 +1238,9 @@ def test_check_questions(tmp_dir):
         cwd="elsewhere",
     )
     assert "Questions answered: 1/1" in out
-    # A category asked for is answered even when there is nothing to say
+    # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump({}, f)
-    out = subprocess.check_output(
-        ["calkit", "status", "-c", "questions"], text=True
-    )
-    assert "Questions" in out
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "No questions defined." in out

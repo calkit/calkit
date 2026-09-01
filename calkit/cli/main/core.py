@@ -484,10 +484,8 @@ def get_status(
             "--category",
             "-c",
             help=(
-                "Status categories to show. Can be specified multiple "
-                "times. Everything but questions is shown by default; ask "
-                "for those with '-c questions', or see them on their own "
-                "with 'calkit check questions'."
+                "Status categories to show. By default, all categories are "
+                "shown. Can be specified multiple times."
             ),
         ),
     ] = None,
@@ -547,13 +545,7 @@ def get_status(
                     raise subprocess.CalledProcessError(result, "dvc init")
             except subprocess.CalledProcessError as e:
                 raise_error(f"Failed to initialize DVC repository: {e}")
-    valid_categories = ["project", "questions", "git", "dvc", "pipeline"]
-    # Questions are asked for rather than shown by default. Judging whether
-    # an answer still matches its evidence means reading calkit.yaml's
-    # history, which no other category needs, and the report is a page of
-    # its own once a project has a few of them. 'calkit check questions'
-    # is where it belongs; this keeps it reachable from status.
-    default_categories = [c for c in valid_categories if c != "questions"]
+    valid_categories = ["project", "git", "dvc", "pipeline"]
     if categories is not None:
         for category in categories:
             if category not in valid_categories:
@@ -562,7 +554,7 @@ def get_status(
                     f"{valid_categories}"
                 )
     else:
-        categories = default_categories
+        categories = valid_categories
     pipeline_status = None
     running_status = None
     if "pipeline" in categories or "dvc" in categories:
@@ -601,12 +593,6 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
-        if "questions" in categories:
-            from calkit.questions import check_questions
-
-            status_dict["questions"] = check_questions(
-                ck_info=ck_info
-            ).model_dump(mode="json")
         if "git" in categories:
             try:
                 repo = calkit.git.get_repo()
@@ -688,22 +674,6 @@ def get_status(
             typer.echo(
                 'Project status not set. Use "calkit new status" to update.'
             )
-        typer.echo()
-    # Questions come right after the project's own status: they are what the
-    # rest of the project exists to answer, and an answer the pipeline has
-    # since contradicted is the first thing a reader should hear about
-    # Asked for and empty still prints, since a category that answers with
-    # a blank screen reads as a broken command
-    if "questions" in categories:
-        from calkit.questions import check_questions, format_status
-
-        print_sep("Questions")
-        qstatus = check_questions(ck_info=ck_info)
-        report = format_status(qstatus)
-        if not qstatus.ok:
-            warn(report, prefix="")
-        else:
-            calkit.echo(report)
         typer.echo()
     if "git" in categories:
         print_sep("Git")

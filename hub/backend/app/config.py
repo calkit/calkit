@@ -143,16 +143,22 @@ class Settings(BaseSettings):
         )  # type: ignore
 
     # What to leave out of a clone. A research project keeps its results in
-    # Git, so most of what a full clone downloads is old revisions of files
-    # nobody is looking at: for one real project, 739 MB of the 957 MB was
-    # history. ``blob:none`` fetches every commit and tree but only the file
-    # contents actually asked for, which took that clone from ~350 s to 26 s
-    # and 957 MB to 274 MB with byte-identical responses, including reads at
-    # old refs. The cost is that reading a file at an old revision fetches it
-    # then (about a second, once, then it is local for good), so a
-    # deployment that needs reads to work without reaching the remote should
-    # set this empty for full clones.
-    GIT_CLONE_FILTER: str = "blob:none"
+    # Git, so most of what a full clone downloads is old revisions of large
+    # files nobody is looking at: for one real project, 739 MB of the 957 MB
+    # was history, nearly all of it figures and results.
+    #
+    # The limit is on blob *size*, not on blobs outright. Every small file --
+    # every revision of dvc.lock, calkit.yaml, the .tex and .bib sources --
+    # comes down with the clone and stays local, which is what the history
+    # endpoints walk. ``blob:none`` looks better on paper (26 s and 274 MB
+    # against 60 s and 364 MB) but defers those too, and then a file history
+    # that resolves DVC versions reads dvc.lock at hundreds of commits and
+    # fetches each one over the network: one such request took 444 seconds,
+    # against 0.11 s here.
+    #
+    # Set empty for full clones, for a deployment that needs reads to work
+    # without reaching the remote.
+    GIT_CLONE_FILTER: str = "blob:limit=1m"
 
     # Shared cache. Everything the project view derives from a repo -- stage
     # statuses, parsed pipelines, figure listings -- is a pure function of a

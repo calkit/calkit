@@ -444,9 +444,9 @@ def test_get_repo_applies_the_configured_clone_filter(monkeypatch):
     try:
         # Most of a full clone of a project that keeps its results in Git is
         # old revisions nobody asked for, so the filter is passed through
-        monkeypatch.setattr(settings, "GIT_CLONE_FILTER", "blob:none")
+        monkeypatch.setattr(settings, "GIT_CLONE_FILTER", "blob:limit=1m")
         app.git.get_repo(project=project, user=None, session=None, ttl=600)
-        assert "--filter=blob:none" in commands[0]
+        assert "--filter=blob:limit=1m" in commands[0]
         # The clone lands at its final name only once git is done with it,
         # so no reader ever sees a partly written tree
         assert commands[0][-1].endswith(".cloning")

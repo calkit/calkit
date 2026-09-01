@@ -1485,6 +1485,10 @@ def update_path(
     the file are discarded. An import records that a file came from
     somewhere else, so a local edit that survived a refresh would make the
     entry a lie about what is on disk.
+
+    An entry that has no 'rev' yet is refreshed the same way, which is how
+    one written by hand gets its commit recorded: 'rev' is required, and
+    this is what fills it in.
     """
     from calkit.provenance import describe_source, find_artifact
 

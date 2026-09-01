@@ -2337,10 +2337,10 @@ calkit import path [OPTIONS] SRC-PATH [DEST-PATH]
 
 Arguments:
 
-| Argument    | Type | Required | Default | Description                                                                                                                                                                                        |
-| ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src_path`  | text | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
-| `dest_path` | text | no       |         | Path at which to save it in this project. Defaults to the source path.                                                                                                                             |
+| Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                              |
+| ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src_path`  | text | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
+| `dest_path` | text | no       |         | Path at which to save it in this project. Defaults to the source path.                                                                                                                                                                                   |
 
 Options:
 
@@ -2918,6 +2918,8 @@ Re-fetch an imported file from where it came from.
 For a Git source this takes the latest on whatever the entry follows, which is its 'ref' if it names one and the repo's default branch otherwise, and records the commit it lands on. '--git-ref' changes what it follows, from then on and not just this once, so switching to a tag pins the import to that tag rather than quietly reverting to the default branch next time.
 
 This is a one-way copy from the source, not a merge: local changes to the file are discarded. An import records that a file came from somewhere else, so a local edit that survived a refresh would make the entry a lie about what is on disk.
+
+An entry that has no 'rev' yet is refreshed the same way, which is how one written by hand gets its commit recorded: 'rev' is required, and this is what fills it in.
 
 Usage:
 

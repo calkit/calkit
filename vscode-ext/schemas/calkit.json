@@ -4186,7 +4186,7 @@
             }
           ],
           "default": null,
-          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.",
           "title": "Inputs"
         },
         "kind": {
@@ -7127,7 +7127,7 @@
             }
           ],
           "default": null,
-          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.",
           "title": "Inputs"
         },
         "kind": {
@@ -7471,7 +7471,7 @@
             }
           ],
           "default": null,
-          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them.",
+          "description": "Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.",
           "title": "Inputs"
         },
         "kind": {
@@ -8200,7 +8200,7 @@
             }
           ],
           "default": null,
-          "description": "Branch, tag, or commit to follow when refreshing this, e.g., 'main'. 'rev' still records the commit actually fetched, so the entry says both what it tracks and what it got. Without it, refreshing follows the repo's default branch.",
+          "description": "Branch, tag, or commit to follow when refreshing this, e.g., 'main'. Optional: an entry that names none is refreshed from the repo's default branch. 'rev' still records the commit actually fetched, so the entry says both what it tracks and what it got.",
           "title": "Ref"
         },
         "repo_url": {
@@ -8209,21 +8209,14 @@
           "type": "string"
         },
         "rev": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "The commit hash the file actually came from, filled in by 'calkit import path' and 'calkit update path'. A branch or tag would move, so this is what makes the entry say which bytes are here. Optional only so an entry can be written by hand before anything has been fetched.",
-          "title": "Rev"
+          "description": "The commit hash the file actually came from, filled in by 'calkit import path' and 'calkit update path'. This is the lock: it says which bytes are here, so it is always recorded, whether or not the entry also follows a 'ref'. Write the entry with 'calkit import path' rather than by hand, or run 'calkit update path' to fill this in for one that was.",
+          "title": "Rev",
+          "type": "string"
         }
       },
       "required": [
-        "repo_url"
+        "repo_url",
+        "rev"
       ],
       "title": "_GitSource",
       "type": "object"

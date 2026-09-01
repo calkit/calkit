@@ -102,6 +102,43 @@ def test_source_from_location():
     )
 
 
+def test_source_from_ssh_clone_urls():
+    # A clone URL is the most natural thing to paste, so it's recognized as
+    # the Git source it is. Before, 'git@github.com:o/r/a.sh' fell through
+    # to the Calkit-project reading and was sent to the hub as a project
+    # named 'git@github.com:o/r'.
+    from calkit.provenance import source_from_location
+
+    assert source_from_location("git@github.com:sup/lol/my-thing") == {
+        "git": {
+            "repo_url": "git@github.com:sup/lol.git",
+            "path": "my-thing",
+        }
+    }
+    # A '.git' suffix is the same repo, and a ref is attached when given
+    assert source_from_location(
+        "git@github.com:sup/lol.git", ref="branch"
+    ) == {"git": {"repo_url": "git@github.com:sup/lol.git", "ref": "branch"}}
+    assert source_from_location("ssh://git@github.com/sup/lol/a/b.sh") == {
+        "git": {
+            "repo_url": "ssh://git@github.com/sup/lol.git",
+            "path": "a/b.sh",
+        }
+    }
+    assert source_from_location("git://example.com/sup/lol/a.sh") == {
+        "git": {"repo_url": "git://example.com/sup/lol.git", "path": "a.sh"}
+    }
+    # A Calkit project path is still one, not a host with a colon missing
+    assert source_from_location("someone/some-project/scripts/x.sh") == {
+        "project": "someone/some-project",
+        "path": "scripts/x.sh",
+    }
+    # A relative path that happens to contain a colon isn't a clone URL:
+    # the host has to look like one
+    with pytest.raises(ValueError, match="Cannot tell where"):
+        source_from_location("notes:todo")
+
+
 def test_fetch_rejects_doi():
     from calkit.provenance import fetch
 
@@ -109,8 +146,9 @@ def test_fetch_rejects_doi():
         fetch({"doi": "10.5281/zenodo.1"}, dest_path="x")
 
 
-def test_hand_authored_git_source():
-    # An entry can be written by hand as intent, with no commit invented
+def test_git_source_always_records_a_commit():
+    # 'rev' is the lock -- which bytes are here -- and 'ref' is what to
+    # follow next time, so the first is required and the second isn't
     from pydantic import ValidationError
 
     from calkit.models.core import MiscArtifact
@@ -120,19 +158,27 @@ def test_hand_authored_git_source():
             path="scripts/setup.sh", imported_from={"git": git}
         ).model_dump(exclude_none=True)["imported_from"]["git"]
 
-    intent = {"repo_url": "https://github.com/o/r.git", "path": "a.sh"}
-    # What a person writes: where it comes from and what to follow. The
-    # commit is the tool's to fill in, so requiring it here would mean
-    # inventing one to be allowed to say the rest.
-    assert source(**intent, ref="main") == intent | {"ref": "main"}
-    assert source(**intent) == intent
-    # A branch in 'rev' is the mistake worth catching, since it would make
-    # the entry name something that moves
-    with pytest.raises(ValidationError, match="goes in 'ref'"):
-        source(**intent, rev="main")
     sha = "0123456789abcdef0123456789abcdef01234567"
-    assert source(**intent, rev=sha)["rev"] == sha
-    assert source(**intent, rev=sha[:7])["rev"] == sha[:7]
+    pinned = {
+        "repo_url": "https://github.com/o/r.git",
+        "path": "a.sh",
+        "rev": sha,
+    }
+    # Following a branch and knowing which commit you're on are separate
+    # facts, and an entry records both
+    assert source(**pinned, ref="main") == pinned | {"ref": "main"}
+    # No 'ref' means the default branch is what a refresh follows, but the
+    # commit is still recorded
+    assert source(**pinned) == pinned
+    assert source(**pinned | {"rev": sha[:7]})["rev"] == sha[:7]
+    # An entry that names something to follow but no commit says where the
+    # file is fetched from without saying which version is here. 'calkit
+    # update path' is what fills it in.
+    with pytest.raises(ValidationError, match="rev"):
+        source(repo_url="https://github.com/o/r.git", path="a.sh", ref="main")
+    # A branch in 'rev' is the other half of the same mistake
+    with pytest.raises(ValidationError, match="goes in 'ref'"):
+        source(**pinned | {"rev": "main"})
 
 
 def test_fetch_resolves_a_slashed_ref(tmp_dir):

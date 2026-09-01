@@ -170,6 +170,68 @@ def _git_source_from_url(url: str, ref: str | None = None) -> dict | None:
     return source
 
 
+# Schemes git understands that aren't HTTP. A clone URL is the most
+# natural thing to paste, so it's recognized as the Git source it is
+# rather than falling through to the Calkit-project reading, where
+# 'git@github.com:o/r' would be sent to the hub as a project name.
+_GIT_URL_SCHEMES = ("ssh://", "git://", "git+ssh://")
+# The scp-like form, 'git@github.com:owner/repo/path'. The host is required
+# to contain a dot so an ordinary relative path with a colon in it isn't
+# mistaken for one.
+_SCP_URL_RE = re.compile(
+    r"^(?P<user>[^@/\s]+@)?(?P<host>[A-Za-z0-9._-]+\.[A-Za-z0-9._-]+)"
+    r":(?P<path>[^/].*)$"
+)
+
+
+def _git_source_from_ssh_url(url: str, ref: str | None = None) -> dict | None:
+    """Read a repo and a path within it out of an SSH-style clone URL.
+
+    Handles both the scp-like ``git@host:owner/repo/path`` and the
+    ``ssh://git@host/owner/repo/path`` form, and returns None for anything
+    that is neither.
+
+    Unlike a forge's web URL, a clone URL has no marker saying where the
+    repo ends and a path inside it begins, so the repo is taken to be the
+    first two segments. That is right for GitHub and for GitLab projects
+    that aren't in nested groups; for anything else, naming the repo with
+    ``--git-repo`` says it exactly rather than leaving it to be guessed.
+    """
+    from urllib.parse import urlsplit
+
+    scp_prefix = None
+    if url.startswith(_GIT_URL_SCHEMES):
+        parts = urlsplit(url)
+        host = parts.netloc
+        rest = parts.path.lstrip("/")
+        scheme = parts.scheme
+    else:
+        match = _SCP_URL_RE.match(url)
+        if match is None:
+            return None
+        host = (match.group("user") or "") + match.group("host")
+        rest = match.group("path")
+        scheme = None
+        scp_prefix = host
+    segments = [seg for seg in rest.split("/") if seg]
+    if len(segments) < 2:
+        return None
+    repo_segments, path_segments = segments[:2], segments[2:]
+    repo = "/".join(repo_segments).removesuffix(".git")
+    # Written back in the form it was given, since that is what git was
+    # going to be handed either way and what the person will recognize
+    if scp_prefix is not None:
+        repo_url = f"{scp_prefix}:{repo}.git"
+    else:
+        repo_url = f"{scheme}://{host}/{repo}.git"
+    source: dict = {"repo_url": repo_url}
+    if path_segments:
+        source["path"] = "/".join(path_segments)
+    if ref is not None:
+        source["ref"] = ref
+    return source
+
+
 def source_from_location(
     location: str,
     git_repo: str | None = None,
@@ -178,8 +240,9 @@ def source_from_location(
     """Work out where a file is being imported from, from how it's written.
 
     ``location`` is a path inside ``git_repo`` when that's given, and
-    otherwise a URL, a DOI, or a Calkit project path like
-    ``someone/some-project/scripts/setup.sh``. An explicit ``ref`` names
+    otherwise a URL, an SSH clone URL like
+    ``git@github.com:owner/repo/path``, a DOI, or a Calkit project path
+    like ``someone/some-project/scripts/setup.sh``. An explicit ``ref`` names
     the branch, tag, or commit to follow, and overrides one read out of a
     URL. Without one, the repo's default branch is what gets fetched, now
     and whenever the import is refreshed.
@@ -202,6 +265,9 @@ def source_from_location(
         if git_source is not None:
             return {"git": git_source}
         return {"url": location}
+    ssh_source = _git_source_from_ssh_url(location, ref=ref)
+    if ssh_source is not None:
+        return {"git": ssh_source}
     segments = location.split("/")
     if len(segments) < 3:
         raise ValueError(

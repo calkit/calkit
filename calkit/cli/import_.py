@@ -234,9 +234,10 @@ def import_path(
         typer.Argument(
             help=(
                 "Where to get the file: a URL, including a GitHub or GitLab "
-                "link to a file, a DOI, a Calkit project path like "
-                "someone/some-project/scripts/setup.sh, or a path inside "
-                "the repo named by --git-repo."
+                "link to a file, an SSH clone URL like "
+                "git@github.com:owner/repo/path, a DOI, a Calkit project "
+                "path like someone/some-project/scripts/setup.sh, or a path "
+                "inside the repo named by --git-repo."
             )
         ),
     ],

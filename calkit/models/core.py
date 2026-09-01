@@ -24,7 +24,7 @@ from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
 from calkit.models.iteration import ParametersType
-from calkit.models.pipeline import Pipeline
+from calkit.models.pipeline import Pipeline, RelativeChildPathString
 
 
 class _ImportedFromProject(BaseModel):
@@ -86,14 +86,14 @@ class _GitSource(BaseModel):
     repo_url: str = Field(
         description="Clone URL of the repo the data came from."
     )
-    rev: str | None = Field(
-        default=None,
+    rev: str = Field(
         description=(
             "The commit hash the file actually came from, filled in by "
-            "'calkit import path' and 'calkit update path'. A branch or "
-            "tag would move, so this is what makes the entry say which "
-            "bytes are here. Optional only so an entry can be written by "
-            "hand before anything has been fetched."
+            "'calkit import path' and 'calkit update path'. This is the "
+            "lock: it says which bytes are here, so it is always recorded, "
+            "whether or not the entry also follows a 'ref'. Write the entry "
+            "with 'calkit import path' rather than by hand, or run 'calkit "
+            "update path' to fill this in for one that was."
         ),
     )
     path: str | None = Field(
@@ -104,21 +104,20 @@ class _GitSource(BaseModel):
         default=None,
         description=(
             "Branch, tag, or commit to follow when refreshing this, e.g., "
-            "'main'. 'rev' still records the commit actually fetched, so "
-            "the entry says both what it tracks and what it got. Without "
-            "it, refreshing follows the repo's default branch."
+            "'main'. Optional: an entry that names none is refreshed from "
+            "the repo's default branch. 'rev' still records the commit "
+            "actually fetched, so the entry says both what it tracks and "
+            "what it got."
         ),
     )
 
     @field_validator("rev")
     @classmethod
-    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
+    def _check_rev_is_a_hash(cls, v: str) -> str:
         # Abbreviated hashes are fine -- Git resolves them -- but a name is
         # not a revision, and accepting one here would quietly make the
         # import irreproducible. A branch belongs in 'ref', which is where
         # something that moves is meant to be written.
-        if v is None:
-            return v
         if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
             raise ValueError(
                 f"rev must be a commit hash, not a branch or tag (got {v!r}); "
@@ -995,7 +994,7 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[RelativeChildPathString] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1005,7 +1004,8 @@ class SlurmEnvironment(Environment):
         validation_alias=AliasChoices("inputs", "deps"),
         description="Files in the project that 'default_setup' reads, e.g., "
         "a setup script it sources. Added as an input to every stage using "
-        "this environment, so editing one reruns them.",
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
     )
     max_concurrent_jobs: int | None = Field(
         default=None,
@@ -1030,7 +1030,7 @@ class PBSEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[RelativeChildPathString] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1040,7 +1040,8 @@ class PBSEnvironment(Environment):
         validation_alias=AliasChoices("inputs", "deps"),
         description="Files in the project that 'default_setup' reads, e.g., "
         "a setup script it sources. Added as an input to every stage using "
-        "this environment, so editing one reruns them.",
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
     )
     max_concurrent_jobs: int | None = Field(
         default=None,
@@ -1201,7 +1202,7 @@ class SystemEnvironment(Environment):
         "is recorded in the environment's lock file, so stages that run "
         "setup commands rerun when it changes.",
     )
-    inputs: list[str] | None = Field(
+    inputs: list[RelativeChildPathString] | None = Field(
         default=None,
         # 'deps' is the name this was published under on Docker
         # environments, and extra keys on an environment are ignored rather
@@ -1211,7 +1212,8 @@ class SystemEnvironment(Environment):
         validation_alias=AliasChoices("inputs", "deps"),
         description="Files in the project that 'default_setup' reads, e.g., "
         "a setup script it sources. Added as an input to every stage using "
-        "this environment, so editing one reruns them.",
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
     )
     lock: list[SystemLockProperty] = Field(
         default=[],

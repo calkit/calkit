@@ -82,17 +82,28 @@ repo, the branch, and the path within it all come out of the URL.
 A link that names no revision, including one written out by hand as
 `https://github.com/myorg/setups/setups/setup.sh`, takes the default
 branch.
-The same thing can be said the long way, which is what a repo Calkit
-can't read a URL for needs:
+An SSH clone URL works the same way, since that is the thing most often
+copied out of a forge:
+
+```sh
+calkit import path git@github.com:myorg/setups/setups/setup.sh \
+  scripts/setup.sh --git-ref main
+```
+
+The repo is taken to be the first two segments after the host, which is
+right for GitHub and for GitLab projects outside nested groups. For
+anything else---or for a repo Calkit can't read a URL for at all---name
+the repo outright:
 
 ```sh
 calkit import path setups/setup.sh scripts/setup.sh \
   --git-repo https://github.com/myorg/setups.git --git-ref main
 ```
 
-`--git-ref` is also how to name a branch containing a slash, like
-`feature/foo`, since a URL doesn't say where such a branch ends and the
-path begins.
+A branch whose name contains a slash, like `feature/foo`, needs no special
+handling: a URL doesn't say where such a branch ends and the path begins,
+so the split is checked against the repo when the file is fetched and
+corrected if the guess was wrong. `--git-ref` still overrides it.
 
 Other addresses work too, and are read as what they are:
 
@@ -162,9 +173,10 @@ recorded in:
 calkit list imports
 ```
 
-An entry that names a `ref` but no `rev` says where the file is fetched
-from without saying which version is here. `calkit check reproducibility`
-reports those, and `calkit update path` fills the commit in.
+`rev` is always recorded, whether or not the entry also names a `ref`: it
+is what says which version is here, so an entry without it would name a
+source without naming a state. `calkit import path` writes it, and `calkit
+update path` fills it in for an entry that was written by hand.
 
 `created_by` is the same key for all of them, whether the work was
 collecting data, drawing a diagram, or taking a photograph, and it takes a

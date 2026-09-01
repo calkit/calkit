@@ -1578,3 +1578,32 @@ def test_get_env_input_paths(capsys):
     # reported rather than silently resolved one way
     with pytest.raises(ValueError, match="merge them into 'inputs'"):
         envs.get_env_input_paths({"inputs": ["a"], "deps": ["b"]}, "both")
+
+
+def test_env_inputs_must_be_inside_the_project():
+    # A stage can't depend on something the repo doesn't carry, so the
+    # inputs this PR adds are constrained the way a stage's wdir is. Note
+    # this is a pydantic constraint, not a JSON-schema one, so it catches a
+    # file being loaded as a model rather than one being linted in an
+    # editor -- same as every other RelativeChildPathString field.
+    from pydantic import ValidationError
+
+    from calkit.models.core import (
+        DockerEnvironment,
+        PBSEnvironment,
+        SlurmEnvironment,
+        SystemEnvironment,
+    )
+
+    for model in (SystemEnvironment, SlurmEnvironment, PBSEnvironment):
+        assert model(inputs=["scripts/setup.sh"]).inputs == [
+            "scripts/setup.sh"
+        ]
+        for bad in ["../outside.sh", "/etc/hosts"]:
+            with pytest.raises(ValidationError):
+                model(inputs=[bad])
+    # Docker's is a rename of a field that has been published for a while,
+    # so tightening it would retroactively invalidate existing projects
+    assert DockerEnvironment(image="x", inputs=["../outside.C"]).inputs == [
+        "../outside.C"
+    ]

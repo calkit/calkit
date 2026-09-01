@@ -703,7 +703,7 @@ def get_status(
         if not qstatus.ok:
             warn(report, prefix="")
         else:
-            typer.echo(report)
+            calkit.echo(report)
         typer.echo()
     if "git" in categories:
         print_sep("Git")

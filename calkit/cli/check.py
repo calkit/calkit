@@ -2070,8 +2070,8 @@ def check_questions(
 
     status = _check_questions(wdir=wdir)
     if json_output:
-        typer.echo(json.dumps(status.model_dump(mode="json"), indent=2))
+        calkit.echo(json.dumps(status.model_dump(mode="json"), indent=2))
     else:
-        typer.echo(format_status(status, verbose=verbose))
+        calkit.echo(format_status(status, verbose=verbose))
     if not status.ok:
         raise typer.Exit(1)

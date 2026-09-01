@@ -1034,10 +1034,13 @@ def test_check_repro_literals(tmp_dir):
     # The summary stays a summary and points at the findings
     assert "3.14" not in result.stdout
     assert "0.42" not in result.stdout
+    # The mark itself is whatever the console can encode---a Windows one
+    # cannot encode a cross---so the line is checked without it
     assert (
-        "Values typed out rather than read from the pipeline: 1 "
-        "\u274c [-c retyped]" in result.stdout
+        "Values typed out rather than read from the pipeline: 1"
+        in result.stdout
     )
+    assert "[-c retyped]" in result.stdout
     assert "[-c numbers]" in result.stdout
     assert "calkit check repro -c retyped" in result.stdout
     out = subprocess.run(
@@ -1158,7 +1161,7 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "add", "-A"])
     subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
-    assert "Answers consistent with their evidence: 1/1 \u2705" in out
+    assert "Answers consistent with their evidence: 1/1" in out
     # Nothing in the project says where the results file came from, which
     # is advice rather than a failure: the answer may be perfectly good
     assert "Evidence with nothing recorded behind it: 1" in out
@@ -1190,7 +1193,7 @@ def test_check_questions(tmp_dir):
         ["calkit", "status", "--category", "questions"], text=True
     )
     assert "Questions" in out
-    assert "Answers whose evidence changed since: 1 \u274c" in out
+    assert "Answers whose evidence changed since: 1" in out
     # Questions are asked for rather than shown by default, in JSON too
     out = subprocess.check_output(["calkit", "status", "--json"], text=True)
     assert "questions" not in json.loads(out)
@@ -1220,6 +1223,20 @@ def test_check_questions(tmp_dir):
     subprocess.check_call(["git", "commit", "-q", "-am", "Declare"])
     out = subprocess.check_output(["calkit", "check", "questions"], text=True)
     assert "nothing recorded behind it" not in out
+    # A console that cannot encode a check mark gets a '?' rather than a
+    # UnicodeEncodeError, which on Windows would kill the command with no
+    # output at all
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    out = subprocess.check_output(
+        ["calkit", "check", "questions"], text=True, env=env
+    )
+    assert "Answers consistent with their evidence: 1/1" in out
+    assert "\u2705" not in out
+    subprocess.check_call(
+        ["calkit", "status", "-c", "questions"],
+        env=env,
+        stdout=subprocess.DEVNULL,
+    )
     # The check can be pointed at a project somewhere else
     os.makedirs("elsewhere")
     out = subprocess.check_output(

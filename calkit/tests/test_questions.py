@@ -276,7 +276,7 @@ def test_check_questions(tmp_dir):
     report = format_status(status)
     assert "[stale] Do the top structures use the rectifier?" in report
     assert "edit the question" in report
-    assert "Answers whose evidence changed since: 1 \u274c" in report
+    assert "Answers whose evidence changed since: 1" in report
     assert "Answers given without evidence: 1 (worth a look)" in report
     assert "Questions answered: 2/4" in report
     assert "Evidence with nothing recorded behind it: 1" in report

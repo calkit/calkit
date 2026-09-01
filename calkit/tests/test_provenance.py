@@ -477,3 +477,56 @@ def test_update_all_with_nothing_refreshable(tmp_dir):
     )
     assert res.returncode != 0
     assert "not valid JSON" in res.stdout + res.stderr
+
+
+def test_import_record_accepts_the_shapes_people_write():
+    # Checked against the imported_from entries in real projects, which
+    # is where these shorthands came from: a bare string, a Git source
+    # written flat, and an origin that can only be described.
+    from pydantic import TypeAdapter, ValidationError
+
+    from calkit.models.core import ImportedFromType
+
+    ta = TypeAdapter(ImportedFromType)
+
+    def dump(v):
+        return ta.validate_python(v).model_dump(exclude_none=True)
+
+    # A bare string is the obvious thing to write, and telling a DOI from
+    # a URL is the same job 'calkit import path' already does
+    assert dump("https://doi.org/10.5281/zenodo.3960218") == {
+        "doi": "10.5281/zenodo.3960218"
+    }
+    assert dump("https://example.com/a.csv") == {
+        "url": "https://example.com/a.csv"
+    }
+    # A Git source written flat is refused rather than guessed at. Here
+    # 'path' would mean the path within the repo, and in a project source
+    # it means the path within that project --- which is exactly what
+    # nesting under 'git' keeps apart.
+    with pytest.raises(ValidationError, match="goes under 'git'"):
+        ta.validate_python(
+            {"git_repo_url": "https://github.com/o/r", "path": "a.sh"}
+        )
+    # An origin that can be stated but not resolved
+    assert dump({"description": "Emailed by someone@example.com."}) == {
+        "description": "Emailed by someone@example.com."
+    }
+    # Every variant can carry a date and a description, so the four agree
+    # on what they are able to say
+    for source in [
+        {"url": "https://x/a"},
+        {"doi": "10.5281/zenodo.1"},
+        {"project": "o/p", "path": "a.csv"},
+        {"git": {"repo_url": "u", "path": "a"}},
+    ]:
+        out = dump(source | {"date": "2026-01-01", "description": "why"})
+        assert out["description"] == "why"
+        assert str(out["date"]) == "2026-01-01"
+    # Accepting shorthands doesn't mean accepting typos
+    for bad in [
+        {"descriptionn": "typo"},
+        {"url": "https://x/a", "dat": "2026-01-01"},
+    ]:
+        with pytest.raises(ValidationError):
+            ta.validate_python(bad)

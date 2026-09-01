@@ -364,6 +364,9 @@
               "$ref": "#/$defs/_ImportedFromGit"
             },
             {
+              "$ref": "#/$defs/_ImportedFromDescription"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1015,6 +1018,9 @@
             },
             {
               "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDescription"
             },
             {
               "type": "null"
@@ -3876,6 +3882,9 @@
               "$ref": "#/$defs/_ImportedFromGit"
             },
             {
+              "$ref": "#/$defs/_ImportedFromDescription"
+            },
+            {
               "type": "null"
             }
           ],
@@ -4951,6 +4960,9 @@
             },
             {
               "$ref": "#/$defs/_ImportedFromGit"
+            },
+            {
+              "$ref": "#/$defs/_ImportedFromDescription"
             },
             {
               "type": "null"
@@ -8540,6 +8552,36 @@
       "title": "_GitSource",
       "type": "object"
     },
+    "_ImportedFromDescription": {
+      "additionalProperties": false,
+      "description": "Data whose origin can be stated but not resolved.\n\nSome things arrive by other means --- emailed by a person, provided\nby a company, handed over on a drive. There is no URL, DOI, repo or\nproject to point at, and recording that in words is better than\nrecording nothing. Weaker provenance than the others, deliberately:\nit says where something came from without saying how to get it again,\nso anyone reading it knows they have a name to ask rather than an\naddress to fetch.",
+      "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was received.",
+          "title": "Date"
+        },
+        "description": {
+          "description": "Where it came from, in words, for an origin that can be stated but not resolved, e.g. 'Emailed by someone@example.com' or 'Provided by Acme, Inc.'",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "_ImportedFromDescription",
+      "type": "object"
+    },
     "_ImportedFromDoi": {
       "additionalProperties": false,
       "description": "Data published under a DOI, which is a citation, not just a link.\n\nKept apart from a URL so it can be cited and resolved as a DOI rather\nthan being one more address that happens to start with https.",
@@ -8557,6 +8599,19 @@
           "default": null,
           "description": "When the data was downloaded.",
           "title": "Date"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where it came from, in words, for whatever the other fields can't say.",
+          "title": "Description"
         },
         "doi": {
           "description": "The DOI, e.g. 10.5281/zenodo.1234567. A https://doi.org/ or doi: prefix is accepted and stripped.",
@@ -8588,6 +8643,19 @@
           "description": "When the data was downloaded.",
           "title": "Date"
         },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where it came from, in words, for whatever the other fields can't say.",
+          "title": "Description"
+        },
         "git": {
           "$ref": "#/$defs/_GitSource"
         }
@@ -8601,6 +8669,33 @@
     "_ImportedFromProject": {
       "additionalProperties": false,
       "properties": {
+        "date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the data was downloaded.",
+          "title": "Date"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where it came from, in words, for whatever the other fields can't say.",
+          "title": "Description"
+        },
         "filter_paths": {
           "anyOf": [
             {
@@ -8669,6 +8764,19 @@
           "default": null,
           "description": "When the data was downloaded. Optional: without it, the commit that added this entry says when, to within a commit.",
           "title": "Date"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where it came from, in words, for whatever the other fields can't say.",
+          "title": "Description"
         },
         "url": {
           "title": "Url",

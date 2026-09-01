@@ -81,7 +81,8 @@ def test_update_dataset(tmp_dir):
             },
         }
     ]
-    # Git needs a commit hash; a branch would move
+    # A branch in the deprecated 'rev' is still the mistake worth
+    # catching --- what moves goes in 'ref'
     result = runner.invoke(
         update_app,
         [
@@ -95,6 +96,8 @@ def test_update_dataset(tmp_dir):
     )
     assert result.exit_code != 0
     assert "commit hash" in result.output
+    # A repo alone is a complete declaration: what it resolves to is
+    # recorded in .calkit/imports.json by 'calkit sync import', not here
     result = runner.invoke(
         update_app,
         [
@@ -102,19 +105,8 @@ def test_update_dataset(tmp_dir):
             "data/b.csv",
             "--imported-from-git-url",
             "https://github.com/a/b",
-        ],
-    )
-    assert result.exit_code != 0
-    assert "--imported-from-git-rev is required" in result.output
-    result = runner.invoke(
-        update_app,
-        [
-            "dataset",
-            "data/b.csv",
-            "--imported-from-git-url",
-            "https://github.com/a/b",
-            "--imported-from-git-rev",
-            "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
+            "--imported-from-git-ref",
+            "main",
             "--imported-from-git-path",
             "data/x.csv",
         ],
@@ -124,8 +116,8 @@ def test_update_dataset(tmp_dir):
     assert ck_info["datasets"][1]["imported_from"] == {
         "git": {
             "repo_url": "https://github.com/a/b",
-            "rev": "4031e49efbea3be3b6b10e66f30d7cff6dfc60cc",
             "path": "data/x.csv",
+            "ref": "main",
         }
     }
     # Only one source, and the extras need a source to go with

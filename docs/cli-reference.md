@@ -2903,15 +2903,15 @@ Arguments:
 
 Options:
 
-| Option                     | Type     | Required | Default | Description                                                                         |
-| -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                  |
-| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                           |
-| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                            |
-| `--imported-from-git-rev`  | str      | no       |         | Commit hash it was taken from. A branch or tag isn't accepted, since it would move. |
-| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                 |
-| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
-| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                              |
+| Option                     | Type     | Required | Default | Description                                                                                                                                     |
+| -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                              |
+| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                       |
+| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                        |
+| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here. |
+| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                             |
+| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                          |
+| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                          |
 
 <a id="command-group-check"></a>
 

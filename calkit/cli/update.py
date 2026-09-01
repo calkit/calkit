@@ -12,7 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 
 update_app = typer.Typer(no_args_is_help=True)
 
@@ -1327,13 +1327,26 @@ def update_dataset(
             help="Clone URL of the Git repo the dataset was imported from.",
         ),
     ] = None,
+    imported_from_git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-git-ref",
+            help=(
+                "Branch, tag, or commit to follow, e.g. 'main'. The commit "
+                "it resolves to is recorded in .calkit/imports.json by "
+                "'calkit sync import', not here."
+            ),
+        ),
+    ] = None,
     imported_from_git_rev: Annotated[
         str | None,
         typer.Option(
             "--imported-from-git-rev",
+            hidden=True,
             help=(
-                "Commit hash it was taken from. A branch or tag isn't "
-                "accepted, since it would move."
+                "Deprecated; the resolved commit lives in "
+                ".calkit/imports.json. Use --imported-from-git-ref to say "
+                "what to follow."
             ),
         ),
     ] = None,
@@ -1382,15 +1395,22 @@ def update_dataset(
     if len(sources_given) > 1:
         raise_error("Specify only one of " + ", ".join(source_options) + ".")
     if not sources_given and (
-        imported_from_git_rev is not None
+        imported_from_git_ref is not None
+        or imported_from_git_rev is not None
         or imported_from_git_path is not None
         or imported_from_date is not None
     ):
         raise_error(
-            "--imported-from-git-rev, --imported-from-git-path, and "
+            "--imported-from-git-ref, --imported-from-git-path, and "
             "--imported-from-date go with one of "
             + ", ".join(source_options)
             + "."
+        )
+    if imported_from_git_rev is not None:
+        warn(
+            "--imported-from-git-rev is deprecated; the resolved commit is "
+            "recorded in .calkit/imports.json by 'calkit sync import'. Use "
+            "--imported-from-git-ref to say what to follow."
         )
     if not sources_given and stage is None:
         raise_error("No updates specified.")
@@ -1404,16 +1424,12 @@ def update_dataset(
             elif imported_from_doi is not None:
                 source = _ImportedFromDoi(doi=imported_from_doi, date=date)
             else:
-                if imported_from_git_rev is None:
-                    raise_error(
-                        "--imported-from-git-rev is required with "
-                        "--imported-from-git-url."
-                    )
                 source = _ImportedFromGit(
                     git=_GitSource(
                         repo_url=calkit.normalize_git_url(
                             imported_from_git_url or ""
                         ),
+                        ref=imported_from_git_ref,
                         rev=imported_from_git_rev,
                         path=imported_from_git_path,
                     ),

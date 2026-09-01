@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import (
     AliasChoices,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
@@ -38,6 +39,9 @@ class _ImportedFromProject(BaseModel):
 
     project: str
     path: str | None = None
+    date: date_type | None = Field(
+        default=None, description="When the data was downloaded."
+    )
     git_rev: str | None = Field(
         default=None,
         deprecated=True,
@@ -47,6 +51,13 @@ class _ImportedFromProject(BaseModel):
         ),
     )
     filter_paths: list[str] | None = None
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
+    )
 
 
 class _ImportedFromUrl(BaseModel):
@@ -64,6 +75,13 @@ class _ImportedFromUrl(BaseModel):
         description=(
             "When the data was downloaded. Optional: without it, the commit "
             "that added this entry says when, to within a commit."
+        ),
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
         ),
     )
 
@@ -111,6 +129,14 @@ class _ImportedFromDoi(BaseModel):
                 f"doi must look like 10.5281/zenodo.1234567 (got {v!r})"
             )
         return bare
+
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
+    )
 
 
 class _GitSource(BaseModel):
@@ -183,6 +209,13 @@ class _ImportedFromGit(BaseModel):
     git: _GitSource
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
     )
 
 
@@ -312,12 +345,73 @@ class _CalkitObject(BaseModel):
 
 # Every place an artifact can have come from. One union shared by every
 # artifact that can be imported, so they all accept the same forms.
-ImportedFromType = (
+class _ImportedFromDescription(BaseModel):
+    """Data whose origin can be stated but not resolved.
+
+    Some things arrive by other means --- emailed by a person, provided
+    by a company, handed over on a drive. There is no URL, DOI, repo or
+    project to point at, and recording that in words is better than
+    recording nothing. Weaker provenance than the others, deliberately:
+    it says where something came from without saying how to get it again,
+    so anyone reading it knows they have a name to ask rather than an
+    address to fetch.
+    """
+
+    # See the note on the other variants
+    model_config = ConfigDict(extra="forbid")
+    description: str = Field(
+        description=(
+            "Where it came from, in words, for an origin that can be "
+            "stated but not resolved, e.g. 'Emailed by "
+            "someone@example.com' or 'Provided by Acme, Inc.'"
+        )
+    )
+    date: date_type | None = Field(
+        default=None, description="When the data was received."
+    )
+
+
+def _normalize_imported_from(v: object) -> object:
+    """Accept the shorthands people reach for, in the canonical shape.
+
+    A bare string is a URL or a DOI --- writing ``imported_from:
+    https://doi.org/10.5281/zenodo.123`` is the obvious thing to do, and
+    telling which it is is the same job ``calkit import path`` already
+    does when it reads a source off the command line.
+
+    A Git source written flat, with ``git_repo_url`` beside ``path``, is
+    refused rather than read: nesting under ``git`` is what keeps
+    ``path`` from meaning two things in one mapping --- a path within the
+    repo, or the path within a Calkit project that the other variant
+    uses. Guessing which was meant is the mistake the nesting exists to
+    prevent, so it is named instead.
+    """
+    if isinstance(v, str):
+        from calkit.provenance import source_from_location
+
+        try:
+            return source_from_location(v)
+        except ValueError:
+            # Not something we can place; leave it to fail with the
+            # union's own message rather than a less specific one
+            return v
+    if isinstance(v, dict) and "git_repo_url" in v and "git" not in v:
+        raise ValueError(
+            "a Git source goes under 'git', as "
+            "{git: {repo_url: ..., path: ...}}, so that 'path' means the "
+            "path within that repo and not the one a project source uses"
+        )
+    return v
+
+
+ImportedFromType = Annotated[
     _ImportedFromProject
     | _ImportedFromUrl
     | _ImportedFromDoi
     | _ImportedFromGit
-)
+    | _ImportedFromDescription,
+    BeforeValidator(_normalize_imported_from),
+]
 
 _IMPORTED_FROM_DESCRIPTION = "Where this came from, if imported."
 

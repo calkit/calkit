@@ -130,7 +130,9 @@ def write_import_lock(
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     # Sorted so the file is stable across runs and diffs read as changes to
     # one import rather than a reshuffle
-    with open(fpath, "w") as f:
+    # newline="\n" so the file is byte-identical on every platform; it is
+    # committed, and CRLF on Windows would churn the diff for everyone else
+    with open(fpath, "w", newline="\n") as f:
         json.dump(locks, f, indent=2, sort_keys=True)
         f.write("\n")
     return fpath

@@ -727,7 +727,13 @@ def write_scheduler_env_lock(
             existing = f.read()
         if existing == content:
             return lock_fpath
-    with open(lock_fpath, "w") as f:
+    # newline="\n" so the file is byte-identical on every platform.
+    # Unlike a system env's lock, this one is a dump of the env config
+    # rather than of the machine, so its content is the same
+    # everywhere -- and it is written wherever the check runs, not
+    # where the scheduler lives, so text mode would let a Windows
+    # collaborator flip it to CRLF and back for everyone else.
+    with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
 

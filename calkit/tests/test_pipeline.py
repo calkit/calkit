@@ -3390,3 +3390,66 @@ def test_system_env_inputs_are_stage_deps(tmp_dir):
     # The outer half of a composite env contributes its inputs as well
     assert "setup.sh" in stages["composite"]["deps"]
     assert "uv.lock" in stages["composite"]["deps"]
+
+
+def test_compiled_pipeline_is_platform_stable(tmp_dir):
+    # dvc.yaml is committed and shared, so compiling on Windows and on
+    # Unix has to produce the same thing. Two ways that can go wrong:
+    # a path built with os.sep, and a generated dep written in text mode,
+    # which turns LF into CRLF on Windows and changes its hash.
+    import json
+    import subprocess
+
+    import calkit
+
+    subprocess.run(["git", "init", "-q", "."], check=True)
+    ck_info = {
+        "environments": {
+            "sys": {
+                "kind": "system",
+                "default_setup": ["source scripts/env.sh"],
+                "inputs": ["scripts/env.sh"],
+            }
+        },
+        "pipeline": {
+            "stages": {
+                "build": {
+                    "kind": "shell-command",
+                    "command": "make",
+                    "environment": "sys",
+                    "outputs": ["out.txt"],
+                }
+            }
+        },
+    }
+    stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    # Nothing in the command or deps is spelled with a backslash
+    assert "\\" not in stages["build"]["cmd"]
+    for dep in stages["build"]["deps"]:
+        assert "\\" not in dep, dep
+    assert ".calkit/stage-setup/build.json" in stages["build"]["deps"]
+    # The generated dep is byte-identical everywhere: LF only, so DVC's
+    # hash of it doesn't depend on which machine compiled the pipeline
+    with open(".calkit/stage-setup/build.json", "rb") as f:
+        raw = f.read()
+    assert b"\r" not in raw
+    assert raw.endswith(b"\n")
+    assert json.loads(raw) == ["source scripts/env.sh"]
+    # Writing LF isn't enough for the generated files that are committed
+    # and hashed by DVC: Git rewrites text files to CRLF on checkout when
+    # core.autocrlf is on, which is the Git for Windows default. A
+    # .gitattributes rule outranks that setting, so it holds whatever the
+    # user configured.
+    with open(".gitattributes") as f:
+        assert "/.calkit/**/*.json text eol=lf" in f.read()
+    attrs = subprocess.run(
+        ["git", "check-attr", "eol", "--", ".calkit/env-locks/e/info.json"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "eol: lf" in attrs
+    # Recompiling replaces the managed block rather than stacking copies
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open(".gitattributes") as f:
+        assert f.read().count("/.calkit/**/*.json text eol=lf") == 1

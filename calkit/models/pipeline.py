@@ -486,7 +486,10 @@ class Stage(BaseModel):
             with open(fpath) as f:
                 if f.read() == content:
                     return rel_path
-        with open(fpath, "w") as f:
+        # newline="\n" so the file is byte-identical on every platform:
+        # text mode writes CRLF on Windows, and this is a DVC dep, so the
+        # stage would rerun purely from switching machine
+        with open(fpath, "w", newline="\n") as f:
             f.write(content)
         return rel_path
 

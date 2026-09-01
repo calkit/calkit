@@ -1279,6 +1279,36 @@ def _warn_on_latexmkrc_out_dir_mismatch(
     )
 
 
+def _ensure_calkit_gitattributes(wdir: str | None = None) -> bool:
+    """Pin the line endings of Calkit's own generated files to LF.
+
+    Several of them are committed *and* hashed by DVC as stage
+    dependencies -- an environment's lock file most of all. Git rewrites
+    text files to CRLF on checkout when ``core.autocrlf`` is on, which is
+    the default for Git for Windows, and DVC hashes the working tree, so a
+    Windows collaborator's checkout disagrees with everyone else's
+    ``dvc.lock`` and the stage reads stale forever. Writing the file with
+    LF is not enough: the rewrite happens on the way out of Git, after we
+    are done.
+
+    DVC recommends the same mechanism for cross-platform work, but applied
+    to everything (``* text=auto eol=lf``, plus ``core.autocrlf false``);
+    see its guide to running on Windows. This rule is deliberately
+    narrower, since normalizing a project's own files is the project's
+    call and doing it unasked would renormalize files nobody meant to
+    touch. The two agree in direction, so a project that follows DVC's
+    advice as well loses nothing.
+
+    ``.gitattributes`` outranks ``core.autocrlf``, so this holds however
+    the user has Git configured.
+    """
+    return _write_managed_gitignore_block(
+        os.path.join(wdir, ".gitattributes") if wdir else ".gitattributes",
+        marker="calkit generated files",
+        lines=["/.calkit/**/*.json text eol=lf"],
+    )
+
+
 def _ensure_latex_aux_gitignore(
     stage: LatexStage, wdir: str | None = None
 ) -> bool:
@@ -1772,6 +1802,11 @@ def to_dvc(
                 marker="calkit stage setup",
                 lines=["/.calkit/stage-setup/"],
             )
+        # The generated files that *are* committed have to keep their line
+        # endings, or Git rewrites them on a Windows checkout and DVC sees
+        # a different hash than the one in dvc.lock
+        if manage_gitignore:
+            _ensure_calkit_gitattributes(wdir=wdir)
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages

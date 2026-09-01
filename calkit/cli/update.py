@@ -1284,17 +1284,6 @@ def update_figure(
     if imported_from_url is None and stage is None:
         raise_error("No updates specified.")
     ck_info = calkit.load_calkit_info()
-    if imported_from_url is not None:
-        from calkit.provenance import verify_or_download_url
-
-        try:
-            downloaded, _ = verify_or_download_url(imported_from_url, path)
-        except Exception as e:
-            raise_error(f"Could not verify imported URL: {e}")
-        if downloaded:
-            typer.echo(f"Downloaded {imported_from_url} to {path}")
-        else:
-            typer.echo(f"Verified {path} against {imported_from_url}")
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
@@ -1311,6 +1300,17 @@ def update_figure(
             entry["stage"] = stage
         figures.append(entry)
         ck_info["figures"] = figures
+    if imported_from_url is not None:
+        from calkit.provenance import verify_or_download_url
+
+        try:
+            downloaded, _ = verify_or_download_url(imported_from_url, path)
+        except Exception as e:
+            raise_error(f"Could not verify imported URL: {e}")
+        if downloaded:
+            typer.echo(f"Downloaded {imported_from_url} to {path}")
+        else:
+            typer.echo(f"Verified {path} against {imported_from_url}")
     calkit.save_calkit_info(ck_info)
 
 

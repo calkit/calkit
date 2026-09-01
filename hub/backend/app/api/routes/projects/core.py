@@ -5483,14 +5483,14 @@ def post_project_misc(
             person.model_dump(exclude_none=True) for person in req.created_by
         ]
     if req.imported_from is not None:
-        entry["imported_from"] = req.imported_from
         url = (
-            (req.imported_from or {}).get("url")
+            req.imported_from.get("url")
             if isinstance(req.imported_from, dict)
             else None
         )
-        if url and os.path.isfile(os.path.join(wdir, path)):
+        if url:
             app.imports.verify_or_download_url(url, os.path.join(wdir, path))
+        entry["imported_from"] = req.imported_from
     # Validated against the model that owns calkit.yaml, which is where
     # the rules live, e.g., made here or imported but not both, and at
     # least one person named

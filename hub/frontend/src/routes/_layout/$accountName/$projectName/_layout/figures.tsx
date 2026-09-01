@@ -60,8 +60,8 @@ const figuresSearchSchema = z.object({
   q: z.string().optional(),
 })
 
-// Each figure's content is fetched and inlined by the API, so pages are kept
-// small; projects with hundreds of figures otherwise take minutes to load.
+// The grid asks for previews rather than the figures themselves: a page of
+// full-size plots is megabytes of base64 to draw images 140px tall.
 const FIGURES_PER_PAGE = 20
 
 export const Route = createFileRoute(
@@ -101,6 +101,22 @@ function FigureThumbnail({
 
   const renderThumb = () => {
     const lowerPath = figure.path.toLowerCase()
+    // A preview the API rendered: one image tag for every format that has
+    // one, including the PDFs that would otherwise each need a PDF renderer
+    // running in the page just to draw a 140px tile.
+    if (figure.thumbnail) {
+      return (
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={`data:image/webp;base64,${figure.thumbnail}`}
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
+      )
+    }
     if (
       (lowerPath.endsWith(".png") ||
         lowerPath.endsWith(".jpg") ||
@@ -117,17 +133,22 @@ function FigureThumbnail({
       }
       const mime = mimeMap[ext] ?? "image/png"
       return (
-        <Image
-          src={
-            figure.content
-              ? `data:${mime};base64,${figure.content}`
-              : String(figure.url)
-          }
-          alt={figure.title}
-          objectFit="contain"
-          width="100%"
-          height="140px"
-        />
+        // Centred at no more than its own size: a plot scales down to fit,
+        // while a small icon stays small instead of being blown up to fill
+        // the tile and going soft.
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={
+              figure.content
+                ? `data:${mime};base64,${figure.content}`
+                : String(figure.url)
+            }
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
       )
     }
     if (lowerPath.endsWith(".pdf") && (figure.content || figure.url)) {
@@ -239,6 +260,7 @@ function ProjectFigures() {
         project_name: projectName,
         ref,
         limit: FIGURES_PER_PAGE,
+        thumbnails: true,
         offset,
         // Filtering happens server-side, across every figure in the project
         // rather than just the ones on this page.

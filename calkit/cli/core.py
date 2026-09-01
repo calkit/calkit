@@ -5,10 +5,28 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from enum import Enum
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
 from typer.core import TyperCommand, TyperGroup
+
+
+class EnvDefaultsModeChoice(str, Enum):
+    """How a stage's own list combines with an environment's defaults.
+
+    The same three values as ``calkit.models.pipeline.EnvDefaultsMode``,
+    which stays a ``Literal`` because that is what puts them inline in the
+    published JSON schema. Typer needs an ``Enum`` to list them in
+    ``--help`` and reject anything else itself, and it has to be importable
+    without pulling in the models, which are loaded lazily to keep CLI
+    startup fast. A test holds the two spellings together.
+    """
+
+    ignore = "ignore"
+    replace = "replace"
+    merge = "merge"
+
 
 if TYPE_CHECKING:
     import click

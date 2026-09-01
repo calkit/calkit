@@ -419,7 +419,7 @@ def check_environment(
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
             alt_lock_fpaths=alt_lock_fpaths,
             platform=env.get("platform"),
-            deps=calkit.environments.env_input_paths(env),
+            deps=calkit.environments.get_env_input_paths(env, env_name),
             env_vars=env.get("env_vars", []),
             ports=env.get("ports", []),
             gpus=env.get("gpus"),

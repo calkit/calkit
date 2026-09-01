@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import re
 
@@ -16,9 +17,47 @@ PROVENANCE_ARTIFACT_TYPES = [
     "presentations",
     "misc",
 ]
-# The kinds whose model takes ``imported_from``, so an import can be
-# recorded in them. Tables and presentations don't yet.
-IMPORTABLE_ARTIFACT_TYPES = ["datasets", "figures", "publications", "misc"]
+
+
+@functools.cache
+def get_importable_artifact_types() -> list[str]:
+    """The kinds whose model takes ``imported_from``.
+
+    Read off the models rather than listed by hand: whether a kind can
+    record an import is a fact about its model, and a copy of that fact
+    would keep validating long after it stopped being true. Adding the
+    field to tables or presentations is then all it takes to make them
+    importable.
+
+    Computed on demand rather than at import: reading the models pulls in
+    pydantic, and this module is imported on every CLI invocation.
+    """
+    from typing import get_args
+
+    from pydantic import BaseModel
+
+    from calkit.models.core import ProjectInfo
+
+    types = []
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        field = ProjectInfo.model_fields.get(kind)
+        if field is None:
+            continue
+        # Each list is annotated as list[<Model>], possibly through a
+        # union of the imported and non-imported forms
+        for arg in get_args(field.annotation):
+            for model in (arg, *get_args(arg)):
+                if (
+                    isinstance(model, type)
+                    and issubclass(model, BaseModel)
+                    and "imported_from" in model.model_fields
+                ):
+                    types.append(kind)
+                    break
+            else:
+                continue
+            break
+    return types
 
 
 def has_provenance(artifact: dict) -> bool:
@@ -27,7 +66,7 @@ def has_provenance(artifact: dict) -> bool:
     A stage and an import are the stronger forms, but ``created_by`` counts
     too: a dataset someone measured, or a schematic someone drew, is
     accounted for even though there's nothing upstream to point at. The
-    field names in :class:`calkit.reproducibility.ReproCheck` predate
+    field names in ``calkit.reproducibility.ReproCheck`` predate
     attribution and are kept so callers reading them keep working.
     """
     return any(
@@ -202,6 +241,59 @@ def describe_source(imported_from: dict) -> str:
     return "an unrecorded source"
 
 
+def _rev_exists(repo_dir: str, rev: str) -> bool:
+    """Return whether ``rev`` names something in the clone at ``repo_dir``.
+
+    The clone has no checkout and no local branches, so a branch is only
+    there as ``origin/<name>``. That's what ``git checkout`` finds by
+    DWIM, and it has to be looked for explicitly here: ``rev-parse``
+    resolves ``refs/remotes/<name>``, which a branch called ``feature/foo``
+    is not.
+    """
+    import subprocess
+
+    for candidate in (rev, f"origin/{rev}"):
+        if (
+            subprocess.call(
+                [
+                    "git",
+                    "-C",
+                    repo_dir,
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    candidate,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            == 0
+        ):
+            return True
+    return False
+
+
+def _widen_ref(repo_dir: str, ref: str, path: str) -> tuple[str, str] | None:
+    """Move the ref/path boundary rightwards until the ref resolves.
+
+    A forge URL for a branch called ``feature/foo`` reads as
+    ``.../blob/feature/foo/scripts/a.sh``, and nothing in it says whether
+    ``foo`` is the rest of the branch name or the first directory. The
+    boundary is guessed at one segment when the URL is parsed; here, with
+    the repo in hand, the guess can be checked and corrected.
+
+    Returns the corrected ``(ref, path)``, or None if no split resolves.
+    The shortest widening wins, so a repo with both ``feature`` and
+    ``feature/foo`` keeps the reading the URL most likely meant.
+    """
+    segments = [s for s in path.split("/") if s]
+    for n in range(1, len(segments)):
+        candidate = "/".join([ref, *segments[:n]])
+        if _rev_exists(repo_dir, candidate):
+            return candidate, "/".join(segments[n:])
+    return None
+
+
 def fetch(imported_from: dict, dest_path: str) -> dict:
     """Download what an ``imported_from`` entry points at, to ``dest_path``.
 
@@ -255,6 +347,19 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
             ]
             try:
                 subprocess.check_call(clone_cmd)
+            except subprocess.CalledProcessError as e:
+                raise ValueError(f"Failed to clone {repo_url}: {e}")
+            # A branch name can contain slashes, and a forge URL doesn't say
+            # where the ref ends and the path begins, so the guess made when
+            # the URL was read may have cut it in the wrong place. Only
+            # reached when the ref as recorded doesn't resolve, so an
+            # explicit --git-ref that works is never second-guessed.
+            if target is not None and not _rev_exists(tmp_dir, target):
+                widened = _widen_ref(tmp_dir, target, src_path)
+                if widened is not None:
+                    target, src_path = widened
+                    git["ref"], git["path"] = target, src_path
+            try:
                 subprocess.check_call(
                     [
                         "git",
@@ -285,7 +390,12 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
                 )
             if os.path.isdir(full_src):
                 shutil.rmtree(dest_path, ignore_errors=True)
-                shutil.copytree(full_src, dest_path)
+                # Symlinks are copied as symlinks rather than followed: the
+                # containment check above covers the path asked for, but a
+                # link *inside* the tree could still point anywhere on this
+                # machine, and copying its target would pull a local file
+                # into the project as though it came from the repo
+                shutil.copytree(full_src, dest_path, symlinks=True)
             else:
                 shutil.copyfile(full_src, dest_path)
         # Recorded as what was actually fetched, so the entry is

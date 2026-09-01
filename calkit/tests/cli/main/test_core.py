@@ -571,13 +571,17 @@ def test_run_in_env_detect_default(tmp_dir):
     assert ck_info == ck_info_2
 
 
+def _write_ck_info(environments: dict) -> None:
+    # Dumped rather than written as literal YAML so the test says what the
+    # environment is, not how it's spelled
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"environments": environments}, f)
+
+
 def test_run_in_env_system(tmp_dir):
     # A named system env runs the command on this machine, like the built-in
     # '_system' env, but with a lock file recording what it pinned
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n  sys:\n    kind: system\n    lock:\n      - os\n"
-        )
+    _write_ck_info({"sys": {"kind": "system", "lock": ["os"]}})
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -590,16 +594,15 @@ def test_run_in_env_system(tmp_dir):
     # 'source' works---the reason most of these exist
     with open("setup_env.sh", "w") as f:
         f.write("export CK_TEST_SETUP=from-setup\n")
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  sys2:\n"
-            "    kind: system\n"
-            "    default_setup:\n"
-            "      - source setup_env.sh\n"
-            "    deps:\n"
-            "      - setup_env.sh\n"
-        )
+    _write_ck_info(
+        {
+            "sys2": {
+                "kind": "system",
+                "default_setup": ["source setup_env.sh"],
+                "inputs": ["setup_env.sh"],
+            }
+        }
+    )
     out = subprocess.check_output(
         [
             "calkit",
@@ -622,14 +625,14 @@ def test_run_in_env_system(tmp_dir):
     # way a scheduler stage's does: 'replace' (the default) uses the env's
     # only when the stage names none, 'merge' runs the env's first, and
     # 'ignore' leaves them out
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  sys3:\n"
-            "    kind: system\n"
-            "    default_setup:\n"
-            "      - export CK_TEST_ORDER=env\n"
-        )
+    _write_ck_info(
+        {
+            "sys3": {
+                "kind": "system",
+                "default_setup": ["export CK_TEST_ORDER=env"],
+            }
+        }
+    )
     show = ["python", "-c", "import os; print(os.environ['CK_TEST_ORDER'])"]
     base = ["calkit", "xenv", "-n", "sys3"]
     assert (
@@ -664,11 +667,10 @@ def test_run_in_env_system(tmp_dir):
         text=True,
     )
     assert res.returncode != 0
-    assert "Invalid --env-default-setup" in res.stdout + res.stderr
+    assert "'nope' is not one of" in res.stdout + res.stderr
     # Setup commands are refused for an env kind that has nowhere to run
     # them, rather than silently dropped
-    with open("calkit.yaml", "w") as f:
-        f.write("environments:\n  img:\n    kind: docker\n    image: x\n")
+    _write_ck_info({"img": {"kind": "docker", "image": "x"}})
     res = subprocess.run(
         ["calkit", "xenv", "-n", "img", "--setup", "true", "--", "echo", "hi"],
         capture_output=True,
@@ -678,14 +680,7 @@ def test_run_in_env_system(tmp_dir):
     assert "only apply to a 'system' environment" in res.stdout + res.stderr
     # A failing setup command stops the stage rather than running it
     # without whatever the setup was meant to provide
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  bad:\n"
-            "    kind: system\n"
-            "    default_setup:\n"
-            "      - exit 3\n"
-        )
+    _write_ck_info({"bad": {"kind": "system", "default_setup": ["exit 3"]}})
     res = subprocess.run(
         ["calkit", "xenv", "-n", "bad", "--", "python", "-c", "print('ran')"],
         capture_output=True,
@@ -694,13 +689,7 @@ def test_run_in_env_system(tmp_dir):
     assert res.returncode != 0
     assert "ran" not in res.stdout
     # A host naming this machine runs here rather than connecting to it
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  here:\n"
-            "    kind: system\n"
-            f"    host: {socket.gethostname()}\n"
-        )
+    _write_ck_info({"here": {"kind": "system", "host": socket.gethostname()}})
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "here", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -710,13 +699,9 @@ def test_run_in_env_system(tmp_dir):
     # without one has nothing to derive from and says so rather than
     # picking a directory it was never told about. No user is needed: SSH
     # resolves that itself.
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  remote:\n"
-            "    kind: system\n"
-            "    host: not-this-box.invalid\n"
-        )
+    _write_ck_info(
+        {"remote": {"kind": "system", "host": "not-this-box.invalid"}}
+    )
     res = subprocess.run(
         ["calkit", "xenv", "-n", "remote", "--", "echo", "hi"],
         capture_output=True,

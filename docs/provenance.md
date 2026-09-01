@@ -155,6 +155,17 @@ bytes came from, and an edit that survived would make that claim false.
 If the file needs to differ here, it isn't imported---drop the
 `imported_from` and record who changed it instead.
 
+To see everything a project took from elsewhere, whichever list it was
+recorded in:
+
+```sh
+calkit list imports
+```
+
+An entry that names a `ref` but no `rev` says where the file is fetched
+from without saying which version is here. `calkit check reproducibility`
+reports those, and `calkit update path` fills the commit in.
+
 `created_by` is the same key for all of them, whether the work was
 collecting data, drawing a diagram, or taking a photograph, and it takes a
 list, since work usually has more than one person behind it. Each entry

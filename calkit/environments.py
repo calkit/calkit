@@ -511,6 +511,30 @@ def _get_julia_manifest_fpath(
     return os.path.join(base_dir, "Manifest.toml")
 
 
+# The shell a system environment's setup commands run in. Setup is the only
+# thing that uses it, and bash is the default because ``source`` is a
+# bashism and sourcing a site setup script is the usual reason to have any.
+SYSTEM_ENV_DEFAULT_SHELL = "bash"
+
+
+def system_env_locks_anything(env: dict) -> bool:
+    """Return whether a ``system`` environment has anything to lock.
+
+    Machine properties under ``lock`` and ``default_setup`` both go in the
+    lock file. So does a ``shell`` that isn't the default, since it changes
+    how a stage's own setup commands run and those are compiled into the
+    stage command without it. Compared by value rather than presence:
+    writing ``shell: bash`` says exactly what leaving it out says, so it
+    must not be what decides whether stages gain a dependency.
+    """
+    return bool(
+        env.get("lock")
+        or env.get("default_setup")
+        or env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
+        != SYSTEM_ENV_DEFAULT_SHELL
+    )
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -618,13 +642,11 @@ def get_env_lock_fpath(
         lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind == "system":
         # A system env's lock file records the machine properties it
-        # declared it depends on, plus its ``default_setup`` and ``shell``,
-        # which are part of how the stage was run rather than properties of
-        # the machine. With none of them there is nothing to depend on, so
-        # no lock file and no DVC dep.
-        if not (
-            env.get("lock") or env.get("default_setup") or env.get("shell")
-        ):
+        # declared it depends on, plus its ``default_setup`` and the
+        # ``shell`` that runs it, which are part of how the stage was run
+        # rather than properties of the machine. With none of them there is
+        # nothing to depend on, so no lock file and no DVC dep.
+        if not system_env_locks_anything(env):
             return None
         # Written by ``write_system_env_lock`` during environment checks, and
         # referenced as a DVC dep by stage compilation. Note this is the file
@@ -708,7 +730,14 @@ def write_scheduler_env_lock(
     return lock_fpath
 
 
-def env_input_paths(env: dict) -> list[str]:
+# Warned once per process, not once per reader: compiling a pipeline reads
+# an environment's inputs several times -- the DVC dep list, the
+# environment check, the run itself -- and a project is only asked to
+# rename the key once.
+_warned_deprecated_deps_key = False
+
+
+def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
     """Read the files an environment declares it depends on.
 
     Written as ``inputs``, and also accepted as ``deps``, which is the name
@@ -717,11 +746,34 @@ def env_input_paths(env: dict) -> list[str]:
     spelling it the old way would otherwise have its files go silently
     untracked---which is the one failure the field exists to prevent.
     ``inputs`` wins if somehow both are written.
+
+    This is the only reader of either spelling, so the alias lives in one
+    place: the models accept it through ``AliasChoices``, and everything
+    reading a raw environment dict comes through here.
     """
-    paths = env.get("inputs")
-    if paths is None:
-        paths = env.get("deps")
-    return list(paths or [])
+    global _warned_deprecated_deps_key
+    inputs = env.get("inputs")
+    deps = env.get("deps")
+    if inputs is not None and deps is not None:
+        where = f" on environment '{env_name}'" if env_name else ""
+        raise ValueError(
+            f"Both 'inputs' and 'deps' are set{where}; 'deps' is the old "
+            "name for the same key, so merge them into 'inputs'"
+        )
+    if deps is not None and not _warned_deprecated_deps_key:
+        from calkit.cli import warn
+
+        _warned_deprecated_deps_key = True
+        # Written for whoever has to act on it rather than raised as a
+        # UserWarning, whose file-and-line formatting reads as a defect in
+        # Calkit instead of a line to change in their own project
+        where = f" on environment '{env_name}'" if env_name else ""
+        warn(
+            f"The 'deps' key{where} is deprecated; rename it to 'inputs', "
+            "which is what it's called now that scheduler and system "
+            "environments take one too"
+        )
+    return list(inputs if inputs is not None else deps or [])
 
 
 def get_system_lock_data(
@@ -806,12 +858,14 @@ def write_system_env_lock(
     )
     # Named so they can't collide with a locked property, now or when the
     # set of them grows. The shell matters to a stage's own setup commands
-    # too, so it's recorded whenever the env names one, not only when it
-    # has defaults.
+    # too, which the environment can't see, so it's recorded whenever it
+    # isn't the default -- a stage compiled with setup commands depends on
+    # this file, so changing the shell out from under it reruns it.
     if env.get("default_setup"):
         lock_data["default_setup"] = list(env["default_setup"])
-    if env.get("default_setup") or env.get("shell"):
-        lock_data["shell"] = env.get("shell", "bash")
+    shell = env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
+    if env.get("default_setup") or shell != SYSTEM_ENV_DEFAULT_SHELL:
+        lock_data["shell"] = shell
     content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     parent = os.path.dirname(lock_fpath)
     if parent:

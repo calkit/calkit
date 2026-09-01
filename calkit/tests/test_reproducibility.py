@@ -265,3 +265,60 @@ def test_find_untraceable_literals():
         f["line"]
         for f in find_untraceable_literals("9.99\n1.11\n", "main.tex")
     ] == [1, 2]
+
+
+def test_unpinned_git_imports_are_reported(tmp_dir):
+    # An import that names a branch to follow but no commit says where the
+    # file comes from without saying which version is here, so it can't
+    # count as full provenance the way a pinned one does
+    import subprocess
+
+    import calkit
+    from calkit.reproducibility import check_reproducibility
+
+    subprocess.run(["calkit", "init"], check=True)
+    # So the recommendation isn't dominated by something more basic
+    with open("README.md", "w") as f:
+        f.write("# Project\n\nHow to reproduce: run `calkit run`.\n")
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    repo_url = "https://github.com/o/r.git"
+    ck_info = calkit.load_calkit_info()
+    ck_info["misc"] = [
+        {
+            "path": "unpinned.sh",
+            "imported_from": {
+                "git": {"repo_url": repo_url, "path": "a.sh", "ref": "main"}
+            },
+        },
+        {
+            "path": "pinned.sh",
+            "imported_from": {
+                "git": {"repo_url": repo_url, "path": "a.sh", "rev": sha}
+            },
+        },
+        # Not a Git source, so there is no commit to be missing
+        {
+            "path": "downloaded.csv",
+            "imported_from": {"url": "https://example.invalid/a.csv"},
+        },
+    ]
+    calkit.save_calkit_info(ck_info)
+    check = check_reproducibility(wdir=".")
+    assert check.unpinned_imports == ["unpinned.sh"]
+    assert check.n_unpinned_imports == 1
+    assert "not pinned to a commit" in check.to_pretty()
+    # The recommendation is ordered, so a project with more basic problems
+    # is told about those first. Asked directly, it names the fix.
+    assert (
+        "calkit update path"
+        in check.model_copy(
+            update={
+                "has_readme": True,
+                "instructions_in_readme": True,
+                "n_dvc_remotes": 1,
+                "has_pipeline": True,
+                "has_calkit_info": True,
+                "n_environments": 1,
+            }
+        ).recommendation
+    )

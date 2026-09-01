@@ -1494,7 +1494,7 @@ def to_dvc(
     """
     import calkit.dvc.zip
     import calkit.markdown
-    from calkit.environments import env_input_paths, get_env_lock_fpath
+    from calkit.environments import get_env_input_paths, get_env_lock_fpath
 
     if ck_info is None:
         ck_info = calkit.load_calkit_info(wdir=wdir)
@@ -1668,7 +1668,7 @@ def to_dvc(
         # copied into the image, and their checksums already ride along in
         # its lock file, which stages depend on.
         if env.get("kind") in ("system", "slurm", "pbs"):
-            for env_input in env_input_paths(env):
+            for env_input in get_env_input_paths(env, env_name):
                 env_lock_fpaths.setdefault(env_name, []).append(
                     Path(env_input).as_posix()
                 )

@@ -420,16 +420,16 @@ Arguments:
 
 Options:
 
-| Option                | Type    | Required | Default | Description                                                                                                                                                                          |
-| --------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--name`, `-n`        | text    | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                     |
-| `--env-path`, `-p`    | text    | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                       |
-| `--wdir`              | text    | no       |         | Working directory. By default will run current working directory.                                                                                                                    |
-| `--no-check`          | boolean | no       | False   | Don't check the environment is valid before running in it.                                                                                                                           |
-| `--relaxed`           | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                               |
-| `--setup`             | text    | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). Combined with a 'system' environment's 'default_setup' per --env-default-setup.                    |
-| `--env-default-setup` | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses them only when no setup commands were given here; 'merge' runs them first; 'ignore' never runs them. |
-| `--verbose`, `-v`     | boolean | no       | False   | Print verbose output.                                                                                                                                                                |
+| Option                | Type                           | Required | Default | Description                                                                                                                                                                          |
+| --------------------- | ------------------------------ | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--name`, `-n`        | text                           | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                     |
+| `--env-path`, `-p`    | text                           | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                       |
+| `--wdir`              | text                           | no       |         | Working directory. By default will run current working directory.                                                                                                                    |
+| `--no-check`          | boolean                        | no       | False   | Don't check the environment is valid before running in it.                                                                                                                           |
+| `--relaxed`           | boolean                        | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                               |
+| `--setup`             | text                           | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). Combined with a 'system' environment's 'default_setup' per --env-default-setup.                    |
+| `--env-default-setup` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses them only when no setup commands were given here; 'merge' runs them first; 'ignore' never runs them. |
+| `--verbose`, `-v`     | boolean                        | no       | False   | Print verbose output.                                                                                                                                                                |
 
 <a id="top-command-install"></a>
 
@@ -1616,24 +1616,24 @@ calkit new|create jupyter-notebook-stage [OPTIONS]
 
 Options:
 
-| Option                         | Type                   | Required | Default             | Description                                                                                                    |
-| ------------------------------ | ---------------------- | -------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | text                   | yes      |                     | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | text                   | yes      |                     | Environment to use to run the stage.                                                                           |
-| `--notebook-path`              | text                   | yes      |                     | Path to notebook.                                                                                              |
-| `--input`, `-i`                | text                   | no       |                     | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | text                   | no       |                     | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | text                   | no       |                     | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | text                   | no       |                     | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | text                   | no       |                     | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | text                   | no       |                     | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | text                   | no       |                     | An output that should not be stored in version control, and should not be deleted before running.              |
-| `--html-storage`               | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the HTML output of the notebook.                                                       |
-| `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | NotebookStorage.git | In what system to store the cleaned ipynb output of the notebook.                                              |
-| `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the executed ipynb output of the notebook.                                             |
-| `--overwrite`, `--force`, `-f` | boolean                | no       | False               | Overwrite an existing stage with this name if necessary.                                                       |
-| `--no-check`                   | boolean                | no       | False               | Do not check if the target, deps, environment, etc., exist.                                                    |
-| `--no-commit`                  | boolean                | no       | False               | Do not commit changes to Git.                                                                                  |
+| Option                         | Type                   | Required | Default | Description                                                                                                    |
+| ------------------------------ | ---------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | text                   | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | text                   | yes      |         | Environment to use to run the stage.                                                                           |
+| `--notebook-path`              | text                   | yes      |         | Path to notebook.                                                                                              |
+| `--input`, `-i`                | text                   | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | text                   | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | text                   | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | text                   | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | text                   | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | text                   | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | text                   | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--html-storage`               | choice(git, dvc, None) | no       | dvc     | In what system to store the HTML output of the notebook.                                                       |
+| `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | git     | In what system to store the cleaned ipynb output of the notebook.                                              |
+| `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | dvc     | In what system to store the executed ipynb output of the notebook.                                             |
+| `--overwrite`, `--force`, `-f` | boolean                | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean                | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean                | no       | False   | Do not commit changes to Git.                                                                                  |
 
 <a id="subcommand-new-create-release"></a>
 
@@ -1871,6 +1871,7 @@ List Calkit objects.
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
 | [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
+| [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -2160,6 +2161,26 @@ Usage:
 
 ```text
 calkit list|ls remotes [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
+<a id="subcommand-list-ls-imports"></a>
+
+#### `calkit list|ls imports`
+
+List everything in the project that was imported from elsewhere.
+
+Walks every artifact kind, so an import shows up here whichever list it was recorded in. Entries are annotated with the kind they came from and a one-line description of the source, since where a file came from is the question being asked and it's spelled differently for a Git repo, a project, a URL, and a DOI.
+
+Usage:
+
+```text
+calkit list|ls imports [OPTIONS]
 ```
 
 Options:
@@ -3633,18 +3654,18 @@ Arguments:
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                                                                                                                                                                                                             |
-| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | text    | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
-| `--environment`, `-e`   | text    | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
-| `--dep`, `-d`           | text    | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
-| `--out`, `-o`           | text    | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
-| `--option`, `-s`        | text    | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
-| `--setup`               | text    | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
-| `--log-path`            | text    | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
-| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
-| `--env-default-options` | text    | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
-| `--env-default-setup`   | text    | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
+| Option                  | Type                           | Required | Default | Description                                                                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | text                           | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
+| `--environment`, `-e`   | text                           | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
+| `--dep`, `-d`           | text                           | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
+| `--out`, `-o`           | text                           | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
+| `--option`, `-s`        | text                           | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
+| `--setup`               | text                           | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--log-path`            | text                           | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
+| `--command`             | boolean                        | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
+| `--env-default-options` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
+| `--env-default-setup`   | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
 <a id="subcommand-scheduler-sch-queue-q"></a>
 

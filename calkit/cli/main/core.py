@@ -36,6 +36,7 @@ from calkit import (
 )
 from calkit.cli import (
     AliasGroup,
+    EnvDefaultsModeChoice,
     complete_stage_names,
     print_sep,
     raise_error,
@@ -3152,7 +3153,7 @@ def run_in_env(
         ),
     ] = [],
     env_default_setup: Annotated[
-        str,
+        EnvDefaultsModeChoice,
         typer.Option(
             "--env-default-setup",
             help=(
@@ -3162,7 +3163,7 @@ def run_in_env(
                 "runs them."
             ),
         ),
-    ] = "replace",
+    ] = EnvDefaultsModeChoice.replace,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3172,12 +3173,6 @@ def run_in_env(
         get_env_lock_fpath,
     )
 
-    valid_modes = ("ignore", "replace", "merge")
-    if env_default_setup not in valid_modes:
-        raise_error(
-            f"Invalid --env-default-setup value '{env_default_setup}'; "
-            f"expected one of {', '.join(valid_modes)}"
-        )
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     calkit.set_env_vars(ck_info=ck_info)
@@ -3217,8 +3212,9 @@ def run_in_env(
     def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
         """Chain the setup commands before a stage's command.
 
-        The setup commands and the stage share one shell, so what the setup
-        exports is what the stage sees. The stage's own ``--setup`` commands
+        The setup commands and the stage share one shell, so a variable the
+        setup sets or a function it defines is in scope for the stage,
+        exported or not -- only a child process needs that. The stage's own ``--setup`` commands
         and the environment's ``default_setup`` are combined the way
         ``calkit scheduler batch`` combines a scheduler env's. The chain
         runs in the environment's shell (bash by default) rather than the
@@ -3242,7 +3238,11 @@ def run_in_env(
         if not setup:
             return None
         chained = " && ".join([*setup, shell_cmd])
-        return [env.get("shell", "bash"), "-c", chained]
+        return [
+            env.get("shell", calkit.environments.SYSTEM_ENV_DEFAULT_SHELL),
+            "-c",
+            chained,
+        ]
 
     def save_env_check_cache() -> None:
         """Record a successful check so repeat calls can skip it."""
@@ -3303,7 +3303,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),
                 platform=env.get("platform"),
-                deps=calkit.environments.env_input_paths(env),
+                deps=calkit.environments.get_env_input_paths(env, env_name),
                 env_vars=env.get("env_vars", []),
                 ports=env.get("ports", []),
                 gpus=env.get("gpus"),

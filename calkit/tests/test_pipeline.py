@@ -3231,3 +3231,18 @@ def test_check_all_in_pipeline_markdown_targets(tmp_dir, monkeypatch):
         ck_info=ck_info, targets=["README.md/a"], force=True
     )
     assert checked == ["top"]
+
+
+def test_env_defaults_mode_choice_matches_the_model():
+    # The models keep a Literal, since that is what puts the values inline
+    # in the published JSON schema, and the CLI needs an Enum to render
+    # them as choices. Held together here so there is no third place to
+    # update when a mode is added.
+    from typing import get_args
+
+    from calkit.cli.core import EnvDefaultsModeChoice
+    from calkit.models.pipeline import EnvDefaultsMode
+
+    assert {m.value for m in EnvDefaultsModeChoice} == set(
+        get_args(EnvDefaultsMode)
+    )

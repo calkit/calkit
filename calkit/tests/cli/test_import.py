@@ -28,41 +28,30 @@ def test_import_zenodo(tmp_dir, monkeypatch):
 def test_import_and_update_path(tmp_dir):
     # Covers importing a file from a Git repo, refreshing it along its
     # 'ref' or the default branch, and the ways that can go wrong
+    import json
     import os
+
+    import git as gitpy
 
     import calkit
 
-    def git(*args, wdir):
-        subprocess.run(
-            ["git", "-C", wdir, *args],
-            check=True,
-            capture_output=True,
-        )
-
-    def commit(wdir, message):
-        git("add", "-A", wdir=wdir)
-        git(
-            "-c",
-            "user.email=t@example.com",
-            "-c",
-            "user.name=Tester",
-            "commit",
-            "-qm",
+    def commit(repo, message):
+        repo.git.add("-A")
+        repo.index.commit(
             message,
-            wdir=wdir,
+            author=gitpy.Actor("Tester", "t@example.com"),
+            committer=gitpy.Actor("Tester", "t@example.com"),
         )
-        return subprocess.check_output(
-            ["git", "-C", wdir, "rev-parse", "HEAD"], text=True
-        ).strip()
+        return repo.head.commit.hexsha
 
     # A repo that isn't a Calkit project, standing in for a shared setups
     # repo kept alongside several projects
     src = os.path.abspath("src-repo")
     os.makedirs(os.path.join(src, "setups"))
-    git("init", "-q", "-b", "main", ".", wdir=src)
+    src_repo = gitpy.Repo.init(src, initial_branch="main")
     with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
         f.write("export FOO=1\n")
-    first_rev = commit(src, "init")
+    first_rev = commit(src_repo, "init")
     subprocess.run(["calkit", "init"], check=True)
     subprocess.run(
         [
@@ -127,7 +116,7 @@ def test_import_and_update_path(tmp_dir):
     # The source moves on, and a local edit is made that must not survive
     with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
         f.write("export FOO=2\n")
-    second_rev = commit(src, "update")
+    second_rev = commit(src_repo, "update")
     with open("scripts/setup.sh", "a") as f:
         f.write("# local edit\n")
     subprocess.run(
@@ -144,7 +133,7 @@ def test_import_and_update_path(tmp_dir):
     calkit.save_calkit_info(ck_info)
     with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
         f.write("export FOO=3\n")
-    third_rev = commit(src, "third")
+    third_rev = commit(src_repo, "third")
     subprocess.run(
         ["calkit", "update", "path", "scripts/setup.sh", "--no-commit"],
         check=True,
@@ -157,7 +146,7 @@ def test_import_and_update_path(tmp_dir):
     )
     # --git-ref changes what the entry follows, from now on rather than
     # just this once, so a later refresh stays on the tag
-    git("tag", "v1", second_rev, wdir=src)
+    src_repo.create_tag("v1", ref=second_rev)
     subprocess.run(
         [
             "calkit",
@@ -181,6 +170,42 @@ def test_import_and_update_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=2\n"
+    # Both commands touch only the file and calkit.yaml. Unrelated staged
+    # work must not be swept into a commit claiming to be about the import,
+    # and an unchanged file must not be called updated just because
+    # something else happened to be staged.
+    repo = calkit.git.get_repo()
+    # Settle what the '--no-commit' refreshes above left staged, so the
+    # only thing outstanding is the unrelated file
+    repo.git.add("-A")
+    repo.index.commit(
+        "settle",
+        author=gitpy.Actor("Tester", "t@example.com"),
+        committer=gitpy.Actor("Tester", "t@example.com"),
+    )
+    with open("unrelated.txt", "w") as f:
+        f.write("mine\n")
+    repo.git.add("unrelated.txt")
+    res = subprocess.run(
+        ["calkit", "update", "path", "scripts/setup.sh"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "already up-to-date" in res.stdout + res.stderr
+    assert "unrelated.txt" in repo.git.diff("--cached", "--name-only")
+    # And when there is something to commit, the unrelated file stays out
+    with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
+        f.write("export FOO=4\n")
+    commit(src_repo, "fourth")
+    subprocess.run(
+        ["calkit", "update", "path", "scripts/setup.sh", "--git-ref", "main"],
+        check=True,
+    )
+    committed = repo.git.show("--stat", "--format=", "HEAD")
+    assert "scripts/setup.sh" in committed
+    assert "unrelated.txt" not in committed
+    assert "unrelated.txt" in repo.git.diff("--cached", "--name-only")
     # A source that isn't a Git repo has no ref to follow
     ck_info = calkit.load_calkit_info()
     ck_info["misc"].append(
@@ -232,6 +257,26 @@ def test_import_and_update_path(tmp_dir):
     ck_info = calkit.load_calkit_info()
     assert "figures" not in ck_info or not ck_info["figures"]
     assert "figures/f.sh" in [e["path"] for e in ck_info["misc"]]
+    # 'calkit list imports' walks every artifact kind, so an import shows
+    # up whichever list it was recorded in, with its source described
+    listed = subprocess.check_output(["calkit", "list", "imports"], text=True)
+    assert "scripts/setup.sh" in listed
+    assert "figures/f.sh" in listed
+    assert "other.txt" in listed
+    assert "https://x.invalid/a" in listed
+    # A file that was never imported isn't an import
+    assert "unrecorded.sh" not in listed
+    as_json = json.loads(
+        subprocess.check_output(
+            ["calkit", "list", "imports", "--json"], text=True
+        )
+    )
+    assert {e["path"] for e in as_json} == {
+        "scripts/setup.sh",
+        "figures/f.sh",
+        "other.txt",
+    }
+    assert {e["kind"] for e in as_json} == {"misc"}
     # A kind whose entries can't say where they came from is refused, as
     # is one that isn't a kind at all
     for bad_kind in ["tables", "widgets"]:

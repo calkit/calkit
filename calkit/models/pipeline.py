@@ -306,7 +306,8 @@ class Stage(BaseModel):
     setup: list[str] | None = Field(
         default=None,
         description="Commands run before this stage's own command, in the "
-        "same shell, so what they export is what the stage sees. Combined "
+        "same shell as the command, so a variable they set or a function "
+        "they define is in scope for it, exported or not. Combined "
         "with the environment's 'default_setup' as 'env_default_setup' "
         "says. Only for environments that have one: 'system', 'slurm', "
         "and 'pbs'.",

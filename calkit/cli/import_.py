@@ -314,12 +314,12 @@ def import_path(
     from pydantic import TypeAdapter
 
     from calkit.models.core import ImportedFromType
-    from calkit.provenance import IMPORTABLE_ARTIFACT_TYPES
+    from calkit.provenance import get_importable_artifact_types
 
-    if kind not in IMPORTABLE_ARTIFACT_TYPES:
+    importable = get_importable_artifact_types()
+    if kind not in importable:
         raise_error(
-            f"Invalid --kind '{kind}'; expected one of "
-            f"{', '.join(IMPORTABLE_ARTIFACT_TYPES)}"
+            f"Invalid --kind '{kind}'; expected one of {', '.join(importable)}"
         )
     # Where it came from, in the shape the entry records it. 'rev' is
     # filled in from what the fetch actually checked out, so a source
@@ -377,12 +377,14 @@ def import_path(
     with open("calkit.yaml", "w") as f:
         calkit.ryaml.dump(ck_info, f)
     repo = calkit.git.get_repo()
-    repo.git.add(dest_path)
-    repo.git.add("calkit.yaml")
+    paths = [dest_path, "calkit.yaml"]
+    repo.git.add(paths)
     typer.echo(f"Imported to {dest_path}")
     if not no_commit:
         typer.echo("Committing changes")
-        repo.git.commit(["-m", f"Import {dest_path}"])
+        # Scoped, so unrelated staged work isn't swept into a commit
+        # claiming to be about this import
+        repo.git.commit(paths + ["-m", f"Import {dest_path}"])
 
 
 @import_app.command(name="environment")

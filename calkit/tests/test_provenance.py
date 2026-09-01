@@ -133,3 +133,106 @@ def test_hand_authored_git_source():
     sha = "0123456789abcdef0123456789abcdef01234567"
     assert source(**intent, rev=sha)["rev"] == sha
     assert source(**intent, rev=sha[:7])["rev"] == sha[:7]
+
+
+def test_fetch_resolves_a_slashed_ref(tmp_dir):
+    # A branch name can contain slashes, and a forge URL doesn't say where
+    # the ref ends and the path begins. The split guessed when the URL is
+    # read is checked against the repo and corrected, and the corrected one
+    # is what gets recorded.
+    import os
+
+    import git as gitpy
+
+    from calkit.provenance import fetch, source_from_location
+
+    def commit(repo, message):
+        repo.git.add("-A")
+        repo.index.commit(
+            message,
+            author=gitpy.Actor("Tester", "t@example.com"),
+            committer=gitpy.Actor("Tester", "t@example.com"),
+        )
+
+    src = os.path.abspath("src")
+    os.makedirs(os.path.join(src, "scripts"))
+    repo = gitpy.Repo.init(src, initial_branch="main")
+    with open(os.path.join(src, "scripts", "a.sh"), "w") as f:
+        f.write("on-main\n")
+    commit(repo, "init")
+    repo.git.checkout("-b", "feature/foo")
+    with open(os.path.join(src, "scripts", "a.sh"), "w") as f:
+        f.write("on-feature\n")
+    commit(repo, "feat")
+    repo.git.checkout("main")
+    # As parsed, the ref is cut at one segment, which is wrong here
+    source = source_from_location(
+        "https://github.com/o/r/blob/feature/foo/scripts/a.sh"
+    )
+    assert source["git"]["ref"] == "feature"
+    assert source["git"]["path"] == "foo/scripts/a.sh"
+    source["git"]["repo_url"] = src
+    out = fetch(source, dest_path="a.sh")
+    assert out["git"]["ref"] == "feature/foo"
+    assert out["git"]["path"] == "scripts/a.sh"
+    with open("a.sh") as f:
+        assert f.read() == "on-feature\n"
+    # A ref that resolves as recorded is never widened, even when a longer
+    # one would also resolve
+    single = source_from_location("https://github.com/o/r/blob/main/a.sh")
+    single["git"]["repo_url"] = src
+    single["git"]["path"] = "scripts/a.sh"
+    out = fetch(single, dest_path="b.sh")
+    assert out["git"]["ref"] == "main"
+    with open("b.sh") as f:
+        assert f.read() == "on-main\n"
+
+
+def test_importable_artifact_types_come_from_the_models():
+    # Whether a kind can record an import is a fact about its model, so it
+    # is read off them rather than listed by hand
+    from typing import get_args
+
+    from pydantic import BaseModel
+
+    from calkit.models.core import ProjectInfo
+    from calkit.provenance import (
+        PROVENANCE_ARTIFACT_TYPES,
+        get_importable_artifact_types,
+    )
+
+    importable = get_importable_artifact_types()
+    assert set(importable) <= set(PROVENANCE_ARTIFACT_TYPES)
+    # Every kind that is offered can actually record an import, and every
+    # kind that can is offered, so the two can't drift apart. Tables and
+    # presentations don't take 'imported_from' yet; adding it to one should
+    # be all it takes to make it importable.
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        models = [
+            arg
+            for arg in get_args(ProjectInfo.model_fields[kind].annotation)
+            for arg in (arg, *get_args(arg))
+            if isinstance(arg, type) and issubclass(arg, BaseModel)
+        ]
+        assert models, kind
+        takes_import = any("imported_from" in m.model_fields for m in models)
+        assert (kind in importable) == takes_import, kind
+    assert "datasets" in importable
+    assert "tables" not in importable
+
+
+def test_import_path_kind_help_lists_what_it_accepts():
+    # The help text spells the kinds out, which is worth having and is a
+    # second place they're written down. Held to the derived list so a kind
+    # gaining 'imported_from' can't leave the help behind.
+    from typing import get_args, get_type_hints
+
+    from calkit.cli.import_ import import_path
+    from calkit.provenance import get_importable_artifact_types
+
+    hints = get_type_hints(import_path, include_extras=True)
+    help_txt = next(
+        meta.help for meta in get_args(hints["kind"]) if hasattr(meta, "help")
+    )
+    for kind in get_importable_artifact_types():
+        assert f"'{kind}'" in help_txt, kind

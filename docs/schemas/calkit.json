@@ -158,7 +158,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -645,7 +645,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -1440,7 +1440,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -1631,7 +1631,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -1874,7 +1874,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -2146,7 +2146,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -2443,7 +2443,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -2882,7 +2882,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -3131,7 +3131,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "show_code": {
@@ -3309,7 +3309,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -3501,7 +3501,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -3762,7 +3762,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -5005,7 +5005,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -5205,7 +5205,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -5538,7 +5538,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -5826,7 +5826,7 @@
       "type": "object"
     },
     "Requirement": {
-      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n:class:`SystemNumberRequirement` and :class:`SystemValueRequirement`\ninstead, which name a property rather than a thing.",
+      "description": "Something that must be true of a machine before the project runs.\n\nFour kinds are supported:\n\n- ``app``: an executable that must be on ``PATH``, optionally\n  satisfying a ``version_spec``.\n- ``env-var``: an environmental variable that must be defined.\n- ``setup``: a per-machine precondition that isn't a file -- e.g.,\n  the user must have authenticated a CLI like ``gh auth login``.\n  A ``setup`` requirement declares ``check_command`` (a shell command\n  whose exit code determines whether it is satisfied) and\n  ``setup_command`` (run on a TTY when the user agrees, or printed\n  as a fix-it command otherwise). To run either inside a project\n  environment, prefix it with ``calkit xenv -n <env> --`` explicitly\n  rather than relying on an implicit wrap. ``cache_ttl`` skips\n  re-probing slow checks.\n- ``calkit-config``: a value that must be set in the user's Calkit\n  configuration.\n\nThese name a thing that must be present, so each has a ``name``. The\nproperties of a machine that can't be installed -- how many CPUs it\nhas, what OS it runs -- are constrained by\n``SystemNumberRequirement`` and ``SystemValueRequirement``\ninstead, which name a property rather than a thing.",
       "properties": {
         "cache_ttl": {
           "anyOf": [
@@ -6373,7 +6373,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {
@@ -6680,7 +6680,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "shell": {
@@ -6895,7 +6895,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "shell": {
@@ -7421,7 +7421,7 @@
       "type": "object"
     },
     "SystemEnvironment": {
-      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``default_setup`` is what has to be *done* on this machine before a\nstage can run: sourcing a site setup script, loading modules, putting a\nhand-built toolchain on the ``PATH``. It runs in the same shell as the\nstage's own command, so what it exports is what the stage sees, which\nis why it can't be a ``setup`` requirement -- those run in a shell of\ntheir own and are cached, since they check whether something has been\ndone rather than doing it every time. It is recorded in the lock file\nfor the same reason a SLURM env's is: changing how a build is set up\nchanges what the build produces, so the stages that used it should\nrerun.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
+      "description": "The machine as it is, with nothing built, installed, or isolated.\n\nAn escape hatch for software Calkit doesn't manage, e.g., a site-wide\nmodule system or a hand-built toolchain. Nothing is pinned by default,\nsince opting out of isolation is the whole point of this kind, so\n``lock`` is how a project says which properties of the machine its\nresults actually depend on.\n\nLocked properties are written to the environment's lock file, which\nstages depend on, so moving to a machine where one of them differs\ninvalidates the cached result rather than silently reusing it.\n\n``requirements`` is the other half, and answers a different question.\nIt says what must be *true* of this machine -- apps that must be\ninstalled, variables that must be set, at least this many CPUs -- and\nis checked before anything runs, on the machine the environment names.\nA requirement that fails stops the run and says how to fix it; a locked\nproperty that changes silently invalidates a cached result. One gates,\nthe other pins, so a property that matters both ways is written in both\nplaces.\n\n``default_setup`` is what has to be *done* on this machine before a\nstage can run: sourcing a site setup script, loading modules, putting a\nhand-built toolchain on the ``PATH``. It runs in the same shell as the\nstage's own command, so a variable it sets or a function it defines is\nin scope for the stage, whether or not it was exported -- only a child\nprocess needs that. This is why it can't be a ``setup`` requirement:\nthose run in a shell of their own and are cached, since they check\nwhether something has been done rather than doing it every time. It is recorded in the lock file\nfor the same reason a SLURM env's is: changing how a build is set up\nchanges what the build produces, so the stages that used it should\nrerun.\n\n``host`` names the machine. SSH is how a machine is reached, not a kind\nof environment, so there is no separate ``ssh`` kind: a system env whose\nhost isn't this machine is reached over SSH, and one whose host is this\nmachine runs here, the same way a SLURM env does. The built-in\n``_system`` environment is shorthand for this kind on ``localhost``\nwith nothing locked.\n\n``machine_id`` says *which* machine, where ``host`` only says what it\nanswers to. Names are renamed, resolve differently from different\nnetworks, and are reused; a project that means one particular machine\ncan name it here instead and have that survive all of it. It replaces\nthe name in deciding whether this is that machine, and is checked again\non the far end when it isn't -- so a host that has come to point at a\ndifferent box is reported rather than run on. ``host`` is still what\nreaches it, so both are worth declaring for a machine that isn't this\none. Run ``calkit describe system`` on a machine to read its ID.\n\nDeclaring one says where to run, which is a separate question from\nwhether results depend on the machine: moving a project to a new one\nand updating this need not invalidate everything computed on the old\none. Whether it does is left to ``lock``, where ``machine-id`` is\navailable for projects whose results really are machine-specific.\n\n``wdir`` is the project's workspace on that host -- the directory the\nstage runs in. It defaults to\n``~/.calkit/workspaces/<hub>/<owner>/<name>``, so a project that just\nnames a host lands somewhere predictable rather than having to spell\nout a path that is the same on every machine anyway. Qualified by hub\nand owner because a host is shared, and hidden because transfers check\nout with ``--force``: a path that looks like the user's own checkout is\none whose edits would be silently destroyed.\n\nWhat moves in and out of that workspace is deliberately not declared\nhere. An environment doesn't know which files a stage reads, so a list\nkept alongside it can fall behind the pipeline and quietly run against\nstale inputs; the paths are taken from the stage instead.",
       "properties": {
         "default_setup": {
           "anyOf": [
@@ -7565,7 +7565,7 @@
         },
         "shell": {
           "default": "bash",
-          "description": "Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when there are none.",
+          "description": "Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file, so stages that run setup commands rerun when it changes.",
           "enum": [
             "sh",
             "bash",
@@ -8134,7 +8134,7 @@
             }
           ],
           "default": null,
-          "description": "Commands run before this stage's own command, in the same shell, so what they export is what the stage sees. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
+          "description": "Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'.",
           "title": "Setup"
         },
         "slurm": {

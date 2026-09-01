@@ -1207,11 +1207,19 @@ def test_system_env_lock(tmp_dir):
     }
     with open(envs.write_system_env_lock(env_name="both", env=both)) as f:
         assert set(json.load(f)) == {"os", "default_setup", "shell"}
-    # A shell named with no defaults is still recorded, for the sake of a
-    # stage's own setup commands, which run in it
+    # A shell other than the default is recorded with no defaults set, for
+    # the sake of a stage's own setup commands, which run in it
     shell_env = {"kind": "system", "shell": "zsh"}
     with open(envs.write_system_env_lock(env_name="zsh", env=shell_env)) as f:
         assert json.load(f) == {"shell": "zsh"}
+    # Writing the default explicitly says exactly what leaving it out says,
+    # so it must not be what decides whether there is a lock file at all --
+    # otherwise 'shell: bash' would silently add a dependency to every
+    # stage using the env and rerun them
+    bash_env = {"kind": "system", "shell": "bash"}
+    assert envs.get_env_lock_fpath(env=bash_env, env_name="b") is None
+    assert envs.write_system_env_lock(env_name="b", env=bash_env) is None
+    assert envs.get_env_lock_fpath(env=shell_env, env_name="z") is not None
     # Locking something writes it, and the file is what stages depend on
     env = {"kind": "system", "lock": ["os", "python-version"]}
     lock_fpath = envs.write_system_env_lock(env_name="sys", env=env)
@@ -1547,3 +1555,26 @@ def test_system_env_checks_are_not_cached():
     assert not envs.cacheable({"kind": "system"})
     for kind in ["uv", "conda", "docker", "slurm", "renv"]:
         assert envs.cacheable({"kind": kind}), kind
+
+
+def test_get_env_input_paths(capsys):
+    # An environment's files are read from 'inputs', with the older 'deps'
+    # spelling still accepted so a project that predates the rename doesn't
+    # have its files go silently untracked
+    import calkit.environments as envs
+
+    assert envs.get_env_input_paths({}) == []
+    assert envs.get_env_input_paths({"inputs": ["a.sh"]}) == ["a.sh"]
+    # Reset, since the warning is deliberately only issued once per process
+    envs._warned_deprecated_deps_key = False
+    assert envs.get_env_input_paths({"deps": ["b.sh"]}, "old") == ["b.sh"]
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.out + captured.err
+    assert "old" in captured.out + captured.err
+    # Only once, however many readers ask
+    envs.get_env_input_paths({"deps": ["c.sh"]}, "old")
+    assert "deprecated" not in capsys.readouterr().out
+    # Saying the same thing twice in two places that can drift apart is
+    # reported rather than silently resolved one way
+    with pytest.raises(ValueError, match="merge them into 'inputs'"):
+        envs.get_env_input_paths({"inputs": ["a"], "deps": ["b"]}, "both")

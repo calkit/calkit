@@ -1526,12 +1526,17 @@ def update_path(
         raise_error(str(e))
     calkit.save_calkit_info(ck_info)
     repo = calkit.git.get_repo()
-    repo.git.add(path)
-    repo.git.add("calkit.yaml")
-    if not repo.git.diff("--cached", "--name-only"):
+    paths = [path, "calkit.yaml"]
+    repo.git.add(paths)
+    # Scoped to the paths this command touched, both to decide whether
+    # anything changed and to commit. Reading the whole index would call an
+    # unchanged file updated whenever something else happened to be staged,
+    # and committing it would sweep that unrelated work into a commit
+    # claiming to be about this file.
+    if not repo.git.diff("--cached", "--name-only", "--", *paths):
         typer.echo(f"{path} is already up-to-date")
         return
     typer.echo(f"Updated {path}")
     if not no_commit:
         typer.echo("Committing changes")
-        repo.git.commit(["-m", f"Update {path} from its source"])
+        repo.git.commit(paths + ["-m", f"Update {path} from its source"])

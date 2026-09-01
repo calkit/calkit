@@ -472,3 +472,41 @@ def list_remotes(
         typer.echo(f"(Git) {name}: {url}")
     for name, url in result["dvc"].items():
         typer.echo(f"(DVC) {name}: {url}")
+
+
+@list_app.command(name="imports")
+def list_imports(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """List everything in the project that was imported from elsewhere.
+
+    Walks every artifact kind, so an import shows up here whichever list it
+    was recorded in. Entries are annotated with the kind they came from and
+    a one-line description of the source, since where a file came from is
+    the question being asked and it's spelled differently for a Git repo, a
+    project, a URL, and a DOI.
+    """
+    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, describe_source
+
+    ck_info = calkit.load_calkit_info()
+    imports = []
+    for kind in PROVENANCE_ARTIFACT_TYPES:
+        for obj in ck_info.get(kind, []) or []:
+            if not isinstance(obj, dict) or not obj.get("imported_from"):
+                continue
+            imports.append(dict(obj, kind=kind))
+    if json_output:
+        echo_json(imports)
+        return
+    if not imports:
+        typer.echo("No imported artifacts found")
+        return
+    for obj in imports:
+        obj = dict(obj)
+        source = describe_source(obj["imported_from"])
+        # Rendered as a line of its own rather than left as the nested
+        # mapping, so a listing can be skimmed for where things came from
+        obj["source"] = source
+        _echo_object(obj)

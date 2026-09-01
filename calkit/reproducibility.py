@@ -126,6 +126,11 @@ class ReproCheck(BaseModel):
     # Paths of misc artifacts with no provenance whose file type is one
     # nobody makes by hand, so something should be recorded for them
     misc_needing_provenance: list[str] = []
+    # Paths whose entry says it was imported from a Git repo but doesn't
+    # record the commit it came from. 'ref' names something that moves, so
+    # such an entry says where the file is fetched from without saying
+    # which bytes are here -- 'calkit update path' fills in 'rev'
+    unpinned_imports: list[str] = []
     # Paths of Git-tracked scripts no pipeline stage refers to, which the
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
@@ -201,6 +206,17 @@ class ReproCheck(BaseModel):
                 "recorded. Add the stage that produces them, the project "
                 "file they were exported from, or who created them."
             )
+        # An import that follows a branch without recording the commit it
+        # landed on says where the file comes from but not which version is
+        # here, so the project can't be rebuilt as it stands
+        if self.n_unpinned_imports > 0:
+            return (
+                f"There are {self.n_unpinned_imports} Git imports "
+                f"({', '.join(self.unpinned_imports)}) that name a branch "
+                "or tag to follow but no commit, so they don't say which "
+                "version is here. Run 'calkit update path <path>' to "
+                "record one."
+            )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n_bad = getattr(self, f"n_{artifact_type}_no_import_or_stage")
             if n_bad:
@@ -252,6 +268,11 @@ class ReproCheck(BaseModel):
     @property
     def n_misc_needing_provenance(self) -> int:
         return len(self.misc_needing_provenance)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def n_unpinned_imports(self) -> int:
+        return len(self.unpinned_imports)
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -312,6 +333,11 @@ class ReproCheck(BaseModel):
             f"{self.n_misc_needing_provenance} "
             f"{_bool_to_check_x(self.n_misc_needing_provenance == 0)}\n"
         )
+        if self.unpinned_imports:
+            txt += (
+                "Git imports not pinned to a commit: "
+                f"{self.n_unpinned_imports} {_bool_to_check_x(False)}\n"
+            )
         if self.untraceable_literals:
             txt += (
                 f"Untraceable literals: {len(self.untraceable_literals)} "
@@ -728,6 +754,26 @@ def check_reproducibility(
         res[f"n_{artifact_type}_no_import_or_stage"] = len(
             [a for a in artifacts if not has_provenance(a)]
         )
+    # A Git import records 'ref' (what it follows) and 'rev' (the commit it
+    # got). Only the second says which bytes are here, and the model allows
+    # an entry written by hand to omit it, so it's reported rather than
+    # silently counted as provenance.
+    unpinned = []
+    for artifact_type in PROVENANCE_ARTIFACT_TYPES:
+        for artifact in ck_info.get(artifact_type, []) or []:
+            if not isinstance(artifact, dict):
+                continue
+            git_src = artifact.get("imported_from") or {}
+            if isinstance(git_src, dict):
+                git_src = git_src.get("git") or {}
+            if (
+                isinstance(git_src, dict)
+                and git_src
+                and not git_src.get("rev")
+                and artifact.get("path")
+            ):
+                unpinned.append(artifact["path"])
+    res["unpinned_imports"] = unpinned
     res["misc_needing_provenance"] = [
         a["path"]
         for a in ck_info.get("misc", [])

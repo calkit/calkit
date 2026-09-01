@@ -557,7 +557,7 @@ class Requirement(BaseModel):
     These name a thing that must be present, so each has a ``name``. The
     properties of a machine that can't be installed -- how many CPUs it
     has, what OS it runs -- are constrained by
-    :class:`SystemNumberRequirement` and :class:`SystemValueRequirement`
+    ``SystemNumberRequirement`` and ``SystemValueRequirement``
     instead, which name a property rather than a thing.
     """
 
@@ -1105,10 +1105,11 @@ class SystemEnvironment(Environment):
     ``default_setup`` is what has to be *done* on this machine before a
     stage can run: sourcing a site setup script, loading modules, putting a
     hand-built toolchain on the ``PATH``. It runs in the same shell as the
-    stage's own command, so what it exports is what the stage sees, which
-    is why it can't be a ``setup`` requirement -- those run in a shell of
-    their own and are cached, since they check whether something has been
-    done rather than doing it every time. It is recorded in the lock file
+    stage's own command, so a variable it sets or a function it defines is
+    in scope for the stage, whether or not it was exported -- only a child
+    process needs that. This is why it can't be a ``setup`` requirement:
+    those run in a shell of their own and are cached, since they check
+    whether something has been done rather than doing it every time. It is recorded in the lock file
     for the same reason a SLURM env's is: changing how a build is set up
     changes what the build produces, so the stages that used it should
     rerun.
@@ -1195,7 +1196,10 @@ class SystemEnvironment(Environment):
         "'default_setup' and a stage's own 'setup', together with the "
         "stage's command. Defaults to bash, since 'source' is a bashism "
         "and sourcing a setup script is the usual reason to have setup "
-        "commands. Ignored when there are none.",
+        "commands. Ignored when neither this environment nor any stage "
+        "using it has setup commands. Setting it to anything but 'bash' "
+        "is recorded in the environment's lock file, so stages that run "
+        "setup commands rerun when it changes.",
     )
     inputs: list[str] | None = Field(
         default=None,

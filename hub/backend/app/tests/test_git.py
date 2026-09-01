@@ -300,8 +300,15 @@ def test_get_repo_requires_a_completed_clone(tmp_path, monkeypatch):
 
     from filelock import Timeout
 
+    from app.config import settings
+
     project = _StubProject(f"ck-repo-ready-{random.randint(0, 10**9)}")
-    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    base_dir = os.path.join(
+        settings.CLONE_ROOT,
+        "anonymous",
+        project.owner_github_name,
+        project.name,
+    )
     repo_dir = os.path.join(base_dir, "repo")
     updated_fpath = os.path.join(base_dir, "updated.txt")
     monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
@@ -373,8 +380,15 @@ def test_get_repo_clone_failures_leave_nothing_readable(tmp_path, monkeypatch):
     import shutil as _shutil
     import subprocess as _subprocess
 
+    from app.config import settings
+
     project = _StubProject(f"ck-repo-fail-{random.randint(0, 10**9)}")
-    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    base_dir = os.path.join(
+        settings.CLONE_ROOT,
+        "anonymous",
+        project.owner_github_name,
+        project.name,
+    )
     repo_dir = os.path.join(base_dir, "repo")
     updated_fpath = os.path.join(base_dir, "updated.txt")
     monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
@@ -421,7 +435,12 @@ def test_get_repo_applies_the_configured_clone_filter(monkeypatch):
     from app.config import settings
 
     project = _StubProject(f"ck-repo-filter-{random.randint(0, 10**9)}")
-    base_dir = f"/tmp/anonymous/{project.owner_github_name}/{project.name}"
+    base_dir = os.path.join(
+        settings.CLONE_ROOT,
+        "anonymous",
+        project.owner_github_name,
+        project.name,
+    )
     monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
     real_check_call = app.git.subprocess.check_call
     commands: list[list[str]] = []

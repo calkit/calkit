@@ -25,7 +25,7 @@ from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
 
 import calkit
-from app import github, users
+from app import cache, github, users
 from app.config import settings
 from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
@@ -138,6 +138,42 @@ def _make_git_auth_env(
     return env
 
 
+# How long a remote's head SHA is trusted. Clones are per user, so ten
+# people looking at one project are ten clones asking git the same question
+# every time their TTL lapses. One answer, shared, serves all of them, and
+# being a few seconds stale only delays noticing a push by that much.
+REMOTE_HEAD_TTL = 30
+
+
+def get_remote_head_sha(
+    repo: git.Repo, remote_url: str, branch: str
+) -> str | None:
+    """The SHA ``origin`` has for ``branch``, or None if it can't be read.
+
+    ``ls-remote`` costs about as much as a fetch that has nothing to
+    transfer -- both are a round trip to the host -- so this is only worth
+    doing because the answer is cached and a fetch's isn't. When it comes
+    back equal to what we already have, the fetch can be skipped entirely.
+    """
+    key = cache.make_key("remote-head", remote_url, branch)
+    cached = cache.get_json(key)
+    if isinstance(cached, str):
+        return cached
+    try:
+        with _timed("ls-remote", branch=branch):
+            out = repo.git.ls_remote(
+                ["origin", branch], kill_after_timeout=GIT_FETCH_TIMEOUT
+            )
+    except GitCommandError as e:
+        logger.warning(f"Could not read remote head for {branch}: {e}")
+        return None
+    line = out.strip().split("\n")[0] if out.strip() else ""
+    sha = line.split()[0] if line else None
+    if sha:
+        cache.set_json(key, sha, ttl=REMOTE_HEAD_TTL)
+    return sha
+
+
 def get_repo(
     project: Project,
     user: User | None,
@@ -159,9 +195,13 @@ def get_repo(
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
         user_dir = user.github_username or user.account.name
-        base_dir = f"/tmp/{user_dir}/{owner_name}/{project_name}"
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, user_dir, owner_name, project_name
+        )
     else:
-        base_dir = f"/tmp/anonymous/{owner_name}/{project_name}"
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, "anonymous", owner_name, project_name
+        )
     repo_dir = os.path.join(base_dir, "repo")
     updated_fpath = os.path.join(base_dir, "updated.txt")
     lock_fpath = os.path.join(base_dir, "updating.lock")
@@ -411,10 +451,32 @@ def get_repo(
                             kill_after_timeout=GIT_FETCH_TIMEOUT,
                         )
                     subprocess.call(["touch", updated_fpath])
-                if not is_shallow:
+                # Ask what the remote has before going to get it. That
+                # answer is shared between everyone's clone of the project,
+                # so most expiries are settled without touching the network,
+                # and when it matches ours there is nothing to fetch at all.
+                already_current = False
+                if not is_shallow and ref is None:
+                    branch_name = repo.active_branch.name
+                    try:
+                        local_head: str | None = repo.head.commit.hexsha
+                    except (ValueError, GitCommandError):
+                        local_head = None
+                    remote_head = (
+                        get_remote_head_sha(repo, git_plain_url, branch_name)
+                        if local_head
+                        else None
+                    )
+                    if remote_head is not None and remote_head == local_head:
+                        logger.info(
+                            f"{repo_label} is already at {remote_head[:7]}"
+                        )
+                        subprocess.call(["touch", updated_fpath])
+                        did_refresh = True
+                        already_current = True
+                if not is_shallow and not already_current:
                     logger.info("Git fetching")
                     if ref is None:
-                        branch_name = repo.active_branch.name
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
@@ -645,7 +707,7 @@ def get_overleaf_repo(
     """Get a freshly pulled Overleaf repository for a user/project."""
     owner_name, project_name = project.owner_github_name, project.name
     base_dir = (
-        f"/tmp/{user.github_username}/{owner_name}/"
+        f"{settings.CLONE_ROOT}/{user.github_username}/{owner_name}/"
         f"{project_name}/overleaf/{overleaf_project_id}"
     )
     repo_dir = os.path.join(base_dir, "repo")
@@ -970,6 +1032,18 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     cached = _peek_dvc_lock_outs(blob_sha)
     if cached is not None:
         return cached
+    # A history walk reads dvc.lock at every commit that touched the file,
+    # and a project of any size keeps a megabyte of it: parsing a thousand
+    # revisions is minutes of work that is identical for every worker, every
+    # viewer and every restart. Keyed by the blob, so it is only ever done
+    # once anywhere.
+    shared_key = cache.make_key("dvc-lock-outs", blob_sha)
+    shared = cache.get_json(shared_key)
+    if isinstance(shared, dict):
+        _DVC_LOCK_PARSE_CACHE[blob_sha] = shared
+        if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
+            _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+        return shared
     try:
         # Not ryaml: we only pull plain strings out of this and never write it
         # back. On a 47 KB dvc.lock that is ~6 ms/parse versus ~94 ms, which
@@ -979,7 +1053,15 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
         data = {}
     outs: dict[str, str] = {}
     for stage in (data.get("stages") or {}).values():
+        # A revision can carry a stage name with nothing under it, which
+        # parses to None. Walking history means reading every dvc.lock a
+        # project ever had, so one malformed old revision must not take the
+        # whole file history down with it.
+        if not isinstance(stage, dict):
+            continue
         for out in stage.get("outs") or []:
+            if not isinstance(out, dict):
+                continue
             p = out.get("path")
             if not p:
                 continue
@@ -987,6 +1069,7 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     _DVC_LOCK_PARSE_CACHE[blob_sha] = outs
     if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
         _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+    cache.set_json(shared_key, outs)
     return outs
 
 

@@ -95,6 +95,7 @@ services:
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
       - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -133,6 +134,8 @@ services:
         restart: true
       prestart:
         condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
     environment:
       - PROJECT_NAME=${PROJECT_NAME}
       - DOMAIN=${DOMAIN}
@@ -150,6 +153,7 @@ services:
       - FEEDBACK_EMAIL=${FEEDBACK_EMAIL-}
       - POSTGRES_SERVER=db
       - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -229,6 +233,8 @@ services:
         restart: true
       prestart:
         condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
     environment:
       - PROJECT_NAME=${PROJECT_NAME}
       - DOMAIN=${DOMAIN}
@@ -245,6 +251,7 @@ services:
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
       - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -450,6 +457,7 @@ services:
       - traefik.http.services.${STACK_NAME?Variable not set}-grafana.loadbalancer.server.port=3000
 
 volumes:
+  project-clones:
   app-db-data:
   minio-data:
     driver: local

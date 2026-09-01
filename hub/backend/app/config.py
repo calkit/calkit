@@ -147,18 +147,27 @@ class Settings(BaseSettings):
     # files nobody is looking at: for one real project, 739 MB of the 957 MB
     # was history, nearly all of it figures and results.
     #
-    # The limit is on blob *size*, not on blobs outright. Every small file --
-    # every revision of dvc.lock, calkit.yaml, the .tex and .bib sources --
-    # comes down with the clone and stays local, which is what the history
-    # endpoints walk. ``blob:none`` looks better on paper (26 s and 274 MB
-    # against 60 s and 364 MB) but defers those too, and then a file history
-    # that resolves DVC versions reads dvc.lock at hundreds of commits and
-    # fetches each one over the network: one such request took 444 seconds,
-    # against 0.11 s here.
+    # Where project clones live. A clone is expensive to make and cheap to
+    # keep, so it belongs somewhere that survives a deploy: on the container
+    # filesystem every release re-clones every project for every viewer.
+    CLONE_ROOT: str = "/tmp"
+
+    # Off by default, because the clone is not where the time goes.
     #
-    # Set empty for full clones, for a deployment that needs reads to work
-    # without reaching the remote.
-    GIT_CLONE_FILTER: str = "blob:limit=1m"
+    # A partial clone is dramatically faster to make -- ``blob:none`` took one
+    # real project from ~350 s and 957 MB to 26 s and 274 MB -- but every read
+    # that touches a blob the filter skipped then fetches it over the network,
+    # one object at a time. That is invisible on a README and ruinous on a
+    # file history, which walks dvc.lock at hundreds of commits: 444 s under
+    # ``blob:none``, and still 105-138 s under a size limit, against a
+    # fraction of a second on a full clone. Raising the limit did not help,
+    # so the cost is not one stray large file.
+    #
+    # A clone is paid once per project and then cached; a lazy fetch is paid
+    # on every read that lands on a missing object. Set this to
+    # ``blob:limit=1m`` or ``blob:none`` only where slow history reads are an
+    # acceptable trade for a faster first clone.
+    GIT_CLONE_FILTER: str = ""
 
     # Shared cache. Everything the project view derives from a repo -- stage
     # statuses, parsed pipelines, figure listings -- is a pure function of a

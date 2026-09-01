@@ -6852,7 +6852,9 @@ def get_project_pipeline(
     dvc_content = None
     if tree.is_file("dvc.yaml"):
         dvc_content = tree.read_text("dvc.yaml")
-        dvc_pipeline = ryaml.load(dvc_content) or {}
+        # Only inspected, never written back, so it doesn't need the
+        # round-trip parser -- see load_yaml_fast.
+        dvc_pipeline = load_yaml_fast(dvc_content) or {}
     # calkit.yaml is the source of truth, and the committed dvc.yaml can lag
     # behind it: a stage added from the hub, a publication from a template,
     # a run not made yet. When the Calkit pipeline declares a stage the
@@ -6900,32 +6902,50 @@ def get_project_pipeline(
     # statuses below are still worth showing.
     mermaid = ""
     pipeline_error: str | None = None
-    try:
-        mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
-        logger.info(
-            f"Created Mermaid diagram for {owner_name}/{project_name}:\n"
-            f"{mermaid}"
+    # Everything below is derived from the tree at this commit, so the
+    # commit identifies it. Building the diagram walks the whole graph
+    # through DVC, which is over a second on a pipeline of any size.
+    commit_sha = resolve_commit_sha(repo, ref)
+    mermaid_key = (
+        cache.make_key(
+            "mermaid", f"{owner_name}/{project_name}".lower(), commit_sha
         )
-    except Exception as e:
-        pipeline_error = str(e).strip() or type(e).__name__
-        logger.info(
-            f"Invalid pipeline for {owner_name}/{project_name}: "
-            f"{type(e).__name__}: {e}"
-        )
+        if commit_sha
+        else None
+    )
+    cached_mermaid = cache.get_json(mermaid_key) if mermaid_key else None
+    if isinstance(cached_mermaid, dict):
+        mermaid = cached_mermaid.get("mermaid") or ""
+        pipeline_error = cached_mermaid.get("error")
+    else:
+        try:
+            mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
+        except Exception as e:
+            pipeline_error = str(e).strip() or type(e).__name__
+            logger.info(
+                f"Invalid pipeline for {owner_name}/{project_name}: "
+                f"{type(e).__name__}: {e}"
+            )
+        if mermaid_key:
+            cache.set_json(
+                mermaid_key, {"mermaid": mermaid, "error": pipeline_error}
+            )
     # Compute per-stage staleness against the committed dvc.lock
     stage_statuses: dict = {}
     overall_status = "unknown"
     try:
         dvc_lock: dict = {}
         if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+            # A megabyte of dvc.lock through the round-trip parser is
+            # seconds of the request on its own.
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_pipeline,
             dvc_lock=dvc_lock,
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            cache_token=resolve_commit_sha(repo, ref),
+            cache_token=commit_sha,
         )
         overall_status = calc_overall_pipeline_status(stage_statuses)
         mermaid = color_mermaid_by_status(mermaid, stage_statuses)

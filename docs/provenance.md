@@ -200,11 +200,10 @@ it, and the `ref` to follow. What a fetch resolved to goes in
 }
 ```
 
-That file is committed, because it is a lock rather than a merge base:
-everyone cloning the project should get the same bytes, the way they do
-from `dvc.lock`. It is not `.calkit/overleaf-sync.json`, which records
-what one checkout last saw and is deliberately local---an import is
-inbound-only, so there is no other side to reconcile with.
+That file is committed, so everyone cloning the project gets the same
+bytes, the way they do from `dvc.lock`. Everything Calkit keeps under
+`.calkit` is managed by Calkit---read and write it through the CLI, the
+web app, or the extension rather than by hand.
 
 To pin an import, write the commit hash as its `ref`. A commit is a thing
 to follow that happens never to move, so no separate field is needed and

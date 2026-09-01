@@ -61,12 +61,13 @@ def get_importable_artifact_types() -> list[str]:
 
 
 # Where the resolved state of each import is recorded: the commit a Git
-# source actually landed on, a checksum of what was fetched, and when. It
-# is committed, because it is a lock rather than a merge base -- everyone
-# cloning the project should get the same bytes, the way they do from
-# ``dvc.lock`` or an environment's lock file. That is what separates it
-# from ``.calkit/overleaf-sync.json``, which records what one checkout
-# last saw and is deliberately local.
+# source actually landed on, a checksum of what was fetched, and when.
+# Committed, so everyone cloning the project gets the same bytes, the way
+# they do from ``dvc.lock`` or an environment's lock file --- the same
+# reason ``.calkit/overleaf-sync.json`` is committed, since two people
+# syncing the same Overleaf project have to agree on where they last
+# were. What this file records is one-way: an import has no other side to
+# reconcile with, so there is only ever what was fetched.
 IMPORT_LOCK_FPATH = os.path.join(".calkit", "imports.json")
 
 

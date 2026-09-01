@@ -8530,7 +8530,7 @@
           ],
           "default": null,
           "deprecated": true,
-          "description": "Deprecated; the commit an import resolved to is recorded in .calkit/imports.json, which is committed alongside it. This file says what to follow, which a person writes; that one says where following it led, which the tool works out. Still read for entries written before the split, and moved across the next time 'calkit update import' runs.",
+          "description": "Deprecated; the commit an import resolved to is recorded in .calkit/imports.json, which is committed alongside it. This file says what to follow, which a person writes; that one says where following it led, which the tool works out. Still read for entries written before the split, and moved across the next time 'calkit sync import' runs.",
           "title": "Rev"
         }
       },

@@ -134,7 +134,7 @@ class _GitSource(BaseModel):
             "file says what to follow, which a person writes; that one "
             "says where following it led, which the tool works out. Still "
             "read for entries written before the split, and moved across "
-            "the next time 'calkit update import' runs."
+            "the next time 'calkit sync import' runs."
         ),
     )
     path: str | None = Field(

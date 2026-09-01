@@ -129,7 +129,7 @@ def test_import_and_update_a_path(tmp_dir):
     with open("scripts/setup.sh", "a") as f:
         f.write("# local edit\n")
     res = subprocess.run(
-        ["calkit", "update", "import", "scripts/setup.sh"],
+        ["calkit", "sync", "import", "scripts/setup.sh"],
         capture_output=True,
         text=True,
     )
@@ -139,7 +139,7 @@ def test_import_and_update_a_path(tmp_dir):
         assert "# local edit" in f.read()
     # Asked for explicitly, the source wins
     subprocess.run(
-        ["calkit", "update", "import", "scripts/setup.sh", "--force"],
+        ["calkit", "sync", "import", "scripts/setup.sh", "--force"],
         check=True,
     )
     with open("scripts/setup.sh") as f:
@@ -154,7 +154,7 @@ def test_import_and_update_a_path(tmp_dir):
         f.write("export FOO=3\n")
     third_rev = commit(src_repo, "third")
     subprocess.run(
-        ["calkit", "update", "import", "scripts/setup.sh", "--no-commit"],
+        ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
         check=True,
     )
     with open("scripts/setup.sh") as f:
@@ -166,7 +166,7 @@ def test_import_and_update_a_path(tmp_dir):
     subprocess.run(
         [
             "calkit",
-            "update",
+            "sync",
             "import",
             "scripts/setup.sh",
             "--git-ref",
@@ -181,7 +181,7 @@ def test_import_and_update_a_path(tmp_dir):
     assert source["ref"] == "v1"
     assert locked("scripts/setup.sh")["rev"] == second_rev
     subprocess.run(
-        ["calkit", "update", "import", "scripts/setup.sh", "--no-commit"],
+        ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
         check=True,
     )
     with open("scripts/setup.sh") as f:
@@ -203,7 +203,7 @@ def test_import_and_update_a_path(tmp_dir):
         f.write("mine\n")
     repo.git.add("unrelated.txt")
     res = subprocess.run(
-        ["calkit", "update", "import", "scripts/setup.sh"],
+        ["calkit", "sync", "import", "scripts/setup.sh"],
         capture_output=True,
         text=True,
         check=True,
@@ -217,7 +217,7 @@ def test_import_and_update_a_path(tmp_dir):
     subprocess.run(
         [
             "calkit",
-            "update",
+            "sync",
             "import",
             "scripts/setup.sh",
             "--git-ref",
@@ -236,7 +236,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     calkit.save_calkit_info(ck_info)
     res = subprocess.run(
-        ["calkit", "update", "import", "other.txt", "--git-ref", "main"],
+        ["calkit", "sync", "import", "other.txt", "--git-ref", "main"],
         capture_output=True,
         text=True,
     )
@@ -325,7 +325,7 @@ def test_import_and_update_a_path(tmp_dir):
     )
     calkit.save_calkit_info(ck_info)
     res = subprocess.run(
-        ["calkit", "update", "import", "--all"],
+        ["calkit", "sync", "import", "--all"],
         capture_output=True,
         text=True,
     )
@@ -352,7 +352,7 @@ def test_import_and_update_a_path(tmp_dir):
         ([], "or --all to refresh every one"),
     ]:
         res = subprocess.run(
-            ["calkit", "update", "import"] + args,
+            ["calkit", "sync", "import"] + args,
             capture_output=True,
             text=True,
         )
@@ -380,7 +380,7 @@ def test_import_and_update_a_path(tmp_dir):
         assert "Invalid --kind" in res.stdout + res.stderr
     # Refreshing something nothing records
     res = subprocess.run(
-        ["calkit", "update", "import", "nope.txt"],
+        ["calkit", "sync", "import", "nope.txt"],
         capture_output=True,
         text=True,
     )

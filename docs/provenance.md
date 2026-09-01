@@ -139,7 +139,7 @@ other input.
 To pick up later changes:
 
 ```sh
-calkit update import scripts/setup.sh
+calkit sync import scripts/setup.sh
 ```
 
 That takes the latest of whatever the entry follows---its `ref` if it
@@ -152,7 +152,7 @@ would make refreshing a no-op.
 this once:
 
 ```sh
-calkit update import scripts/setup.sh --git-ref v1.2
+calkit sync import scripts/setup.sh --git-ref v1.2
 ```
 
 A `ref` naming a commit rather than a branch is a fixed point, so an
@@ -175,7 +175,7 @@ calkit list imports
 And to refresh all of them at once:
 
 ```sh
-calkit update import --all
+calkit sync import --all
 ```
 
 An entry that can't be refreshed in place---a dataset tracked by DVC, or a
@@ -214,7 +214,7 @@ file that has been changed since it was fetched would discard that work,
 so it is reported and refused until `--force` says otherwise:
 
 ```sh
-calkit update import scripts/setup.sh
+calkit sync import scripts/setup.sh
 # Error: 'scripts/setup.sh' has been edited since it was imported ...
 ```
 

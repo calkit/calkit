@@ -430,7 +430,7 @@ def test_import_paths_must_stay_in_the_project(tmp_dir):
     ]
     calkit.save_calkit_info(ck_info)
     res = subprocess.run(
-        ["calkit", "update", "import", "../escape.txt"],
+        ["calkit", "sync", "import", "../escape.txt"],
         capture_output=True,
         text=True,
     )
@@ -456,7 +456,7 @@ def test_update_all_with_nothing_refreshable(tmp_dir):
     ]
     calkit.save_calkit_info(ck_info)
     res = subprocess.run(
-        ["calkit", "update", "import", "--all"],
+        ["calkit", "sync", "import", "--all"],
         capture_output=True,
         text=True,
     )
@@ -471,7 +471,7 @@ def test_update_all_with_nothing_refreshable(tmp_dir):
     with open(os.path.join(".calkit", "imports.json"), "w") as f:
         f.write("{ not json")
     res = subprocess.run(
-        ["calkit", "update", "import", "--all"],
+        ["calkit", "sync", "import", "--all"],
         capture_output=True,
         text=True,
     )

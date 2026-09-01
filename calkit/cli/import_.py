@@ -278,7 +278,7 @@ def import_path(
             "--git-ref",
             help=(
                 "Branch, tag, or commit to follow, recorded so 'calkit "
-                "update import' knows where to look next time, and overriding "
+                "sync import' knows where to look next time, and overriding "
                 "one read out of the URL. Needed for a URL whose branch "
                 "name contains a slash. Defaults to the repo's default "
                 "branch."
@@ -311,7 +311,7 @@ def import_path(
     setup script shared between projects. The copy is committed here, so
     the project stays self-contained and the pipeline can depend on it;
     the entry records the source so it can be refreshed with 'calkit
-    update import' and so the file isn't one whose origin nobody knows.
+    sync import' and so the file isn't one whose origin nobody knows.
     """
     from pydantic import TypeAdapter
 
@@ -357,7 +357,7 @@ def import_path(
     if found is not None and not overwrite:
         raise_error(
             f"A {found[0]} entry already exists at '{dest_path}'; pass "
-            "--overwrite to replace it, or use 'calkit update import' to "
+            "--overwrite to replace it, or use 'calkit sync import' to "
             "refresh it from where it came from"
         )
     if os.path.exists(dest_path) and not overwrite:

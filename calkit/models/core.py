@@ -139,74 +139,45 @@ class _ImportedFromDoi(BaseModel):
     )
 
 
-class _GitSource(BaseModel):
-    # An unrecognized key is refused rather than dropped. These entries
-    # exist to be trusted, and an untagged union silently ignoring what it
-    # doesn't understand means a misspelled key, a key at the wrong level,
-    # or two sources named at once all validate while saying less than
-    # whoever wrote them meant. Stages already forbid extras for the same
-    # reason.
-    model_config = ConfigDict(extra="forbid")
+class _ImportedFromGit(BaseModel):
+    """Data from a Git repo that isn't a Calkit project.
 
-    repo_url: str = Field(
+    Written flat, the way a project source is: everything here is already
+    inside ``imported_from``, and the source-naming key beside it says
+    what ``path`` is a path within, so nesting adds a level without
+    adding clarity. The nested ``git:`` spelling earlier versions wrote is
+    still read.
+    """
+
+    # See the note on the other variants
+    model_config = ConfigDict(extra="forbid")
+    git_repo_url: str = Field(
         description="Clone URL of the repo the data came from."
-    )
-    rev: str | None = Field(
-        default=None,
-        deprecated=True,
-        description=(
-            "Deprecated; the commit an import resolved to is recorded in "
-            ".calkit/imports.json, which is committed alongside it. This "
-            "file says what to follow, which a person writes; that one "
-            "says where following it led, which the tool works out. Still "
-            "read for entries written before the split, and moved across "
-            "the next time 'calkit sync import' runs."
-        ),
     )
     path: str | None = Field(
         default=None,
         description="Path within that repo, if it isn't the whole thing.",
     )
-    ref: str | None = Field(
+    git_ref: str | None = Field(
         default=None,
         description=(
             "Branch, tag, or commit to follow when refreshing this, e.g., "
             "'main'. Optional: an entry that names none is refreshed from "
-            "the repo's default branch. 'rev' still records the commit "
-            "actually fetched, so the entry says both what it tracks and "
-            "what it got."
+            "the repo's default branch. The commit it resolves to is "
+            "recorded in .calkit/imports.json, so the entry says both what "
+            "it tracks and what it got."
         ),
     )
-
-    @field_validator("rev")
-    @classmethod
-    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
-        # Abbreviated hashes are fine -- Git resolves them -- but a name is
-        # not a revision, and accepting one here would quietly make the
-        # import irreproducible. A branch belongs in 'ref', which is where
-        # something that moves is meant to be written.
-        if v is None:
-            return v
-        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
-            raise ValueError(
-                f"rev must be a commit hash, not a branch or tag (got {v!r}); "
-                "a branch or tag to follow goes in 'ref'"
-            )
-        return v
-
-
-class _ImportedFromGit(BaseModel):
-    """Data from a Git repo that isn't a Calkit project."""
-
-    # An unrecognized key is refused rather than dropped. These entries
-    # exist to be trusted, and an untagged union silently ignoring what it
-    # doesn't understand means a misspelled key, a key at the wrong level,
-    # or two sources named at once all validate while saying less than
-    # whoever wrote them meant. Stages already forbid extras for the same
-    # reason.
-    model_config = ConfigDict(extra="forbid")
-
-    git: _GitSource
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; the commit an import resolved to is recorded in "
+            ".calkit/imports.json, which is committed alongside it. Still "
+            "read for entries written before the split, and moved across "
+            "the next time 'calkit sync import' runs."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
@@ -217,6 +188,22 @@ class _ImportedFromGit(BaseModel):
             "can't say."
         ),
     )
+
+    @field_validator("git_rev")
+    @classmethod
+    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
+        # Abbreviated hashes are fine -- Git resolves them -- but a name is
+        # not a revision, and accepting one here would quietly make the
+        # import irreproducible. A branch belongs in 'git_ref', which is
+        # where something that moves is meant to be written.
+        if v is None:
+            return v
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
+            raise ValueError(
+                f"git_rev must be a commit hash, not a branch or tag "
+                f"(got {v!r}); a branch or tag to follow goes in 'git_ref'"
+            )
+        return v
 
 
 class _Person(BaseModel):
@@ -379,12 +366,9 @@ def _normalize_imported_from(v: object) -> object:
     telling which it is is the same job ``calkit import path`` already
     does when it reads a source off the command line.
 
-    A Git source written flat, with ``git_repo_url`` beside ``path``, is
-    refused rather than read: nesting under ``git`` is what keeps
-    ``path`` from meaning two things in one mapping --- a path within the
-    repo, or the path within a Calkit project that the other variant
-    uses. Guessing which was meant is the mistake the nesting exists to
-    prevent, so it is named instead.
+    A Git source nested under ``git`` is read into the flat form. That
+    is what earlier versions wrote, and what ``calkit import path`` wrote
+    until this became the canonical spelling.
     """
     if isinstance(v, str):
         from calkit.provenance import source_from_location
@@ -395,12 +379,19 @@ def _normalize_imported_from(v: object) -> object:
             # Not something we can place; leave it to fail with the
             # union's own message rather than a less specific one
             return v
-    if isinstance(v, dict) and "git_repo_url" in v and "git" not in v:
-        raise ValueError(
-            "a Git source goes under 'git', as "
-            "{git: {repo_url: ..., path: ...}}, so that 'path' means the "
-            "path within that repo and not the one a project source uses"
-        )
+    if isinstance(v, dict) and isinstance(v.get("git"), dict):
+        # The nested spelling earlier versions wrote
+        v = dict(v)
+        git = dict(v.pop("git"))
+        flat = {
+            "git_repo_url": git.pop("repo_url", None),
+            "path": git.pop("path", None),
+            "git_ref": git.pop("ref", None),
+            "git_rev": git.pop("rev", None),
+        }
+        # Anything unrecognized is left where it was, so it still fails
+        # rather than being quietly discarded
+        return {k: val for k, val in flat.items() if val is not None} | git | v
     return v
 
 

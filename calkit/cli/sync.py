@@ -98,6 +98,7 @@ def _refresh_import(
         check_project_path,
         describe_source,
         find_artifact,
+        git_source,
         local_edit,
         read_import_locks,
         write_import_lock,
@@ -128,12 +129,17 @@ def _refresh_import(
             "import dataset' to refresh it"
         )
     if git_ref is not None:
-        if "git" not in imported_from:
+        git = git_source(imported_from)
+        if git is None:
             return (
                 f"'{target}' was not imported from a Git repo, so there is "
                 "no ref to follow"
             )
-        imported_from["git"] = dict(imported_from["git"]) | {"ref": git_ref}
+        # Read before the nested spelling is dropped, so an entry written
+        # that way keeps its repo rather than losing it
+        git["git_ref"] = git_ref
+        imported_from.pop("git", None)
+        imported_from.update({k: v for k, v in git.items() if v is not None})
     # A refresh overwrites, so a file edited since it was fetched would
     # lose that work silently. Reported rather than merged: an import is
     # inbound-only, so there is no other side to merge with.
@@ -154,9 +160,6 @@ def _refresh_import(
     # An entry written before the split carries its commit in calkit.yaml.
     # Moving it across here is what upgrades the project, so nobody has to
     # run anything to migrate.
-    git_source = entry["imported_from"].get("git")
-    if isinstance(git_source, dict):
-        git_source.pop("rev", None)
     entry["imported_from"].pop("git_rev", None)
     write_import_lock(target, lock)
     return ""

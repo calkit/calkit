@@ -76,11 +76,11 @@ def test_import_and_update_a_path(tmp_dir):
         assert f.read() == "export FOO=1\n"
     entries = calkit.load_calkit_info()["misc"]
     assert len(entries) == 1
-    source = entries[0]["imported_from"]["git"]
+    source = entries[0]["imported_from"]
     # A branch was named, so that is what calkit.yaml records -- the
     # commit it resolved to goes in the lock file
     assert "rev" not in source
-    assert source["ref"] == "main"
+    assert source["git_ref"] == "main"
     assert source["path"] == "setups/setup.sh"
     assert locked("scripts/setup.sh")["rev"] == first_rev
     assert locked("scripts/setup.sh")["hash"].startswith("sha256:")
@@ -148,7 +148,7 @@ def test_import_and_update_a_path(tmp_dir):
     # With no 'ref' recorded, refreshing takes the latest on the default
     # branch rather than re-reading the commit it last landed on
     ck_info = calkit.load_calkit_info()
-    del ck_info["misc"][0]["imported_from"]["git"]["ref"]
+    del ck_info["misc"][0]["imported_from"]["git_ref"]
     calkit.save_calkit_info(ck_info)
     with open(os.path.join(src, "setups", "setup.sh"), "w") as f:
         f.write("export FOO=3\n")
@@ -177,8 +177,8 @@ def test_import_and_update_a_path(tmp_dir):
     )
     with open("scripts/setup.sh") as f:
         assert f.read() == "export FOO=2\n"
-    source = calkit.load_calkit_info()["misc"][0]["imported_from"]["git"]
-    assert source["ref"] == "v1"
+    source = calkit.load_calkit_info()["misc"][0]["imported_from"]
+    assert source["git_ref"] == "v1"
     assert locked("scripts/setup.sh")["rev"] == second_rev
     subprocess.run(
         ["calkit", "sync", "import", "scripts/setup.sh", "--no-commit"],
@@ -316,7 +316,7 @@ def test_import_and_update_a_path(tmp_dir):
             "path": "unreachable.sh",
             "imported_from": {
                 "git": {
-                    "repo_url": os.path.join(tmp_dir, "no-such-repo"),
+                    "git_repo_url": os.path.join(tmp_dir, "no-such-repo"),
                     "path": "a.sh",
                     "rev": "0123abc",
                 }

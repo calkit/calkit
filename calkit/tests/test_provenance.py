@@ -14,52 +14,54 @@ def test_source_from_location():
     # gets fetched, now and on every refresh
     assert source_from_location(
         "https://github.com/someone/repo/path/to/file"
-    ) == {"git": {"repo_url": gh, "path": "path/to/file"}}
+    ) == {"git_repo_url": gh, "path": "path/to/file"}
     assert source_from_location(
         "https://github.com/someone/repo/blob/main/path/to/file"
-    ) == {"git": {"repo_url": gh, "path": "path/to/file", "ref": "main"}}
+    ) == {"git_repo_url": gh, "path": "path/to/file", "git_ref": "main"}
     # A commit is a thing to follow that happens never to move, so it is
     # recorded the same way, and refreshing the import stays on it
     sha = "0123456789abcdef0123456789abcdef01234567"
     assert source_from_location(
         f"https://github.com/someone/repo/blob/{sha}/a.sh"
-    ) == {"git": {"repo_url": gh, "path": "a.sh", "ref": sha}}
+    ) == {"git_repo_url": gh, "path": "a.sh", "git_ref": sha}
     assert source_from_location(
         "https://raw.githubusercontent.com/someone/repo/main/a/b.sh"
-    ) == {"git": {"repo_url": gh, "path": "a/b.sh", "ref": "main"}}
+    ) == {"git_repo_url": gh, "path": "a/b.sh", "git_ref": "main"}
     assert source_from_location(
         "https://raw.githubusercontent.com/someone/repo/refs/heads/dev/a.sh"
-    ) == {"git": {"repo_url": gh, "path": "a.sh", "ref": "dev"}}
+    ) == {"git_repo_url": gh, "path": "a.sh", "git_ref": "dev"}
     assert source_from_location(
         "https://gitlab.com/grp/sub/repo/-/blob/v1.2/a/b.sh"
     ) == {
-        "git": {
-            "repo_url": "https://gitlab.com/grp/sub/repo.git",
-            "path": "a/b.sh",
-            "ref": "v1.2",
-        }
+        "git_repo_url": "https://gitlab.com/grp/sub/repo.git",
+        "path": "a/b.sh",
+        "git_ref": "v1.2",
     }
     # An explicit ref wins over whatever the URL said
     assert source_from_location(
         f"https://github.com/someone/repo/blob/{sha}/a.sh", ref="main"
-    ) == {"git": {"repo_url": gh, "path": "a.sh", "ref": "main"}}
+    ) == {"git_repo_url": gh, "path": "a.sh", "git_ref": "main"}
     # A branch name can contain slashes, and the URL doesn't say where it
     # ends; an explicit ref settles it
     assert source_from_location(
         "https://github.com/someone/repo/blob/feature/foo/scripts/a.sh"
     ) == {
-        "git": {"repo_url": gh, "path": "foo/scripts/a.sh", "ref": "feature"}
+        "git_repo_url": gh,
+        "path": "foo/scripts/a.sh",
+        "git_ref": "feature",
     }
     assert source_from_location(
         "https://github.com/someone/repo/blob/feature/foo/scripts/a.sh",
         ref="feature/foo",
     ) == {
-        "git": {"repo_url": gh, "path": "scripts/a.sh", "ref": "feature/foo"}
+        "git_repo_url": gh,
+        "path": "scripts/a.sh",
+        "git_ref": "feature/foo",
     }
     # A browser writes a space as '%20', but the checkout doesn't
     assert source_from_location(
         "https://github.com/someone/repo/blob/main/a%20b.csv"
-    ) == {"git": {"repo_url": gh, "path": "a b.csv", "ref": "main"}}
+    ) == {"git_repo_url": gh, "path": "a b.csv", "git_ref": "main"}
     # A DOI resolves to a landing page, so recognizing it is what stops
     # the HTML from being saved and called the data
     for written in [
@@ -110,23 +112,23 @@ def test_source_from_ssh_clone_urls():
     from calkit.provenance import source_from_location
 
     assert source_from_location("git@github.com:sup/lol/my-thing") == {
-        "git": {
-            "repo_url": "git@github.com:sup/lol.git",
-            "path": "my-thing",
-        }
+        "git_repo_url": "git@github.com:sup/lol.git",
+        "path": "my-thing",
     }
     # A '.git' suffix is the same repo, and a ref is attached when given
     assert source_from_location(
         "git@github.com:sup/lol.git", ref="branch"
-    ) == {"git": {"repo_url": "git@github.com:sup/lol.git", "ref": "branch"}}
+    ) == {
+        "git_repo_url": "git@github.com:sup/lol.git",
+        "git_ref": "branch",
+    }
     assert source_from_location("ssh://git@github.com/sup/lol/a/b.sh") == {
-        "git": {
-            "repo_url": "ssh://git@github.com/sup/lol.git",
-            "path": "a/b.sh",
-        }
+        "git_repo_url": "ssh://git@github.com/sup/lol.git",
+        "path": "a/b.sh",
     }
     assert source_from_location("git://example.com/sup/lol/a.sh") == {
-        "git": {"repo_url": "git://example.com/sup/lol.git", "path": "a.sh"}
+        "git_repo_url": "git://example.com/sup/lol.git",
+        "path": "a.sh",
     }
     # A Calkit project path is still one, not a host with a colon missing
     assert source_from_location("someone/some-project/scripts/x.sh") == {
@@ -182,23 +184,32 @@ def test_git_source_records_intent_not_resolved_state():
 
     from calkit.models.core import MiscArtifact
 
-    def source(**git):
+    def source(**fields):
         return MiscArtifact(
-            path="scripts/setup.sh", imported_from={"git": git}
-        ).model_dump(exclude_none=True)["imported_from"]["git"]
+            path="scripts/setup.sh", imported_from=fields
+        ).model_dump(exclude_none=True)["imported_from"]
 
     sha = "0123456789abcdef0123456789abcdef01234567"
-    intent = {"repo_url": "https://github.com/o/r.git", "path": "a.sh"}
-    assert source(**intent, ref="main") == intent | {"ref": "main"}
-    # Pinning, with no 'rev' anywhere in calkit.yaml
-    assert source(**intent, ref=sha) == intent | {"ref": sha}
+    intent = {"git_repo_url": "https://github.com/o/r.git", "path": "a.sh"}
+    assert source(**intent, git_ref="main") == intent | {"git_ref": "main"}
+    # Pinning, with no resolved commit anywhere in calkit.yaml
+    assert source(**intent, git_ref=sha) == intent | {"git_ref": sha}
     # No ref at all means the repo's default branch
     assert source(**intent) == intent
-    # 'rev' is still read for entries written before the split, and still
-    # has to be a commit hash rather than something that moves
-    assert source(**intent, rev=sha)["rev"] == sha
-    with pytest.raises(ValidationError, match="goes in 'ref'"):
-        source(**intent, rev="main")
+    # 'git_rev' is still read for entries written before the split, and
+    # still has to be a commit hash rather than something that moves
+    assert source(**intent, git_rev=sha)["git_rev"] == sha
+    with pytest.raises(ValidationError, match="goes in 'git_ref'"):
+        source(**intent, git_rev="main")
+    # The nested spelling earlier versions wrote is read into the flat one
+    assert MiscArtifact(
+        path="s.sh",
+        imported_from={"git": {"repo_url": "u", "path": "a", "ref": "main"}},
+    ).model_dump(exclude_none=True)["imported_from"] == {
+        "git_repo_url": "u",
+        "path": "a",
+        "git_ref": "main",
+    }
 
 
 def test_fetch_resolves_a_slashed_ref(tmp_dir):
@@ -235,12 +246,12 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     source = source_from_location(
         "https://github.com/o/r/blob/feature/foo/scripts/a.sh"
     )
-    assert source["git"]["ref"] == "feature"
-    assert source["git"]["path"] == "foo/scripts/a.sh"
-    source["git"]["repo_url"] = src
+    assert source["git_ref"] == "feature"
+    assert source["path"] == "foo/scripts/a.sh"
+    source["git_repo_url"] = src
     out, lock = fetch(source, dest_path="a.sh")
-    assert out["git"]["ref"] == "feature/foo"
-    assert out["git"]["path"] == "scripts/a.sh"
+    assert out["git_ref"] == "feature/foo"
+    assert out["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
     assert lock["rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
@@ -248,10 +259,10 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     # A ref that resolves as recorded is never widened, even when a longer
     # one would also resolve
     single = source_from_location("https://github.com/o/r/blob/main/a.sh")
-    single["git"]["repo_url"] = src
-    single["git"]["path"] = "scripts/a.sh"
+    single["git_repo_url"] = src
+    single["path"] = "scripts/a.sh"
     out, _ = fetch(single, dest_path="b.sh")
-    assert out["git"]["ref"] == "main"
+    assert out["git_ref"] == "main"
     with open("b.sh") as f:
         assert f.read() == "on-main\n"
 
@@ -319,7 +330,7 @@ def test_import_record_refuses_what_it_cannot_record():
     sha = "0123456789abcdef0123456789abcdef01234567"
     for bad in [
         # 'rev' belongs inside 'git', not beside it
-        {"git": {"repo_url": "u", "path": "a", "rev": sha}, "rev": sha},
+        {"git": {"git_repo_url": "u", "path": "a", "rev": sha}, "rev": sha},
         # A misspelled field name
         {"url": "https://x/a.csv", "dat": "2026-01-01"},
         # Two sources at once: one of them would have been dropped
@@ -331,7 +342,7 @@ def test_import_record_refuses_what_it_cannot_record():
     # Each source on its own still validates, with its optional date
     for good in [
         {
-            "git": {"repo_url": "u", "path": "a", "rev": sha},
+            "git": {"git_repo_url": "u", "path": "a", "rev": sha},
             "date": "2026-01-01",
         },
         {"url": "https://x/a.csv", "date": "2026-01-01"},
@@ -500,14 +511,22 @@ def test_import_record_accepts_the_shapes_people_write():
     assert dump("https://example.com/a.csv") == {
         "url": "https://example.com/a.csv"
     }
-    # A Git source written flat is refused rather than guessed at. Here
-    # 'path' would mean the path within the repo, and in a project source
-    # it means the path within that project --- which is exactly what
-    # nesting under 'git' keeps apart.
-    with pytest.raises(ValidationError, match="goes under 'git'"):
-        ta.validate_python(
-            {"git_repo_url": "https://github.com/o/r", "path": "a.sh"}
-        )
+    # A Git source written flat, the way a project source is. 'path' is
+    # unambiguous because it sits inside imported_from and the key beside
+    # it says which source it belongs to.
+    assert dump(
+        {"git_repo_url": "https://github.com/o/r", "path": "a.sh"}
+    ) == {
+        "git_repo_url": "https://github.com/o/r",
+        "path": "a.sh",
+    }
+    # The nested spelling earlier versions wrote reads into the same thing
+    assert dump(
+        {"git": {"repo_url": "https://github.com/o/r", "path": "a.sh"}}
+    ) == {
+        "git_repo_url": "https://github.com/o/r",
+        "path": "a.sh",
+    }
     # An origin that can be stated but not resolved
     assert dump({"description": "Emailed by someone@example.com."}) == {
         "description": "Emailed by someone@example.com."
@@ -518,7 +537,7 @@ def test_import_record_accepts_the_shapes_people_write():
         {"url": "https://x/a"},
         {"doi": "10.5281/zenodo.1"},
         {"project": "o/p", "path": "a.csv"},
-        {"git": {"repo_url": "u", "path": "a"}},
+        {"git_repo_url": "u", "path": "a"},
     ]:
         out = dump(source | {"date": "2026-01-01", "description": "why"})
         assert out["description"] == "why"
@@ -555,7 +574,7 @@ def test_import_search_is_wider_than_provenance_scoring():
     assert "notebook" not in get_importable_artifact_kinds()
     # The field is real, not silently dropped
     nb = Notebook.model_validate(
-        {"path": "nb.ipynb", "imported_from": {"git": {"repo_url": "u"}}}
+        {"path": "nb.ipynb", "imported_from": {"git_repo_url": "u"}}
     )
     assert nb.imported_from is not None
     # Every scored kind that can record an import is searched too, so

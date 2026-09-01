@@ -114,11 +114,9 @@ def test_update_dataset(tmp_dir):
     assert result.exit_code == 0, result.output
     ck_info = calkit.load_calkit_info()
     assert ck_info["datasets"][1]["imported_from"] == {
-        "git": {
-            "repo_url": "https://github.com/a/b",
-            "path": "data/x.csv",
-            "ref": "main",
-        }
+        "git_repo_url": "https://github.com/a/b",
+        "path": "data/x.csv",
+        "git_ref": "main",
     }
     # Only one source, and the extras need a source to go with
     result = runner.invoke(

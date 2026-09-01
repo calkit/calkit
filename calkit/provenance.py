@@ -389,14 +389,14 @@ def _git_source_from_url(url: str, ref: str | None = None) -> dict | None:
     forge_host = "github.com" if host == "raw.githubusercontent.com" else host
     repo = "/".join(repo_segments).removesuffix(".git")
     source: dict = {
-        "repo_url": f"{scheme}://{forge_host}/{repo}.git",
+        "git_repo_url": f"{scheme}://{forge_host}/{repo}.git",
         "path": "/".join(path_segments),
     }
-    # Recorded as a 'ref' whether it names a branch, a tag, or a commit.
-    # A commit is a thing to follow that happens never to move, which is
-    # what keeps a deliberate pin pinned when the import is refreshed.
+    # Recorded as a 'git_ref' whether it names a branch, a tag, or a
+    # commit. A commit is a thing to follow that happens never to move,
+    # which is what keeps a deliberate pin pinned when refreshed.
     if ref is not None:
-        source["ref"] = ref
+        source["git_ref"] = ref
     return source
 
 
@@ -454,11 +454,11 @@ def _git_source_from_ssh_url(url: str, ref: str | None = None) -> dict | None:
         repo_url = f"{scp_prefix}:{repo}.git"
     else:
         repo_url = f"{scheme}://{host}/{repo}.git"
-    source: dict = {"repo_url": repo_url}
+    source: dict = {"git_repo_url": repo_url}
     if path_segments:
         source["path"] = "/".join(path_segments)
     if ref is not None:
-        source["ref"] = ref
+        source["git_ref"] = ref
     return source
 
 
@@ -478,10 +478,10 @@ def source_from_location(
     and whenever the import is refreshed.
     """
     if git_repo is not None:
-        source: dict = {"repo_url": git_repo, "path": location}
+        source: dict = {"git_repo_url": git_repo, "path": location}
         if ref is not None:
-            source["ref"] = ref
-        return {"git": source}
+            source["git_ref"] = ref
+        return source
     stripped = re.sub(
         r"^(https?://(dx\.)?doi\.org/|doi:)", "", location.strip(), flags=re.I
     )
@@ -493,7 +493,7 @@ def source_from_location(
     if location.startswith(("http://", "https://")):
         git_source = _git_source_from_url(location, ref=ref)
         if git_source is not None:
-            return {"git": git_source}
+            return git_source
         # A link to a Zenodo record is that record, not a file. Read as the
         # DOI it stands for, since the two name the same thing and a record
         # is a landing page: downloading it would save the HTML and call it
@@ -510,7 +510,7 @@ def source_from_location(
         return {"url": location}
     ssh_source = _git_source_from_ssh_url(location, ref=ref)
     if ssh_source is not None:
-        return {"git": ssh_source}
+        return ssh_source
     segments = location.split("/")
     if len(segments) < 3:
         raise ValueError(
@@ -521,9 +521,32 @@ def source_from_location(
     return {"project": "/".join(segments[:2]), "path": "/".join(segments[2:])}
 
 
+def git_source(imported_from: dict) -> dict | None:
+    """Read a Git source out of an entry, flat or nested.
+
+    Flat is the spelling written now; ``git: {repo_url: ...}`` is what
+    earlier versions wrote, and is still found in projects. Returned in
+    the flat form either way, so callers only handle one shape.
+    """
+    nested = imported_from.get("git")
+    if isinstance(nested, dict):
+        return {
+            "git_repo_url": nested.get("repo_url"),
+            "path": nested.get("path"),
+            "git_ref": nested.get("ref"),
+            "git_rev": nested.get("rev"),
+        }
+    if imported_from.get("git_repo_url") is not None:
+        return {
+            k: imported_from.get(k)
+            for k in ("git_repo_url", "path", "git_ref", "git_rev")
+        }
+    return None
+
+
 def default_dest_path(imported_from: dict) -> str:
     """Where an import lands when no destination was given."""
-    if (git := imported_from.get("git")) is not None:
+    if (git := git_source(imported_from)) is not None:
         return os.path.basename(str(git.get("path") or ""))
     if imported_from.get("project") is not None:
         return str(imported_from.get("path") or "")
@@ -536,9 +559,9 @@ def default_dest_path(imported_from: dict) -> str:
 
 def describe_source(imported_from: dict) -> str:
     """Name where an artifact came from, for a message to a person."""
-    if (git := imported_from.get("git")) is not None:
+    if (git := git_source(imported_from)) is not None:
         path = git.get("path")
-        where = str(git.get("repo_url") or "a Git repo")
+        where = str(git.get("git_repo_url") or "a Git repo")
         return where + (f"/{path}" if path else "")
     if (project := imported_from.get("project")) is not None:
         path = imported_from.get("path")
@@ -679,9 +702,8 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     imported_from = dict(imported_from)
     lock: dict = {}
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
-    if (git := imported_from.get("git")) is not None:
-        git = dict(git)
-        repo_url = git.get("repo_url")
+    if (git := git_source(imported_from)) is not None:
+        repo_url = git.get("git_repo_url")
         if not repo_url:
             raise ValueError("Git source has no 'repo_url' to fetch from")
         src_path = git.get("path")
@@ -694,7 +716,7 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
         # returned, so using it here would make every refresh return the
         # same thing it did last time. Nothing named means the repo's
         # default branch.
-        target = git.get("ref")
+        target = git.get("git_ref")
         with tempfile.TemporaryDirectory() as tmp_dir:
             # Blobless and checkout-less, so a big repo costs about as
             # little as fetching one file from it can
@@ -722,7 +744,7 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
                 widened = _widen_ref(tmp_dir, target, src_path)
                 if widened is not None:
                     target, src_path = widened
-                    git["ref"], git["path"] = target, src_path
+                    git["git_ref"], git["path"] = target, src_path
             try:
                 subprocess.check_call(
                     [
@@ -765,8 +787,11 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
         # What was actually fetched, so the import is reproducible even
         # when it follows a moving branch. Kept out of the entry: the entry
         # says what to follow, this says where that led.
-        git.pop("rev", None)
-        imported_from["git"] = git
+        # Written back flat, and the nested spelling dropped if the entry
+        # arrived that way, so a refresh also settles the shape
+        imported_from.pop("git", None)
+        git.pop("git_rev", None)
+        imported_from.update({k: v for k, v in git.items() if v is not None})
         return imported_from, _with_state(lock, dest_path, rev=rev)
     if (url := imported_from.get("url")) is not None:
         import requests

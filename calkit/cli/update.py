@@ -1378,7 +1378,6 @@ def update_dataset(
 
     from calkit.models.core import (
         Dataset,
-        _GitSource,
         _ImportedFromDoi,
         _ImportedFromGit,
         _ImportedFromUrl,
@@ -1425,14 +1424,12 @@ def update_dataset(
                 source = _ImportedFromDoi(doi=imported_from_doi, date=date)
             else:
                 source = _ImportedFromGit(
-                    git=_GitSource(
-                        repo_url=calkit.normalize_git_url(
-                            imported_from_git_url or ""
-                        ),
-                        ref=imported_from_git_ref,
-                        rev=imported_from_git_rev,
-                        path=imported_from_git_path,
+                    git_repo_url=calkit.normalize_git_url(
+                        imported_from_git_url or ""
                     ),
+                    git_ref=imported_from_git_ref,
+                    git_rev=imported_from_git_rev,
+                    path=imported_from_git_path,
                     date=date,
                 )
         except ValidationError as e:

@@ -107,12 +107,12 @@ corrected if the guess was wrong. `--git-ref` still overrides it.
 
 Other addresses work too, and are read as what they are:
 
-| Written as                          | Recorded as                  |
-| ----------------------------------- | ---------------------------- |
-| A GitHub or GitLab link to a file   | `git`, with `ref` and `path` |
-| Any other URL                       | `url`                        |
-| A DOI, bare or as a `doi.org` link  | `doi`                        |
-| `someone/some-project/path/to/file` | `project`                    |
+| Written as                          | Recorded as                               |
+| ----------------------------------- | ----------------------------------------- |
+| A GitHub or GitLab link to a file   | `git_repo_url`, with `git_ref` and `path` |
+| Any other URL                       | `url`                                     |
+| A DOI, bare or as a `doi.org` link  | `doi`                                     |
+| `someone/some-project/path/to/file` | `project`                                 |
 
 A DOI is recognized rather than downloaded, since it resolves to a
 landing page: saving that HTML and calling it the data is the mistake
@@ -126,10 +126,9 @@ the commit the file actually came from, even when a branch was named:
 misc:
   - path: scripts/setup.sh
     imported_from:
-      git:
-        repo_url: https://github.com/myorg/setups.git
-        path: setups/setup.sh
-        ref: main
+      git_repo_url: https://github.com/myorg/setups.git
+      path: setups/setup.sh
+      git_ref: main
 ```
 
 The copy is committed here rather than fetched on demand, so the project
@@ -142,11 +141,11 @@ To pick up later changes:
 calkit sync import scripts/setup.sh
 ```
 
-That takes the latest of whatever the entry follows---its `ref` if it
+That takes the latest of whatever the entry follows---its `git_ref` if it
 names one, and the repo's default branch otherwise---and records the
-commit it lands on in `rev`.
-So `ref` is the question and `rev` is the answer: reading the answer back
-would make refreshing a no-op.
+commit it lands on in the lock file.
+So `git_ref` is the question and the recorded commit is the answer:
+reading the answer back would make refreshing a no-op.
 
 `--git-ref` changes what an entry follows, from then on rather than just
 this once:
@@ -155,7 +154,7 @@ this once:
 calkit sync import scripts/setup.sh --git-ref v1.2
 ```
 
-A `ref` naming a commit rather than a branch is a fixed point, so an
+A `git_ref` naming a commit rather than a branch is a fixed point, so an
 import pinned that way---including one taken from a link to a file at a
 particular commit---stays where it is when refreshed.
 
@@ -187,7 +186,7 @@ anything was skipped, so a script notices.
 ## What goes where
 
 `calkit.yaml` records what a person declared---the repo, the path within
-it, and the `ref` to follow. What a fetch resolved to goes in
+it, and the `git_ref` to follow. What a fetch resolved to goes in
 `.calkit/imports.json`, keyed by path:
 
 ```json
@@ -205,7 +204,7 @@ bytes, the way they do from `dvc.lock`. Everything Calkit keeps under
 `.calkit` is managed by Calkit---read and write it through the CLI, the
 web app, or the extension rather than by hand.
 
-To pin an import, write the commit hash as its `ref`. A commit is a thing
+To pin an import, write the commit hash as its `git_ref`. A commit is a thing
 to follow that happens never to move, so no separate field is needed and
 `calkit.yaml` stays a statement of intent.
 
@@ -218,7 +217,8 @@ calkit sync import scripts/setup.sh
 # Error: 'scripts/setup.sh' has been edited since it was imported ...
 ```
 
-An entry written before this split carries its `rev` in `calkit.yaml`.
+An entry written before this split carries its `git_rev` in
+`calkit.yaml`.
 It is still read, and refreshing the import moves it across, so nothing
 has to be migrated by hand.
 
@@ -329,7 +329,8 @@ beats an attestation whenever one exists. Prefer, in order:
 1. **A DOI**, which resolves and is citable
 2. **A Git repo at a specific commit**, which names exact bytes. A repo and
    path with no revision names whatever is there today, which is a mutable
-   claim dressed as a citation, so `rev` must be a commit hash rather than a
+   claim dressed as a citation, so `git_rev` must be a commit hash rather
+   than a
    branch or tag
 3. **A URL**, optionally with the date it was retrieved
 4. **An attestation** that someone collected or created it, when there's

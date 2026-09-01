@@ -100,7 +100,14 @@ function PlotlyThumbnail({ figure }: { figure: Figure }) {
       try {
         const spec = JSON.parse(decodeBase64Utf8(String(figure.content)))
         if (!spec.data || !spec.layout) throw new Error("not a Plotly figure")
-        const Plotly = (await import("plotly.js")).default
+        // The prebuilt bundle, which is what react-plotly.js imports too --
+        // bare "plotly.js" resolves to its unbuilt source entry, which is a
+        // second copy of the library with different interop. It carries no
+        // types of its own; the API is the one "plotly.js" declares.
+        const Plotly =
+          // @ts-expect-error -- prebuilt bundle, untyped; see above
+          (await import("plotly.js/dist/plotly"))
+            .default as typeof import("plotly.js")
         const url = await Plotly.toImage(
           { data: spec.data, layout: thumbnailLayout(spec.layout) },
           { format: "webp", width: 320, height: 200 },

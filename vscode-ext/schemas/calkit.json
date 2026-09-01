@@ -8597,7 +8597,7 @@
     },
     "_ImportedFromGit": {
       "additionalProperties": false,
-      "description": "Data from a Git repo that isn't a Calkit project.\n\nWritten flat, the way a project source is: everything here is already\ninside ``imported_from``, and the source-naming key beside it says\nwhat ``path`` is a path within, so nesting adds a level without\nadding clarity. The nested ``git:`` spelling earlier versions wrote is\nstill read.",
+      "description": "Data from a Git repo that isn't a Calkit project.\n\nWritten flat, the way a project source is: everything here is already\ninside ``imported_from``, and the source-naming key beside it says\nwhat ``path`` is a path within, so nesting adds a level without\nadding clarity.",
       "properties": {
         "date": {
           "anyOf": [

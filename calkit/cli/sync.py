@@ -135,11 +135,7 @@ def _refresh_import(
                 f"'{target}' was not imported from a Git repo, so there is "
                 "no ref to follow"
             )
-        # Read before the nested spelling is dropped, so an entry written
-        # that way keeps its repo rather than losing it
-        git["git_ref"] = git_ref
-        imported_from.pop("git", None)
-        imported_from.update({k: v for k, v in git.items() if v is not None})
+        imported_from["git_ref"] = git_ref
     # A refresh overwrites, so a file edited since it was fetched would
     # lose that work silently. Reported rather than merged: an import is
     # inbound-only, so there is no other side to merge with.

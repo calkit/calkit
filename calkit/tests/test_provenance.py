@@ -201,15 +201,9 @@ def test_git_source_records_intent_not_resolved_state():
     assert source(**intent, git_rev=sha)["git_rev"] == sha
     with pytest.raises(ValidationError, match="goes in 'git_ref'"):
         source(**intent, git_rev="main")
-    # The nested spelling earlier versions wrote is read into the flat one
-    assert MiscArtifact(
-        path="s.sh",
-        imported_from={"git": {"repo_url": "u", "path": "a", "ref": "main"}},
-    ).model_dump(exclude_none=True)["imported_from"] == {
-        "git_repo_url": "u",
-        "path": "a",
-        "git_ref": "main",
-    }
+    # Nesting under 'git' is refused: one way to write each source
+    with pytest.raises(ValidationError, match="written flat"):
+        MiscArtifact(path="s.sh", imported_from={"git": {"repo_url": "u"}})
 
 
 def test_fetch_resolves_a_slashed_ref(tmp_dir):
@@ -329,8 +323,8 @@ def test_import_record_refuses_what_it_cannot_record():
     ta = TypeAdapter(ImportedFromType)
     sha = "0123456789abcdef0123456789abcdef01234567"
     for bad in [
-        # 'rev' belongs inside 'git', not beside it
-        {"git": {"git_repo_url": "u", "path": "a", "rev": sha}, "rev": sha},
+        # A Git source nested under 'git' rather than written flat
+        {"git": {"repo_url": "u", "path": "a"}},
         # A misspelled field name
         {"url": "https://x/a.csv", "dat": "2026-01-01"},
         # Two sources at once: one of them would have been dropped
@@ -342,7 +336,9 @@ def test_import_record_refuses_what_it_cannot_record():
     # Each source on its own still validates, with its optional date
     for good in [
         {
-            "git": {"git_repo_url": "u", "path": "a", "rev": sha},
+            "git_repo_url": "u",
+            "path": "a",
+            "git_rev": sha,
             "date": "2026-01-01",
         },
         {"url": "https://x/a.csv", "date": "2026-01-01"},
@@ -520,13 +516,12 @@ def test_import_record_accepts_the_shapes_people_write():
         "git_repo_url": "https://github.com/o/r",
         "path": "a.sh",
     }
-    # The nested spelling earlier versions wrote reads into the same thing
-    assert dump(
-        {"git": {"repo_url": "https://github.com/o/r", "path": "a.sh"}}
-    ) == {
-        "git_repo_url": "https://github.com/o/r",
-        "path": "a.sh",
-    }
+    # Nesting under 'git' is refused rather than quietly accepted as a
+    # second spelling
+    with pytest.raises(ValidationError, match="written flat"):
+        ta.validate_python(
+            {"git": {"repo_url": "https://github.com/o/r", "path": "a.sh"}}
+        )
     # An origin that can be stated but not resolved
     assert dump({"description": "Emailed by someone@example.com."}) == {
         "description": "Emailed by someone@example.com."

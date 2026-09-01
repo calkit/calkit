@@ -145,8 +145,7 @@ class _ImportedFromGit(BaseModel):
     Written flat, the way a project source is: everything here is already
     inside ``imported_from``, and the source-naming key beside it says
     what ``path`` is a path within, so nesting adds a level without
-    adding clarity. The nested ``git:`` spelling earlier versions wrote is
-    still read.
+    adding clarity.
     """
 
     # See the note on the other variants
@@ -366,9 +365,9 @@ def _normalize_imported_from(v: object) -> object:
     telling which it is is the same job ``calkit import path`` already
     does when it reads a source off the command line.
 
-    A Git source nested under ``git`` is read into the flat form. That
-    is what earlier versions wrote, and what ``calkit import path`` wrote
-    until this became the canonical spelling.
+    A Git source nested under ``git`` is refused rather than read. There
+    is one way to write each source; a second spelling accepted quietly
+    is one that never goes away.
     """
     if isinstance(v, str):
         from calkit.provenance import source_from_location
@@ -379,19 +378,12 @@ def _normalize_imported_from(v: object) -> object:
             # Not something we can place; leave it to fail with the
             # union's own message rather than a less specific one
             return v
-    if isinstance(v, dict) and isinstance(v.get("git"), dict):
-        # The nested spelling earlier versions wrote
-        v = dict(v)
-        git = dict(v.pop("git"))
-        flat = {
-            "git_repo_url": git.pop("repo_url", None),
-            "path": git.pop("path", None),
-            "git_ref": git.pop("ref", None),
-            "git_rev": git.pop("rev", None),
-        }
-        # Anything unrecognized is left where it was, so it still fails
-        # rather than being quietly discarded
-        return {k: val for k, val in flat.items() if val is not None} | git | v
+    if isinstance(v, dict) and "git" in v:
+        raise ValueError(
+            "a Git source is written flat, as 'git_repo_url' with 'path' "
+            "and 'git_ref', the way a project source is --- not nested "
+            "under 'git'"
+        )
     return v
 
 

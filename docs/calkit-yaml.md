@@ -602,8 +602,7 @@ Data from a Git repo that isn't a Calkit project.
 Written flat, the way a project source is: everything here is already
 inside `imported_from`, and the source-naming key beside it says
 what `path` is a path within, so nesting adds a level without
-adding clarity. The nested `git:` spelling earlier versions wrote is
-still read.
+adding clarity.
 
 | Parameter      | Type         | Required | Default | Description                                                                                                                                                                                                                                                                |
 | -------------- | ------------ | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

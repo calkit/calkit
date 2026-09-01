@@ -522,26 +522,13 @@ def source_from_location(
 
 
 def git_source(imported_from: dict) -> dict | None:
-    """Read a Git source out of an entry, flat or nested.
-
-    Flat is the spelling written now; ``git: {repo_url: ...}`` is what
-    earlier versions wrote, and is still found in projects. Returned in
-    the flat form either way, so callers only handle one shape.
-    """
-    nested = imported_from.get("git")
-    if isinstance(nested, dict):
-        return {
-            "git_repo_url": nested.get("repo_url"),
-            "path": nested.get("path"),
-            "git_ref": nested.get("ref"),
-            "git_rev": nested.get("rev"),
-        }
-    if imported_from.get("git_repo_url") is not None:
-        return {
-            k: imported_from.get(k)
-            for k in ("git_repo_url", "path", "git_ref", "git_rev")
-        }
-    return None
+    """Read a Git source out of an entry, or None if it isn't one."""
+    if imported_from.get("git_repo_url") is None:
+        return None
+    return {
+        k: imported_from.get(k)
+        for k in ("git_repo_url", "path", "git_ref", "git_rev")
+    }
 
 
 def default_dest_path(imported_from: dict) -> str:
@@ -787,9 +774,6 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
         # What was actually fetched, so the import is reproducible even
         # when it follows a moving branch. Kept out of the entry: the entry
         # says what to follow, this says where that led.
-        # Written back flat, and the nested spelling dropped if the entry
-        # arrived that way, so a refresh also settles the shape
-        imported_from.pop("git", None)
         git.pop("git_rev", None)
         imported_from.update({k: v for k, v in git.items() if v is not None})
         return imported_from, _with_state(lock, dest_path, rev=rev)

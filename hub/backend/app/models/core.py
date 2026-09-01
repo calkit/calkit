@@ -9,11 +9,13 @@ import sqlalchemy
 from app import utcnow
 
 if TYPE_CHECKING:
-    # Release lives in app.models.releases (imported into the app.models
-    # namespace via __init__); this guarded import resolves the "Release"
-    # forward reference in Project.releases for type checkers without creating
-    # a runtime circular import.
+    # These live in sibling modules that import back from here (all pulled
+    # into the app.models namespace via __init__); the guarded imports
+    # resolve the forward references in Project's relationships for type
+    # checkers without creating a runtime circular import.
+    from app.models.contrib import ContribRequest
     from app.models.releases import Release
+    from app.models.tasks import Task
 from pydantic import BaseModel, EmailStr, computed_field
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -598,6 +600,14 @@ class ProjectBase(SQLModel):
         default=None, min_length=0, max_length=2048
     )
     is_public: bool = Field(default=False)
+    # Who may comment without asking first. "viewers" means anyone who can
+    # see the project, which is the sane default -- feedback is the point.
+    # "collaborators" restricts it to members, and turns the comment box on
+    # an artifact into a "request to comment" affordance for everyone else,
+    # which raises an inbound ContribRequest rather than a dead end.
+    comment_access: Literal["viewers", "collaborators"] = Field(
+        default="viewers", max_length=32
+    )
     created: datetime | None = Field(default_factory=utcnow)
     updated: datetime | None = Field(default_factory=utcnow)
     git_repo_url: str = Field(max_length=2048)
@@ -649,6 +659,12 @@ class Project(ProjectBase, table=True):
         back_populates="project", cascade_delete=True
     )
     releases: list["Release"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    contrib_requests: list["ContribRequest"] = Relationship(
+        back_populates="project", cascade_delete=True
+    )
+    tasks: list["Task"] = Relationship(
         back_populates="project", cascade_delete=True
     )
     onboarding_flags: list["UserOnboardingFlag"] = Relationship(

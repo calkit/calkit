@@ -39,6 +39,10 @@ to the whole project.
 Like the rest of Calkit, the hub is free and open source, so
 [you can run your own](self-hosting.md).
 
+For how to bring other people into a project--collaborators, review
+requests, and the work queue that comes back--see
+[collaboration](../collaboration.md).
+
 ## Using DVC remotes other than a Calkit hub
 
 It's possible to configure DVC to use a different remote storage location,

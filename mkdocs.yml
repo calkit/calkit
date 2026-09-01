@@ -40,6 +40,8 @@ nav:
   - Sharing, collaboration, and backup (Calkit hub):
       - hub/index.md
       - Running your own: hub/self-hosting.md
+  - Collaboration: collaboration.md
+  - Project management: project-management.md
   - Use with AI tools: ai-tools.md
   - Questions, hypotheses, answers, and evidence: questions.md
   - Version control: version-control.md
@@ -91,6 +93,11 @@ nav:
   - Reproducibility: reproducibility.md
   - Governance: governance.md
   - Acknowledgements: acknowledgements.md
+# Internal design notes live in docs/dev; they're for contributors, not
+# users, so they're built out of the site rather than shown unlinked.
+exclude_docs: |
+  dev/
+
 markdown_extensions:
   - admonition
   - attr_list

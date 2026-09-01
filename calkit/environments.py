@@ -779,7 +779,8 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
     environment are ignored rather than refused, so a project still
     spelling it the old way would otherwise have its files go silently
     untracked---which is the one failure the field exists to prevent.
-    ``inputs`` wins if somehow both are written.
+    Setting both is refused rather than resolved one way, since it is the
+    same list written twice in two places that can drift apart.
 
     This is the only reader of either spelling, so the alias lives in one
     place: the models accept it through ``AliasChoices``, and everything

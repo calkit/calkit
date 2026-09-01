@@ -2345,7 +2345,7 @@ Arguments:
 | Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                              |
 | ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src_path`  | str  | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
-| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the source path.                                                                                                                                                                                   |
+| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the path within the source project for a Calkit project source, and to the file's name for a Git repo, a URL, or anything else that has no project-relative path.                                  |
 
 Options:
 

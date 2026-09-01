@@ -572,7 +572,7 @@ def test_run_in_env_detect_default(tmp_dir):
 
 
 def test_run_in_env_system(tmp_dir):
-    def _write_ck_info(environments: dict) -> None:
+    def _write_envs_to_ck_info(environments: dict) -> None:
         # Dumped rather than written as literal YAML so the test says what
         # the environment is, not how it's spelled
         with open("calkit.yaml", "w") as f:
@@ -580,7 +580,7 @@ def test_run_in_env_system(tmp_dir):
 
     # A named system env runs the command on this machine, like the built-in
     # '_system' env, but with a lock file recording what it pinned
-    _write_ck_info({"sys": {"kind": "system", "lock": ["os"]}})
+    _write_envs_to_ck_info({"sys": {"kind": "system", "lock": ["os"]}})
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -596,7 +596,9 @@ def test_run_in_env_system(tmp_dir):
     # it is handed.
     with open("setup_env.sh", "w") as f:
         f.write("export CK_TEST_SETUP=from-setup\n")
-    _write_ck_info({"sys2": {"kind": "system", "inputs": ["setup_env.sh"]}})
+    _write_envs_to_ck_info(
+        {"sys2": {"kind": "system", "inputs": ["setup_env.sh"]}}
+    )
     out = subprocess.check_output(
         [
             "calkit",
@@ -683,7 +685,7 @@ def test_run_in_env_system(tmp_dir):
     )
     # Setup commands are refused for an env kind that has nowhere to run
     # them, rather than silently dropped
-    _write_ck_info({"img": {"kind": "docker", "image": "x"}})
+    _write_envs_to_ck_info({"img": {"kind": "docker", "image": "x"}})
     res = subprocess.run(
         ["calkit", "xenv", "-n", "img", "--setup", "true", "--", "echo", "hi"],
         capture_output=True,
@@ -693,7 +695,7 @@ def test_run_in_env_system(tmp_dir):
     assert "only applies to a 'system' environment" in res.stdout + res.stderr
     # A failing setup command stops the stage rather than running it
     # without whatever the setup was meant to provide
-    _write_ck_info({"bad": {"kind": "system"}})
+    _write_envs_to_ck_info({"bad": {"kind": "system"}})
     res = subprocess.run(
         [
             "calkit",
@@ -713,7 +715,9 @@ def test_run_in_env_system(tmp_dir):
     assert res.returncode != 0
     assert "ran" not in res.stdout
     # A host naming this machine runs here rather than connecting to it
-    _write_ck_info({"here": {"kind": "system", "host": socket.gethostname()}})
+    _write_envs_to_ck_info(
+        {"here": {"kind": "system", "host": socket.gethostname()}}
+    )
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "here", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -723,7 +727,7 @@ def test_run_in_env_system(tmp_dir):
     # without one has nothing to derive from and says so rather than
     # picking a directory it was never told about. No user is needed: SSH
     # resolves that itself.
-    _write_ck_info(
+    _write_envs_to_ck_info(
         {"remote": {"kind": "system", "host": "not-this-box.invalid"}}
     )
     res = subprocess.run(

@@ -245,7 +245,9 @@ def import_path(
         typer.Argument(
             help=(
                 "Path at which to save it in this project. Defaults to the "
-                "source path."
+                "path within the source project for a Calkit project "
+                "source, and to the file's name for a Git repo, a URL, or "
+                "anything else that has no project-relative path."
             )
         ),
     ] = None,

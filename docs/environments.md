@@ -345,7 +345,6 @@ so what gets pulled back is exactly what was built,
 and Calkit checks the image's layers against the lock after pulling.
 
 <!-- prettier-ignore -->
-<!-- prettier-ignore -->
 !!! note
 
     Pushing to a registry requires being logged into it. When the GitHub
@@ -358,7 +357,6 @@ and Calkit checks the image's layers against the lock after pulling.
     Actions, the `calkit/calkit/actions/run` action logs in automatically,
     so long as the workflow grants the `packages: write` permission.
 
-<!-- prettier-ignore -->
 <!-- prettier-ignore -->
 !!! note
 
@@ -387,7 +385,6 @@ The digest goes into the lock file as soon as the image is built, since a
 manifest is content-addressed: the digest an image is built with is the
 one it has once it's pushed, so pushing it leaves the lock alone.
 
-<!-- prettier-ignore -->
 <!-- prettier-ignore -->
 !!! note
 
@@ -1079,7 +1076,6 @@ Locking a property the machine can't supply, e.g., a tool that isn't
 installed, is an error rather than a recorded null---a stage that claims to
 be pinned to something it isn't is worse than one that pins nothing.
 
-<!-- prettier-ignore -->
 <!-- prettier-ignore -->
 !!! note
     The properties available to `lock` are a fixed set, so editors can offer

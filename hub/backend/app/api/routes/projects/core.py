@@ -63,6 +63,7 @@ import calkit.resources
 import calkit.templates
 from app import (
     arxiv,
+    cache,
     github,
     messaging,
     mixpanel,
@@ -7864,6 +7865,27 @@ class References(BaseModel):
     stages: list[str] | None = None
 
 
+def parse_bib_entries(raw_text: str) -> list[dict]:
+    """Parse a BibTeX file into its entries, cached on the text itself.
+
+    Parsing dominates the references endpoint: a project with a paper-sized
+    bibliography spends several seconds here, and does it again on every
+    read. The result is a pure function of the bytes, so the cache is keyed
+    by their hash -- which also means the copies of one shared ``.bib`` that
+    a multi-paper project keeps per publication all answer from a single
+    entry, rather than being parsed once each.
+    """
+    key = cache.make_key(
+        "bib", hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    )
+    cached = cache.get_json(key)
+    if isinstance(cached, list):
+        return cached
+    entries = bibtexparser.loads(raw_text).entries
+    cache.set_json(key, entries)
+    return entries
+
+
 @router.get("/projects/{owner_name}/{project_name}/references")
 def get_project_references(
     owner_name: str,
@@ -8014,8 +8036,7 @@ def get_project_references(
             if include_raw_text:
                 ref_collection["raw_text"] = raw_text
             try:
-                refs = bibtexparser.loads(raw_text)
-                entries = refs.entries
+                entries = parse_bib_entries(raw_text)
             except Exception as e:
                 logger.warning(f"Failed to parse BibTeX file {path}: {e}")
                 entries = []

@@ -154,6 +154,18 @@ class Settings(BaseSettings):
     # set this empty for full clones.
     GIT_CLONE_FILTER: str = "blob:none"
 
+    # Shared cache. Everything the project view derives from a repo -- stage
+    # statuses, parsed pipelines, figure listings -- is a pure function of a
+    # commit SHA, so it can be cached until that SHA moves. Running several
+    # workers means a per-process cache is cold most of the time, hence a
+    # shared one. Unset disables caching entirely, which is a supported way
+    # to run: every read just recomputes.
+    REDIS_URL: str | None = None
+    # How long a cached entry lives. Entries are keyed by commit SHA and so
+    # are never stale, but they still expire so a repo nobody visits again
+    # doesn't hold memory forever.
+    CACHE_TTL_S: int = 86400
+
     # Object storage configuration
     # The root under which this hub stores all of its objects, usually
     # just a bucket; project DVC data lives in a folder within it (see

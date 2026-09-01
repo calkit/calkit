@@ -19,6 +19,29 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_DB=${POSTGRES_DB?Variable not set}
 
+  cache:
+    image: valkey/valkey:8-alpine
+    restart: always
+    # Everything cached is derived from a commit that is still in Git, so
+    # losing the cache costs recomputation and nothing else. No volume, and
+    # eviction rather than an out-of-memory error when it fills.
+    command:
+      [
+        "valkey-server",
+        "--save",
+        "",
+        "--maxmemory",
+        "512mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 5s
+
   adminer:
     image: adminer
     restart: always
@@ -71,6 +94,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -104,6 +128,9 @@ services:
       db:
         condition: service_healthy
         restart: true
+      cache:
+        condition: service_healthy
+        restart: true
       prestart:
         condition: service_completed_successfully
     environment:
@@ -122,6 +149,7 @@ services:
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - FEEDBACK_EMAIL=${FEEDBACK_EMAIL-}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -196,6 +224,9 @@ services:
       db:
         condition: service_healthy
         restart: true
+      cache:
+        condition: service_healthy
+        restart: true
       prestart:
         condition: service_completed_successfully
     environment:
@@ -213,6 +244,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}

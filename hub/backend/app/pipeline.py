@@ -26,9 +26,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Literal
 
 import ruamel.yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 import calkit.notebooks
+from app import cache
 from app.dvc import get_data_fpath_for_md5
 from app.git import RepoTree
 from app.storage import get_data_prefix_for_owner
@@ -251,14 +252,29 @@ def _build_stage_status_cache_key(
 def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
     with _stage_status_cache_lock:
         cached = _stage_status_cache.get(cache_key)
-        if cached is None:
-            return None
-        cached_at, value = cached
-        if time.monotonic() - cached_at > _STAGE_STATUS_CACHE_TTL_S:
+        if cached is not None:
+            cached_at, value = cached
+            if time.monotonic() - cached_at <= _STAGE_STATUS_CACHE_TTL_S:
+                _stage_status_cache.move_to_end(cache_key)
+                return value
             del _stage_status_cache[cache_key]
-            return None
+    # Missing from this worker's memory doesn't mean nobody has computed it:
+    # with several workers, the odds are it was another one. Fall through to
+    # the shared cache before paying for the object-storage checks again.
+    shared = cache.get_json(cache.make_key("stage-status", cache_key))
+    if shared is None:
+        return None
+    try:
+        value = {k: StageStatus.model_validate(v) for k, v in shared.items()}
+    except (ValidationError, AttributeError) as e:
+        logger.warning(f"Ignoring unreadable cached stage statuses: {e}")
+        return None
+    with _stage_status_cache_lock:
+        _stage_status_cache[cache_key] = (time.monotonic(), value)
         _stage_status_cache.move_to_end(cache_key)
-        return value
+        if len(_stage_status_cache) > _STAGE_STATUS_CACHE_MAX:
+            _stage_status_cache.popitem(last=False)
+    return value
 
 
 def _stage_status_cache_put(
@@ -269,6 +285,11 @@ def _stage_status_cache_put(
         _stage_status_cache.move_to_end(cache_key)
         if len(_stage_status_cache) > _STAGE_STATUS_CACHE_MAX:
             _stage_status_cache.popitem(last=False)
+    cache.set_json(
+        cache.make_key("stage-status", cache_key),
+        {k: v.model_dump() for k, v in value.items()},
+        ttl=_STAGE_STATUS_CACHE_TTL_S,
+    )
 
 
 def _build_outs_index(lock_stages: dict) -> dict[str, str | None]:

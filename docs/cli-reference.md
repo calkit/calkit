@@ -3249,11 +3249,12 @@ Arguments:
 
 Options:
 
-| Option           | Type | Required | Default | Description                                                                                              |
-| ---------------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------- |
-| `--output`, `-o` | text | yes      |         | Output LaTeX file path(s).                                                                               |
-| `--command`      | text | no       |         | Command name to use in LaTeX output.                                                                     |
-| `--format-json`  | text | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc. |
+| Option           | Type | Required | Default | Description                                                                                                                     |
+| ---------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o` | text | yes      |         | Output LaTeX file path(s).                                                                                                      |
+| `--command`      | text | no       |         | Command name to use in LaTeX output.                                                                                            |
+| `--key`          | text | no       |         | Key to expose, dotted to reach into nested output, e.g., 'cases.a.cp'. Repeatable. Without any, every top-level key is exposed. |
+| `--format-json`  | text | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
 <a id="subcommand-latex-tex-build"></a>
 

@@ -1082,6 +1082,28 @@ def test_check_repro_literals(tmp_dir):
     )
     assert bad.returncode != 0
     assert "Invalid category" in bad.stderr
+    # A stage that names a nested key puts that value within the
+    # document's reach, so typing it is the same copy and paste. Reading
+    # only the top level would miss exactly what the stage exposed.
+    with open("results.json", "w") as f:
+        json.dump({"DragCoefficient": 0.42, "cases": {"a": {"cp": 0.7321}}}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"]["stages"]["results-latex"]["keys"] = [
+        "DragCoefficient",
+        "cases.a.cp",
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("main.tex", "a") as f:
+        f.write("A nested value typed by hand: 0.7321.\n")
+    out = subprocess.check_output(
+        ["calkit", "check", "repro", "--json"], text=True
+    )
+    retyped_values = {
+        f["value"]: f["source"] for f in json.loads(out)["retyped_values"]
+    }
+    assert retyped_values.get("0.7321") == "results.json:cases.a.cp"
     # The file a json-to-latex stage writes is full of the very numbers
     # the check looks for, and reporting them would flag the fix itself
     with open("results.tex", "w") as f:
@@ -1090,7 +1112,10 @@ def test_check_repro_literals(tmp_dir):
         ["calkit", "check", "repro", "--json"], text=True
     )
     parsed = json.loads(out)
-    assert [f["value"] for f in parsed["retyped_values"]] == ["0.42"]
+    assert sorted(f["value"] for f in parsed["retyped_values"]) == [
+        "0.42",
+        "0.7321",
+    ]
     assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
 
 

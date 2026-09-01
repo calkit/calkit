@@ -1308,6 +1308,15 @@
           "description": "Arguments over which to run this stage multiple times.",
           "title": "Iterate Over"
         },
+        "keys": {
+          "default": [],
+          "description": "Keys to expose to the document, dotted to reach into nested output, e.g., 'cases.a.cp'. Without any, every top-level key is exposed, which is fine for a results file written for the paper and unwieldy for one exported wholesale from an analysis.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
         "kind": {
           "const": "json-to-latex",
           "default": "json-to-latex",

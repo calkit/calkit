@@ -370,11 +370,12 @@ Model class: `DockerCommandStage`
 
 Model class: `JsonToLatexStage`
 
-| Kind-specific parameter | Type                   | Required | Default    | Description                                         |
-| ----------------------- | ---------------------- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage. |
-| `command_name`          | str \| None            | no       | null       | Name of the LaTeX command to define for each value. |
-| `format`                | dict[str, str] \| None | no       | null       | Format strings for values, keyed by their JSON key. |
+| Kind-specific parameter | Type                   | Required | Default    | Description                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------- | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage.                                                                                                                                                                                                   |
+| `command_name`          | str \| None            | no       | null       | Name of the LaTeX command to define for each value.                                                                                                                                                                                                   |
+| `format`                | dict[str, str] \| None | no       | null       | Format strings for values, keyed by their JSON key.                                                                                                                                                                                                   |
+| `keys`                  | list[str]              | no       |            | Keys to expose to the document, dotted to reach into nested output, e.g., 'cases.a.cp'. Without any, every top-level key is exposed, which is fine for a results file written for the paper and unwieldy for one exported wholesale from an analysis. |
 
 ### `julia-command`
 

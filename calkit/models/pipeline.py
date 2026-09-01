@@ -1157,6 +1157,16 @@ class JsonToLatexStage(Stage):
         default=None,
         description="Format strings for values, keyed by their JSON key.",
     )
+    keys: list[str] = Field(
+        default=[],
+        description=(
+            "Keys to expose to the document, dotted to reach into nested "
+            "output, e.g., 'cases.a.cp'. Without any, every top-level key "
+            "is exposed, which is fine for a results file written for the "
+            "paper and unwieldy for one exported wholesale from an "
+            "analysis."
+        ),
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1173,6 +1183,8 @@ class JsonToLatexStage(Stage):
             cmd += f" --output '{out_path}'"
         if self.command_name is not None:
             cmd += f" --command {self.command_name}"
+        for key in self.keys:
+            cmd += f" --key {shlex.quote(key)}"
         if self.format is not None:
             fmt_json = json.dumps(self.format)
             cmd += f" --format-json '{fmt_json}'"

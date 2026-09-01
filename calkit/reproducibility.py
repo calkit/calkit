@@ -669,6 +669,8 @@ def _project_values(wdir: str, stages: dict) -> dict[str, str]:
     """
     import json
 
+    from calkit.questions import resolve_key
+
     values: dict[str, str] = {}
     for stage in stages.values():
         cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
@@ -689,7 +691,35 @@ def _project_values(wdir: str, stages: dict) -> dict[str, str]:
                     value, bool
                 ):
                     values.setdefault(str(value), f"{dep}:{key}")
+            # A stage can name nested keys, which the document can then
+            # reference and therefore retype. Reading only the top level
+            # would miss exactly the values the stage went out of its way
+            # to expose.
+            for key in _named_keys(cmd):
+                try:
+                    value = resolve_key(data, key)
+                except (KeyError, ValueError, IndexError, TypeError):
+                    continue
+                if isinstance(value, (int, float)) and not isinstance(
+                    value, bool
+                ):
+                    values.setdefault(str(value), f"{dep}:{key}")
     return values
+
+
+def _named_keys(cmd: str) -> list[str]:
+    """The keys a ``json-to-latex`` stage names with ``--key``."""
+    import shlex
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return []
+    return [
+        parts[i + 1]
+        for i, part in enumerate(parts)
+        if part == "--key" and i + 1 < len(parts)
+    ]
 
 
 def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:

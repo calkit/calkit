@@ -228,6 +228,10 @@ def test_check_questions(tmp_dir):
     assert q4.evidence[0].current == 8
     assert q4.evidence[0].stage == "summarize"
     assert q4.evidence[3].status == "ok"
+    # The figure is real and nothing says where it came from: no stage
+    # makes it and it is not declared with an import or a person
+    assert q4.evidence[4].status == "unattributed"
+    assert [ev.path for ev in status.unattributed] == ["figures/plot.png"]
     rendered = render_question(ck_info["questions"][3], ck_info, ".")
     assert rendered["answer"] == "8 of eight do, a 5.1x gain."
     assert rendered["evidence"][2]["explanation"] == "The best is a."
@@ -266,14 +270,16 @@ def test_check_questions(tmp_dir):
     assert q4.evidence[0].status == "changed"
     assert "n_top was 8 at" in (q4.evidence[0].message or "")
     assert q4.evidence[1].status == "ok"
-    assert q4.evidence[4].status == "ok"
+    # Advice does not fail the check; only stale and broken do
+    assert q4.evidence[4].status == "unattributed"
     assert not status.ok
     report = format_status(status)
     assert "[stale] Do the top structures use the rectifier?" in report
     assert "edit the question" in report
-    assert "1 stale" in report
-    assert "1 answered without evidence" in report
-    assert "2 unanswered" in report
+    assert "Answers whose evidence changed since: 1 \u274c" in report
+    assert "Answers given without evidence: 1 (worth a look)" in report
+    assert "Questions answered: 2/4" in report
+    assert "Evidence with nothing recorded behind it: 1" in report
     assert (
         render_question(ck_info["questions"][3], ck_info, ".")["answer"]
         == "0 of eight do, a 5.1x gain."

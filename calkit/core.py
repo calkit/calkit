@@ -179,6 +179,16 @@ DVC_EXTENSIONS = [
 DVC_SIZE_THRESH_BYTES = 5_000_000
 
 
+def check_or_x(val: bool | int) -> str:
+    """A check mark for something that holds, an X for something that does
+    not.
+
+    The mark every report prints, so a project's checks read the same way
+    wherever they are shown.
+    """
+    return "✅" if val else "❌"
+
+
 def echo(message: str) -> None:
     """Print a message safely, replacing unencodable characters
     (e.g., emoji).

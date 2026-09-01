@@ -36,8 +36,11 @@ Judgment, done here:
 ## Procedure
 
 1. Run `calkit check repro --json` and read the report. The plain output
-   is a summary; `--json` carries every finding, and a person looking for
-   themselves gets them from `calkit check repro -c <category>`.
+   is a summary, each countable line naming the `-c` that opens it;
+   `--json` carries every finding. The command exits non-zero only for
+   `retyped_values`, a value the project's own pipeline computes and the
+   document typed anyway; everything else is advice and leaves the exit
+   code alone. Read the findings, not the exit code.
 
 2. **Pipeline and environment findings** come first: a value can't be made
    traceable until there is a pipeline to make it. See the

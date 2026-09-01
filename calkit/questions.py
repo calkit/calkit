@@ -41,7 +41,9 @@ from pydantic import BaseModel, Field
 
 import calkit
 
-EvidenceStatus = Literal["ok", "changed", "missing", "error", "skipped"]
+EvidenceStatus = Literal[
+    "ok", "changed", "missing", "error", "skipped", "unattributed"
+]
 QuestionStatus = Literal["ok", "stale", "error", "unanswered", "no-evidence"]
 CALKIT_YAML = "calkit.yaml"
 
@@ -96,6 +98,26 @@ class QuestionsStatus(BaseModel):
     def ok(self) -> bool:
         """True if no answered question is stale or broken."""
         return not self.stale and not self.errors
+
+    @property
+    def unattributed(self) -> list[EvidenceCheck]:
+        """Evidence entries nothing in the project accounts for."""
+        return [
+            ev
+            for q in self.questions
+            for ev in q.evidence
+            if ev.status == "unattributed"
+        ]
+
+    @property
+    def deprecated(self) -> list[EvidenceCheck]:
+        """Evidence entries still written as a 'result' with a key."""
+        return [
+            ev
+            for q in self.questions
+            for ev in q.evidence
+            if ev.kind == "result" and ev.key
+        ]
 
 
 # -- values and templates ---------------------------------------------------
@@ -515,6 +537,41 @@ def _check_publication_label(
     )
 
 
+def _is_attributed(
+    path: str, stage: str | None, ck_info: dict, wdir: str
+) -> bool:
+    """Whether the project says where an evidence path came from.
+
+    A pipeline stage is the strong form, in ``calkit.yaml`` or, for a
+    stage Calkit did not compile, in ``dvc.lock``. Failing that, the path
+    may be declared as an artifact that records an import or a person,
+    which is what :func:`calkit.provenance.has_provenance` reads---an
+    imported dataset or a hand-drawn schematic is accounted for even
+    though there is nothing upstream to point at.
+    """
+    from calkit.provenance import has_provenance
+
+    if stage is not None:
+        return True
+    try:
+        with open(os.path.join(wdir, "dvc.lock"), encoding="utf-8") as f:
+            if _lock_hash(f.read(), path) is not None:
+                return True
+    except OSError:
+        pass
+    for artifacts in ck_info.values():
+        if not isinstance(artifacts, list):
+            continue
+        for artifact in artifacts:
+            if (
+                isinstance(artifact, dict)
+                and artifact.get("path") == path
+                and has_provenance(artifact)
+            ):
+                return True
+    return False
+
+
 def check_evidence(
     ev: dict, ck_info: dict, wdir: str, repo: Any, since: str | None
 ) -> EvidenceCheck:
@@ -573,7 +630,19 @@ def check_evidence(
         )
         if change:
             out.status = "changed"
-            out.message = change
+            # Not overwritten: a deprecated entry that also changed is
+            # still worth migrating, and the hint is the only place it is
+            # said
+            out.message = "; ".join(filter(None, [out.message, change]))
+    if out.status == "ok" and not _is_attributed(
+        path, out.stage, ck_info, wdir
+    ):
+        out.status = "unattributed"
+        out.message = (
+            "nothing says where this came from; produce it with a pipeline "
+            "stage, or record it under figures, datasets, or publications "
+            "with 'imported_from' or 'created_by'"
+        )
     return out
 
 
@@ -625,7 +694,10 @@ def check_question(
         try:
             render(t, values)
         except KeyError as e:
-            messages.append(f"placeholder {{{e.args[0]}}} names no evidence")
+            messages.append(
+                f"placeholder {{{e.args[0]}}} names no evidence; write "
+                "'{{' and '}}' for braces meant to stay in the text"
+            )
         except (ValueError, IndexError) as e:
             messages.append(f"cannot render {t[:40]!r}...: {e}")
     statuses = {c.status for c in checks}
@@ -683,7 +755,11 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     if not status.questions:
         return "No questions defined."
     for q in status.questions:
-        needs_attention = q.status in ("stale", "error")
+        # An unattributed entry is advisory rather than a failure, but it
+        # is only ever said here, so it earns the question a block
+        needs_attention = q.status in ("stale", "error") or any(
+            ev.status == "unattributed" for ev in q.evidence
+        )
         if not verbose and not needs_attention:
             continue
         lines.append(f"{q.index}. [{q.status}] {q.question}")
@@ -695,17 +771,39 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
             where = f"{ev.path}" + (f":{ev.key}" if ev.key else "")
             detail = f" -- {ev.message}" if ev.message else ""
             lines.append(f"     {ev.kind} {where} [{ev.status}]{detail}")
+    if lines:
+        lines.append("")
     n_ok = sum(1 for q in answered if q.status == "ok")
-    summary = (
-        f"{len(answered)} answered question(s): {n_ok} consistent with "
-        f"their evidence, {len(status.stale)} stale, {len(status.errors)} "
-        "with errors"
+    lines.append(
+        f"Questions answered: {len(answered)}/{len(status.questions)}"
     )
+    if answered:
+        lines.append(
+            f"Answers consistent with their evidence: {n_ok}/{len(answered)} "
+            f"{calkit.check_or_x(n_ok == len(answered))}"
+        )
+        lines.append(
+            f"Answers whose evidence changed since: {len(status.stale)} "
+            f"{calkit.check_or_x(not status.stale)}"
+        )
+        lines.append(
+            f"Answers with broken references: {len(status.errors)} "
+            f"{calkit.check_or_x(not status.errors)}"
+        )
+    # No check mark either way on the rest: worth a look, not a verdict
     no_evidence = sum(1 for q in answered if q.status == "no-evidence")
     if no_evidence:
-        summary += f"; {no_evidence} answered without evidence"
-    unanswered = len(status.questions) - len(answered)
-    if unanswered:
-        summary += f"; {unanswered} unanswered"
-    lines.append(summary)
+        lines.append(
+            f"Answers given without evidence: {no_evidence} (worth a look)"
+        )
+    if status.unattributed:
+        lines.append(
+            "Evidence with nothing recorded behind it: "
+            f"{len(status.unattributed)} (worth a look)"
+        )
+    if status.deprecated:
+        lines.append(
+            f"Evidence written as a 'result' with a key: "
+            f"{len(status.deprecated)} (use 'kind: value')"
+        )
     return "\n".join(lines)

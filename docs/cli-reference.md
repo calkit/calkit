@@ -2886,6 +2886,8 @@ Check the reproducibility of a project.
 
 Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
 
+Exits with an error when the project types out a value its own pipeline computes, which is a defect rather than a matter of taste. Everything else here is advice and does not affect the exit code.
+
 Usage:
 
 ```text
@@ -3212,6 +3214,7 @@ Options:
 
 | Option            | Type    | Required | Default | Description                                                                         |
 | ----------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------- |
+| `--wdir`          | text    | no       | .       | Project working directory.                                                          |
 | `--verbose`, `-v` | boolean | no       | False   | List every answered question and its evidence, not only the ones needing attention. |
 | `--json`          | boolean | no       | False   | Output the report as JSON.                                                          |
 

@@ -327,6 +327,10 @@ def check_repro(
     Reports one line per check. Where a line counts something, ask for
     that category to see what it counted, e.g., 'calkit check repro -c
     retyped' for values in a manuscript the pipeline already computes.
+
+    Exits with an error when the project types out a value its own
+    pipeline computes, which is a defect rather than a matter of taste.
+    Everything else here is advice and does not affect the exit code.
     """
     from calkit.reproducibility import DETAIL_CATEGORIES, check_reproducibility
 
@@ -339,17 +343,22 @@ def check_repro(
     res = check_reproducibility(wdir=wdir, log_func=typer.echo)
     if as_json:
         calkit.echo(res.model_dump_json(indent=2))
+        if res.retyped_values:
+            raise typer.Exit(1)
         return
     if not categories:
         calkit.echo(res.to_pretty())
         # The findings themselves are a page of their own, and printing
-        # them here buries the one line that says what to do next
-        available = res.categories_with_detail
-        if available:
+        # them here buries the one line that says what to do next. Each
+        # line that has any names its own category, so the reader goes
+        # from the line that bothered them to the findings behind it.
+        if res.categories_with_detail:
             calkit.echo(
-                "For the findings behind a line above, run 'calkit check "
-                "repro -c' with any of: " + ", ".join(available)
+                "Add the '-c' shown beside a line above to see what it "
+                "counted, e.g., 'calkit check repro -c retyped'."
             )
+        if res.retyped_values:
+            raise typer.Exit(1)
         return
     for category in categories:
         items = res.details(category)
@@ -364,6 +373,8 @@ def check_repro(
             calkit.echo(f"{category} ({len(items)}):")
             for item in items:
                 calkit.echo(f"  {item}")
+    if res.retyped_values:
+        raise typer.Exit(1)
 
 
 def _echo_retyped(findings: list[dict]) -> None:
@@ -2029,6 +2040,9 @@ def check_call(
 
 @check_app.command(name="questions")
 def check_questions(
+    wdir: Annotated[
+        str, typer.Option("--wdir", help="Project working directory.")
+    ] = ".",
     verbose: Annotated[
         bool,
         typer.Option(
@@ -2054,7 +2068,7 @@ def check_questions(
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status
 
-    status = _check_questions()
+    status = _check_questions(wdir=wdir)
     if json_output:
         typer.echo(json.dumps(status.model_dump(mode="json"), indent=2))
     else:

@@ -89,14 +89,6 @@ _SCRIPT_DIRS_IGNORED = {
 }
 
 
-def _bool_to_check_x(val: bool | int) -> str:
-    """Convert a boolean to a checkmark or an X."""
-    if val:
-        return "✅"
-    else:
-        return "❌"
-
-
 #: Parts of the check that carry per-item detail, and the attribute
 #: holding it. The summary counts them; asking for a category lists them,
 #: since a wall of findings buries the one line that says what to do next.
@@ -286,35 +278,41 @@ class ReproCheck(BaseModel):
     def n_stages_with_env(self) -> int:
         return len(self.stages_with_env)
 
+    def _tag(self, category: str) -> str:
+        """Where to look for the findings behind a line, if there are any."""
+        return f" [-c {category}]" if self.details(category) else ""
+
     def to_pretty(self) -> str:
         """Format as a nice string to print."""
-        txt = f"Is a Git repo: {_bool_to_check_x(self.is_git_repo)}\n"
-        txt += f"Has README.md: {_bool_to_check_x(self.has_readme)}\n"
+        txt = f"Is a Git repo: {calkit.check_or_x(self.is_git_repo)}\n"
+        txt += f"Has README.md: {calkit.check_or_x(self.has_readme)}\n"
         txt += (
             f"Instructions in README.md: "
-            f"{_bool_to_check_x(self.instructions_in_readme)}\n"
+            f"{calkit.check_or_x(self.instructions_in_readme)}\n"
         )
-        txt += f"DVC initialized: {_bool_to_check_x(self.is_dvc_repo)}\n"
-        txt += f"DVC remote defined: {_bool_to_check_x(self.n_dvc_remotes)}\n"
-        txt += f"Has pipeline: {_bool_to_check_x(self.has_pipeline)}\n"
-        txt += f"Has Calkit info: {_bool_to_check_x(self.has_calkit_info)}\n"
+        txt += f"DVC initialized: {calkit.check_or_x(self.is_dvc_repo)}\n"
+        txt += f"DVC remote defined: {calkit.check_or_x(self.n_dvc_remotes)}\n"
+        txt += f"Has pipeline: {calkit.check_or_x(self.has_pipeline)}\n"
+        txt += f"Has Calkit info: {calkit.check_or_x(self.has_calkit_info)}\n"
         txt += (
             f"Has dev container spec: "
-            f"{_bool_to_check_x(self.has_dev_container)}\n"
+            f"{calkit.check_or_x(self.has_dev_container)}\n"
         )
         txt += (
             f"Environments defined: {self.n_environments} "
-            f"{_bool_to_check_x(self.n_environments)}\n"
+            f"{calkit.check_or_x(self.n_environments)}\n"
         )
         txt += (
             "Pipeline stages run in an environment: "
             f"{self.n_stages_with_env}/{self.n_stages} "
-            f"{_bool_to_check_x(self.n_stages_without_env == 0)}\n"
+            f"{calkit.check_or_x(self.n_stages_without_env == 0)}"
+            f"{self._tag('environments')}\n"
         )
         txt += (
             "Scripts not run by any pipeline stage: "
             f"{self.n_scripts_not_in_pipeline} "
-            f"{_bool_to_check_x(self.n_scripts_not_in_pipeline == 0)}\n"
+            f"{calkit.check_or_x(self.n_scripts_not_in_pipeline == 0)}"
+            f"{self._tag('scripts')}\n"
         )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
@@ -323,23 +321,26 @@ class ReproCheck(BaseModel):
             txt += (
                 f"{artifact_type.capitalize()} with provenance recorded "
                 f"(stage, import, or attribution): {n_good}/{n} "
-                f"{_bool_to_check_x(n_bad == 0)}\n"
+                f"{calkit.check_or_x(n_bad == 0)}\n"
             )
         txt += (
             "Misc artifacts not made by hand but lacking provenance: "
             f"{self.n_misc_needing_provenance} "
-            f"{_bool_to_check_x(self.n_misc_needing_provenance == 0)}\n"
+            f"{calkit.check_or_x(self.n_misc_needing_provenance == 0)}"
+            f"{self._tag('provenance')}\n"
         )
         txt += (
             "Values typed out rather than read from the pipeline: "
             f"{len(self.retyped_values)} "
-            f"{_bool_to_check_x(not self.retyped_values)}\n"
+            f"{calkit.check_or_x(not self.retyped_values)}"
+            f"{self._tag('retyped')}\n"
         )
         # No check mark either way: these are worth a look, not a verdict
         if self.unattributed_numbers:
             txt += (
                 "Numbers with nothing recorded behind them: "
-                f"{len(self.unattributed_numbers)} (worth a look)\n"
+                f"{len(self.unattributed_numbers)} (worth a look)"
+                f"{self._tag('numbers')}\n"
             )
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"

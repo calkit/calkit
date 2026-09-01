@@ -45,6 +45,17 @@ of the project's findings.
   `key`, and can be templated into the question's text under its `name`
   (which defaults to the key).
 
+A `result` entry with a `key` is the older way of writing a `value` entry.
+It still works and is read the same way, but `calkit check questions`
+reports how many are left, and new entries should use `kind: value`.
+
+Evidence should be something the project accounts for: produced by a
+pipeline stage, or declared under `figures`, `datasets`, or `publications`
+with `imported_from` or `created_by`.
+An entry that is neither is reported as `unattributed`, which is advice
+rather than a failure---the answer may be fine, but nothing says where the
+thing it rests on came from.
+
 Keys are looked up literally at the top level first, then split on dots
 and walked into nested objects, with integers indexing lists,
 so `results.case-a.score` reaches into structured output.
@@ -65,6 +76,9 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 the one the pipeline produced.
 A placeholder that names no evidence, or a format that its value cannot
 satisfy, is an error in `calkit check questions`.
+
+Braces are Python's format syntax, so a brace meant to stay in the text
+has to be doubled: write `\frac{{a}}{{b}}`, not `\frac{a}{b}`.
 
 ## Keeping answers honest
 

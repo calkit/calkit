@@ -601,7 +601,7 @@ def get_status(
                     "timestamp": status.timestamp.isoformat(),
                 }
             )
-        if "questions" in categories and ck_info.get("questions"):
+        if "questions" in categories:
             from calkit.questions import check_questions
 
             status_dict["questions"] = check_questions(
@@ -692,7 +692,9 @@ def get_status(
     # Questions come right after the project's own status: they are what the
     # rest of the project exists to answer, and an answer the pipeline has
     # since contradicted is the first thing a reader should hear about
-    if "questions" in categories and ck_info.get("questions"):
+    # Asked for and empty still prints, since a category that answers with
+    # a blank screen reads as a broken command
+    if "questions" in categories:
         from calkit.questions import check_questions, format_status
 
         print_sep("Questions")

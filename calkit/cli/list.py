@@ -237,12 +237,41 @@ def list_questions(
     the question's value evidence, so numbers shown are read from the
     results files rather than retyped into ``calkit.yaml``.
     """
-    from calkit.questions import render_question
+    from calkit.questions import (
+        TEMPLATED_FIELDS,
+        evidence_name,
+        is_value_evidence,
+        placeholders,
+        render_question,
+    )
 
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions", []) or []
     if not raw:
-        questions = [render_question(q, ck_info) for q in questions]
+        rendered = [render_question(q, ck_info) for q in questions]
+        # A placeholder left as written looks exactly like text somebody
+        # meant literally, so say when one could not be filled rather than
+        # let a fresh clone read as a project that types its braces
+        unfilled = any(
+            name
+            in {
+                evidence_name(ev)
+                for ev in q.get("evidence") or []
+                if is_value_evidence(ev)
+            }
+            for q in rendered
+            if isinstance(q, dict)
+            for field in TEMPLATED_FIELDS
+            for name in placeholders(q.get(field) or "")
+        )
+        if unfilled:
+            warn(
+                "Some placeholders could not be filled from the evidence. "
+                "Run 'calkit check questions' to see why; 'calkit pull' if "
+                "the results files are not here yet.",
+                err=json_output,
+            )
+        questions = rendered
     if json_output:
         echo_json(questions)
         return

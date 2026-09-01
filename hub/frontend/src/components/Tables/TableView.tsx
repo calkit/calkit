@@ -23,7 +23,13 @@ import {
 } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { FaLink, FaSort, FaSortDown, FaSortUp } from "react-icons/fa"
+import {
+  FaExclamationTriangle,
+  FaLink,
+  FaSort,
+  FaSortDown,
+  FaSortUp,
+} from "react-icons/fa"
 import { FiSettings } from "react-icons/fi"
 import { useDebounce } from "use-debounce"
 
@@ -48,6 +54,7 @@ import {
 } from "../../lib/tables"
 import ClearableInput from "../Common/ClearableInput"
 import LoadingSpinner from "../Common/LoadingSpinner"
+import TexText from "../Common/TexText"
 
 // Rendering every row of a large table locks the page up for seconds, and
 // nobody reads past the first screenful anyway -- searching and sorting are
@@ -336,6 +343,15 @@ export default function TableView({
 
   return (
     <Box>
+      {parsed.isTruncated ? (
+        <Flex align="center" gap={2} mb={2} fontSize="xs" color="gray.500">
+          <Icon as={FaExclamationTriangle} color="orange.400" />
+          <Text fontSize="xs">
+            This file ends before the table does, so these are only the rows
+            that were written.
+          </Text>
+        </Flex>
+      ) : null}
       <Flex align="center" gap={3} mb={2} wrap="wrap">
         <ClearableInput
           placeholder="Search rows…"
@@ -456,7 +472,11 @@ export default function TableView({
                     _hover={{ color: "blue.500" }}
                     title={`Sort by ${column || `column ${i + 1}`}`}
                   >
-                    {column}
+                    {parsed.texColumns ? (
+                      <TexText>{parsed.texColumns[i] ?? column}</TexText>
+                    ) : (
+                      column
+                    )}
                     <Icon
                       as={
                         sort?.column !== i + 1
@@ -525,7 +545,13 @@ export default function TableView({
                         selectCell(row.index, cellIndex + 1, e.shiftKey)
                       }
                     >
-                      {cell}
+                      {parsed.texRows ? (
+                        <TexText>
+                          {parsed.texRows[row.index - 1]?.[cellIndex] ?? cell}
+                        </TexText>
+                      ) : (
+                        cell
+                      )}
                     </Td>
                   )
                 })}

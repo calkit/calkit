@@ -308,6 +308,8 @@ const pipelineSearchSchema = z.object({
   // Draw the diagram for a pipeline with too many stages to read. A query
   // param so the choice survives a reload and can be linked to.
   show_diagram: z.boolean().optional(),
+  // Render every line of a pipeline file too long to show at once.
+  show_full_yaml: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -319,7 +321,8 @@ export const Route = createFileRoute(
 
 function ProjectPipeline() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, stage, stage_editor_open, show_diagram } = Route.useSearch()
+  const { ref, stage, stage_editor_open, show_diagram, show_full_yaml } =
+    Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const pipelineQuery = useQuery({
@@ -378,6 +381,13 @@ function ProjectPipeline() {
   // There is nothing to click when the diagram isn't drawn, so the hint that
   // says to click it goes with it.
   const isDiagramDrawn = stageCount <= MAX_READABLE_STAGES || show_diagram
+  const setIsFullYamlShown = useCallback(
+    (shown: boolean) =>
+      navigate({
+        search: (prev) => ({ ...prev, show_full_yaml: shown || undefined }),
+      }),
+    [navigate],
+  )
   const setIsDiagramShown = useCallback(
     (shown: boolean) =>
       navigate({
@@ -449,6 +459,8 @@ function ProjectPipeline() {
                       envNames={envNames}
                       envTo={envTo}
                       highlightStage={stage}
+                      isFullShown={show_full_yaml}
+                      setIsFullShown={setIsFullYamlShown}
                     />
                   </>
                 ) : (
@@ -462,6 +474,8 @@ function ProjectPipeline() {
                       envNames={envNames}
                       envTo={envTo}
                       highlightStage={stage}
+                      isFullShown={show_full_yaml}
+                      setIsFullShown={setIsFullYamlShown}
                     />
                   </>
                 )}

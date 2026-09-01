@@ -204,35 +204,6 @@ You can also declare a minimum version in `calkit.yaml`;
 see
 [Pinning the Calkit CLI version](https://docs.calkit.org/requirements.md#pinning-the-calkit-cli-version).
 
-### Line endings on Windows
-
-Windows writes CRLF line endings where macOS and Linux write LF, and Git
-rewrites text files on checkout to match when `core.autocrlf` is on, which
-is the default for Git for Windows. DVC hashes files as they are on disk,
-so the same file can hash differently on two machines and a stage that
-nobody touched reads as stale.
-
-Calkit pins the line endings of its own generated files---the environment
-lock files and import records under `.calkit`---with a managed block in
-`.gitattributes`, so those are safe whatever your Git configuration says.
-
-Files your project itself commits are your call, and DVC's
-[guidance for running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
-covers them. Their recommendation, for a project worked on from more than
-one platform:
-
-```sh
-git config --global core.autocrlf false
-git config --global core.eol lf
-```
-
-<!-- prettier-ignore -->
-!!! note
-
-    Adding a `.gitattributes` rule to a repository that already has CRLF
-    files committed makes Git renormalize them on the next checkout, so
-    expect one commit's worth of churn as they settle.
-
 ### Calkit Assistant
 
 For Windows users, the

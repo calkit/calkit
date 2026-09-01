@@ -1,13 +1,16 @@
 ---
-name: answer-todos
-description: Build the analysis a paper's TODO comments ask for, as pipeline
-  stages, and keep the project's questions and answers matching the paper.
-  Use when the user invokes `/calkit:answer-todos`, leaves TODO comments in a
-  manuscript for an agent to address, or asks to work backwards from the
-  writing to the project behind it.
+name: build-paper-pipeline
+description: Build the pipeline stages a manuscript's TODO comments ask for,
+  working backwards from the writing to the analysis behind it, and keep the
+  project's questions and answers matching the paper. Use when the user
+  invokes `/calkit:build-paper-pipeline`, leaves TODO comments in a manuscript
+  for an agent to address, or asks to work backwards from the writing to the
+  project behind it. Only for TODOs in a manuscript, and only in a Calkit
+  project: not TODO comments in source code, not GitHub issues, not a task
+  list in someone's notes.
 ---
 
-# Answer the paper's TODOs
+# Build the pipeline the paper asks for
 
 The writing is the human's job. Deciding what the paper claims, and whether
 a claim is worth making, is what nobody else can do for them. Everything

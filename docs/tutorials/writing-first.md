@@ -47,7 +47,7 @@ mean speedup over the baseline" is a brief; "add speedup" is not.
 ## Step 2: Ask the agent to close them
 
 ```
-/calkit:answer-todos
+/calkit:build-paper-pipeline
 ```
 
 The agent reads the manuscript, collects the TODOs, and tells you what it

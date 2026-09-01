@@ -105,8 +105,8 @@ Judgment, done here:
 
 ## Related
 
-- `answer-todos` builds the analysis a manuscript's TODO comments ask for,
-  so the value is injected from the start rather than typed and caught
-  here.
+- `build-paper-pipeline` builds the stages a manuscript's TODO comments
+  ask for, so the value is injected from the start rather than typed and
+  caught here.
 - `check-questions` covers whether the project's answers still follow from
   their evidence, which is the same idea one level up.

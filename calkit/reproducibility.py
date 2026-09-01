@@ -687,20 +687,25 @@ def _project_values(wdir: str, stages: dict) -> dict[str, str]:
                 continue
             if not isinstance(data, dict):
                 continue
+            # What the document can reach is what the stage exposes. Named
+            # keys are exactly that list, and they may be nested, so a
+            # value the stage went out of its way to expose counts while
+            # everything around it does not: the fix for one of those is
+            # to name it, not to reference a command that was never
+            # generated. Without any names every top-level key is exposed.
+            named = _named_keys(cmd)
+            if named:
+                for key in named:
+                    try:
+                        value = resolve_key(data, key)
+                    except (KeyError, ValueError, IndexError, TypeError):
+                        continue
+                    if isinstance(value, (int, float)) and not isinstance(
+                        value, bool
+                    ):
+                        values.setdefault(str(value), f"{dep}:{key}")
+                continue
             for key, value in data.items():
-                if isinstance(value, (int, float)) and not isinstance(
-                    value, bool
-                ):
-                    values.setdefault(str(value), f"{dep}:{key}")
-            # A stage can name nested keys, which the document can then
-            # reference and therefore retype. Reading only the top level
-            # would miss exactly the values the stage went out of its way
-            # to expose.
-            for key in _named_keys(cmd):
-                try:
-                    value = resolve_key(data, key)
-                except (KeyError, ValueError, IndexError, TypeError):
-                    continue
                 if isinstance(value, (int, float)) and not isinstance(
                     value, bool
                 ):

@@ -239,11 +239,17 @@ def list_questions(
     """
     from calkit.questions import (
         TEMPLATED_FIELDS,
-        evidence_name,
-        is_value_evidence,
         placeholders,
         render_question,
     )
+
+    def _texts(question: dict) -> list[str]:
+        evidence = question.get("evidence") or []
+        return [question.get(f) or "" for f in TEMPLATED_FIELDS] + [
+            ev.get("explanation") or ""
+            for ev in evidence
+            if isinstance(ev, dict)
+        ]
 
     ck_info = calkit.load_calkit_info()
     questions = ck_info.get("questions", []) or []
@@ -251,18 +257,15 @@ def list_questions(
         rendered = [render_question(q, ck_info) for q in questions]
         # A placeholder left as written looks exactly like text somebody
         # meant literally, so say when one could not be filled rather than
-        # let a fresh clone read as a project that types its braces
+        # let a fresh clone read as a project that types its braces. Any
+        # placeholder left standing counts, whether it names evidence that
+        # could not be read or names nothing at all: a brace meant to stay
+        # in the text is written '{{' and never reaches here.
         unfilled = any(
-            name
-            in {
-                evidence_name(ev)
-                for ev in q.get("evidence") or []
-                if is_value_evidence(ev)
-            }
+            placeholders(text)
             for q in rendered
             if isinstance(q, dict)
-            for field in TEMPLATED_FIELDS
-            for name in placeholders(q.get(field) or "")
+            for text in _texts(q)
         )
         if unfilled:
             warn(

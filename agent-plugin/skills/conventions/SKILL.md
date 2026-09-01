@@ -77,7 +77,7 @@ environments:
   py:
     kind: uv
     path: pyproject.toml
-    python: "3.14"
+    python: "3.13"
 
   py2:
     kind: uv-venv

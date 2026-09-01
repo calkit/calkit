@@ -1102,7 +1102,15 @@ def test_check_repro_literals(tmp_dir):
     # document's reach, so typing it is the same copy and paste. Reading
     # only the top level would miss exactly what the stage exposed.
     with open("results.json", "w") as f:
-        json.dump({"DragCoefficient": 0.42, "cases": {"a": {"cp": 0.7321}}}, f)
+        json.dump(
+            {
+                "DragCoefficient": 0.42,
+                "cases": {"a": {"cp": 0.7321}},
+                # Named by no key, so the document has no command for it
+                "NotExposed": 0.6194,
+            },
+            f,
+        )
     ck_info = calkit.load_calkit_info()
     ck_info["pipeline"]["stages"]["results-latex"]["keys"] = [
         "DragCoefficient",
@@ -1113,6 +1121,7 @@ def test_check_repro_literals(tmp_dir):
     calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
     with open("main.tex", "a") as f:
         f.write("A nested value typed by hand: 0.7321.\n")
+        f.write("A value the stage does not expose: 0.6194.\n")
     out = subprocess.run(
         ["calkit", "check", "repro", "--json"], capture_output=True, text=True
     ).stdout
@@ -1120,6 +1129,14 @@ def test_check_repro_literals(tmp_dir):
         f["value"]: f["source"] for f in json.loads(out)["retyped_values"]
     }
     assert retyped_values.get("0.7321") == "results.json:cases.a.cp"
+    # Once a stage names its keys, what it does not name is out of the
+    # document's reach: reporting it would ask for a command that was
+    # never generated. It is still a result-like number with nothing
+    # recorded behind it, which is the weaker list
+    assert "0.6194" not in retyped_values
+    assert "0.6194" in {
+        f["value"] for f in json.loads(out)["unattributed_numbers"]
+    }
     # The file a json-to-latex stage writes is full of the very numbers
     # the check looks for, and reporting them would flag the fix itself
     with open("results.tex", "w") as f:
@@ -1132,7 +1149,12 @@ def test_check_repro_literals(tmp_dir):
         "0.42",
         "0.7321",
     ]
-    assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
+    # 0.6194 stays in the weaker list: the stage reads its file but does
+    # not name that key, so the document cannot reference it
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == [
+        "3.14",
+        "0.6194",
+    ]
 
 
 def test_check_questions(tmp_dir):
@@ -1238,6 +1260,15 @@ def test_check_questions(tmp_dir):
         cwd="elsewhere",
     )
     assert "Questions answered: 1/1" in out
+    # A placeholder that names nothing renders as written, which looks
+    # like text somebody meant literally, so the listing says so
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["answer"] = "It is {missing} of them."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "placeholders could not be filled" in out
+    assert "It is {missing} of them." in out
     # A project with no questions says so rather than printing nothing
     os.remove("calkit.yaml")
     with open("calkit.yaml", "w") as f:

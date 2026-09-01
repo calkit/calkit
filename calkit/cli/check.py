@@ -411,7 +411,9 @@ def _echo_retyped(findings: list[dict]) -> None:
         "much ordinary prose to be worth reporting; a value the document "
         "rounds or reformats before typing, since it is compared as "
         "written; and anything in a results file no 'json-to-latex' stage "
-        "reads, or nested in one and not named under that stage's 'keys'."
+        "reads, or in one whose stage names its 'keys' without naming "
+        "that value---the document has no command for it, so typing it "
+        "is what there is until the key is named."
     )
 
 

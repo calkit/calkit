@@ -5735,6 +5735,8 @@
             }
           ],
           "default": null,
+          "deprecated": true,
+          "description": "Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.",
           "title": "Git Rev"
         },
         "internal": {
@@ -8176,6 +8178,7 @@
       "type": "object"
     },
     "_GitSource": {
+      "additionalProperties": false,
       "properties": {
         "path": {
           "anyOf": [
@@ -8209,19 +8212,28 @@
           "type": "string"
         },
         "rev": {
-          "description": "The commit hash the file actually came from, filled in by 'calkit import path' and 'calkit update path'. This is the lock: it says which bytes are here, so it is always recorded, whether or not the entry also follows a 'ref'. Write the entry with 'calkit import path' rather than by hand, or run 'calkit update path' to fill this in for one that was.",
-          "title": "Rev",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "deprecated": true,
+          "description": "Deprecated; the commit an import resolved to is recorded in .calkit/imports.json, which is committed alongside it. This file says what to follow, which a person writes; that one says where following it led, which the tool works out. Still read for entries written before the split, and moved across the next time 'calkit update import' runs.",
+          "title": "Rev"
         }
       },
       "required": [
-        "repo_url",
-        "rev"
+        "repo_url"
       ],
       "title": "_GitSource",
       "type": "object"
     },
     "_ImportedFromDoi": {
+      "additionalProperties": false,
       "description": "Data published under a DOI, which is a citation, not just a link.\n\nKept apart from a URL so it can be cited and resolved as a DOI rather\nthan being one more address that happens to start with https.",
       "properties": {
         "date": {
@@ -8251,6 +8263,7 @@
       "type": "object"
     },
     "_ImportedFromGit": {
+      "additionalProperties": false,
       "description": "Data from a Git repo that isn't a Calkit project.",
       "properties": {
         "date": {
@@ -8278,6 +8291,7 @@
       "type": "object"
     },
     "_ImportedFromProject": {
+      "additionalProperties": false,
       "properties": {
         "filter_paths": {
           "anyOf": [
@@ -8304,6 +8318,8 @@
             }
           ],
           "default": null,
+          "deprecated": true,
+          "description": "Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to.",
           "title": "Git Rev"
         },
         "path": {
@@ -8330,6 +8346,7 @@
       "type": "object"
     },
     "_ImportedFromUrl": {
+      "additionalProperties": false,
       "properties": {
         "date": {
           "anyOf": [

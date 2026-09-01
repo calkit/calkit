@@ -564,12 +564,12 @@ vanishing and leaving the author thinking they recorded it.
 
 #### `_ImportedFromProject`
 
-| Parameter      | Type              | Required | Default | Description |
-| -------------- | ----------------- | -------- | ------- | ----------- |
-| `project`      | str               | yes      |         |             |
-| `path`         | str \| None       | no       | null    |             |
-| `git_rev`      | str \| None       | no       | null    |             |
-| `filter_paths` | list[str] \| None | no       | null    |             |
+| Parameter      | Type              | Required | Default | Description                                                                                      |
+| -------------- | ----------------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `project`      | str               | yes      |         |                                                                                                  |
+| `path`         | str \| None       | no       | null    |                                                                                                  |
+| `git_rev`      | str \| None       | no       | null    | Deprecated; recorded in .calkit/imports.json instead, with the other things a fetch resolves to. |
+| `filter_paths` | list[str] \| None | no       | null    |                                                                                                  |
 
 #### `_ImportedFromUrl`
 
@@ -641,11 +641,11 @@ Data from a Git repo that isn't a Calkit project.
 
 #### `_GitSource`
 
-| Parameter  | Type        | Required | Default | Description                                                                                                                                                                                                                                                                                                                                                    |
-| ---------- | ----------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `repo_url` | str         | yes      |         | Clone URL of the repo the data came from.                                                                                                                                                                                                                                                                                                                      |
-| `rev`      | str         | yes      |         | The commit hash the file actually came from, filled in by 'calkit import path' and 'calkit update path'. This is the lock: it says which bytes are here, so it is always recorded, whether or not the entry also follows a 'ref'. Write the entry with 'calkit import path' rather than by hand, or run 'calkit update path' to fill this in for one that was. |
-| `path`     | str \| None | no       | null    | Path within that repo, if it isn't the whole thing.                                                                                                                                                                                                                                                                                                            |
-| `ref`      | str \| None | no       | null    | Branch, tag, or commit to follow when refreshing this, e.g., 'main'. Optional: an entry that names none is refreshed from the repo's default branch. 'rev' still records the commit actually fetched, so the entry says both what it tracks and what it got.                                                                                                   |
+| Parameter  | Type        | Required | Default | Description                                                                                                                                                                                                                                                                                                                                           |
+| ---------- | ----------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo_url` | str         | yes      |         | Clone URL of the repo the data came from.                                                                                                                                                                                                                                                                                                             |
+| `rev`      | str \| None | no       | null    | Deprecated; the commit an import resolved to is recorded in .calkit/imports.json, which is committed alongside it. This file says what to follow, which a person writes; that one says where following it led, which the tool works out. Still read for entries written before the split, and moved across the next time 'calkit update import' runs. |
+| `path`     | str \| None | no       | null    | Path within that repo, if it isn't the whole thing.                                                                                                                                                                                                                                                                                                   |
+| `ref`      | str \| None | no       | null    | Branch, tag, or commit to follow when refreshing this, e.g., 'main'. Optional: an entry that names none is refreshed from the repo's default branch. 'rev' still records the commit actually fetched, so the entry says both what it tracks and what it got.                                                                                          |
 
 <!-- AUTO-GENERATED: CALKIT-YAML-KEYS:END -->

@@ -28,13 +28,36 @@ from calkit.models.pipeline import Pipeline, RelativeChildPathString
 
 
 class _ImportedFromProject(BaseModel):
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
+
     project: str
     path: str | None = None
-    git_rev: str | None = None
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; recorded in .calkit/imports.json instead, with "
+            "the other things a fetch resolves to."
+        ),
+    )
     filter_paths: list[str] | None = None
 
 
 class _ImportedFromUrl(BaseModel):
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
+
     url: str
     date: date_type | None = Field(
         default=None,
@@ -51,6 +74,14 @@ class _ImportedFromDoi(BaseModel):
     Kept apart from a URL so it can be cited and resolved as a DOI rather
     than being one more address that happens to start with https.
     """
+
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
 
     doi: str = Field(
         description=(
@@ -83,17 +114,27 @@ class _ImportedFromDoi(BaseModel):
 
 
 class _GitSource(BaseModel):
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
+
     repo_url: str = Field(
         description="Clone URL of the repo the data came from."
     )
-    rev: str = Field(
+    rev: str | None = Field(
+        default=None,
+        deprecated=True,
         description=(
-            "The commit hash the file actually came from, filled in by "
-            "'calkit import path' and 'calkit update path'. This is the "
-            "lock: it says which bytes are here, so it is always recorded, "
-            "whether or not the entry also follows a 'ref'. Write the entry "
-            "with 'calkit import path' rather than by hand, or run 'calkit "
-            "update path' to fill this in for one that was."
+            "Deprecated; the commit an import resolved to is recorded in "
+            ".calkit/imports.json, which is committed alongside it. This "
+            "file says what to follow, which a person writes; that one "
+            "says where following it led, which the tool works out. Still "
+            "read for entries written before the split, and moved across "
+            "the next time 'calkit update import' runs."
         ),
     )
     path: str | None = Field(
@@ -113,11 +154,13 @@ class _GitSource(BaseModel):
 
     @field_validator("rev")
     @classmethod
-    def _check_rev_is_a_hash(cls, v: str) -> str:
+    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
         # Abbreviated hashes are fine -- Git resolves them -- but a name is
         # not a revision, and accepting one here would quietly make the
         # import irreproducible. A branch belongs in 'ref', which is where
         # something that moves is meant to be written.
+        if v is None:
+            return v
         if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
             raise ValueError(
                 f"rev must be a commit hash, not a branch or tag (got {v!r}); "
@@ -128,6 +171,14 @@ class _GitSource(BaseModel):
 
 class _ImportedFromGit(BaseModel):
     """Data from a Git repo that isn't a Calkit project."""
+
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
 
     git: _GitSource
     date: date_type | None = Field(
@@ -1375,7 +1426,14 @@ class Release(BaseModel):
         "model",
     ]
     path: str | None = None
-    git_rev: str | None = None
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; recorded in .calkit/imports.json instead, with "
+            "the other things a fetch resolves to."
+        ),
+    )
     # Version of Calkit that created the release, for reproducibility.
     calkit_version: str | None = None
     date: str | None = None

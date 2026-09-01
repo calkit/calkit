@@ -2176,6 +2176,8 @@ List everything in the project that was imported from elsewhere.
 
 Walks every artifact kind, so an import shows up here whichever list it was recorded in. Entries are annotated with the kind they came from and a one-line description of the source, since where a file came from is the question being asked and it's spelled differently for a Git repo, a project, a URL, and a DOI.
 
+What each import resolved to -- the commit, the checksum, when it was fetched -- is read from '.calkit/imports.json' and shown under 'locked', so both halves of the record are in one listing.
+
 Usage:
 
 ```text
@@ -2326,7 +2328,7 @@ Options:
 
 Import a file from elsewhere, recording where it came from.
 
-For a script or config maintained outside this project, e.g., a site setup script shared between projects. The copy is committed here, so the project stays self-contained and the pipeline can depend on it; the entry records the source so it can be refreshed with 'calkit update path' and so the file isn't one whose origin nobody knows.
+For a script or config maintained outside this project, e.g., a site setup script shared between projects. The copy is committed here, so the project stays self-contained and the pipeline can depend on it; the entry records the source so it can be refreshed with 'calkit update import' and so the file isn't one whose origin nobody knows.
 
 Usage:
 
@@ -2343,15 +2345,15 @@ Arguments:
 
 Options:
 
-| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                           |
-| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--kind`            | text    | no       | misc    | Which list in calkit.yaml to record this in: 'datasets', 'figures', 'publications', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                         |
-| `--git-repo`        | text    | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                |
-| `--git-ref`         | text    | no       |         | Branch, tag, or commit to follow, recorded so 'calkit update path' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the repo's default branch. |
-| `--title`           | text    | no       |         | Title for the entry.                                                                                                                                                                                                                  |
-| `--description`     | text    | no       |         | Description for the entry.                                                                                                                                                                                                            |
-| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                       |
-| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                        |
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                             |
+| ------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind`            | text    | no       | misc    | What kind of artifact this is: 'dataset', 'figure', 'publication', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                                            |
+| `--git-repo`        | text    | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                  |
+| `--git-ref`         | text    | no       |         | Branch, tag, or commit to follow, recorded so 'calkit update import' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the repo's default branch. |
+| `--title`           | text    | no       |         | Title for the entry.                                                                                                                                                                                                                    |
+| `--description`     | text    | no       |         | Description for the entry.                                                                                                                                                                                                              |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                         |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                          |
 
 <a id="subcommand-import-environment"></a>
 
@@ -2496,7 +2498,7 @@ Update objects.
 | [`stage`](#subcommand-update-stage)                   | Update a pipeline stage in calkit.yaml.                                              |
 | [`figure`](#subcommand-update-figure)                 | Update a figure entry in calkit.yaml.                                                |
 | [`dataset`](#subcommand-update-dataset)               | Update a dataset entry in calkit.yaml.                                               |
-| [`path`](#subcommand-update-path)                     | Re-fetch an imported file from where it came from.                                   |
+| [`import`](#subcommand-update-import)                 | Re-fetch an imported file from where it came from.                                   |
 
 <a id="subcommand-update-devcontainer"></a>
 
@@ -2908,36 +2910,42 @@ Options:
 | `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
 | `--stage`                  | text     | no       |         | Name of the pipeline stage that produces this dataset.                              |
 
-<a id="subcommand-update-path"></a>
+<a id="subcommand-update-import"></a>
 
-#### `calkit update path`
+#### `calkit update import`
 
 Re-fetch an imported file from where it came from.
 
 For a Git source this takes the latest on whatever the entry follows, which is its 'ref' if it names one and the repo's default branch otherwise, and records the commit it lands on. '--git-ref' changes what it follows, from then on and not just this once, so switching to a tag pins the import to that tag rather than quietly reverting to the default branch next time.
 
-This is a one-way copy from the source, not a merge: local changes to the file are discarded. An import records that a file came from somewhere else, so a local edit that survived a refresh would make the entry a lie about what is on disk.
+This is a one-way copy from the source, not a merge. An import records that a file came from somewhere else, so a local edit that survived a refresh would make the entry a lie about what is on disk -- but losing that edit silently would be worse, so a file that differs from what was last fetched is reported and left alone until '--force' says otherwise. The checksum recorded in '.calkit/imports.json' is what makes the edit visible.
 
-An entry that has no 'rev' yet is refreshed the same way, which is how one written by hand gets its commit recorded: 'rev' is required, and this is what fills it in.
+What the fetch resolves to -- the commit, the checksum, the time -- is written to '.calkit/imports.json' rather than to 'calkit.yaml', which keeps only what a person declared. To pin an import, write the commit hash as its 'ref'. An entry written before that split carries its 'rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has to be migrated by hand.
+
+With '--all', every imported object is refreshed instead, whichever list it was recorded in, and they are committed together. One that can't be refreshed in place -- a dataset tracked by DVC, or a record named only by a DOI -- is reported and skipped rather than stopping the rest, and so is one whose source can't be reached, since a repo being down shouldn't leave every other import stale. Naming a single object that can't be refreshed is still an error, since that is what was asked for. With '--all' the command exits non-zero if anything was skipped.
+
+Only imported paths for now, since that is the only kind of object an import records. An imported environment has no path of its own, so when 'calkit import environment' is finished this is where refreshing it belongs.
 
 Usage:
 
 ```text
-calkit update path [OPTIONS] PATH
+calkit update import [OPTIONS] [PATH]
 ```
 
 Arguments:
 
-| Argument | Type | Required | Default | Description                           |
-| -------- | ---- | -------- | ------- | ------------------------------------- |
-| `path`   | text | yes      |         | Path of the imported file to refresh. |
+| Argument | Type | Required | Default | Description                                              |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------- |
+| `path`   | text | no       |         | Path of the imported object to refresh. Omit with --all. |
 
 Options:
 
-| Option        | Type    | Required | Default | Description                                                                                                                    |
-| ------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `--git-ref`   | text    | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo. Recorded, so later refreshes keep using it. |
-| `--no-commit` | boolean | no       | False   | Do not commit changes to repo.                                                                                                 |
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--all`         | boolean | no       | False   | Refresh every imported object in the project, across all artifact kinds. Ones that can't be refreshed in place are reported and skipped. |
+| `--git-ref`     | text    | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo. Recorded, so later refreshes keep using it.           |
+| `--force`, `-f` | boolean | no       | False   | Overwrite even if the file has been edited since it was imported.                                                                        |
+| `--no-commit`   | boolean | no       | False   | Do not commit changes to repo.                                                                                                           |
 
 <a id="command-group-check"></a>
 

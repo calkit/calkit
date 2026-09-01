@@ -60,6 +60,128 @@ def get_importable_artifact_types() -> list[str]:
     return types
 
 
+# Where the resolved state of each import is recorded: the commit a Git
+# source actually landed on, a checksum of what was fetched, and when. It
+# is committed, because it is a lock rather than a merge base -- everyone
+# cloning the project should get the same bytes, the way they do from
+# ``dvc.lock`` or an environment's lock file. That is what separates it
+# from ``.calkit/overleaf-sync.json``, which records what one checkout
+# last saw and is deliberately local.
+IMPORT_LOCK_FPATH = os.path.join(".calkit", "imports.json")
+
+
+def read_import_locks(wdir: str | None = None) -> dict:
+    """Read the recorded state of every import, keyed by path."""
+    import json
+
+    fpath = (
+        os.path.join(wdir, IMPORT_LOCK_FPATH) if wdir else (IMPORT_LOCK_FPATH)
+    )
+    if not os.path.isfile(fpath):
+        return {}
+    try:
+        with open(fpath) as f:
+            locks = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    # Early versions wrote a list of Zenodo import events here. Nothing
+    # ever read it, so it is treated as absent rather than migrated.
+    if not isinstance(locks, dict):
+        return {}
+    return locks
+
+
+def write_import_lock(
+    path: str, lock: dict | None, wdir: str | None = None
+) -> str:
+    """Record what an import resolved to, or drop it with ``lock=None``.
+
+    Returns the lock file's path, so the caller can commit it alongside
+    whatever it fetched.
+    """
+    import json
+
+    fpath = (
+        os.path.join(wdir, IMPORT_LOCK_FPATH) if wdir else (IMPORT_LOCK_FPATH)
+    )
+    locks = read_import_locks(wdir=wdir)
+    if lock is None:
+        locks.pop(path, None)
+    else:
+        # 'fetched' says when this version arrived, not when it was last
+        # checked for. Refreshing an unchanged import must leave the file
+        # alone, or every check would be a commit and nothing would ever
+        # read as up to date.
+        previous = locks.get(path)
+        if previous is not None and {
+            k: v for k, v in previous.items() if k != "fetched"
+        } == {k: v for k, v in lock.items() if k != "fetched"}:
+            lock = dict(lock)
+            if "fetched" in previous:
+                lock["fetched"] = previous["fetched"]
+        locks[path] = lock
+    os.makedirs(os.path.dirname(fpath), exist_ok=True)
+    # Sorted so the file is stable across runs and diffs read as changes to
+    # one import rather than a reshuffle
+    with open(fpath, "w") as f:
+        json.dump(locks, f, indent=2, sort_keys=True)
+        f.write("\n")
+    return fpath
+
+
+def hash_path(path: str) -> str | None:
+    """Checksum what is at ``path``, for telling whether it has changed.
+
+    Returns None for a directory: a Git source can bring one in, and there
+    is no single content hash for it that is worth inventing here. Such an
+    import is still pinned by its ``rev``.
+    """
+    import hashlib
+
+    if not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            digest.update(chunk)
+    return f"sha256:{digest.hexdigest()}"
+
+
+def local_edit(path: str, lock: dict | None) -> bool:
+    """Whether what is on disk differs from what the import last fetched.
+
+    False when there is nothing to compare against -- an entry written
+    before locks were recorded, or a directory import -- since a refresh
+    that can't tell shouldn't claim it can.
+    """
+    if not lock or not lock.get("sha256") or not os.path.isfile(path):
+        return False
+    return hash_path(path) != lock["sha256"]
+
+
+def artifact_kind_to_list(kind: str) -> str:
+    """The ``calkit.yaml`` list a singular artifact kind is recorded in.
+
+    Kinds are named in the singular where a person types one -- a figure,
+    a dataset -- and the lists holding them are plural. ``misc`` is
+    already a mass noun, so it is spelled the same either way.
+    """
+    return kind if kind == "misc" else kind + "s"
+
+
+@functools.cache
+def get_importable_artifact_kinds() -> list[str]:
+    """Singular names of the kinds an import can be recorded as.
+
+    The same set as :func:`get_importable_artifact_types`, spelled the way
+    the CLI takes them, so the two can't name different things.
+    """
+    return [
+        kind if kind == "misc" else kind.removesuffix("s")
+        for kind in get_importable_artifact_types()
+    ]
+
+
 def has_provenance(artifact: dict) -> bool:
     """Return whether an artifact entry records where it came from.
 
@@ -264,6 +386,19 @@ def source_from_location(
         git_source = _git_source_from_url(location, ref=ref)
         if git_source is not None:
             return {"git": git_source}
+        # A link to a Zenodo record is that record, not a file. Read as the
+        # DOI it stands for, since the two name the same thing and a record
+        # is a landing page: downloading it would save the HTML and call it
+        # the data, which is the mistake the DOI branch above exists to
+        # prevent. Zenodo's version DOI is its record ID, which is how
+        # 'calkit import zenodo' reads one in the other direction.
+        record_match = re.match(
+            r"^https?://(www\.)?zenodo\.org/records?/(?P<id>\d+)",
+            location,
+            flags=re.I,
+        )
+        if record_match is not None:
+            return {"doi": f"10.5281/zenodo.{record_match.group('id')}"}
         return {"url": location}
     ssh_source = _git_source_from_ssh_url(location, ref=ref)
     if ssh_source is not None:
@@ -360,18 +495,35 @@ def _widen_ref(repo_dir: str, ref: str, path: str) -> tuple[str, str] | None:
     return None
 
 
-def fetch(imported_from: dict, dest_path: str) -> dict:
+def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
+    """Fill in what a fetch resolved to: the commit, checksum, and when."""
+    from datetime import datetime, timezone
+
+    if rev is not None:
+        lock["rev"] = rev
+    checksum = hash_path(dest_path)
+    if checksum is not None:
+        lock["sha256"] = checksum
+    lock["fetched"] = (
+        datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    )
+    return lock
+
+
+def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     """Download what an ``imported_from`` entry points at, to ``dest_path``.
 
-    Returns the entry as it should now be recorded. A Git source comes back
-    with ``rev`` set to the commit actually fetched, so an entry says which
-    commit it ended up on and re-reading it later gets the same bytes.
+    Returns the entry as it should now be recorded, and separately what the
+    fetch resolved to: the commit a Git source landed on, a checksum of the
+    file, and when. The first belongs in ``calkit.yaml`` because a person
+    wrote it; the second belongs in ``.calkit/imports.json`` because the
+    tool worked it out.
 
     What gets fetched is the source's ``ref``---a branch, a tag, or a
-    commit---or the repo's default branch when it names none. ``rev`` is
-    the answer, never the question: refreshing an import is asking where
-    the thing it follows is now, and reading the last answer back would
-    make that a no-op.
+    commit---or the repo's default branch when it names none. The recorded
+    ``rev`` is the answer, never the question: refreshing an import is
+    asking where the thing it follows is now, and reading the last answer
+    back would make that a no-op.
 
     Whatever is at ``dest_path`` is replaced. This is a one-way copy from
     the source, not a merge: an import is a statement about where a file
@@ -382,6 +534,7 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
     import tempfile
 
     imported_from = dict(imported_from)
+    lock: dict = {}
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     if (git := imported_from.get("git")) is not None:
         git = dict(git)
@@ -464,11 +617,12 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
                 shutil.copytree(full_src, dest_path, symlinks=True)
             else:
                 shutil.copyfile(full_src, dest_path)
-        # Recorded as what was actually fetched, so the entry is
-        # reproducible even when it follows a moving branch
-        git["rev"] = rev
+        # What was actually fetched, so the import is reproducible even
+        # when it follows a moving branch. Kept out of the entry: the entry
+        # says what to follow, this says where that led.
+        git.pop("rev", None)
         imported_from["git"] = git
-        return imported_from
+        return imported_from, _with_state(lock, dest_path, rev=rev)
     if (url := imported_from.get("url")) is not None:
         import requests
 
@@ -488,7 +642,7 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
         finally:
             if os.path.exists(part_path):
                 os.remove(part_path)
-        return imported_from
+        return imported_from, _with_state(lock, dest_path)
     if (project := imported_from.get("project")) is not None:
         import base64
 
@@ -507,7 +661,7 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
         if content is not None:
             with open(dest_path, "wb") as f:
                 f.write(base64.b64decode(content))
-            return imported_from
+            return imported_from, _with_state(lock, dest_path)
         download_url = contents.get("url")
         if download_url is None:
             raise ValueError(f"Could not fetch {src_path} from {project}")
@@ -515,7 +669,7 @@ def fetch(imported_from: dict, dest_path: str) -> dict:
         # URL branch above finishes the job. The entry still records the
         # project, since that is where the file came from.
         fetch({"url": download_url}, dest_path=dest_path)
-        return imported_from
+        return imported_from, _with_state(lock, dest_path)
     if imported_from.get("doi") is not None:
         raise ValueError(
             "Fetching by DOI is not supported here, since a DOI resolves to "

@@ -139,6 +139,32 @@ def test_source_from_ssh_clone_urls():
         source_from_location("notes:todo")
 
 
+def test_zenodo_record_urls_are_read_as_dois():
+    # A link to a Zenodo record is that record, not a file. Reading it as a
+    # plain URL would download the landing page and save the HTML as the
+    # data, which is the mistake the DOI handling exists to prevent -- so
+    # both spellings of the same record have to reach it.
+    from calkit.provenance import source_from_location
+
+    doi = {"doi": "10.5281/zenodo.18038227"}
+    for url in [
+        "https://zenodo.org/records/18038227",
+        "https://zenodo.org/record/18038227",
+        "http://zenodo.org/records/18038227",
+        "https://www.zenodo.org/records/18038227",
+        "https://zenodo.org/records/18038227/files/data.csv",
+    ]:
+        assert source_from_location(url) == doi, url
+    # Written as a DOI it already worked, and still does
+    assert source_from_location("https://doi.org/10.5281/zenodo.18038227") == (
+        doi
+    )
+    # Anything else on the host is still just a URL
+    assert source_from_location("https://zenodo.org/communities/x") == {
+        "url": "https://zenodo.org/communities/x"
+    }
+
+
 def test_fetch_rejects_doi():
     from calkit.provenance import fetch
 
@@ -146,9 +172,12 @@ def test_fetch_rejects_doi():
         fetch({"doi": "10.5281/zenodo.1"}, dest_path="x")
 
 
-def test_git_source_always_records_a_commit():
-    # 'rev' is the lock -- which bytes are here -- and 'ref' is what to
-    # follow next time, so the first is required and the second isn't
+def test_git_source_records_intent_not_resolved_state():
+    # calkit.yaml says what to follow, which a person writes. Where
+    # following it led -- the commit, the checksum -- goes in
+    # .calkit/imports.json, so 'ref' is the only revision written here.
+    # Pinning is writing a commit hash as the ref: a thing to follow that
+    # happens never to move.
     from pydantic import ValidationError
 
     from calkit.models.core import MiscArtifact
@@ -159,26 +188,17 @@ def test_git_source_always_records_a_commit():
         ).model_dump(exclude_none=True)["imported_from"]["git"]
 
     sha = "0123456789abcdef0123456789abcdef01234567"
-    pinned = {
-        "repo_url": "https://github.com/o/r.git",
-        "path": "a.sh",
-        "rev": sha,
-    }
-    # Following a branch and knowing which commit you're on are separate
-    # facts, and an entry records both
-    assert source(**pinned, ref="main") == pinned | {"ref": "main"}
-    # No 'ref' means the default branch is what a refresh follows, but the
-    # commit is still recorded
-    assert source(**pinned) == pinned
-    assert source(**pinned | {"rev": sha[:7]})["rev"] == sha[:7]
-    # An entry that names something to follow but no commit says where the
-    # file is fetched from without saying which version is here. 'calkit
-    # update path' is what fills it in.
-    with pytest.raises(ValidationError, match="rev"):
-        source(repo_url="https://github.com/o/r.git", path="a.sh", ref="main")
-    # A branch in 'rev' is the other half of the same mistake
+    intent = {"repo_url": "https://github.com/o/r.git", "path": "a.sh"}
+    assert source(**intent, ref="main") == intent | {"ref": "main"}
+    # Pinning, with no 'rev' anywhere in calkit.yaml
+    assert source(**intent, ref=sha) == intent | {"ref": sha}
+    # No ref at all means the repo's default branch
+    assert source(**intent) == intent
+    # 'rev' is still read for entries written before the split, and still
+    # has to be a commit hash rather than something that moves
+    assert source(**intent, rev=sha)["rev"] == sha
     with pytest.raises(ValidationError, match="goes in 'ref'"):
-        source(**pinned | {"rev": "main"})
+        source(**intent, rev="main")
 
 
 def test_fetch_resolves_a_slashed_ref(tmp_dir):
@@ -218,9 +238,11 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert source["git"]["ref"] == "feature"
     assert source["git"]["path"] == "foo/scripts/a.sh"
     source["git"]["repo_url"] = src
-    out = fetch(source, dest_path="a.sh")
+    out, lock = fetch(source, dest_path="a.sh")
     assert out["git"]["ref"] == "feature/foo"
     assert out["git"]["path"] == "scripts/a.sh"
+    # What it resolved to comes back separately, for the lock file
+    assert lock["rev"] and lock["sha256"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer
@@ -228,7 +250,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     single = source_from_location("https://github.com/o/r/blob/main/a.sh")
     single["git"]["repo_url"] = src
     single["git"]["path"] = "scripts/a.sh"
-    out = fetch(single, dest_path="b.sh")
+    out, _ = fetch(single, dest_path="b.sh")
     assert out["git"]["ref"] == "main"
     with open("b.sh") as f:
         assert f.read() == "on-main\n"
@@ -274,11 +296,98 @@ def test_import_path_kind_help_lists_what_it_accepts():
     from typing import get_args, get_type_hints
 
     from calkit.cli.import_ import import_path
-    from calkit.provenance import get_importable_artifact_types
+    from calkit.provenance import get_importable_artifact_kinds
 
     hints = get_type_hints(import_path, include_extras=True)
     help_txt = next(
         meta.help for meta in get_args(hints["kind"]) if hasattr(meta, "help")
     )
-    for kind in get_importable_artifact_types():
+    for kind in get_importable_artifact_kinds():
         assert f"'{kind}'" in help_txt, kind
+
+
+def test_import_record_refuses_what_it_cannot_record():
+    # These entries exist to be trusted, so a key the schema doesn't know
+    # is refused rather than dropped. An untagged union that ignores extras
+    # would let a misspelling, a key at the wrong level, or two sources at
+    # once all validate while saying less than whoever wrote them meant.
+    from pydantic import TypeAdapter, ValidationError
+
+    from calkit.models.core import ImportedFromType
+
+    ta = TypeAdapter(ImportedFromType)
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    for bad in [
+        # 'rev' belongs inside 'git', not beside it
+        {"git": {"repo_url": "u", "path": "a", "rev": sha}, "rev": sha},
+        # A misspelled field name
+        {"url": "https://x/a.csv", "dat": "2026-01-01"},
+        # Two sources at once: one of them would have been dropped
+        {"url": "https://x/a.csv", "doi": "10.5281/zenodo.1"},
+        {"project": "o/p", "path": "a.csv", "url": "https://x/a.csv"},
+    ]:
+        with pytest.raises(ValidationError):
+            ta.validate_python(bad)
+    # Each source on its own still validates, with its optional date
+    for good in [
+        {
+            "git": {"repo_url": "u", "path": "a", "rev": sha},
+            "date": "2026-01-01",
+        },
+        {"url": "https://x/a.csv", "date": "2026-01-01"},
+        {"doi": "10.5281/zenodo.1"},
+        {"project": "o/p", "path": "a.csv", "git_rev": "abc1234"},
+    ]:
+        assert ta.validate_python(good) is not None
+
+
+def test_import_lock_store(tmp_dir):
+    # The lock is keyed by path, sorted so diffs read as one import
+    # changing, and tolerant of the list an older version wrote here
+    import json
+    import os
+
+    from calkit.provenance import (
+        IMPORT_LOCK_FPATH,
+        hash_path,
+        local_edit,
+        read_import_locks,
+        write_import_lock,
+    )
+
+    assert read_import_locks() == {}
+    write_import_lock("b.txt", {"rev": "abc1234"})
+    write_import_lock("a.txt", {"rev": "def5678"})
+    assert list(read_import_locks()) == ["a.txt", "b.txt"]
+    # Dropping one leaves the rest
+    write_import_lock("b.txt", None)
+    assert list(read_import_locks()) == ["a.txt"]
+    # An older version appended a list of Zenodo events here; it is read as
+    # absent rather than crashing, since nothing ever consumed it
+    with open(IMPORT_LOCK_FPATH, "w") as f:
+        json.dump([{"from": "zenodo"}], f)
+    assert read_import_locks() == {}
+    # A checksum tells an edited file from an untouched one, and says
+    # nothing when there is nothing to compare against
+    with open("f.txt", "w") as f:
+        f.write("one\n")
+    lock = {"sha256": hash_path("f.txt")}
+    assert not local_edit("f.txt", lock)
+    with open("f.txt", "a") as f:
+        f.write("edited\n")
+    assert local_edit("f.txt", lock)
+    assert not local_edit("f.txt", None)
+    assert not local_edit("f.txt", {"rev": "abc1234"})
+    assert not local_edit("missing.txt", lock)
+    # A directory has no single content hash worth inventing
+    os.makedirs("d", exist_ok=True)
+    assert hash_path("d") is None
+    # 'fetched' says when this version arrived, not when it was last
+    # checked for, so re-recording the same state leaves the file alone --
+    # otherwise every refresh would be a commit
+    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-01-01"})
+    write_import_lock("c.txt", {"rev": "abc1234", "fetched": "2026-06-30"})
+    assert read_import_locks()["c.txt"]["fetched"] == "2026-01-01"
+    # A different revision is a new version, so the time moves
+    write_import_lock("c.txt", {"rev": "def5678", "fetched": "2026-06-30"})
+    assert read_import_locks()["c.txt"]["fetched"] == "2026-06-30"

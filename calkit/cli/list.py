@@ -487,16 +487,32 @@ def list_imports(
     a one-line description of the source, since where a file came from is
     the question being asked and it's spelled differently for a Git repo, a
     project, a URL, and a DOI.
+
+    What each import resolved to -- the commit, the checksum, when it was
+    fetched -- is read from '.calkit/imports.json' and shown under
+    'locked', so both halves of the record are in one listing.
     """
-    from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, describe_source
+    from calkit.provenance import (
+        PROVENANCE_ARTIFACT_TYPES,
+        describe_source,
+        read_import_locks,
+    )
 
     ck_info = calkit.load_calkit_info()
+    # calkit.yaml says what each import follows; the lock file says where
+    # following it led. Joined here so a listing answers both without the
+    # reader opening two files.
+    locks = read_import_locks()
     imports = []
     for kind in PROVENANCE_ARTIFACT_TYPES:
         for obj in ck_info.get(kind, []) or []:
             if not isinstance(obj, dict) or not obj.get("imported_from"):
                 continue
-            imports.append(dict(obj, kind=kind))
+            entry = dict(obj, kind=kind)
+            lock = locks.get(obj.get("path"))
+            if lock:
+                entry["locked"] = lock
+            imports.append(entry)
     if json_output:
         echo_json(imports)
         return

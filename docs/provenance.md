@@ -140,7 +140,7 @@ other input.
 To pick up later changes:
 
 ```sh
-calkit update path scripts/setup.sh
+calkit update import scripts/setup.sh
 ```
 
 That takes the latest of whatever the entry follows---its `ref` if it
@@ -153,7 +153,7 @@ would make refreshing a no-op.
 this once:
 
 ```sh
-calkit update path scripts/setup.sh --git-ref v1.2
+calkit update import scripts/setup.sh --git-ref v1.2
 ```
 
 A `ref` naming a commit rather than a branch is a fixed point, so an
@@ -173,10 +173,56 @@ recorded in:
 calkit list imports
 ```
 
-`rev` is always recorded, whether or not the entry also names a `ref`: it
-is what says which version is here, so an entry without it would name a
-source without naming a state. `calkit import path` writes it, and `calkit
-update path` fills it in for an entry that was written by hand.
+And to refresh all of them at once:
+
+```sh
+calkit update import --all
+```
+
+An entry that can't be refreshed in place---a dataset tracked by DVC, or a
+record named only by a DOI---is reported and skipped rather than stopping
+the rest, as is one whose source can't be reached, since a repo being down
+shouldn't leave every other import stale. The command exits non-zero when
+anything was skipped, so a script notices.
+
+## What goes where
+
+`calkit.yaml` records what a person declared---the repo, the path within
+it, and the `ref` to follow. What a fetch resolved to goes in
+`.calkit/imports.json`, keyed by path:
+
+```json
+{
+  "scripts/setup.sh": {
+    "fetched": "2026-08-31T23:14:21+00:00",
+    "rev": "4fadbcf62125c19c9cbf31de60831f656ffe5d4e",
+    "sha256": "sha256:9f2b..."
+  }
+}
+```
+
+That file is committed, because it is a lock rather than a merge base:
+everyone cloning the project should get the same bytes, the way they do
+from `dvc.lock`. It is not `.calkit/overleaf-sync.json`, which records
+what one checkout last saw and is deliberately local---an import is
+inbound-only, so there is no other side to reconcile with.
+
+To pin an import, write the commit hash as its `ref`. A commit is a thing
+to follow that happens never to move, so no separate field is needed and
+`calkit.yaml` stays a statement of intent.
+
+The recorded checksum is what makes a local edit visible. Refreshing a
+file that has been changed since it was fetched would discard that work,
+so it is reported and refused until `--force` says otherwise:
+
+```sh
+calkit update import scripts/setup.sh
+# Error: 'scripts/setup.sh' has been edited since it was imported ...
+```
+
+An entry written before this split carries its `rev` in `calkit.yaml`.
+It is still read, and refreshing the import moves it across, so nothing
+has to be migrated by hand.
 
 `created_by` is the same key for all of them, whether the work was
 collecting data, drawing a diagram, or taking a photograph, and it takes a

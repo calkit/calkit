@@ -14,6 +14,7 @@ import click
 import typer
 from pydantic import BaseModel
 from pydantic.fields import PydanticUndefined
+from typer.core import TyperArgument, TyperCommand, TyperGroup, TyperOption
 
 from calkit.cli.main.core import app
 from calkit.models.core import (
@@ -88,14 +89,14 @@ def make_table(rows: list[tuple[Any, ...]], header: list[str]) -> str:
     return "\n".join(out) + "\n"
 
 
-def _command_text(cmd: click.Command) -> str:
+def _command_text(cmd: TyperCommand) -> str:
     # CLI helps are written in RST style; convert so prettier doesn't
     # rewrite the generated file and fail the pre-commit hook.
     text = (cmd.help or cmd.short_help or "").strip()
     return rst_to_markdown(text)
 
 
-def _command_desc(cmd: click.Command) -> str:
+def _command_desc(cmd: TyperCommand) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -105,7 +106,7 @@ def _command_desc(cmd: click.Command) -> str:
     return m.group(1) if m else first_para
 
 
-def _command_desc_full(cmd: click.Command) -> str:
+def _command_desc_full(cmd: TyperCommand) -> str:
     text = _command_text(cmd)
     if not text:
         return ""
@@ -117,16 +118,16 @@ def _command_desc_full(cmd: click.Command) -> str:
     return "\n\n".join(paragraphs)
 
 
-def _list_commands(group: click.Group) -> list[tuple[str, click.Command]]:
+def _list_commands(group: TyperGroup) -> list[tuple[str, TyperCommand]]:
     names = list(group.commands.keys())
     return [(name, group.commands[name]) for name in names]
 
 
 def _list_unique_commands(
-    group: click.Group,
-) -> list[tuple[list[str], click.Command]]:
+    group: TyperGroup,
+) -> list[tuple[list[str], TyperCommand]]:
     alias_re = re.compile(r"\balias for ['\"]([^'\"]+)['\"]", re.IGNORECASE)
-    commands: list[tuple[list[str], click.Command]] = []
+    commands: list[tuple[list[str], TyperCommand]] = []
     for name, cmd in _list_commands(group):
         desc = _command_text(cmd)
         if alias_re.search(desc):
@@ -141,7 +142,7 @@ def _type_name(param_type: click.ParamType) -> str:
     return getattr(param_type, "name", str(param_type))
 
 
-def _default_value(param: click.Parameter) -> str:
+def _default_value(param: TyperOption | TyperArgument) -> str:
     default = getattr(param, "default", None)
     if default is None:
         return ""
@@ -152,23 +153,23 @@ def _default_value(param: click.Parameter) -> str:
     return str(default)
 
 
-def _param_help(param: click.Parameter) -> str:
+def _param_help(param: TyperOption | TyperArgument) -> str:
     help_text = getattr(param, "help", "") or ""
     return " ".join(help_text.split())
 
 
-def _usage(command_path: str, cmd_obj: click.Command) -> str:
+def _usage(command_path: str, cmd_obj: TyperCommand) -> str:
     parts = [command_path]
 
     has_visible_options = any(
-        isinstance(param, click.Option) and not getattr(param, "hidden", False)
+        isinstance(param, TyperOption) and not getattr(param, "hidden", False)
         for param in cmd_obj.params
     )
     if has_visible_options:
         parts.append("[OPTIONS]")
 
     for param in cmd_obj.params:
-        if not isinstance(param, click.Argument):
+        if not isinstance(param, TyperArgument):
             continue
         arg_name = (param.name or "arg").upper().replace("_", "-")
         if param.nargs != 1:
@@ -177,16 +178,16 @@ def _usage(command_path: str, cmd_obj: click.Command) -> str:
             arg_name = f"[{arg_name}]"
         parts.append(arg_name)
 
-    if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+    if isinstance(cmd_obj, TyperGroup) and cmd_obj.commands:
         parts.extend(["COMMAND", "[ARGS]..."])
 
     return " ".join(parts)
 
 
-def _args_table(cmd_obj: click.Command) -> str:
+def _args_table(cmd_obj: TyperCommand) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
-        if not isinstance(param, click.Argument):
+        if not isinstance(param, TyperArgument):
             continue
         name = f"`{param.name}`"
         ptype = _type_name(param.type)
@@ -204,14 +205,14 @@ def _args_table(cmd_obj: click.Command) -> str:
     )
 
 
-def _has_args(cmd_obj: click.Command) -> bool:
-    return any(isinstance(param, click.Argument) for param in cmd_obj.params)
+def _has_args(cmd_obj: TyperCommand) -> bool:
+    return any(isinstance(param, TyperArgument) for param in cmd_obj.params)
 
 
-def _opts_table(cmd_obj: click.Command) -> str:
+def _opts_table(cmd_obj: TyperCommand) -> str:
     rows: list[list[str]] = []
     for param in cmd_obj.params:
-        if not isinstance(param, click.Option):
+        if not isinstance(param, TyperOption):
             continue
         if getattr(param, "hidden", False):
             continue
@@ -232,9 +233,9 @@ def _opts_table(cmd_obj: click.Command) -> str:
     )
 
 
-def _has_visible_options(cmd_obj: click.Command) -> bool:
+def _has_visible_options(cmd_obj: TyperCommand) -> bool:
     for param in cmd_obj.params:
-        if not isinstance(param, click.Option):
+        if not isinstance(param, TyperOption):
             continue
         if getattr(param, "hidden", False):
             continue
@@ -248,7 +249,7 @@ def _has_visible_options(cmd_obj: click.Command) -> bool:
 def _append_command_details(
     lines: list[str],
     command_path: str,
-    cmd_obj: click.Command,
+    cmd_obj: TyperCommand,
     heading: str = "###",
     anchor: str | None = None,
 ) -> None:
@@ -311,8 +312,8 @@ def _command_link_label(names: list[str], anchor: str) -> str:
 
 def generate_cli_markdown() -> str:
     root_cmd = typer.main.get_command(app)
-    if not isinstance(root_cmd, click.Group):
-        raise TypeError("Expected root CLI command to be a Click Group")
+    if not isinstance(root_cmd, TyperGroup):
+        raise TypeError("Expected root CLI command to be a Typer group")
     top_summary = _command_desc(root_cmd)
     top_commands = [
         (names, cmd_obj, _command_desc(cmd_obj))
@@ -336,8 +337,8 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level commands")
     lines.append("")
 
-    def _top_table_anchor(names: list[str], cmd_obj: click.Command) -> str:
-        is_group_with_subcommands = isinstance(cmd_obj, click.Group) and bool(
+    def _top_table_anchor(names: list[str], cmd_obj: TyperCommand) -> str:
+        is_group_with_subcommands = isinstance(cmd_obj, TyperGroup) and bool(
             cmd_obj.commands
         )
         return (
@@ -364,7 +365,7 @@ def generate_cli_markdown() -> str:
     lines.append("## Top-level command details")
     lines.append("")
     for cmd_names, cmd_obj, _ in top_commands:
-        if isinstance(cmd_obj, click.Group) and cmd_obj.commands:
+        if isinstance(cmd_obj, TyperGroup) and cmd_obj.commands:
             continue
         _append_command_details(
             lines,
@@ -377,7 +378,7 @@ def generate_cli_markdown() -> str:
     lines.append("")
     found_group = False
     for cmd_names, cmd_obj, cmd_desc in top_commands:
-        if not isinstance(cmd_obj, click.Group):
+        if not isinstance(cmd_obj, TyperGroup):
             continue
         subcommands = _list_unique_commands(cmd_obj)
         if not subcommands:

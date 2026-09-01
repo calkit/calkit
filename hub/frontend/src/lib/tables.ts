@@ -145,13 +145,15 @@ const fromJsonLines = (text: string): ParsedTable | null => {
 // which the grid renders and `texToPlainText` reduces for search and sorting.
 const cleanTexCell = (cell: string): string => {
   let out = cell
-  // \multicolumn{2}{c}{Header} and \multirow{2}{*}{Header} keep their text
-  out = out.replace(
-    /\\(multicolumn|multirow)\s*\{[^}]*\}\s*\{[^}]*\}\s*\{([\s\S]*?)\}/g,
-    "$2",
-  )
   out = out.replace(/\\(hline|toprule|midrule|bottomrule|addlinespace)\b/g, "")
   out = out.replace(/\\(cmidrule|cline)\s*(\([^)]*\))?\s*\{[^}]*\}/g, "")
+  // A citation or cross-reference points somewhere this view doesn't go, and
+  // its key is not the column's name: `\cite{RM3}` in a heading would read
+  // as "DOE Report RM3 Design RM3".
+  out = out.replace(
+    /\\(cite[a-zA-Z]*|ref|autoref|eqref|label|footnote)\s*(\[[^\]]*\])?\s*\{[^{}]*\}/g,
+    "",
+  )
   // ~ is a non-breaking space, and a backslash before one is an explicit space
   out = out.replace(/~/g, " ")
   out = out.replace(/\\\s/g, " ")
@@ -217,6 +219,61 @@ const dropLeadingGroups = (text: string, count: number): string => {
 const stripTexComments = (text: string): string =>
   text.replace(/(^|[^\\])%.*$/gm, "$1")
 
+// The balanced `{...}` group starting at `start`, and where it ends.
+const readBraceGroup = (
+  text: string,
+  start: number,
+): { content: string; end: number } | null => {
+  let i = start
+  while (i < text.length && /\s/.test(text[i])) i++
+  if (text[i] !== "{") return null
+  const open = i
+  let depth = 0
+  for (; i < text.length; i++) {
+    if (text[i] === "{") depth++
+    else if (text[i] === "}") {
+      depth--
+      if (depth === 0) {
+        return { content: text.slice(open + 1, i), end: i + 1 }
+      }
+    }
+  }
+  return null
+}
+
+// A row's cells, with any spanning cell repeated across the columns it covers.
+//
+// `\multicolumn{3}{c}{Group}` is one cell in the source but three in the
+// grid, and a header row left unexpanded no longer lines up with the row
+// beneath it. Repeating the label rather than padding with blanks also keeps
+// every column saying what it holds once the header rows are merged, which
+// matters when each one is independently sortable.
+const splitRowCells = (rawRow: string): string[] => {
+  const cells: string[] = []
+  for (const raw of rawRow.split(/(?<!\\)&/)) {
+    const spanMatch = raw.match(/\\(multicolumn|multirow)\s*\{(\d+)\}/)
+    if (spanMatch?.index !== undefined) {
+      const afterCount = spanMatch.index + spanMatch[0].length
+      // The column spec, which may nest braces of its own
+      const spec = readBraceGroup(raw, afterCount)
+      const body = spec ? readBraceGroup(raw, spec.end) : null
+      if (body) {
+        const label = cleanTexCell(raw.slice(0, spanMatch.index) + body.content)
+        const span = Math.max(1, Number.parseInt(spanMatch[2], 10) || 1)
+        for (let i = 0; i < span; i++) cells.push(label)
+        continue
+      }
+    }
+    cells.push(cleanTexCell(raw))
+  }
+  return cells
+}
+
+// A full-width rule separates a table's heading from its body. The partial
+// ones (`\cline`, `\cmidrule`) underline a spanning heading and sit *inside*
+// the heading block, so they don't count.
+const ROW_RULE = /\\(hline|midrule)\b/
+
 const fromTex = (text: string): ParsedTable | null => {
   if (!isStandaloneTexTable(text)) return null
   const envMatch = text.match(
@@ -238,10 +295,21 @@ const fromTex = (text: string): ParsedTable | null => {
     takesWidth ? 2 : 1,
   )
   const lines: string[][] = []
+  // How many leading rows are heading. A table can head its columns with
+  // several rows -- a spanning group over the names beneath it -- and taking
+  // only the first leaves the rest sitting in the grid as though they were
+  // data. The full-width rule under the heading is what marks the boundary.
+  let headerRows = 1
+  let foundRule = false
   for (const rawRow of body.split(/\\\\/)) {
+    const hasRule = ROW_RULE.test(rawRow)
+    if (hasRule && !foundRule && lines.length > 0) {
+      headerRows = lines.length
+      foundRule = true
+    }
     // A row's cells are separated by & -- but not by an escaped \&, which is
     // a literal ampersand inside one cell.
-    const cells = rawRow.split(/(?<!\\)&/).map(cleanTexCell)
+    const cells = splitRowCells(rawRow)
     if (cells.every((cell) => cell === "")) continue
     lines.push(cells)
   }
@@ -252,13 +320,24 @@ const fromTex = (text: string): ParsedTable | null => {
     while (out.length < width) out.push("")
     return out
   }
-  const texRows = lines.map(pad)
-  const plainRows = texRows.map((row) => row.map(texToPlainText))
+  const padded = lines.map(pad)
+  headerRows = Math.min(headerRows, padded.length)
+  // Merge the heading rows column-wise, dropping the repeats that expanding a
+  // spanning cell produced so a name reads "Group Value", not "Group Group".
+  const texColumns = padded[0].map((_, i) => {
+    const parts: string[] = []
+    for (let r = 0; r < headerRows; r++) {
+      const part = padded[r][i].trim()
+      if (part && !parts.includes(part)) parts.push(part)
+    }
+    return parts.join(" ")
+  })
+  const texRows = padded.slice(headerRows)
   return {
-    columns: plainRows[0],
-    rows: plainRows.slice(1),
-    texColumns: texRows[0],
-    texRows: texRows.slice(1),
+    columns: texColumns.map(texToPlainText),
+    rows: texRows.map((row) => row.map(texToPlainText)),
+    texColumns,
+    texRows,
     ...(isTruncated ? { isTruncated: true } : {}),
   }
 }

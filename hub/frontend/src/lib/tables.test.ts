@@ -107,14 +107,14 @@ describe("parseTable", () => {
     )
     expect(math?.columns).toEqual(["T_f,2", "500 · 10^-3"])
     expect(math?.texColumns).toEqual(["$T_{f,2}$", "$500 \\cdot 10^{-3}$"])
-    // \multicolumn keeps its text, and an escaped ampersand stays in its cell
-    // rather than splitting it
+    // \multicolumn keeps its text across every column it spans, and an
+    // escaped ampersand stays in its cell rather than splitting it
     expect(
       parseTable(
         "t.tex",
         "\\begin{tabular}{ll}\\multicolumn{2}{c}{R \\& D} & b \\\\\\end{tabular}",
       )?.columns,
-    ).toEqual(["R & D", "b"])
+    ).toEqual(["R & D", "R & D", "b"])
     // A real generated table: the column spec nests braces, a \\cline sits
     // between rows, and one row is commented out. None of that is data.
     const real = [
@@ -157,6 +157,27 @@ describe("parseTable", () => {
       parseTable("ok.tex", "\\begin{tabular}{ll}a & b \\\\\\end{tabular}")
         ?.isTruncated,
     ).toBeUndefined()
+    // A heading spread over two rows, with a group spanning three columns
+    // above the names beneath it. The full-width rule marks where the heading
+    // stops, the span is repeated so the columns line up, and the merged name
+    // says what each column holds. A \\cite in a heading is a pointer, not
+    // part of the name.
+    const spanned = [
+      "\\begin{tabular}{P{0.15\\linewidth}|c|c|r}",
+      "& \\multicolumn{3}{M{0.23\\linewidth}|}{DOE Report \\cite{RM3}} \\\\",
+      "Variable & MDOcean & Actual & Error \\\\",
+      "\\hline",
+      "Mass (kg) & $213 $ & $208 $ & $2.4\\% $ \\\\",
+      "\\end{tabular}",
+    ].join("\n")
+    const parsedSpanned = parseTable("v.tex", spanned)
+    expect(parsedSpanned?.columns).toEqual([
+      "Variable",
+      "DOE Report MDOcean",
+      "DOE Report Actual",
+      "DOE Report Error",
+    ])
+    expect(parsedSpanned?.rows).toEqual([["Mass (kg)", "213", "208", "2.4%"]])
     // Nothing tabular in the file means nothing to render as a grid
     expect(parseTable("t.tex", "\\section{Results}")).toBeNull()
     // A paper is not a table: pulling its first tabular out would present a

@@ -39,6 +39,10 @@ dependencies = [
   "pillow",
   "pydantic[email]",
   "pydantic-settings",
+  # pygtrie 2.6.0 moved _NONE_STEP off the Trie class, but sqltrie (via
+  # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
+  # diff raises AttributeError; see treeverse/sqltrie#97
+  "pygtrie<2.6.0",
   "pyjwt",
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",

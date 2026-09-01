@@ -34,6 +34,17 @@ def from_json(
         str | None,
         typer.Option("--command", help="Command name to use in LaTeX output."),
     ] = None,
+    keys: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--key",
+            help=(
+                "Key to expose, dotted to reach into nested output, e.g., "
+                "'cases.a.cp'. Repeatable. Without any, every top-level key "
+                "is exposed."
+            ),
+        ),
+    ] = None,
     fmt_json: Annotated[
         str | None,
         typer.Option(
@@ -79,6 +90,20 @@ def from_json(
                 data.update(data_i)
             except json.JSONDecodeError:
                 raise_error("Input JSON file is not valid JSON")
+    # Named keys are looked up wherever they are, so a nested value can
+    # reach the document without exposing everything around it
+    if keys:
+        from calkit.questions import resolve_key
+
+        selected = {}
+        for key in keys:
+            try:
+                selected[key] = resolve_key(data, key)
+            except (KeyError, ValueError, IndexError, TypeError):
+                raise_error(
+                    f"Key '{key}' is not in " + ", ".join(input_fpaths)
+                )
+        data = selected
     for output_fpath in output_fpaths:
         if not output_fpath.endswith(".tex"):
             raise_error("Output file must be a .tex file")

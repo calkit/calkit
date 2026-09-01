@@ -3764,12 +3764,24 @@ def run_procedure(
     except Exception as e:
         raise_error(f"Procedure '{name}' is invalid: {e}")
     git_repo = calkit.git.get_repo()
-    # Check to make sure the working tree is clean, so we know we ran the
-    # committed version of the procedure
-    git_status = git_repo.git.status()
-    if "working tree clean" not in git_status:
+    # The procedure's own definition has to be committed, so a run is a
+    # record of carrying out an agreed procedure rather than one someone
+    # was editing at the time. Only its definition: a procedure that is a
+    # pipeline stage runs after earlier stages have written their outputs,
+    # so a whole-tree check could never hold there, and unrelated changes
+    # say nothing about which procedure was carried out. The run log is
+    # committed on its own after each step, so other work in progress is
+    # never swept up either.
+    definition = calkit.procedures.definition_paths(name, ck_info=ck_info)
+    dirty = [
+        path
+        for path in definition
+        if str(git_repo.git.status("--porcelain", "--", path)).strip()
+    ]
+    if dirty:
         raise_error(
-            f"Cannot execute procedures unless repo is clean:\n\n{git_status}"
+            "Cannot execute a procedure whose definition has uncommitted "
+            "changes: " + ", ".join(dirty)
         )
     t_start_overall = calkit.utcnow()
     # Formulate headers for CSV file, which must contain all inputs from all
@@ -3791,8 +3803,12 @@ def run_procedure(
     # timestamp corresponding to the period in which now falls
     # If so, exit
     # If not, continue
-    # Create empty CSV if one doesn't exist
-    t_start_overall_str = t_start_overall.isoformat(timespec="seconds")
+    # Create empty CSV if one doesn't exist. Colons are not legal in a
+    # Windows filename, so the time is separated the same way the run logs
+    # separate theirs.
+    t_start_overall_str = t_start_overall.isoformat(
+        timespec="seconds"
+    ).replace(":", "-")
     fpath = f".calkit/procedure-runs/{name}/{t_start_overall_str}.csv"
     dirname = os.path.dirname(fpath)
     if not os.path.isdir(dirname):

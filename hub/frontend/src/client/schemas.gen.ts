@@ -8697,13 +8697,21 @@ export const ReproCheckSchema = {
       type: "integer",
       title: "N Dvc Remotes",
     },
-    untraceable_literals: {
+    retyped_values: {
       items: {
         additionalProperties: true,
         type: "object",
       },
       type: "array",
-      title: "Untraceable Literals",
+      title: "Retyped Values",
+    },
+    unattributed_numbers: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Unattributed Numbers",
     },
     recommendation: {
       anyOf: [
@@ -11013,13 +11021,21 @@ export const ReproCheckWritableSchema = {
       type: "integer",
       title: "N Dvc Remotes",
     },
-    untraceable_literals: {
+    retyped_values: {
       items: {
         additionalProperties: true,
         type: "object",
       },
       type: "array",
-      title: "Untraceable Literals",
+      title: "Retyped Values",
+    },
+    unattributed_numbers: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Unattributed Numbers",
     },
   },
   type: "object",

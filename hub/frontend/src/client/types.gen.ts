@@ -4959,9 +4959,15 @@ export type ReproCheck = {
    */
   n_dvc_remotes: number
   /**
-   * Untraceable Literals
+   * Retyped Values
    */
-  untraceable_literals?: Array<{
+  retyped_values?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Unattributed Numbers
+   */
+  unattributed_numbers?: Array<{
     [key: string]: unknown
   }>
   /**
@@ -6350,9 +6356,15 @@ export type ReproCheckWritable = {
    */
   n_dvc_remotes: number
   /**
-   * Untraceable Literals
+   * Retyped Values
    */
-  untraceable_literals?: Array<{
+  retyped_values?: Array<{
+    [key: string]: unknown
+  }>
+  /**
+   * Unattributed Numbers
+   */
+  unattributed_numbers?: Array<{
     [key: string]: unknown
   }>
 }

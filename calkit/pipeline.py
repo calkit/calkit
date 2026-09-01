@@ -1734,6 +1734,9 @@ def to_dvc(
     # whose outer environment is a job scheduler. Env defaults are applied
     # at job-submission time, not here.
     pipeline.set_stage_scheduler_options(environments=environments)
+    # Tell procedure stages where their procedure is written down, which
+    # only calkit.yaml knows
+    pipeline.resolve_procedure_paths(procedures=ck_info.get("procedures", {}))
     # Ensure environment lock files are set as stage inputs if necessary
     pipeline.ensure_env_lock_paths_are_inputs(env_lock_fpaths=env_lock_fpaths)
     # Now convert Calkit stages into DVC stages

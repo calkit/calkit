@@ -2707,21 +2707,16 @@ def _discover_figures(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
             continue
         _maybe_add_figure(dvc_path)
-    dvc_lock: dict[str, Any] = {}
-    if figures:
-        try:
-            if tree.is_file("dvc.lock"):
-                # Read-only: parsed for stage lookups, never written back.
-                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
-        except Exception as e:
-            logger.warning(f"Failed to read dvc.lock for figures: {e}")
+    # dvc.lock comes back parsed (and cached) from the call above; a project
+    # of any size keeps a megabyte of it, so parsing it twice per request is
+    # most of the request.
     return _FigureContext(
         figures=figures,
         tree=tree,
@@ -3179,7 +3174,7 @@ def _build_tables(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Also auto-detect tables from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
@@ -3190,11 +3185,8 @@ def _build_tables(
     if not tables:
         return []
     # Staleness is best-effort: never let it block the listing.
-    dvc_lock: dict[str, Any] = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
             dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
@@ -5052,14 +5044,11 @@ def get_project_publications(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Staleness is best-effort: never let it block the publication listing.
-    dvc_lock: dict = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=pipeline,
             dvc_lock=dvc_lock,
@@ -6563,10 +6552,10 @@ def get_project_overleaf_sync_status(
     try:
         tree = app.projects.get_repo_tree_for_ref(repo, None)
         if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         dvc_yaml: dict = {}
         if tree.is_file("dvc.yaml"):
-            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_yaml,
             dvc_lock=dvc_lock,
@@ -10271,12 +10260,12 @@ def get_project_showcase(
         showcase_tree = app.projects.get_repo_tree_for_ref(repo, ref)
         if showcase_tree.is_file("dvc.lock"):
             showcase_dvc_lock = (
-                ryaml.load(showcase_tree.read_bytes("dvc.lock").decode()) or {}
+                load_yaml_fast(showcase_tree.read_bytes("dvc.lock")) or {}
             )
         showcase_dvc_yaml: dict = {}
         if showcase_tree.is_file("dvc.yaml"):
             showcase_dvc_yaml = (
-                ryaml.load(showcase_tree.read_bytes("dvc.yaml").decode()) or {}
+                load_yaml_fast(showcase_tree.read_bytes("dvc.yaml")) or {}
             )
         showcase_stage_statuses = compute_stage_statuses(
             dvc_yaml=showcase_dvc_yaml,

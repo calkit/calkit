@@ -39,9 +39,9 @@ def _yaml_load(data: bytes | str):
 import app.dvc
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
+    load_yaml_fast,
     normalize_artifact_path,
     params_from_url,
-    ryaml,
     utcnow,
 )
 from app.dvc import (
@@ -1309,7 +1309,8 @@ def get_dvc_pipeline_for_ref(
     tree = get_repo_tree_for_ref(repo, ref)
     if not tree.is_file("dvc.yaml"):
         return {}
-    return ryaml.load(tree.read_text("dvc.yaml")) or {}
+    # Read-only, so the fast loader rather than the round-trip parser
+    return load_yaml_fast(tree.read_text("dvc.yaml")) or {}
 
 
 def get_figure_from_repo(

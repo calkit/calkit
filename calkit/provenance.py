@@ -139,6 +139,13 @@ def write_import_lock(
     return fpath
 
 
+# Named in the recorded value rather than in the key it is stored under,
+# so it can change without the lock file's shape changing --- and so a
+# hash written by another version is recognizable as one this version
+# can't compare against.
+HASH_ALGORITHM = "sha256"
+
+
 def hash_path(path: str) -> str | None:
     """Checksum what is at ``path``, for telling whether it has changed.
 
@@ -179,19 +186,26 @@ def hash_path(path: str) -> str | None:
                     add_file(full)
     else:
         return None
-    return f"sha256:{digest.hexdigest()}"
+    return f"{HASH_ALGORITHM}:{digest.hexdigest()}"
 
 
 def local_edit(path: str, lock: dict | None) -> bool:
     """Whether what is on disk differs from what the import last fetched.
 
     False when there is nothing to compare against -- an entry written
-    before locks were recorded, say -- since a refresh that can't tell
-    shouldn't claim it can.
+    before hashes were recorded, or one recorded with an algorithm this
+    version doesn't compute -- since a refresh that can't tell shouldn't
+    claim it can.
     """
-    if not lock or not lock.get("sha256") or not os.path.exists(path):
+    recorded = (lock or {}).get("hash")
+    if not recorded or not os.path.exists(path):
         return False
-    return hash_path(path) != lock["sha256"]
+    # The algorithm is named in the value, so a file hashed by a version
+    # that used a different one is not mistaken for an edited file
+    algorithm = recorded.split(":", 1)[0]
+    if algorithm != HASH_ALGORITHM:
+        return False
+    return hash_path(path) != recorded
 
 
 def check_project_path(path: str) -> str:
@@ -590,7 +604,7 @@ def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
         lock["rev"] = rev
     checksum = hash_path(dest_path)
     if checksum is not None:
-        lock["sha256"] = checksum
+        lock["hash"] = checksum
     lock["fetched"] = (
         datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     )

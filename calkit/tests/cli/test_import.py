@@ -83,7 +83,7 @@ def test_import_and_update_a_path(tmp_dir):
     assert source["ref"] == "main"
     assert source["path"] == "setups/setup.sh"
     assert locked("scripts/setup.sh")["rev"] == first_rev
-    assert locked("scripts/setup.sh")["sha256"].startswith("sha256:")
+    assert locked("scripts/setup.sh")["hash"].startswith("sha256:")
     # Importing over it again needs saying so
     res = subprocess.run(
         [

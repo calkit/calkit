@@ -242,7 +242,7 @@ def test_fetch_resolves_a_slashed_ref(tmp_dir):
     assert out["git"]["ref"] == "feature/foo"
     assert out["git"]["path"] == "scripts/a.sh"
     # What it resolved to comes back separately, for the lock file
-    assert lock["rev"] and lock["sha256"].startswith("sha256:")
+    assert lock["rev"] and lock["hash"].startswith("sha256:")
     with open("a.sh") as f:
         assert f.read() == "on-feature\n"
     # A ref that resolves as recorded is never widened, even when a longer
@@ -371,13 +371,16 @@ def test_import_lock_store(tmp_dir):
     # nothing when there is nothing to compare against
     with open("f.txt", "w") as f:
         f.write("one\n")
-    lock = {"sha256": hash_path("f.txt")}
+    lock = {"hash": hash_path("f.txt")}
     assert not local_edit("f.txt", lock)
     with open("f.txt", "a") as f:
         f.write("edited\n")
     assert local_edit("f.txt", lock)
     assert not local_edit("f.txt", None)
     assert not local_edit("f.txt", {"rev": "abc1234"})
+    # A hash written by a version using a different algorithm is not
+    # mistaken for an edited file; it just can't be compared
+    assert not local_edit("f.txt", {"hash": "blake3:" + "0" * 64})
     assert not local_edit("missing.txt", lock)
     # A directory is hashed over its entries and their contents, so a
     # refresh can tell that one was edited before replacing it wholesale
@@ -389,7 +392,7 @@ def test_import_lock_store(tmp_dir):
     with open(os.path.join("d", "sub", "x.txt"), "a") as f:
         f.write("edited\n")
     assert hash_path("d") != before
-    dir_lock = {"sha256": before}
+    dir_lock = {"hash": before}
     assert local_edit("d", dir_lock)
     # A renamed file is a change too, even with identical content
     os.rename(os.path.join("d", "sub", "x.txt"), os.path.join("d", "sub", "y"))

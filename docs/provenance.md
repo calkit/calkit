@@ -195,7 +195,7 @@ it, and the `ref` to follow. What a fetch resolved to goes in
   "scripts/setup.sh": {
     "fetched": "2026-08-31T23:14:21+00:00",
     "rev": "4fadbcf62125c19c9cbf31de60831f656ffe5d4e",
-    "sha256": "sha256:9f2b..."
+    "hash": "sha256:9f2b..."
   }
 }
 ```

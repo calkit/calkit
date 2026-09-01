@@ -12,6 +12,7 @@ from fastapi.routing import APIRoute
 from git.exc import GitCommandError
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.main import api_router
 from app.config import settings
@@ -75,6 +76,13 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     generate_unique_id_function=custom_generate_unique_id,
 )
+
+# Compress responses. The project view returns large JSON documents -- a
+# references listing for a paper-heavy project runs to several megabytes of
+# BibTeX -- which are almost entirely repeated keys and prose, so they shrink
+# by roughly an order of magnitude. Added before CORS so CORS stays the
+# outermost layer and error responses still carry its headers.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:

@@ -4,8 +4,10 @@ import {
   AlertIcon,
   AlertTitle,
   Box,
+  Button,
   Flex,
   Heading,
+  Icon,
   Link,
   Text,
 } from "@chakra-ui/react"
@@ -31,7 +33,11 @@ import { z } from "zod"
 
 import { ProjectsService } from "../../../../../client"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
-import Mermaid from "../../../../../components/Common/Mermaid"
+import { FaExclamationTriangle } from "react-icons/fa"
+
+import Mermaid, {
+  MAX_READABLE_STAGES,
+} from "../../../../../components/Common/Mermaid"
 import StageEditorModal from "../../../../../components/Pipeline/StageEditorModal"
 import useProject, {
   useProjectEnvironments,
@@ -175,24 +181,58 @@ function makeRenderer(
 // ---------------------------------------------------------------------------
 // Linked YAML block
 // ---------------------------------------------------------------------------
+// Every line here becomes its own element tree, so a generated pipeline file
+// -- thousands of lines for a project with a hundred stages -- mounts tens of
+// thousands of nodes at once and makes the whole page lag. Past this many
+// lines only a window is rendered, with the rest a click away.
+const MAX_YAML_LINES = 1500
+
 function LinkedYaml({
   content,
   filesTo,
   envNames,
   envTo,
   highlightStage,
+  isFullShown,
+  setIsFullShown,
 }: {
   content: string
   filesTo: string
   envNames: Set<string>
   envTo: string
   highlightStage?: string
+  isFullShown?: boolean
+  setIsFullShown?: (shown: boolean) => void
 }) {
-  const paths = useMemo(() => extractFilePaths(content), [content])
-  const envRefs = useMemo(() => extractEnvRefs(content), [content])
+  const lines = useMemo(() => content.split("\n"), [content])
+  // The window to render: the stage being looked at if there is one, so a
+  // link to a stage still lands on it, and the head of the file otherwise.
+  const [shownContent, windowStart] = useMemo(() => {
+    if (isFullShown || lines.length <= MAX_YAML_LINES) {
+      return [content, 0]
+    }
+    const stageRange = highlightStage
+      ? findStageLineRange(content, highlightStage)
+      : null
+    let start = 0
+    if (stageRange) {
+      start = Math.max(
+        0,
+        Math.min(
+          stageRange[0] - Math.floor(MAX_YAML_LINES / 2),
+          lines.length - MAX_YAML_LINES,
+        ),
+      )
+    }
+    return [lines.slice(start, start + MAX_YAML_LINES).join("\n"), start]
+  }, [content, lines, highlightStage, isFullShown])
+  const isWindowed = shownContent !== content
+  const paths = useMemo(() => extractFilePaths(shownContent), [shownContent])
+  const envRefs = useMemo(() => extractEnvRefs(shownContent), [shownContent])
   const highlightRange = useMemo(
-    () => (highlightStage ? findStageLineRange(content, highlightStage) : null),
-    [content, highlightStage],
+    () =>
+      highlightStage ? findStageLineRange(shownContent, highlightStage) : null,
+    [shownContent, highlightStage],
   )
   const firstHighlightRef = useRef<HTMLSpanElement>(null)
   const renderer = useMemo(
@@ -219,22 +259,42 @@ function LinkedYaml({
   }, [highlightRange])
 
   return (
-    <Box height="80vh" overflowY="auto" borderRadius="lg">
-      <SyntaxHighlighter
-        language="yaml"
-        style={atomOneDark}
-        renderer={renderer}
-        useInlineStyles={true}
-        customStyle={{
-          borderRadius: "var(--chakra-radii-lg)",
-          height: "100%",
-          margin: 0,
-          fontSize: "13px",
-        }}
-      >
-        {content}
-      </SyntaxHighlighter>
-    </Box>
+    <>
+      {isWindowed ? (
+        <Flex align="center" gap={2} mb={1} fontSize="xs" color="ui.dim">
+          <Icon as={FaExclamationTriangle} color="orange.400" />
+          <Text fontSize="xs">
+            Showing lines {windowStart + 1}-{windowStart + MAX_YAML_LINES} of{" "}
+            {lines.length}.
+          </Text>
+          {setIsFullShown ? (
+            <Button
+              size="xs"
+              variant="link"
+              onClick={() => setIsFullShown(true)}
+            >
+              Show the whole file
+            </Button>
+          ) : null}
+        </Flex>
+      ) : null}
+      <Box height="80vh" overflowY="auto" borderRadius="lg">
+        <SyntaxHighlighter
+          language="yaml"
+          style={atomOneDark}
+          renderer={renderer}
+          useInlineStyles={true}
+          customStyle={{
+            borderRadius: "var(--chakra-radii-lg)",
+            height: "100%",
+            margin: 0,
+            fontSize: "13px",
+          }}
+        >
+          {shownContent}
+        </SyntaxHighlighter>
+      </Box>
+    </>
   )
 }
 
@@ -245,6 +305,9 @@ const pipelineSearchSchema = z.object({
   ref: z.string().optional(),
   stage: z.string().optional(),
   stage_editor_open: z.boolean().optional(),
+  // Draw the diagram for a pipeline with too many stages to read. A query
+  // param so the choice survives a reload and can be linked to.
+  show_diagram: z.boolean().optional(),
 })
 
 export const Route = createFileRoute(
@@ -256,7 +319,7 @@ export const Route = createFileRoute(
 
 function ProjectPipeline() {
   const { accountName, projectName } = Route.useParams()
-  const { ref, stage, stage_editor_open } = Route.useSearch()
+  const { ref, stage, stage_editor_open, show_diagram } = Route.useSearch()
   const navigate = useNavigate({ from: Route.fullPath })
   const { userHasWriteAccess } = useProject(accountName, projectName)
   const pipelineQuery = useQuery({
@@ -308,6 +371,20 @@ function ProjectPipeline() {
   )
   const closeStageEditor = () =>
     navigate({ search: (prev) => ({ ...prev, stage_editor_open: undefined }) })
+  // What the diagram actually draws. The compiled DVC stages are what the
+  // graph is built from, so they're what decides whether it's worth drawing;
+  // calkit.yaml stages are a subset for projects that define them there.
+  const stageCount = Object.keys(pipelineQuery.data?.dvc_stages ?? {}).length
+  // There is nothing to click when the diagram isn't drawn, so the hint that
+  // says to click it goes with it.
+  const isDiagramDrawn = stageCount <= MAX_READABLE_STAGES || show_diagram
+  const setIsDiagramShown = useCallback(
+    (shown: boolean) =>
+      navigate({
+        search: (prev) => ({ ...prev, show_diagram: shown || undefined }),
+      }),
+    [navigate],
+  )
 
   return (
     <>
@@ -343,13 +420,16 @@ function ProjectPipeline() {
                     <Mermaid
                       isDiagramExpanded={isDiagramExpanded}
                       setIsDiagramExpanded={setIsDiagramExpanded}
+                      stageCount={stageCount}
+                      isOversizedShown={show_diagram}
+                      setIsOversizedShown={setIsDiagramShown}
                       zoomToStage={stage}
                       stageNames={canEditStages ? stageNames : undefined}
                       onStageClick={canEditStages ? openStageEditor : undefined}
                     >
                       {String(pipelineQuery.data.mermaid)}
                     </Mermaid>
-                    {canEditStages && (
+                    {canEditStages && isDiagramDrawn && (
                       <Text mt={1} fontSize="xs" color="ui.dim">
                         Click a stage to edit it.
                       </Text>

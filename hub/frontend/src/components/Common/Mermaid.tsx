@@ -1,4 +1,4 @@
-import { Box, Flex, IconButton } from "@chakra-ui/react"
+import { Box, Button, Flex, Icon, IconButton, Text } from "@chakra-ui/react"
 import { select } from "d3-selection"
 import {
   type D3ZoomEvent,
@@ -7,12 +7,25 @@ import {
   zoomIdentity,
 } from "d3-zoom"
 import { useEffect, useRef, useState } from "react"
-import { FaExpandAlt, FaHome } from "react-icons/fa"
+import { FaExclamationTriangle, FaExpandAlt, FaHome } from "react-icons/fa"
+
+import Tooltip from "./Tooltip"
+
+// Past this many stages the graph is a hairball: every node is a few pixels
+// wide, the edges cross everything, and it takes seconds to lay out. The
+// stage list beside it stays readable at any size, so that leads instead and
+// the diagram becomes something you ask for.
+export const MAX_READABLE_STAGES = 50
 
 interface MermaidProps {
   children: string
   isDiagramExpanded: boolean
   setIsDiagramExpanded: Function
+  /** Stages the diagram draws, used to decide whether it's worth drawing. */
+  stageCount?: number
+  /** Draw it even when there are more stages than that. */
+  isOversizedShown?: boolean
+  setIsOversizedShown?: (shown: boolean) => void
   /** Pan/zoom the diagram to center the node for this pipeline stage. */
   zoomToStage?: string
   /**
@@ -38,14 +51,25 @@ const Mermaid = ({
   children,
   isDiagramExpanded,
   setIsDiagramExpanded,
+  stageCount,
+  isOversizedShown,
+  setIsOversizedShown,
   zoomToStage,
   onStageClick,
   stageNames,
 }: MermaidProps) => {
+  const isOversized =
+    stageCount !== undefined && stageCount > MAX_READABLE_STAGES
+  // Drawn only on request once it's this big, so the page doesn't spend
+  // seconds laying out a picture nobody can read.
+  const isSuppressed = isOversized && !isOversizedShown
   const zoomBehaviorRef = useRef<ZoomBehavior<Element, unknown> | null>(null)
   // Bumped each time the diagram finishes rendering so the zoom-to-stage
   // effect can re-run against the freshly drawn SVG.
   const [renderTick, setRenderTick] = useState(0)
+  // Set when mermaid refuses to draw the graph, so a pipeline too big for it
+  // says so instead of leaving an empty box on the page.
+  const [renderError, setRenderError] = useState<string | null>(null)
 
   const handleResetZoom = () => {
     const svgSelection = select<Element, unknown>(".mermaid svg")
@@ -59,6 +83,9 @@ const Mermaid = ({
   }
 
   useEffect(() => {
+    if (isSuppressed) {
+      return
+    }
     const renderDiagram = async () => {
       try {
         const { default: mermaid } = await import("mermaid")
@@ -67,7 +94,14 @@ const Mermaid = ({
           theme: "dark",
           securityLevel: "loose",
           fontFamily: "monospace",
+          // Mermaid's own default is 500, past which it throws instead of
+          // drawing anything. A real pipeline crosses that easily -- a
+          // hundred-odd stages wired to their inputs and outputs is a few
+          // hundred edges -- and the graph is the project's own, not
+          // untrusted input, so the guard only costs us the diagram.
+          maxEdges: 5000,
         })
+        setRenderError(null)
         await mermaid.run({ querySelector: ".mermaid" })
         const svgSelection = select<Element, unknown>(".mermaid svg")
         // Remove max-width set by mermaid-js
@@ -87,13 +121,16 @@ const Mermaid = ({
         setRenderTick((t) => t + 1)
       } catch (error) {
         console.error("Error rendering Mermaid diagram:", error)
+        setRenderError(
+          error instanceof Error ? error.message : String(error ?? "Unknown"),
+        )
       }
     }
     renderDiagram()
     return () => {
       select(".mermaid svg").on("zoom", null)
     }
-  }, [children])
+  }, [children, isSuppressed])
 
   // Make stage nodes clickable, once the diagram is rendered. Listeners go on
   // the nodes themselves (rather than one delegated handler) so the pointer
@@ -214,7 +251,7 @@ const Mermaid = ({
       py={2}
       position={"relative"}
     >
-      <Flex position="relative" direction={"row-reverse"} h={0}>
+      <Flex position="relative" direction={"row-reverse"} h={0} zIndex={1}>
         <IconButton
           aria-label="expand"
           height="25px"
@@ -222,6 +259,19 @@ const Mermaid = ({
           onClick={toggleisDiagramExpanded}
           ml={1}
         />
+        {isOversized ? (
+          <Tooltip
+            label={`This pipeline has ${stageCount} stages, more than the ${MAX_READABLE_STAGES} a diagram stays readable at.`}
+          >
+            <Flex align="center" h="25px" ml={1}>
+              <Icon
+                as={FaExclamationTriangle}
+                color="orange.400"
+                aria-label="Too many stages to draw clearly"
+              />
+            </Flex>
+          </Tooltip>
+        ) : null}
         <IconButton
           aria-label="refresh"
           height="25px"
@@ -234,6 +284,12 @@ const Mermaid = ({
         className="mermaid"
         aria-label="Mermaid diagram"
         role="img"
+        // Kept mounted so mermaid can retry into it, but hidden when there
+        // is nothing drawn in it: the element still holds the raw diagram
+        // source, which is not what anyone wants to look at.
+        visibility={
+          renderError === null && !isSuppressed ? "visible" : "hidden"
+        }
         h={"100%"}
         w={"100%"}
         sx={{
@@ -252,6 +308,40 @@ const Mermaid = ({
       >
         {children}
       </Box>
+      {isSuppressed ? (
+        <Flex
+          position="absolute"
+          inset={0}
+          direction="column"
+          align="center"
+          justify="center"
+          gap={3}
+          px={6}
+        >
+          <Text fontSize="sm" color="gray.500" textAlign="center">
+            {stageCount} stages is more than a diagram can show clearly. The
+            stage list has all of them.
+          </Text>
+          {setIsOversizedShown ? (
+            <Button size="sm" onClick={() => setIsOversizedShown(true)}>
+              Draw it anyway
+            </Button>
+          ) : null}
+        </Flex>
+      ) : null}
+      {renderError !== null ? (
+        <Flex
+          position="absolute"
+          inset={0}
+          align="center"
+          justify="center"
+          px={6}
+        >
+          <Text fontSize="sm" color="gray.500" textAlign="center">
+            This pipeline's diagram couldn't be drawn: {renderError}
+          </Text>
+        </Flex>
+      ) : null}
     </Box>
   )
 }

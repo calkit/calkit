@@ -2884,7 +2884,7 @@ Check things.
 
 Check the reproducibility of a project.
 
-Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c literals' for the numbers in a manuscript that no pipeline output accounts for.
+Reports one line per check. Where a line counts something, ask for that category to see what it counted, e.g., 'calkit check repro -c retyped' for values in a manuscript the pipeline already computes.
 
 Usage:
 

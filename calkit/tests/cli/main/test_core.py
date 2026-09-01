@@ -571,14 +571,13 @@ def test_run_in_env_detect_default(tmp_dir):
     assert ck_info == ck_info_2
 
 
-def _write_ck_info(environments: dict) -> None:
-    # Dumped rather than written as literal YAML so the test says what the
-    # environment is, not how it's spelled
-    with open("calkit.yaml", "w") as f:
-        calkit.ryaml.dump({"environments": environments}, f)
-
-
 def test_run_in_env_system(tmp_dir):
+    def _write_ck_info(environments: dict) -> None:
+        # Dumped rather than written as literal YAML so the test says what
+        # the environment is, not how it's spelled
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"environments": environments}, f)
+
     # A named system env runs the command on this machine, like the built-in
     # '_system' env, but with a lock file recording what it pinned
     _write_ck_info({"sys": {"kind": "system", "lock": ["os"]}})

@@ -1464,6 +1464,7 @@ def _refresh_import(
     shouldn't leave every later import stale.
     """
     from calkit.provenance import (
+        check_project_path,
         describe_source,
         find_artifact,
         local_edit,
@@ -1471,6 +1472,9 @@ def _refresh_import(
         write_import_lock,
     )
 
+    problem = check_project_path(target)
+    if problem:
+        return problem
     found = find_artifact(ck_info, target)
     if found is None:
         return (
@@ -1684,17 +1688,26 @@ def update_import(
             skipped.append(f"{target}: {problem}")
             continue
         refreshed.append(target)
-    calkit.save_calkit_info(ck_info)
     n = len(refreshed)
-    changed = _commit_refreshed(
-        paths=refreshed + ["calkit.yaml", IMPORT_LOCK_FPATH],
-        message=f"Update {n} imported objects from their sources",
-        nothing_changed=f"{n} imported objects are already up-to-date",
-        no_commit=no_commit,
-    )
+    # Nothing fetched means nothing to record or commit. The lock file may
+    # not even exist -- a project whose only imports are a DVC dataset or
+    # a DOI never writes one -- and staging it would fail before these
+    # diagnostics got a chance to print.
+    if refreshed:
+        calkit.save_calkit_info(ck_info)
+        changed = _commit_refreshed(
+            paths=refreshed + ["calkit.yaml", IMPORT_LOCK_FPATH],
+            message=f"Update {n} imported objects from their sources",
+            nothing_changed=f"{n} imported objects are already up-to-date",
+            no_commit=no_commit,
+        )
+    else:
+        changed = False
     for note in skipped:
         warn(f"Skipped {note}")
     if changed:
         typer.echo(f"Updated {n} imported objects")
+    elif not refreshed and skipped:
+        typer.echo(f"Nothing refreshed; {len(skipped)} skipped")
     if skipped:
         raise typer.Exit(1)

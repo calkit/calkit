@@ -1579,6 +1579,7 @@ def test_env_inputs_must_be_inside_the_project():
     # editor -- same as every other RelativeChildPathString field.
     from pydantic import ValidationError
 
+    import calkit.environments as envs
     from calkit.models.core import (
         DockerEnvironment,
         PBSEnvironment,
@@ -1593,8 +1594,21 @@ def test_env_inputs_must_be_inside_the_project():
         for bad in ["../outside.sh", "/etc/hosts"]:
             with pytest.raises(ValidationError):
                 model(inputs=[bad])
+    # The models are not what production reads: every caller goes through
+    # get_env_input_paths with a raw dict, so the check has to be there
+    # too or the guarantee only holds in tests
+    for kind in ("system", "slurm", "pbs"):
+        assert envs.get_env_input_paths(
+            {"kind": kind, "inputs": ["scripts/setup.sh"]}
+        ) == ["scripts/setup.sh"]
+        for bad in ["../outside.sh", "/etc/hosts"]:
+            with pytest.raises(ValueError, match="outside|absolute"):
+                envs.get_env_input_paths({"kind": kind, "inputs": [bad]})
     # Docker's is a rename of a field that has been published for a while,
     # so tightening it would retroactively invalidate existing projects
     assert DockerEnvironment(image="x", inputs=["../outside.C"]).inputs == [
         "../outside.C"
     ]
+    assert envs.get_env_input_paths(
+        {"kind": "docker", "inputs": ["../outside.C"]}
+    ) == ["../outside.C"]

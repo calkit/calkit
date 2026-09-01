@@ -379,9 +379,22 @@ def test_import_lock_store(tmp_dir):
     assert not local_edit("f.txt", None)
     assert not local_edit("f.txt", {"rev": "abc1234"})
     assert not local_edit("missing.txt", lock)
-    # A directory has no single content hash worth inventing
-    os.makedirs("d", exist_ok=True)
-    assert hash_path("d") is None
+    # A directory is hashed over its entries and their contents, so a
+    # refresh can tell that one was edited before replacing it wholesale
+    os.makedirs(os.path.join("d", "sub"), exist_ok=True)
+    with open(os.path.join("d", "sub", "x.txt"), "w") as f:
+        f.write("one\n")
+    before = hash_path("d")
+    assert before is not None
+    with open(os.path.join("d", "sub", "x.txt"), "a") as f:
+        f.write("edited\n")
+    assert hash_path("d") != before
+    dir_lock = {"sha256": before}
+    assert local_edit("d", dir_lock)
+    # A renamed file is a change too, even with identical content
+    os.rename(os.path.join("d", "sub", "x.txt"), os.path.join("d", "sub", "y"))
+    assert hash_path("d") != before
+    assert hash_path("nowhere-at-all") is None
     # 'fetched' says when this version arrived, not when it was last
     # checked for, so re-recording the same state leaves the file alone --
     # otherwise every refresh would be a commit
@@ -391,3 +404,73 @@ def test_import_lock_store(tmp_dir):
     # A different revision is a new version, so the time moves
     write_import_lock("c.txt", {"rev": "def5678", "fetched": "2026-06-30"})
     assert read_import_locks()["c.txt"]["fetched"] == "2026-06-30"
+
+
+def test_import_paths_must_stay_in_the_project(tmp_dir):
+    # An import writes to its path and then hands it to 'git add', so one
+    # pointing out of the project would clobber a file elsewhere and then
+    # fail confusingly. Checked before anything is fetched or written.
+    import os
+    import subprocess
+
+    import calkit
+    from calkit.provenance import check_project_path
+
+    assert check_project_path("scripts/setup.sh") == ""
+    assert check_project_path("a/../b.txt") == ""
+    for bad in ["../escape.txt", "/etc/hosts", "a/../../escape.txt"]:
+        assert check_project_path(bad), bad
+    subprocess.run(["calkit", "init"], check=True, capture_output=True)
+    ck_info = calkit.load_calkit_info()
+    ck_info["misc"] = [
+        {"path": "../escape.txt", "imported_from": {"url": "https://x/a"}}
+    ]
+    calkit.save_calkit_info(ck_info)
+    res = subprocess.run(
+        ["calkit", "update", "import", "../escape.txt"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "points outside the project" in res.stdout + res.stderr
+    assert not os.path.exists(os.path.join("..", "escape.txt"))
+
+
+def test_update_all_with_nothing_refreshable(tmp_dir):
+    # Every target skipped means nothing to record or commit, and a
+    # project whose only import is a DOI has no lock file to stage --
+    # staging one anyway used to raise a git pathspec error before these
+    # diagnostics could print
+    import os
+    import subprocess
+
+    import calkit
+
+    subprocess.run(["calkit", "init"], check=True, capture_output=True)
+    ck_info = calkit.load_calkit_info()
+    ck_info["misc"] = [
+        {"path": "r.txt", "imported_from": {"doi": "10.5281/zenodo.1"}}
+    ]
+    calkit.save_calkit_info(ck_info)
+    res = subprocess.run(
+        ["calkit", "update", "import", "--all"],
+        capture_output=True,
+        text=True,
+    )
+    combined = res.stdout + res.stderr
+    assert res.returncode != 0
+    assert "Skipped r.txt" in combined
+    assert "Nothing refreshed; 1 skipped" in combined
+    assert "pathspec" not in combined
+    # A lock file that isn't JSON is reported rather than read as empty,
+    # which would discard every other import's state on the next write
+    os.makedirs(".calkit", exist_ok=True)
+    with open(os.path.join(".calkit", "imports.json"), "w") as f:
+        f.write("{ not json")
+    res = subprocess.run(
+        ["calkit", "update", "import", "--all"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not valid JSON" in res.stdout + res.stderr

@@ -644,10 +644,10 @@ def get_env_lock_fpath(
         lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind == "system":
         # A system env's lock file records the machine properties it
-        # declared it depends on, plus its ``default_setup`` and the
-        # ``shell`` that runs it, which are part of how the stage was run
-        # rather than properties of the machine. With none of them there is
-        # nothing to depend on, so no lock file and no DVC dep.
+        # declared it depends on, plus a ``shell`` that isn't the default.
+        # Not ``default_setup``: that is compiled into each stage's
+        # command. With neither there is nothing to depend on, so no lock
+        # file and no DVC dep.
         if not system_env_locks_anything(env):
             return None
         # Written by ``write_system_env_lock`` during environment checks, and
@@ -801,7 +801,21 @@ def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
             "which is what it's called now that scheduler and system "
             "environments take one too"
         )
-    return list(inputs if inputs is not None else deps or [])
+    paths = list(inputs if inputs is not None else deps or [])
+    # Checked here rather than only on the models: every production caller
+    # reads a raw environment dict, so a model annotation alone would let
+    # '../outside.sh' through to DVC. Docker's list is exempt because it
+    # is the long-published 'deps' under a new name, and tightening it
+    # would retroactively invalidate existing projects.
+    if env.get("kind") in ("system", "slurm", "pbs"):
+        from calkit.provenance import check_project_path
+
+        for path in paths:
+            problem = check_project_path(path)
+            if problem:
+                where = f" on environment '{env_name}'" if env_name else ""
+                raise ValueError(f"Environment input{where}: {problem}")
+    return paths
 
 
 def get_system_lock_data(

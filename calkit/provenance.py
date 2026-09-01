@@ -79,11 +79,18 @@ def read_import_locks(wdir: str | None = None) -> dict:
     )
     if not os.path.isfile(fpath):
         return {}
-    try:
-        with open(fpath) as f:
+    with open(fpath) as f:
+        try:
             locks = json.load(f)
-    except (OSError, ValueError):
-        return {}
+        except ValueError as e:
+            # Reported rather than treated as absent: the next write would
+            # replace the file, so swallowing this turns a file somebody
+            # can still fix into every import losing its recorded state
+            raise ValueError(
+                f"{fpath} is not valid JSON ({e}); fix or delete it -- "
+                "treating it as empty would discard every import's "
+                "recorded state on the next write"
+            )
     # Early versions wrote a list of Zenodo import events here. Nothing
     # ever read it, so it is treated as absent rather than migrated.
     if not isinstance(locks, dict):
@@ -132,18 +139,43 @@ def write_import_lock(
 def hash_path(path: str) -> str | None:
     """Checksum what is at ``path``, for telling whether it has changed.
 
-    Returns None for a directory: a Git source can bring one in, and there
-    is no single content hash for it that is worth inventing here. Such an
-    import is still pinned by its ``rev``.
+    A directory is hashed over its entries as well as their contents, so a
+    renamed or removed file changes the digest. Symlinks are hashed by
+    their target rather than followed, since following one would reach
+    outside the tree. Returns None only when there is nothing there.
+
+    A Git source can bring in a directory, and refreshing one replaces it
+    wholesale, so it needs a checksum for the same reason a file does:
+    without one, an edit inside it would be deleted without warning.
     """
     import hashlib
 
-    if not os.path.isfile(path):
-        return None
     digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            digest.update(chunk)
+
+    def add_file(fpath: str) -> None:
+        with open(fpath, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                digest.update(chunk)
+
+    if os.path.islink(path):
+        digest.update(b"link\0" + os.readlink(path).encode())
+    elif os.path.isfile(path):
+        add_file(path)
+    elif os.path.isdir(path):
+        # Sorted so the digest doesn't depend on directory order, and
+        # names are hashed too so a rename is a change
+        for root, dirs, files in os.walk(path):
+            dirs.sort()
+            for name in sorted(files + dirs):
+                full = os.path.join(root, name)
+                rel = os.path.relpath(full, path).replace(os.sep, "/")
+                digest.update(rel.encode() + b"\0")
+                if os.path.islink(full):
+                    digest.update(b"link\0" + os.readlink(full).encode())
+                elif os.path.isfile(full):
+                    add_file(full)
+    else:
+        return None
     return f"sha256:{digest.hexdigest()}"
 
 
@@ -151,12 +183,29 @@ def local_edit(path: str, lock: dict | None) -> bool:
     """Whether what is on disk differs from what the import last fetched.
 
     False when there is nothing to compare against -- an entry written
-    before locks were recorded, or a directory import -- since a refresh
-    that can't tell shouldn't claim it can.
+    before locks were recorded, say -- since a refresh that can't tell
+    shouldn't claim it can.
     """
-    if not lock or not lock.get("sha256") or not os.path.isfile(path):
+    if not lock or not lock.get("sha256") or not os.path.exists(path):
         return False
     return hash_path(path) != lock["sha256"]
+
+
+def check_project_path(path: str) -> str:
+    """Return why ``path`` isn't safe to write in the project, or "".
+
+    An import writes to this path and later hands it to ``git add``, so a
+    hand-written ``../..`` or an absolute path would put a file outside
+    the repo and then fail confusingly. Symlinks are resolved, since one
+    inside the project can still point out of it.
+    """
+    if os.path.isabs(path):
+        return f"'{path}' must be a path inside the project, not absolute"
+    root = os.path.realpath(os.getcwd())
+    full = os.path.realpath(os.path.join(root, path))
+    if full != root and os.path.commonpath([root, full]) != root:
+        return f"'{path}' points outside the project"
+    return ""
 
 
 def artifact_kind_to_list(kind: str) -> str:
@@ -490,9 +539,44 @@ def _widen_ref(repo_dir: str, ref: str, path: str) -> tuple[str, str] | None:
     segments = [s for s in path.split("/") if s]
     for n in range(1, len(segments)):
         candidate = "/".join([ref, *segments[:n]])
-        if _rev_exists(repo_dir, candidate):
-            return candidate, "/".join(segments[n:])
+        rest = "/".join(segments[n:])
+        if _ref_and_path_resolve(repo_dir, candidate, rest):
+            return candidate, rest
     return None
+
+
+def _ref_and_path_resolve(repo_dir: str, ref: str, path: str) -> bool:
+    """Whether ``ref`` exists *and* holds ``path``.
+
+    Checked as a pair. A repo with both ``feature`` and ``feature/foo``
+    would otherwise stop at ``feature``, which resolves, and then look for
+    a path that only exists on ``feature/foo`` -- the split has to be
+    judged by whether the whole thing works, not by the ref alone.
+    """
+    import subprocess
+
+    if not _rev_exists(repo_dir, ref):
+        return False
+    if not path:
+        return True
+    for candidate in (ref, f"origin/{ref}"):
+        if (
+            subprocess.call(
+                [
+                    "git",
+                    "-C",
+                    repo_dir,
+                    "cat-file",
+                    "-e",
+                    f"{candidate}:{path}",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            == 0
+        ):
+            return True
+    return False
 
 
 def _with_state(lock: dict, dest_path: str, rev: str | None = None) -> dict:
@@ -573,7 +657,9 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
             # the URL was read may have cut it in the wrong place. Only
             # reached when the ref as recorded doesn't resolve, so an
             # explicit --git-ref that works is never second-guessed.
-            if target is not None and not _rev_exists(tmp_dir, target):
+            if target is not None and not _ref_and_path_resolve(
+                tmp_dir, target, src_path
+            ):
                 widened = _widen_ref(tmp_dir, target, src_path)
                 if widened is not None:
                     target, src_path = widened
@@ -626,19 +712,23 @@ def fetch(imported_from: dict, dest_path: str) -> tuple[dict, dict]:
     if (url := imported_from.get("url")) is not None:
         import requests
 
-        resp = requests.get(url, stream=True)
-        try:
-            resp.raise_for_status()
-        except Exception as e:
-            raise ValueError(f"Failed to download {url}: {e}")
         # Written beside the destination and moved over it once complete,
-        # so a download that dies partway leaves the old file intact
+        # so a download that dies partway leaves the old file intact.
+        # Every failure is reported the same way, including a connection
+        # that never opens or dies mid-body: a caller refreshing many
+        # imports has to be able to skip this one and carry on.
         part_path = dest_path + ".part"
         try:
-            with open(part_path, "wb") as f:
-                for chunk in resp.iter_content(chunk_size=8192):
-                    f.write(chunk)
+            with requests.get(url, stream=True) as resp:
+                resp.raise_for_status()
+                with open(part_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
             os.replace(part_path, dest_path)
+        except requests.RequestException as e:
+            raise ValueError(f"Failed to download {url}: {e}")
+        except OSError as e:
+            raise ValueError(f"Failed to write {dest_path}: {e}")
         finally:
             if os.path.exists(part_path):
                 os.remove(part_path)

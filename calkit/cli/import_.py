@@ -342,6 +342,12 @@ def import_path(
             f"Cannot tell what to call the file imported from '{src_path}'; "
             "give a destination path"
         )
+    # Checked before anything is written or fetched: this path is written
+    # to and then handed to 'git add', so one pointing out of the project
+    # would clobber a file elsewhere and then fail confusingly
+    problem = calkit.provenance.check_project_path(dest_path)
+    if problem:
+        raise_error(problem[0].upper() + problem[1:])
     ck_info = calkit.load_calkit_info()
     # Checked across every list and on disk, since either would be
     # clobbered

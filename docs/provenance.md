@@ -130,7 +130,6 @@ misc:
         repo_url: https://github.com/myorg/setups.git
         path: setups/setup.sh
         ref: main
-        rev: 4fadbcf62125c19c9cbf31de60831f656ffe5d4e
 ```
 
 The copy is committed here rather than fetched on demand, so the project

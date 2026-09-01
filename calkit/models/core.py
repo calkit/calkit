@@ -1161,10 +1161,13 @@ class SystemEnvironment(Environment):
     in scope for the stage, whether or not it was exported -- only a child
     process needs that. This is why it can't be a ``setup`` requirement:
     those run in a shell of their own and are cached, since they check
-    whether something has been done rather than doing it every time. It is recorded in the lock file
-    for the same reason a SLURM env's is: changing how a build is set up
-    changes what the build produces, so the stages that used it should
-    rerun.
+    whether something has been done rather than doing it every time.
+
+    It is not recorded in the environment's lock file. The pipeline
+    compiler merges it with each stage's own ``setup`` and writes the
+    result beside the pipeline, which the stage depends on -- so changing
+    it reruns exactly the stages that run it, and not the ones whose
+    ``env_default_setup`` means they never do.
 
     ``host`` names the machine. SSH is how a machine is reached, not a kind
     of environment, so there is no separate ``ssh`` kind: a system env whose
@@ -1239,8 +1242,10 @@ class SystemEnvironment(Environment):
         default=None,
         description="Commands run in the same shell, before every stage "
         "that uses this environment, e.g. 'module load cuda' or a site "
-        "setup script that exports compiler paths. Recorded in the "
-        "environment's lock file, so changing them reruns those stages.",
+        "setup script that exports compiler paths. Merged with each "
+        "stage's own 'setup' when the pipeline is compiled and written "
+        "beside it, which the stage depends on, so changing them reruns "
+        "the stages that actually run them.",
     )
     shell: Literal["sh", "bash", "zsh"] = Field(
         default="bash",
@@ -1250,8 +1255,9 @@ class SystemEnvironment(Environment):
         "and sourcing a setup script is the usual reason to have setup "
         "commands. Ignored when neither this environment nor any stage "
         "using it has setup commands. Setting it to anything but 'bash' "
-        "is recorded in the environment's lock file, so stages that run "
-        "setup commands rerun when it changes.",
+        "is recorded in the environment's lock file -- unlike the commands "
+        "themselves, the shell isn't in the compiled command -- so stages "
+        "that run setup commands rerun when it changes.",
     )
     inputs: list[RelativeChildPathString] | None = Field(
         default=None,

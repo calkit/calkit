@@ -7459,17 +7459,6 @@ export const ReferencesSchema = {
         },
       ],
     },
-    raw_text: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Raw Text",
-    },
     zotero: {
       anyOf: [
         {

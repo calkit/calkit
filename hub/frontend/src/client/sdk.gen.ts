@@ -5602,7 +5602,6 @@ export class ProjectsService {
       owner_name: string
       project_name: string
       ref?: string | null
-      include_raw_text?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -5618,7 +5617,6 @@ export class ProjectsService {
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
             { in: "query", key: "ref" },
-            { in: "query", key: "include_raw_text" },
           ],
         },
       ],

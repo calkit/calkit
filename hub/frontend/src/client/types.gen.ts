@@ -4260,10 +4260,6 @@ export type References = {
    */
   entries?: Array<ReferenceEntry> | null
   imported_from?: ImportInfo | null
-  /**
-   * Raw Text
-   */
-  raw_text?: string | null
   zotero?: ReferenceZoteroLink | null
   /**
    * Stages
@@ -9914,7 +9910,7 @@ export type GetProjectPublicationsData = {
     /**
      * Include Content
      *
-     * Inline each publication's content. Set false to return only the presigned URL, which is what a listing needs: one PDF held in Git rather than object storage can otherwise be almost the whole response.
+     * Inline each publication's content rather than leaving the caller to fetch it from the returned URL. Off by default: a listing only needs the metadata, and one PDF can otherwise be almost the whole response. Content is still inlined for a file with no URL, since there would be no other way to reach it.
      */
     include_content?: boolean
   }
@@ -11032,10 +11028,6 @@ export type GetProjectReferencesData = {
      * Ref
      */
     ref?: string | null
-    /**
-     * Include Raw Text
-     */
-    include_raw_text?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/references"
 }

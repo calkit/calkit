@@ -4983,12 +4983,13 @@ def get_project_publications(
     session: SessionDep,
     ref: str | None = None,
     include_content: bool = Query(
-        True,
+        False,
         description=(
-            "Inline each publication's content. Set false to return only the "
-            "presigned URL, which is what a listing needs: one PDF held in "
-            "Git rather than object storage can otherwise be almost the "
-            "whole response."
+            "Inline each publication's content rather than leaving the "
+            "caller to fetch it from the returned URL. Off by default: a "
+            "listing only needs the metadata, and one PDF can otherwise be "
+            "almost the whole response. Content is still inlined for a file "
+            "with no URL, since there would be no other way to reach it."
         ),
     ),
 ) -> list[Publication]:
@@ -5069,7 +5070,13 @@ def get_project_publications(
                     dvc_lock_outs=dvc_lock_outs,
                     zip_path_map=zip_path_map,
                 )
-                pub["content"] = item.content if include_content else None
+                # Only worth omitting when there's a URL to fetch it from:
+                # a file small enough to live in Git rather than object
+                # storage has no URL, and dropping its content would leave
+                # nothing to render.
+                pub["content"] = (
+                    item.content if include_content or not item.url else None
+                )
                 pub["storage"] = item.storage
                 # Prioritize URL if already defined
                 if "url" not in pub:
@@ -7859,7 +7866,6 @@ class References(BaseModel):
     files: list[ReferenceFile] | None = None
     entries: list[ReferenceEntry] | None = None
     imported_from: ImportInfo | None = None
-    raw_text: str | None = None
     zotero: ReferenceZoteroLink | None = None
     # Names of pipeline stages that consume this .bib as a dependency/input.
     stages: list[str] | None = None
@@ -7893,7 +7899,6 @@ def get_project_references(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
-    include_raw_text: bool = False,
 ) -> list[References]:
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -8030,11 +8035,6 @@ def get_project_references(
         if os.path.isfile(os.path.join(repo.working_dir, path)):
             with open(os.path.join(repo.working_dir, path)) as f:
                 raw_text = f.read()
-            # The whole .bib on top of the parsed entries roughly doubles
-            # the response, and a paper-heavy project has several of them, so
-            # only send it when a caller says it wants it.
-            if include_raw_text:
-                ref_collection["raw_text"] = raw_text
             try:
                 entries = parse_bib_entries(raw_text)
             except Exception as e:

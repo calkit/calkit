@@ -1348,6 +1348,10 @@ export type Figure = {
    */
   url?: string | null
   /**
+   * Thumbnail
+   */
+  thumbnail?: string | null
+  /**
    * Comment Count
    */
   comment_count?: number
@@ -9319,6 +9323,12 @@ export type GetProjectFiguresData = {
      * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
      */
     include_content?: boolean
+    /**
+     * Thumbnails
+     *
+     * Send a small WebP preview in `thumbnail` instead of the full-size bytes in `content`. This is what a grid of previews wants: a page of figures is otherwise megabytes of base64 to draw images a couple of hundred pixels tall.
+     */
+    thumbnails?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }

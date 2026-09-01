@@ -3659,6 +3659,7 @@ export class ProjectsService {
       offset?: number
       q?: string | null
       include_content?: boolean
+      thumbnails?: boolean
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
@@ -3678,6 +3679,7 @@ export class ProjectsService {
             { in: "query", key: "offset" },
             { in: "query", key: "q" },
             { in: "query", key: "include_content" },
+            { in: "query", key: "thumbnails" },
           ],
         },
       ],

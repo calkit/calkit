@@ -2397,6 +2397,17 @@ export const FigureSchema = {
       ],
       title: "Url",
     },
+    thumbnail: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Thumbnail",
+    },
     comment_count: {
       type: "integer",
       title: "Comment Count",

@@ -72,6 +72,7 @@ from app import (
     users,
     zotero,
 )
+from app import thumbnails as thumbnails_mod
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -2739,6 +2740,7 @@ def _resolve_figures(
     ctx: _FigureContext,
     figures: list[dict[str, Any]],
     resolve_content: bool = True,
+    thumbnails: bool = False,
 ) -> list[Figure]:
     """Resolve content, comment counts and stage status for ``figures``.
 
@@ -2822,6 +2824,22 @@ def _resolve_figures(
         fig["content"] = item.content
         fig["url"] = item.url
         fig["storage"] = item.storage
+        if thumbnails:
+            # A figure over the inline limit comes back as a URL with no
+            # bytes, so read it from the tree instead; one that lives only in
+            # object storage has neither, and keeps its URL.
+            raw: bytes | None = None
+            if item.content is not None:
+                raw = base64.b64decode(item.content)
+            elif tree.is_file(fig["path"]):
+                raw = tree.read_bytes(fig["path"])
+            if raw is not None:
+                fig["thumbnail"] = thumbnails_mod.get_thumbnail_b64(
+                    raw, fig["path"]
+                )
+            # The full-size bytes are what this call was avoiding sending.
+            if fig.get("thumbnail"):
+                fig["content"] = None
         return _annotate(fig)
 
     if not resolve_content:
@@ -2875,6 +2893,15 @@ def get_project_figures(
             "listing that skips object storage entirely."
         ),
     ),
+    thumbnails: bool = Query(
+        False,
+        description=(
+            "Send a small WebP preview in `thumbnail` instead of the "
+            "full-size bytes in `content`. This is what a grid of previews "
+            "wants: a page of figures is otherwise megabytes of base64 to "
+            "draw images a couple of hundred pixels tall."
+        ),
+    ),
 ) -> FiguresPage:
     """Get a page of the project's figures.
 
@@ -2919,7 +2946,8 @@ def get_project_figures(
         ref=ref,
         ctx=ctx,
         figures=page,
-        resolve_content=include_content,
+        resolve_content=include_content or thumbnails,
+        thumbnails=thumbnails,
     )
     return FiguresPage(
         items=items,

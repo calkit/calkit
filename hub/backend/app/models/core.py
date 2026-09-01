@@ -1077,6 +1077,10 @@ class Figure(SQLModel):
     dataset: str | None = None
     content: str | None = None  # Base64 encoded
     url: str | None = None
+    # A base64 WebP preview, sent instead of `content` to a caller that only
+    # needs to draw the figure small. Its media type is fixed, so a client
+    # renders it as `data:image/webp;base64,<thumbnail>`.
+    thumbnail: str | None = None  # Base64 encoded WebP
     comment_count: int = 0
     storage: Literal["git", "dvc", "dvc-zip"] | None = None
     # TODO: Link to a dataset, or does the pipeline do that?

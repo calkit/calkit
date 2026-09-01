@@ -48,6 +48,11 @@ dependencies = [
   "h5py",
   # Shared cache across workers; see app/cache.py
   "redis>=5.2.0",
+  # Figure thumbnails; see app/thumbnails.py. pypdfium2 rather than PyMuPDF
+  # because it is Apache/BSD rather than AGPL, and a self-contained wheel
+  # with no system packages behind it.
+  "pillow>=11.0.0",
+  "pypdfium2>=4.30.0",
 ]
 
 [dependency-groups]

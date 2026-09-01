@@ -108,3 +108,49 @@ def test_parse_bib_entries_is_cached_on_its_text(monkeypatch):
     _reset_client(monkeypatch, None)
     assert core.parse_bib_entries(bib) == first
     assert parses["n"] == 3
+
+
+def test_thumbnails_shrink_figures_and_never_raise(monkeypatch):
+    import base64
+    import io
+
+    from PIL import Image
+
+    from app import thumbnails
+
+    class _Store:
+        def __init__(self) -> None:
+            self.data: dict[str, bytes] = {}
+
+        def get(self, key):
+            return self.data.get(key)
+
+        def set(self, key, value, ex=None):
+            self.data[key] = value
+
+        def delete(self, key):
+            self.data.pop(key, None)
+
+    store = _Store()
+    _reset_client(monkeypatch, store)
+    buf = io.BytesIO()
+    Image.new("RGB", (1600, 1200), "white").save(buf, format="PNG")
+    png = buf.getvalue()
+    encoded = thumbnails.get_thumbnail_b64(png, "plot.png")
+    assert encoded is not None
+    assert len(base64.b64decode(encoded)) < len(png)
+    # Keyed by the bytes, so the same figure is rasterized once however many
+    # times and by however many workers it is asked for
+    assert len(store.data) == 1
+    assert thumbnails.get_thumbnail_b64(png, "other-name.png") == encoded
+    assert len(store.data) == 1
+    # Transparency is composited onto white rather than onto whatever is
+    # behind the grid
+    buf = io.BytesIO()
+    Image.new("RGBA", (400, 300), (255, 0, 0, 128)).save(buf, format="PNG")
+    assert thumbnails.get_thumbnail_b64(buf.getvalue(), "a.png") is not None
+    # Vector stays as it is, and nothing unreadable brings the request down
+    assert thumbnails.get_thumbnail_b64(b"<svg/>", "a.svg") is None
+    assert thumbnails.get_thumbnail_b64(b"not an image", "a.png") is None
+    assert thumbnails.get_thumbnail_b64(b"%PDF-1.4 broken", "a.pdf") is None
+    assert not thumbnails.can_thumbnail("notes.txt")

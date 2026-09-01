@@ -62,7 +62,11 @@ class OptionalValueCommand(TyperCommand):
 
     optional_value_options: dict[str, str] = {}
 
-    def parse_args(self, ctx: "click.Context", args: list[str]) -> list[str]:
+    # The context is whatever Typer built, which since 0.26 is its own
+    # vendored Click rather than the one importable here. Nothing below
+    # reads it, so it is passed straight through rather than annotated
+    # against a private module.
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         new_args = []
         i = 0
         while i < len(args):

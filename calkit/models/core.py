@@ -1441,11 +1441,51 @@ class FigureEvidence(BaseModel):
 
 
 class ResultsEvidence(BaseModel):
-    """Evidence in the form of a result."""
+    """Evidence in the form of a results file: a set of values, a table, a
+    map, whatever the pipeline wrote. For one value inside such a file, use
+    ``value`` evidence, which can be templated into the answer.
+    """
 
     kind: Literal["result"] = "result"
     path: str
-    key: str | None = None
+    key: str | None = Field(
+        default=None,
+        description=(
+            "Deprecated: use 'value' evidence for a single value within a "
+            "results file."
+        ),
+    )
+    explanation: str | None = None
+
+
+_KEY_DESCRIPTION = (
+    "Key of the value within the results file. A key present at the top "
+    "level is used as-is; otherwise it is split on dots and walked into "
+    "nested objects, with integers indexing lists."
+)
+
+
+class ValueEvidence(BaseModel):
+    """Evidence in the form of one value from a results file.
+
+    The value is never copied into ``calkit.yaml``: the pipeline owns it,
+    and the entry only points at it. Under its ``name`` it can be templated
+    into the question's prose with Python format syntax, e.g.,
+    ``"about {improvement:.1f}x"``, so a number in an answer is read from
+    the results file when the question is displayed and cannot go stale.
+    """
+
+    kind: Literal["value"] = "value"
+    path: str
+    key: str = Field(description=_KEY_DESCRIPTION)
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Name under which the value can be templated into the "
+            "question's text, as in '{name:.2f}'. Defaults to the key. Must "
+            "be unique within the question."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1458,10 +1498,33 @@ class TableEvidence(BaseModel):
 
 
 class PublicationEvidence(BaseModel):
-    """Evidence in the form of a publication."""
+    """Evidence in the form of a publication.
+
+    The pointer to *where* in the publication the evidence lives is split in
+    two, in the spirit of a W3C selector: ``section`` is for the reader, and
+    ``label`` is an anchor in the source (e.g., a LaTeX ``\\label``) that
+    ``calkit check questions`` can verify still exists, so the reference
+    cannot rot when the document is reorganized.
+    """
 
     kind: Literal["publication"] = "publication"
     path: str
+    section: str | None = Field(
+        default=None,
+        description=(
+            "Section or subsection of the publication where the evidence "
+            "is presented, as a reader would find it, e.g., '4.2' or "
+            "'Results'."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        description=(
+            "Anchor for the section in the publication's source, e.g., a "
+            "LaTeX label such as 'sec:results'. Checked against the "
+            "source of the LaTeX stage that builds the publication."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1472,15 +1535,38 @@ class Question(BaseModel):
     ``kind``, so citing something doesn't require declaring it at the top
     level first. The top-level collections are for the things worth naming or
     annotating, not a registry that evidence has to be registered in.
+
+    Keep the answer to the claim itself and let the evidence carry the
+    numbers: a ``value`` evidence entry can be templated into the text by
+    name, as in ``"about {improvement:.1f}x"``, so it is read from the
+    results file rather than retyped. Longer reasoning belongs in the
+    publication, pointed at with a publication evidence entry and its
+    ``section``.
+
+    An answer is a claim about the evidence as it was when the answer was
+    last edited, and Git records when that was. ``calkit check questions``
+    reports a question as stale when any of its evidence has changed since
+    that commit, so editing the question after re-reading it against the
+    new evidence is how to say it still holds.
     """
 
     question: str
     hypothesis: str | None = None
     answer: str | None = None
+    notes: str | None = Field(
+        default=None,
+        description=(
+            "Free-form notes, e.g., why a question is still open and what "
+            "would answer it. Unlike an answer, notes make no claim, so a "
+            "question with notes and no answer is reported as unanswered "
+            "rather than as an answer lacking evidence."
+        ),
+    )
     evidence: (
         list[
             FigureEvidence
             | ResultsEvidence
+            | ValueEvidence
             | TableEvidence
             | PublicationEvidence
         ]

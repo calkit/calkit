@@ -234,6 +234,10 @@ const useProjectPublications = (
       ProjectsService.getProjectPublications({
         owner_name: accountName,
         project_name: projectName,
+        // Every publication comes back with a presigned URL, and both the
+        // PDF viewer and PublicationView prefer it, so inlining the bytes
+        // only bloats the listing: one PDF held in Git was 98% of it.
+        include_content: false,
         ref,
       }).then((response) => response.data),
   })

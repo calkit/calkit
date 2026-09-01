@@ -9911,6 +9911,12 @@ export type GetProjectPublicationsData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each publication's content. Set false to return only the presigned URL, which is what a listing needs: one PDF held in Git rather than object storage can otherwise be almost the whole response.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/publications"
 }
@@ -11026,6 +11032,10 @@ export type GetProjectReferencesData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Include Raw Text
+     */
+    include_raw_text?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/references"
 }

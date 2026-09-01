@@ -4981,6 +4981,15 @@ def get_project_publications(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
+    include_content: bool = Query(
+        True,
+        description=(
+            "Inline each publication's content. Set false to return only the "
+            "presigned URL, which is what a listing needs: one PDF held in "
+            "Git rather than object storage can otherwise be almost the "
+            "whole response."
+        ),
+    ),
 ) -> list[Publication]:
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -5059,7 +5068,7 @@ def get_project_publications(
                     dvc_lock_outs=dvc_lock_outs,
                     zip_path_map=zip_path_map,
                 )
-                pub["content"] = item.content
+                pub["content"] = item.content if include_content else None
                 pub["storage"] = item.storage
                 # Prioritize URL if already defined
                 if "url" not in pub:
@@ -7862,6 +7871,7 @@ def get_project_references(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
+    include_raw_text: bool = False,
 ) -> list[References]:
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -7998,7 +8008,11 @@ def get_project_references(
         if os.path.isfile(os.path.join(repo.working_dir, path)):
             with open(os.path.join(repo.working_dir, path)) as f:
                 raw_text = f.read()
-            ref_collection["raw_text"] = raw_text
+            # The whole .bib on top of the parsed entries roughly doubles
+            # the response, and a paper-heavy project has several of them, so
+            # only send it when a caller says it wants it.
+            if include_raw_text:
+                ref_collection["raw_text"] = raw_text
             try:
                 refs = bibtexparser.loads(raw_text)
                 entries = refs.entries

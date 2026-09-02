@@ -35,6 +35,7 @@ import json
 import os
 import re
 import string
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -214,13 +215,23 @@ TEMPLATED_FIELDS = ("hypothesis", "answer", "notes")
 
 
 def render_question(
-    question: str | dict, ck_info: dict | None = None, wdir: str | None = None
+    question: str | dict,
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    read_evidence: Callable[[str], Any] | None = None,
 ) -> str | dict:
     """A copy of a question with its templates filled from the evidence.
 
     A placeholder that cannot be filled is left as written rather than
     raising, since this is for display; ``check_questions`` is where a
     broken template is an error.
+
+    ``read_evidence`` loads a results file given its project-relative
+    path, for a caller whose project is not a directory on a disk --- the
+    hub reads a Git tree at a ref. Without one the path is read from
+    ``wdir``, which is what the CLI wants. Injecting the reading rather
+    than reimplementing the rendering is what keeps the hub and the CLI
+    from filling the same sentence two different ways.
     """
     if isinstance(question, str):
         return question
@@ -231,7 +242,10 @@ def render_question(
             continue
         name = evidence_name(ev)
         try:
-            data = read_evidence_file(os.path.join(wdir, ev["path"]))
+            if read_evidence is not None:
+                data = read_evidence(ev["path"])
+            else:
+                data = read_evidence_file(os.path.join(wdir, ev["path"]))
             values[name or ""] = resolve_key(data, ev["key"])
         except Exception:
             continue

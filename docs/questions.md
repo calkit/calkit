@@ -74,6 +74,9 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 `calkit list questions` renders placeholders from the results files
 (`--raw` shows the text as written), so a number in an answer is always
 the one the pipeline produced.
+The hub's project page renders them the same way, from the results file
+as it stands at the ref being browsed --- the same function does both, so
+the two cannot fill one sentence differently.
 A placeholder that names no evidence, or a format that its value cannot
 satisfy, is an error in `calkit check questions`.
 

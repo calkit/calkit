@@ -7039,7 +7039,7 @@ export const QuestionEvidenceSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "value", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -7056,6 +7056,17 @@ export const QuestionEvidenceSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
     },
     explanation: {
       anyOf: [
@@ -7119,7 +7130,7 @@ export const QuestionEvidencePostSchema = {
   properties: {
     kind: {
       type: "string",
-      enum: ["figure", "result", "table", "publication"],
+      enum: ["figure", "value", "result", "table", "publication"],
       title: "Kind",
     },
     path: {
@@ -7136,6 +7147,17 @@ export const QuestionEvidencePostSchema = {
         },
       ],
       title: "Key",
+    },
+    name: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Name",
     },
     explanation: {
       anyOf: [

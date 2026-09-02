@@ -61,6 +61,7 @@ import calkit.detect
 import calkit.environments
 import calkit.latex
 import calkit.pipeline
+import calkit.questions
 import calkit.resources
 import calkit.templates
 from app import (
@@ -2222,19 +2223,19 @@ def _sync_questions_with_db(
     return project
 
 
-def _resolve_result_value(
+def _read_result_file(
     project: Project,
     repo: git.Repo,
     ref: str | None,
     path: str,
-    key: str,
     cache: dict[str, dict | None],
-) -> str | None:
-    """Read a result file and return the value at ``key`` as a string.
+) -> dict | None:
+    """Parse a JSON or YAML results file out of the repo, once per request.
 
-    Supports JSON and YAML result files and dot-separated nested keys (e.g.
-    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items.
-    Returns None if the file or key cannot be resolved.
+    ``cache`` memoizes it across every evidence entry and every answer
+    that reads the same file, which is the common case: a question's
+    values and the numbers templated into its prose usually come from one
+    results file.
     """
     if path not in cache:
         data: dict | None = None
@@ -2252,15 +2253,36 @@ def _resolve_result_value(
         except Exception as e:
             logger.warning(f"Failed to read result {path}: {e}")
         cache[path] = data if isinstance(data, dict) else None
-    data = cache[path]
+    return cache[path]
+
+
+def _resolve_result_value(
+    project: Project,
+    repo: git.Repo,
+    ref: str | None,
+    path: str,
+    key: str,
+    cache: dict[str, dict | None],
+) -> str | None:
+    """Read a result file and return the value at ``key`` as a string.
+
+    Supports JSON and YAML result files and dot-separated nested keys (e.g.
+    ``metrics.mean``). ``cache`` memoizes parsed files across evidence items.
+    Returns None if the file or key cannot be resolved.
+    """
+    data = _read_result_file(
+        project=project, repo=repo, ref=ref, path=path, cache=cache
+    )
     if data is None:
         return None
-    value: object = data
-    for part in key.split("."):
-        if isinstance(value, dict) and part in value:
-            value = value[part]
-        else:
-            return None
+    # calkit's own lookup rather than a walk of our own: a key present
+    # literally at the top level wins even when it contains dots, and
+    # integer parts index into lists, so 'stations.0.cf' resolves here the
+    # way it does in `calkit list questions`
+    try:
+        value: object = calkit.questions.resolve_key(data, key)
+    except (KeyError, ValueError, IndexError, TypeError):
+        return None
     if isinstance(value, (dict, list)):
         return None
     return str(value)
@@ -2282,6 +2304,7 @@ def _build_question_evidence(
     for ev in evidence_ck:
         if not isinstance(ev, dict) or ev.get("kind") not in (
             "figure",
+            "value",
             "result",
             "table",
             "publication",
@@ -2292,13 +2315,14 @@ def _build_question_evidence(
             kind=ev["kind"],
             path=path,
             key=ev.get("key"),
+            name=ev.get("name"),
             explanation=ev.get("explanation"),
         )
         if item.kind == "figure":
             item.figure = figures_by_path.get(path)
         elif item.kind == "publication":
             item.publication = publications_by_path.get(path)
-        elif item.kind in ("result", "table"):
+        elif item.kind in ("value", "result", "table"):
             # A declared table answers table evidence first; a result at
             # the same path answers result evidence. Falling through to
             # results covers a table nobody declared, which is still worth
@@ -2371,7 +2395,7 @@ def _build_questions_public(
             )
         }
     results_by_path: dict[tuple[str, str | None], Result] = {}
-    if kinds & {"result", "table"}:
+    if kinds & {"value", "result", "table"}:
         # Keyed by (path, key), since several results can point at one file.
         # A keyless result lands under (path, None), which is what keyless
         # evidence resolves against; a keyed one must not stand in for it,
@@ -2396,9 +2420,35 @@ def _build_questions_public(
     db_questions = sorted(project.questions, key=lambda q: q.number)
     result_value_cache: dict[str, dict | None] = {}
     questions_public = []
+
+    # An answer keeps its numbers in the results file and templates them
+    # into the prose, so what is stored is "{improvement:.1f}x" and what a
+    # reader should see is what that is now. Rendered with calkit's own
+    # function, reading through this request's cache, so the hub and
+    # `calkit list questions` cannot fill the same sentence two ways.
+    def _read_evidence(path: str) -> Any:
+        data = _read_result_file(
+            project=project,
+            repo=repo,
+            ref=ref,
+            path=path,
+            cache=result_value_cache,
+        )
+        if data is None:
+            raise ValueError(f"Could not read {path}")
+        return data
+
     for q_ck, q_db in zip(questions_ck, db_questions):
-        hypothesis = q_ck.get("hypothesis") if isinstance(q_ck, dict) else None
-        answer = q_ck.get("answer") if isinstance(q_ck, dict) else None
+        rendered = (
+            calkit.questions.render_question(
+                q_ck, read_evidence=_read_evidence
+            )
+            if isinstance(q_ck, dict)
+            else {}
+        )
+        rendered = rendered if isinstance(rendered, dict) else {}
+        hypothesis = rendered.get("hypothesis")
+        answer = rendered.get("answer")
         evidence = _build_question_evidence(
             project=project,
             repo=repo,

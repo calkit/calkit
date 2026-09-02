@@ -4026,7 +4026,7 @@ export type QuestionEvidence = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "value" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -4035,6 +4035,10 @@ export type QuestionEvidence = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
   /**
    * Explanation
    */
@@ -4055,7 +4059,7 @@ export type QuestionEvidencePost = {
   /**
    * Kind
    */
-  kind: "figure" | "result" | "table" | "publication"
+  kind: "figure" | "value" | "result" | "table" | "publication"
   /**
    * Path
    */
@@ -4064,6 +4068,10 @@ export type QuestionEvidencePost = {
    * Key
    */
   key?: string | null
+  /**
+   * Name
+   */
+  name?: string | null
   /**
    * Explanation
    */

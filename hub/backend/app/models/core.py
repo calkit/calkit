@@ -1538,9 +1538,13 @@ class MiscArtifact(BaseModel):
 # Question evidence models live here (after Figure, Result, and Publication) so
 # their resolved-artifact fields reference already-defined types.
 class QuestionEvidence(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    # "value" is one value inside a results file, which is what an answer
+    # templates a number from; "result" with a key is its deprecated form
+    kind: Literal["figure", "value", "result", "table", "publication"]
     path: str
     key: str | None = None
+    # What the value is called in the answer's "{name}" placeholders
+    name: str | None = None
     explanation: str | None = None
     # Resolved artifact the evidence points to, if it could be found
     figure: Figure | None = None
@@ -1552,9 +1556,10 @@ class QuestionEvidence(SQLModel):
 
 
 class QuestionEvidencePost(SQLModel):
-    kind: Literal["figure", "result", "table", "publication"]
+    kind: Literal["figure", "value", "result", "table", "publication"]
     path: str
     key: str | None = None
+    name: str | None = None
     explanation: str | None = None
 
 

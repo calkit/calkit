@@ -49,6 +49,10 @@ interface EvidenceRow {
   // Combined "kind:path" so a single dropdown can pick figure or result.
   selection: string
   key: string
+  // What the value is called in the answer's "{name}" placeholders. Not
+  // edited here, but carried through the form: dropping it on save would
+  // unfill every placeholder in the answer that names it.
+  name: string
   explanation: string
 }
 
@@ -61,6 +65,10 @@ interface EditQuestionForm {
 
 const rowToSelection = (kind: string, path: string) => `${kind}:${path}`
 
+// Kinds that point at one value inside a results file. "value" is the
+// current form; "result" with a key is the one it replaced.
+const KEYED_KINDS = new Set(["value", "result"])
+
 const parseSelection = (selection: string) => {
   const idx = selection.indexOf(":")
   if (idx < 0) {
@@ -69,6 +77,7 @@ const parseSelection = (selection: string) => {
   return {
     kind: selection.slice(0, idx) as
       | "figure"
+      | "value"
       | "result"
       | "table"
       | "publication",
@@ -144,6 +153,7 @@ const EditQuestion = ({
       evidence: (question.evidence ?? []).map((ev) => ({
         selection: rowToSelection(ev.kind, ev.path),
         key: ev.key ?? "",
+        name: ev.name ?? "",
         explanation: ev.explanation ?? "",
       })),
     })
@@ -167,7 +177,10 @@ const EditQuestion = ({
               {
                 kind: parsed.kind,
                 path: parsed.path,
-                key: parsed.kind === "result" && row.key ? row.key : undefined,
+                key:
+                  KEYED_KINDS.has(parsed.kind) && row.key ? row.key : undefined,
+                name:
+                  parsed.kind === "value" && row.name ? row.name : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
               },
             ]
@@ -244,7 +257,12 @@ const EditQuestion = ({
                 size="xs"
                 ml={-1.5}
                 onClick={() =>
-                  append({ selection: "", key: "", explanation: "" })
+                  append({
+                    selection: "",
+                    key: "",
+                    name: "",
+                    explanation: "",
+                  })
                 }
               />
             </Flex>
@@ -266,7 +284,7 @@ const EditQuestion = ({
               const selectionInList =
                 (parsed?.kind === "figure" &&
                   figures.some((f) => f.path === parsed.path)) ||
-                (parsed?.kind === "result" &&
+                ((parsed?.kind === "result" || parsed?.kind === "value") &&
                   results.some((r) => r.path === parsed.path)) ||
                 (parsed?.kind === "table" &&
                   tables.some((t) => t.path === parsed.path)) ||
@@ -352,7 +370,7 @@ const EditQuestion = ({
                       ) : null}
                     </Select>
                   </FormControl>
-                  {parsed?.kind === "result" ? (
+                  {parsed && KEYED_KINDS.has(parsed.kind) ? (
                     <FormControl mb={2}>
                       <FormLabel fontSize="xs" mb={1}>
                         Key (optional)

@@ -1559,7 +1559,7 @@ def get_project_history(
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
-        shared_read=True,
+        read_only=True,
     )
     history = get_commit_history(repo, max_count=limit + offset, ref=ref)
     return history[offset : offset + limit]
@@ -1732,7 +1732,7 @@ def get_project_file_history(
         user=current_user,
         session=session,
         ttl=FULL_HISTORY_REPO_TTL,
-        shared_read=True,
+        read_only=True,
     )
     return get_file_history(repo, path=path, max_count=limit, storage=storage)
 
@@ -1820,7 +1820,7 @@ def get_project_contents(
         session=session,
         ttl=ttl,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     return app.projects.get_contents_from_repo(
         project=project,
@@ -2004,7 +2004,7 @@ def get_project_content_paths(
         session=session,
         ttl=ttl,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     tree = app.projects.get_repo_tree_for_ref(repo, ref)
     dvc_lock_outs = app.projects.get_ck_info_and_dvc_outs_from_tree(
@@ -2455,7 +2455,7 @@ def get_project_questions(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -3289,7 +3289,7 @@ def get_project_tables(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     return _build_tables(
         project=project,
@@ -3340,7 +3340,7 @@ def get_project_results(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     return _build_results(project=project, repo=repo, ref=ref)
 
@@ -5049,7 +5049,7 @@ def get_project_publications(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     # Read declared metadata at the requested ref. get_repo only fetches a
     # ref, it does not check it out, so reading the working tree would return
@@ -5579,7 +5579,7 @@ def get_project_presentations(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     # Read declared metadata at the requested ref. get_repo only fetches a
     # ref, it does not check it out, so reading the working tree would return
@@ -6921,7 +6921,7 @@ def get_project_pipeline(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     # Read files at the requested ref rather than the live checkout, which
     # always reflects the default branch (get_repo only fetches a ref, it
@@ -8050,7 +8050,7 @@ def get_project_references(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = get_ck_info_from_repo(repo)
     # An empty "references:" key in calkit.yaml parses to None.
@@ -9660,7 +9660,7 @@ def get_project_environments(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -9783,7 +9783,7 @@ def get_project_software(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -9896,7 +9896,7 @@ def get_project_notebooks(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,
@@ -10002,7 +10002,7 @@ def get_project_repro_check(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     # A pure function of the tree at this commit, and a second and a half of
     # work on a large project, so it is worked out once per commit rather
@@ -10361,7 +10361,7 @@ def get_project_showcase(
         session=session,
         ttl=ttl,
         ref=ref,
-        shared_read=True,
+        read_only=True,
     )
     ck_info = app.projects.get_ck_info_for_ref(
         project=project,

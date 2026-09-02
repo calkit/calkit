@@ -526,7 +526,7 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
             user=None,
             session=None,
             ttl=600,
-            shared_read=True,
+            read_only=True,
         )
         assert app.git.SHARED_READER_DIR in str(repo.working_dir)
         assert len(clones) == 1
@@ -535,7 +535,7 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
             user=None,
             session=None,
             ttl=600,
-            shared_read=True,
+            read_only=True,
         )
         assert len(clones) == 1
         # And it is recognisable as the shared one, so a write that lands
@@ -566,7 +566,7 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
             user=None,
             session=None,
             ttl=600,
-            shared_read=True,
+            read_only=True,
         )
         assert app.git.SHARED_READER_DIR not in str(private.working_dir)
     finally:

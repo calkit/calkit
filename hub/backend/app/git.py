@@ -200,8 +200,9 @@ def refuse_if_shared(repo: git.Repo) -> None:
     Reads share one copy per project; writes each get their own. Committing
     in the shared one would author it in a tree other people are reading,
     and push it under whichever credentials that copy happens to hold. A
-    caller that ends up here asked for a shared read and then tried to
-    write, which is a bug in the caller rather than anything a user did.
+    caller that ends up here asked ``get_repo`` for a read-only repo and
+    then wrote to it, which is a bug in the caller rather than anything
+    a user did.
     """
     if is_shared_read_checkout(repo):
         raise HTTPException(
@@ -243,32 +244,36 @@ def get_repo(
     ttl: int | None = None,
     fresh=False,
     ref: str | None = None,
-    shared_read: bool = False,
+    read_only: bool = False,
 ) -> git.Repo:
     """Ensure that the repo exists and is ready for operating upon for the user.
 
     Handles concurrency in case multiple API calls request the repo
     simultaneously. If TTL is None, the latest version is always fetched.
 
-    ``shared_read`` asks for the checkout everybody reads from rather than
-    this user's own. What a commit contains is the same whoever is looking,
-    so a project needs one copy for reading, not one per viewer -- and one
-    that stays warm for the next person instead of being cloned again.
+    ``read_only`` promises the caller will only read, which lets every
+    reader of a project share one checkout instead of cloning their own.
+    What a commit contains is the same whoever is looking, so a project
+    needs one copy for reading, not one per viewer -- and one that stays
+    warm for the next person rather than being cloned again.
 
-    It is opt-in, and deliberately so: the shared checkout must never be
-    written to, since a commit made there would be authored in a tree other
-    people are reading. A caller that doesn't ask for it gets its own
-    checkout exactly as before, so the cost of missing one is a slow read
-    rather than a wrong write.
+    It is opt-in, and deliberately so: a caller that doesn't ask for it
+    gets its own checkout exactly as before, so the cost of missing one is
+    a slow read rather than a wrong write. Breaking the promise is caught
+    rather than trusted -- see ``refuse_if_shared``.
     """
     owner_name = project.owner_github_name
     project_name = project.name
     shared_token: str | None = None
-    if shared_read:
-        shared_read, shared_token = _shared_read_token(project)
+    # Read-only is what the caller asks for; sharing is how it's answered,
+    # and a private repo the App isn't installed on can't be answered that
+    # way at all. Those fall back to a per-user checkout, still read-only.
+    shared = False
+    if read_only:
+        shared, shared_token = _shared_read_token(project)
     # Add the file to the repo(s) -- we may need to clone it.
     # Ref-based reads should not mutate this working tree checkout.
-    if shared_read:
+    if shared:
         base_dir = os.path.join(
             settings.CLONE_ROOT, SHARED_READER_DIR, owner_name, project_name
         )
@@ -299,7 +304,7 @@ def get_repo(
             os.remove(updated_fpath)
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
-    if shared_read:
+    if shared:
         # The shared checkout belongs to the project, not to whoever asked
         # for it, so it carries the project's credentials and never a
         # user's. Nothing here is authorized by this: the caller has
@@ -623,7 +628,7 @@ def get_repo(
     # have stored the literal string "None" as the committer, so we
     # re-run on every refresh to repair that -- but not on every cached
     # read, which would be pure overhead.
-    if user is not None and did_refresh and not shared_read:
+    if user is not None and did_refresh and not shared:
         _configure_committer(repo, user, session=session)
     if did_refresh:
         record_project_update(project, repo, session)

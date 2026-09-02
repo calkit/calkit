@@ -19,6 +19,7 @@ import time
 
 from sqlmodel import Session, select
 
+from app import cache
 from app.core import logger
 from app.db import engine
 from app.models import Account, Project, User
@@ -61,6 +62,29 @@ def warm_project(owner_name: str, project_name: str) -> dict:
                     "project": f"{owner_name}/{project_name}",
                     "private_no_user": True,
                 }
+        # The clone is what tells us which commit we would be warming, so
+        # it happens here rather than as a step: everything after it is
+        # derived from that commit and keyed by it, so if the last warm
+        # already ran at this commit there is nothing left to do. A push
+        # reaches us twice -- once from the CLI and once from GitHub -- and
+        # a restart re-queues what is already warm, so this is the common
+        # case rather than the unusual one.
+        from app.git import get_repo, resolve_commit_sha
+
+        slug = f"{owner_name}/{project_name}".lower()
+        warmed_key = cache.make_key("warmed", slug)
+        try:
+            repo = get_repo(project=project, user=user, session=session, ttl=0)
+            done.append("clone")
+            sha = resolve_commit_sha(repo, None)
+        except Exception as e:
+            logger.warning(
+                f"Could not read {slug} to warm it: {type(e).__name__}: {e}"
+            )
+            return {"project": slug, "failed": ["clone"]}
+        if sha and cache.get_json(warmed_key) == sha:
+            logger.info(f"{slug} is already warm at {sha[:7]}")
+            return {"project": slug, "already_warm_at": sha}
         for label, step in _steps():
             try:
                 step(project, user, session)
@@ -72,6 +96,10 @@ def warm_project(owner_name: str, project_name: str) -> dict:
                     f"failed: {type(e).__name__}: {e}"
                 )
                 failed.append(label)
+    if sha and not failed:
+        # Only when everything worked: a partial warm should be retried, not
+        # remembered as done.
+        cache.set_json(warmed_key, sha)
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
     logger.info(
         f"Warmed {owner_name}/{project_name}",
@@ -95,15 +123,17 @@ def _steps():
 
     Imported lazily and listed here rather than called inline so one failing
     step is reported by name and the rest still run.
+
+    Each step goes through the route the page calls, rather than reaching
+    past it, so warming can't drift from what a request actually does. They
+    each call ``get_repo`` again, which looks wasteful and measures at 0.4 ms
+    once the first step has refreshed the clone: past that it is the TTL fast
+    path, which returns the existing checkout without touching the lock or
+    the network. For a private project it also re-reads the owner's token,
+    which is a query against a row already in the session's identity map and
+    only reaches GitHub when the credential is near expiry.
     """
     from app.api.routes.projects import core as routes
-
-    def clone(project, user, session):
-        # ttl=0 forces the freshness check; the rev gate still skips the
-        # fetch when the remote hasn't actually moved.
-        from app.git import get_repo
-
-        get_repo(project=project, user=user, session=session, ttl=0)
 
     def pipeline(project, user, session):
         routes.get_project_pipeline(
@@ -140,6 +170,24 @@ def _steps():
             ref=None,
         )
 
+    def questions(project, user, session):
+        routes.get_project_questions(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            current_user=user,
+            session=session,
+            ref=None,
+        )
+
+    def datasets(project, user, session):
+        routes.get_project_datasets(
+            owner_name=project.owner_account_name,
+            project_name=project.name,
+            current_user=user,
+            session=session,
+            ref=None,
+        )
+
     def publications(project, user, session):
         routes.get_project_publications(
             owner_name=project.owner_account_name,
@@ -151,9 +199,10 @@ def _steps():
         )
 
     return [
-        ("clone", clone),
         ("pipeline", pipeline),
         ("figures", figures),
         ("references", references),
         ("publications", publications),
+        ("questions", questions),
+        ("datasets", datasets),
     ]

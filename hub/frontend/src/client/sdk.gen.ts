@@ -320,6 +320,8 @@ import type {
   PostProjectEnvironmentErrors,
   PostProjectEnvironmentResponses,
   PostProjectErrors,
+  PostProjectEventErrors,
+  PostProjectEventResponses,
   PostProjectFigureErrors,
   PostProjectFigureResponses,
   PostProjectFigureScriptErrors,
@@ -387,6 +389,7 @@ import type {
   PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
+  ProjectEventPost,
   ProjectInvitationPost,
   ProjectPatch,
   ProjectPost,
@@ -4791,6 +4794,63 @@ export class ProjectsService {
       url: "/projects/{owner_name}/{project_name}/syncs",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Post Project Event
+   *
+   * Tell the hub something happened to this project elsewhere.
+   *
+   * ``calkit push`` reports a push here, so the person who just pushed
+   * doesn't have to be the one who waits for the pipeline, figures and
+   * references to be worked out again. The GitHub App's webhook says the
+   * same thing for anyone pushing through GitHub; this covers the rest, and
+   * arrives sooner.
+   *
+   * Needs write access, since it is a request to spend server time on the
+   * project, and returns immediately either way: warming is an optimization,
+   * and a deployment with no queue configured simply doesn't do it.
+   */
+  public static postProjectEvent<ThrowOnError extends boolean = true>(
+    parameters: {
+      owner_name: string
+      project_name: string
+      projectEventPost: ProjectEventPost
+    },
+    options?: Options<never, ThrowOnError>,
+  ): RequestResult<
+    PostProjectEventResponses,
+    PostProjectEventErrors,
+    ThrowOnError
+  > {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "owner_name" },
+            { in: "path", key: "project_name" },
+            { key: "projectEventPost", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? client).post<
+      PostProjectEventResponses,
+      PostProjectEventErrors,
+      ThrowOnError
+    >({
+      responseType: "json",
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/projects/{owner_name}/{project_name}/events",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

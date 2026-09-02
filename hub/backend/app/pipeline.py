@@ -261,13 +261,18 @@ def _stage_status_cache_get(cache_key: str) -> dict[str, StageStatus] | None:
     # Missing from this worker's memory doesn't mean nobody has computed it:
     # with several workers, the odds are it was another one. Fall through to
     # the shared cache before paying for the object-storage checks again.
-    shared = cache.get_json(cache.make_key("stage-status", cache_key))
+    shared_key = cache.make_key("stage-status", cache_key)
+    shared = cache.get_json(shared_key)
     if shared is None:
         return None
     try:
         value = {k: StageStatus.model_validate(v) for k, v in shared.items()}
     except (ValidationError, AttributeError) as e:
-        logger.warning(f"Ignoring unreadable cached stage statuses: {e}")
+        # Written by an older shape of StageStatus. Drop it rather than
+        # step over it: leaving it means warning and recomputing on every
+        # request until it expires.
+        logger.warning(f"Discarding unreadable cached stage statuses: {e}")
+        cache.delete(shared_key)
         return None
     with _stage_status_cache_lock:
         _stage_status_cache[cache_key] = (time.monotonic(), value)

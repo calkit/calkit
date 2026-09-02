@@ -6812,19 +6812,33 @@ def post_project_sync(
     return Message(message="success")
 
 
-@router.post("/projects/{owner_name}/{project_name}/warm")
-def post_project_warm(
+class ProjectEventPost(BaseModel):
+    """Something that happened to a project somewhere else."""
+
+    kind: Literal["push"] = "push"
+    # What was pushed and where, recorded for reference: the hub works out
+    # the current state from the repo itself, so none of this is trusted as
+    # input, but it is what makes a log line worth reading.
+    git_rev: str | None = None
+    remote: str | None = None
+    branch: str | None = None
+
+
+@router.post("/projects/{owner_name}/{project_name}/events")
+def post_project_event(
     owner_name: str,
     project_name: str,
     current_user: CurrentUser,
     session: SessionDep,
+    req: ProjectEventPost,
 ) -> Message:
-    """Ask for this project's derived data to be recomputed now.
+    """Tell the hub something happened to this project elsewhere.
 
-    Called by ``calkit push`` so the person who just pushed doesn't have to
-    be the one who waits for the pipeline, figures and references to be
-    worked out again. The GitHub App's webhook does the same thing for
-    anyone pushing through GitHub; this covers the rest, and arrives sooner.
+    ``calkit push`` reports a push here, so the person who just pushed
+    doesn't have to be the one who waits for the pipeline, figures and
+    references to be worked out again. The GitHub App's webhook says the
+    same thing for anyone pushing through GitHub; this covers the rest, and
+    arrives sooner.
 
     Needs write access, since it is a request to spend server time on the
     project, and returns immediately either way: warming is an optimization,
@@ -6836,6 +6850,15 @@ def post_project_warm(
         session=session,
         current_user=current_user,
         min_access_level="write",
+    )
+    logger.info(
+        f"{project.owner_account_name}/{project.name} reported a {req.kind}",
+        extra={
+            "event_kind": req.kind,
+            "event_git_rev": req.git_rev,
+            "event_remote": req.remote,
+            "event_branch": req.branch,
+        },
     )
     queued = app.tasks.enqueue_warm(project.owner_account_name, project.name)
     return Message(message="Queued" if queued else "Not queued")

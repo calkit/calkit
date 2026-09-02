@@ -5613,6 +5613,53 @@ export const ProjectCommentPostSchema = {
   title: "ProjectCommentPost",
 } as const
 
+export const ProjectEventPostSchema = {
+  properties: {
+    kind: {
+      type: "string",
+      const: "push",
+      title: "Kind",
+      default: "push",
+    },
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    remote: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Remote",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+  },
+  type: "object",
+  title: "ProjectEventPost",
+  description: "Something that happened to a project somewhere else.",
+} as const
+
 export const ProjectInvitationCreatedSchema = {
   properties: {
     id: {

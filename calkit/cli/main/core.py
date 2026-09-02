@@ -1676,10 +1676,10 @@ def push(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
-        _tell_hub_we_pushed()
+        _tell_hub_we_pushed(git_args)
 
 
-def _tell_hub_we_pushed() -> None:
+def _tell_hub_we_pushed(git_args: list[str]) -> None:
     """Let the hub know this project has moved, so it can get ready.
 
     Everything the hub shows for a project is worked out from its latest
@@ -1701,12 +1701,30 @@ def _tell_hub_we_pushed() -> None:
         # neither belongs in the seconds after a push has already succeeded.
         headers = calkit.hub.get_headers()
         url = (
-            calkit.hub.get_base_url().rstrip("/") + f"/projects/{project}/warm"
+            calkit.hub.get_base_url().rstrip("/")
+            + f"/projects/{project}/events"
         )
     except Exception:
         return
+    # What was pushed and where. The hub reads the repo itself to find the
+    # current state, so this is for the record rather than for it to act on,
+    # and anything we can't work out is simply left out.
+    body: dict[str, str] = {"kind": "push"}
     try:
-        requests.post(url, headers=headers, timeout=5)
+        repo = calkit.git.get_repo()
+        body["git_rev"] = repo.head.commit.hexsha
+        body["branch"] = repo.active_branch.name
+        # The remote git actually pushed to: whatever was named on the
+        # command line, else the branch's own upstream, else origin.
+        named = [a for a in git_args if not a.startswith("-")]
+        if named:
+            body["remote"] = named[0]
+        else:
+            body["remote"] = repo.active_branch.tracking_branch().remote_name
+    except Exception:
+        body.setdefault("remote", "origin")
+    try:
+        requests.post(url, headers=headers, json=body, timeout=5)
     except Exception:
         # Not connected to a hub, not logged in, offline, or a hub that
         # doesn't know this project: none of them are the user's problem

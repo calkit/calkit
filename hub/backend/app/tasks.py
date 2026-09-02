@@ -16,6 +16,7 @@ is a no-op, and the first viewer pays for the work as they did before.
 import re
 from typing import Any
 
+from app import cache
 from app.cache import get_client
 from app.config import settings
 from app.core import logger
@@ -26,6 +27,9 @@ QUEUE_NAME = "warm"
 JOB_TIMEOUT = 1800
 # A warm is only worth doing while it is still roughly current.
 JOB_TTL = 600
+# How long a startup sweep counts as having happened. Long enough to cover a
+# rolling deploy and a development server reloading on every save.
+STARTUP_WARM_INTERVAL = 900
 
 
 def get_queue() -> Any:
@@ -87,6 +91,14 @@ def enqueue_startup_warms(limit: int) -> int:
     were queued.
     """
     if limit <= 0:
+        return 0
+    # Every process that starts would otherwise sweep, and in development
+    # the app restarts on every file save: without this the queue is never
+    # empty and the worker never stops, which makes the whole stack feel
+    # slow for the sake of pages nobody asked for. One sweep per interval,
+    # whoever gets there first.
+    if not cache.claim(cache.make_key("startup-warm"), STARTUP_WARM_INTERVAL):
+        logger.info("Skipping startup warms; one ran recently")
         return 0
     from sqlmodel import Session, select
 

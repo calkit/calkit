@@ -91,6 +91,12 @@ function PlotlyThumbnail({ figure }: { figure: Figure }) {
   const [src, setSrc] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
+    // Start over whenever the figure's content does: this component is
+    // reused across a ref change or a refetch, and without the reset it
+    // would keep showing the previous image, or stay stuck on a failure
+    // that no longer applies.
+    setSrc(null)
+    setFailed(false)
     if (!figure.content) {
       setFailed(true)
       return

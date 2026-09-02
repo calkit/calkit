@@ -86,7 +86,8 @@ app = FastAPI(
 # pandas, which then tries to gunzip bytes that are already plain and fails
 # with "Not a gzipped file". Nothing on these paths is text worth shrinking
 # anyway -- it is app assets and data files.
-_NO_COMPRESS_PATHS = ("/apps/",)
+_NO_COMPRESS_PREFIXES = ("/projects/",)
+_NO_COMPRESS_SEGMENT = "/apps/"
 
 
 class SelectiveGZipMiddleware:
@@ -97,8 +98,14 @@ class SelectiveGZipMiddleware:
         self.gzip_app = GZipMiddleware(app, minimum_size=minimum_size)
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
-        if scope["type"] == "http" and any(
-            part in scope.get("path", "") for part in _NO_COMPRESS_PATHS
+        path = scope.get("path", "")
+        # An app's files live under /projects/<owner>/<project>/apps/..., so
+        # both halves have to match: a substring test alone would also skip
+        # compression on anything else that merely contains "/apps/".
+        if (
+            scope["type"] == "http"
+            and path.startswith(_NO_COMPRESS_PREFIXES)
+            and _NO_COMPRESS_SEGMENT in path
         ):
             await self.app(scope, receive, send)
             return

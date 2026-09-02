@@ -101,11 +101,41 @@ def set_json(key: str, value: Any, ttl: int | None = None) -> None:
         _warn_once(f"Cache write failed, continuing without it: {e}")
 
 
-def make_key(*parts: str) -> str:
-    """A cache key from its parts, namespaced by environment.
+def delete(key: str) -> None:
+    """Drop one entry. Failures are logged, never raised."""
+    client = get_client()
+    if client is None:
+        return
+    try:
+        client.delete(key)
+    except Exception as e:
+        _warn_once(f"Cache delete failed, continuing without it: {e}")
 
-    Staging and production share a Redis in some deployments, and the same
-    project can sit at the same commit in both, so the environment has to be
-    part of the key or one would answer for the other.
+
+def claim(key: str, ttl: int) -> bool:
+    """Take ``key`` for ``ttl`` seconds, if nobody else holds it.
+
+    True means the caller got it. Used to let one process do a thing that
+    would be wasteful for every process to do -- with no cache configured
+    nobody is coordinating anything, so everyone gets True and behaves as
+    they did before.
+    """
+    client = get_client()
+    if client is None:
+        return True
+    try:
+        return bool(client.set(key, b"1", nx=True, ex=ttl))
+    except Exception as e:
+        _warn_once(f"Cache claim failed, continuing without it: {e}")
+        return True
+
+
+def make_key(*parts: str) -> str:
+    """A cache key from its parts, under a prefix naming the deployment.
+
+    Each environment runs its own cache, so this isn't what keeps them
+    apart. It's a namespace: every key the hub writes is reachable by
+    pattern, which is what makes it possible to expire a class of them
+    without reaching for the whole database.
     """
     return ":".join(["ck", settings.ENVIRONMENT, *parts])

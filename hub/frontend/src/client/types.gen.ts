@@ -3297,6 +3297,30 @@ export type ProjectCommentPost = {
 }
 
 /**
+ * ProjectEventPost
+ *
+ * Something that happened to a project somewhere else.
+ */
+export type ProjectEventPost = {
+  /**
+   * Kind
+   */
+  kind?: "push"
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Remote
+   */
+  remote?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+}
+
+/**
  * ProjectInvitationCreated
  */
 export type ProjectInvitationCreated = {
@@ -10293,6 +10317,42 @@ export type PostProjectSyncResponses = {
 
 export type PostProjectSyncResponse =
   PostProjectSyncResponses[keyof PostProjectSyncResponses]
+
+export type PostProjectEventData = {
+  body: ProjectEventPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/events"
+}
+
+export type PostProjectEventErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectEventError =
+  PostProjectEventErrors[keyof PostProjectEventErrors]
+
+export type PostProjectEventResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostProjectEventResponse =
+  PostProjectEventResponses[keyof PostProjectEventResponses]
 
 export type GetProjectPipelineData = {
   body?: never

@@ -82,7 +82,7 @@ set it once and every repo the App is installed on delivers to it.
 In the App's settings, under **Webhook**:
 
 - Tick **Active**.
-- Set the URL to `https://api.your-hub.example.edu/github-events`.
+- Set the URL to `https://api.your-hub.example.edu/events/github`.
 - Set a secret, and give the backend the same value as `GH_WEBHOOK_SECRET`.
 - Under **Subscribe to events**, tick **Push**.
 

@@ -206,7 +206,7 @@ def post_discount_code(
     return code
 
 
-@router.post("/github-events", include_in_schema=False)
+@router.post("/events/github", include_in_schema=False)
 async def post_github_event(request: Request) -> Message:
     """Receive the GitHub App's webhook deliveries.
 
@@ -215,7 +215,8 @@ async def post_github_event(request: Request) -> Message:
     recompute. The work is queued rather than done here; see ``app.warm``.
 
     One webhook is configured on the App, not per repository, so every repo
-    the App is installed on delivers here.
+    the App is installed on delivers here. Namespaced under ``/events``
+    alongside anywhere else news about a project might come from.
     """
     body = await request.body()
     secret = settings.GH_WEBHOOK_SECRET
@@ -232,7 +233,14 @@ async def post_github_event(request: Request) -> Message:
         raise HTTPException(401, "Bad signature")
     if request.headers.get("x-github-event") != "push":
         return Message(message="Ignored")
-    payload = json.loads(body)
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        # Signed, so this came from GitHub, but it isn't what we expect.
+        # A bad request is the honest answer; a 500 would say it was ours.
+        raise HTTPException(400, "Body is not JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body is not an object")
     repo = (payload.get("repository") or {}).get("full_name")
     if not repo or "/" not in repo:
         return Message(message="Ignored")

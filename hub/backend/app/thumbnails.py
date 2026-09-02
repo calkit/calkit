@@ -1,4 +1,4 @@
-"""Small previews of a project's figures.
+"""Small previews of images and PDFs.
 
 The figures page is a grid of thumbnails a couple of hundred pixels tall, but
 a figure is whatever the pipeline produced: a 400 kB plot, or a PDF page. Sent
@@ -7,6 +7,13 @@ whole, twenty of them are megabytes of base64 to draw twenty postage stamps.
 A thumbnail is a pure function of the bytes it came from, so it is cached by
 their hash and computed once per distinct figure across every worker and every
 viewer. See ``app.cache``.
+
+Keying on content rather than on a project and revision means an entry is
+never wrong, but also that nothing knows to delete it when the figure it came
+from stops existing. That is left to the cache's own eviction
+(``maxmemory-policy allkeys-lru``): a thumbnail nobody has asked for in a long
+time is exactly what should go first. If that stops being enough, the way out
+is a second key per project revision listing what it produced.
 """
 
 import base64

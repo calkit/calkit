@@ -1306,7 +1306,9 @@ def get_project(
         # the difference between a few milliseconds and a quarter of a
         # second, and this request is what the whole project page waits on.
         ck_info = app.projects.get_ck_info_for_ref(
-            project=project, repo=repo, ref=ref, read_only=True
+            project=project,
+            repo=repo,
+            ref=ref,
         )
         resp.calkit_info_keys = list(ck_info.keys())
         # Read status if present
@@ -2460,8 +2462,7 @@ def get_project_questions(
         repo=repo,
         ref=ref,
         # This route only reads; the POST/PUT handlers below load their own
-        # copy through ruamel so their rewrites keep comments intact.
-        read_only=True,
+        # copy through ruamel so their rewrites keep comments intact.,
     )
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
@@ -2651,8 +2652,7 @@ def _discover_figures(
         ref=ref,
         # Discovery only reads this metadata, so skip ruamel's round-trip
         # parser; on a 42 KB calkit.yaml that is ~5 ms instead of ~78 ms,
-        # paid on every page of the listing.
-        read_only=True,
+        # paid on every page of the listing.,
     )
     figures = ck_info.get("figures", [])
     # Declared figures (from calkit.yaml) may omit a title; fill one in so
@@ -3111,7 +3111,6 @@ def _build_tables(
         project=project,
         repo=repo,
         ref=ref,
-        read_only=True,
     )
     tables: list[dict[str, Any]] = []
     known_paths: set[str] = set()
@@ -5266,7 +5265,9 @@ def get_project_publication_components(
     )
     tree = get_repo_tree_for_ref(repo, ref)
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=ref, read_only=True
+        project=project,
+        repo=repo,
+        ref=ref,
     )
     dvc_outs = app.projects.dvc_outputs_from_tree(project=project, tree=tree)
     # Every file in the folder, from Git and from DVC
@@ -10177,7 +10178,6 @@ def get_project_apps(
         project=project,
         repo=repo,
         ref=ref,
-        read_only=True,
     )
     return _project_apps_from_ck_info(
         ck_info, owner_name=owner_name, project_name=project_name
@@ -10274,7 +10274,9 @@ def serve_project_app_file(
         )
         return RedirectResponse(base + path.strip("/"), status_code=302)
     ck_info = app.projects.get_ck_info_for_ref(
-        project=project, repo=repo, ref=git_sha, read_only=True
+        project=project,
+        repo=repo,
+        ref=git_sha,
     )
     apps = _project_apps_from_ck_info(
         ck_info, owner_name=owner_name, project_name=project_name

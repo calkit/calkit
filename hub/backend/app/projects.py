@@ -1276,21 +1276,24 @@ def get_ck_info_for_ref(
     project: Project,
     repo: git.Repo,
     ref: str | None = None,
-    read_only: bool = False,
 ) -> dict:
     """Return Calkit metadata for the requested ref, if provided.
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
     the ref or doesn't hold a mapping. Declared artifact paths come back
-    normalized (see ``normalize_ck_info_paths``), so callers must not write
-    the result back to calkit.yaml.
+    normalized (see ``normalize_ck_info_paths``, which rewrites them in
+    place), so what comes back here must never be written to calkit.yaml.
 
-    Pass ``read_only=True`` only when the caller won't write the result back;
-    see ``get_ck_info_from_repo``.
+    Which is why there is no choice of parser: ruamel's round-trip mode
+    exists to preserve the comments and quoting a faithful rewrite needs,
+    and nothing may rewrite this. On a large calkit.yaml that is a quarter
+    of a second per request, paid by most of the project view. Callers that
+    do write calkit.yaml back read it through ``get_ck_info_from_repo``
+    instead.
     """
     if ref is None:
         return normalize_ck_info_paths(
-            get_ck_info_from_repo(repo=repo, read_only=read_only)
+            get_ck_info_from_repo(repo=repo, read_only=True)
         )
     try:
         ck_item = get_contents_from_repo(

@@ -77,13 +77,11 @@ export function buildImportedFrom(
   if (source === "url") return { url: data.url, date }
   if (source === "doi") return { doi: data.doi, date }
   return {
-    git: {
-      repo_url: data.repo_url,
-      // Blank means the default branch's head, which the hub resolves and
-      // records
-      rev: data.repo_rev || null,
-      path: data.repo_path || null,
-    },
+    git_repo_url: data.repo_url,
+    // Blank means the default branch's head, which the hub resolves and
+    // records
+    git_ref: data.repo_rev || null,
+    path: data.repo_path || null,
     date,
   }
 }

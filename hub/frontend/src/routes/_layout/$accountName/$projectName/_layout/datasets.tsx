@@ -51,7 +51,9 @@ interface ImportedFrom {
   git_rev?: string | null
   url?: string | null
   doi?: string | null
-  git?: { repo_url: string; rev: string; path?: string | null } | null
+  git_repo_url?: string | null
+  git_ref?: string | null
+  description?: string | null
   date?: string | null
 }
 
@@ -146,23 +148,34 @@ const DatasetSource = ({
         </Text>
       )
     }
-    if (importedFrom.git) {
-      const { repo_url, rev, path } = importedFrom.git
-      const commitUrl = repo_url.includes("github.com")
-        ? `${repo_url.replace(/\.git$/, "")}/tree/${rev}/${path ?? ""}`
-        : repo_url
-      const label = `${repo_url.replace(/^https?:\/\/(www\.)?/, "")}${
+    if (importedFrom.git_repo_url) {
+      const repoUrl = importedFrom.git_repo_url
+      const path = importedFrom.path
+      // The commit an import resolved to lives in .calkit/imports.json,
+      // so calkit.yaml may name only what it follows. Either identifies
+      // a place in the repo; a ref is just one that can move.
+      const at = importedFrom.git_rev ?? importedFrom.git_ref ?? null
+      const treeUrl =
+        repoUrl.includes("github.com") && at
+          ? `${repoUrl.replace(/\.git$/, "")}/tree/${at}/${path ?? ""}`
+          : repoUrl
+      const label = `${repoUrl.replace(/^https?:\/\/(www\.)?/, "")}${
         path ? `/${path}` : ""
       }`
       return (
         <Text fontSize="sm" isTruncated>
           <strong>Source:</strong> from Git repo{" "}
-          <Tooltip label={`${label} at ${rev}`}>
-            <Link href={commitUrl} isExternal>
+          <Tooltip label={at ? `${label} at ${at}` : label}>
+            <Link href={treeUrl} isExternal>
               {label} <ExternalLinkIcon mb={0.5} />
             </Link>
-          </Tooltip>{" "}
-          at <Code fontSize="xs">{rev.slice(0, 7)}</Code>
+          </Tooltip>
+          {at ? (
+            <>
+              {" "}
+              at <Code fontSize="xs">{at.slice(0, 7)}</Code>
+            </>
+          ) : null}
           {date}
         </Text>
       )

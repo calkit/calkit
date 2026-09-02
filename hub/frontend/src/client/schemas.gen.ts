@@ -4935,7 +4935,7 @@ export const PresentationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
@@ -4945,7 +4945,7 @@ export const PresentationSchema = {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -5006,6 +5006,8 @@ export const PresentationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Presentation",
+  description:
+    "A presentation declared in calkit.yaml, or auto-detected in the repo.",
 } as const
 
 export const PresignedChunkedAccessSchema = {
@@ -6558,7 +6560,7 @@ export const PublicationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
@@ -6569,13 +6571,19 @@ export const PublicationSchema = {
             "poster",
             "report",
             "book",
+            "proposal",
+            "blog",
+            "thesis",
+            "masters-thesis",
+            "phd-thesis",
+            "other",
           ],
         },
         {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -6668,6 +6676,7 @@ export const PublicationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Publication",
+  description: "A publication declared in calkit.yaml.",
 } as const
 
 export const PublicationComponentSchema = {

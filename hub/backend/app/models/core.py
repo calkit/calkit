@@ -2,11 +2,11 @@
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, Union
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
 
 import sqlalchemy
 
-from app import utcnow
+from app import title_from_path, utcnow
 
 if TYPE_CHECKING:
     # Release lives in app.models.releases (imported into the app.models
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     # forward reference in Project.releases for type checkers without creating
     # a runtime circular import.
     from app.models.releases import Release
-from pydantic import BaseModel, EmailStr, computed_field
+from pydantic import BaseModel, EmailStr, computed_field, model_validator
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.subscriptions import (
@@ -1407,21 +1407,64 @@ class PublicationOverleaf(BaseModel):
     last_sync_commit: str | None = None
 
 
-class Publication(BaseModel):
+class _DeclaredArtifact(BaseModel):
+    """Base for an artifact read out of a hand-written calkit.yaml.
+
+    Deliberately forgiving about what it reads: a missing title falls back
+    to the file name, the older ``type`` spelling is read as ``kind``, and a
+    kind outside the known set is dropped rather than refused, so one odd
+    entry can't 500 a whole listing.
+    """
+
+    # What ``kind`` accepts; subclasses narrow the field itself to match
+    _KINDS: ClassVar[tuple[str, ...]] = ()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tolerate_declared_values(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        # ``kind`` is what the CLI writes and what everything else in Calkit
+        # calls this, but the hub itself wrote ``type`` until it was renamed,
+        # so existing projects still have that spelling on disk.
+        if not data.get("kind") and data.get("type"):
+            data["kind"] = data["type"]
+        if data.get("kind") not in cls._KINDS:
+            data["kind"] = None
+        if not data.get("title") and isinstance(data.get("path"), str):
+            data["title"] = title_from_path(data["path"])
+        return data
+
+
+# Every publication kind the CLI, the hub's own forms, and older calkit.yaml
+# files have written. Kept open rather than tight: a declaration is
+# hand-written, and a listing that refuses to load because one entry says
+# something unexpected is worse than one that shows it as written.
+PublicationKind = Literal[
+    "journal-article",
+    "conference-paper",
+    "presentation",
+    "poster",
+    "report",
+    "book",
+    "proposal",
+    "blog",
+    "thesis",
+    "masters-thesis",
+    "phd-thesis",
+    "other",
+]
+
+
+class Publication(_DeclaredArtifact):
+    """A publication declared in calkit.yaml."""
+
+    _KINDS: ClassVar[tuple[str, ...]] = get_args(PublicationKind)
     path: str
     title: str
     description: str | None = None
-    type: (
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "presentation",
-            "poster",
-            "report",
-            "book",
-        ]
-        | None
-    ) = None
+    kind: PublicationKind | None = None
     stage: str | None = None
     stage_status: "StageStatus | None" = None
     content: str | None = None
@@ -1513,18 +1556,21 @@ class QuestionPut(SQLModel):
     evidence: list[QuestionEvidencePost] = []
 
 
-class Presentation(BaseModel):
+PresentationKind = Literal[
+    "slides",
+    "poster",
+    "talk",
+]
+
+
+class Presentation(_DeclaredArtifact):
+    """A presentation declared in calkit.yaml, or auto-detected in the repo."""
+
+    _KINDS: ClassVar[tuple[str, ...]] = get_args(PresentationKind)
     path: str
     title: str
     description: str | None = None
-    type: (
-        Literal[
-            "slides",
-            "poster",
-            "talk",
-        ]
-        | None
-    ) = None
+    kind: PresentationKind | None = None
     stage: str | None = None
     content: str | None = None
     stage_info: DvcPipelineStage | None = None

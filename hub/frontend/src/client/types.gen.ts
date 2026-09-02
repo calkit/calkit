@@ -2924,6 +2924,8 @@ export type PipelineStagePut = {
 
 /**
  * Presentation
+ *
+ * A presentation declared in calkit.yaml, or auto-detected in the repo.
  */
 export type Presentation = {
   /**
@@ -2939,9 +2941,9 @@ export type Presentation = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?: "slides" | "poster" | "talk" | null
+  kind?: "slides" | "poster" | "talk" | null
   /**
    * Stage
    */
@@ -3748,6 +3750,8 @@ export type ProjectsPublic = {
 
 /**
  * Publication
+ *
+ * A publication declared in calkit.yaml.
  */
 export type Publication = {
   /**
@@ -3763,15 +3767,21 @@ export type Publication = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?:
+  kind?:
     | "journal-article"
     | "conference-paper"
     | "presentation"
     | "poster"
     | "report"
     | "book"
+    | "proposal"
+    | "blog"
+    | "thesis"
+    | "masters-thesis"
+    | "phd-thesis"
+    | "other"
     | null
   /**
    * Stage

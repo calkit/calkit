@@ -2304,16 +2304,16 @@ Arguments:
 
 | Argument   | Type | Required | Default | Description                                                                                                                                                                                                |
 | ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `document` | text | no       |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. Left out, it is worked out from --source, or from the project if it builds only one document. |
+| `document` | str  | no       |         | Document to describe. The LaTeX source, the built PDF, or the provenance sidecar all name the same document. Left out, it is worked out from --source, or from the project if it builds only one document. |
 
 Options:
 
 | Option              | Type    | Required | Default | Description                                                                                                                                                 |
 | ------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--line`            | integer | no       |         | Describe only what is on this line of the source (1-based), rather than the whole document.                                                                 |
-| `--column`, `--col` | integer | no       |         | Narrow a --line to the component under this column.                                                                                                         |
-| `--source`          | text    | no       |         | File the --line refers to, if the cursor is in a file the document inputs rather than the document itself.                                                  |
-| `--page`            | integer | no       |         | Only components appearing on this page.                                                                                                                     |
+| `--line`            | int     | no       |         | Describe only what is on this line of the source (1-based), rather than the whole document.                                                                 |
+| `--column`, `--col` | int     | no       |         | Narrow a --line to the component under this column.                                                                                                         |
+| `--source`          | str     | no       |         | File the --line refers to, if the cursor is in a file the document inputs rather than the document itself.                                                  |
+| `--page`            | int     | no       |         | Only components appearing on this page.                                                                                                                     |
 | `--stale`           | boolean | no       | False   | Only components known to be out of date or missing. A component nothing could be checked about is not one of them; it reads as unknown in the full listing. |
 | `--no-stage-check`  | boolean | no       | False   | Skip the pipeline status check, which is the slow part. Drift between the document and the project is still reported; a stage needing a rerun is not.       |
 | `--json`            | boolean | no       | False   | Output result as JSON.                                                                                                                                      |
@@ -3375,7 +3375,7 @@ Options:
 
 | Option           | Type | Required | Default                 | Description             |
 | ---------------- | ---- | -------- | ----------------------- | ----------------------- |
-| `--output`, `-o` | text | no       | generated-questions.tex | Output LaTeX file path. |
+| `--output`, `-o` | str  | no       | generated-questions.tex | Output LaTeX file path. |
 
 <a id="subcommand-latex-tex-build"></a>
 
@@ -3399,17 +3399,17 @@ Arguments:
 
 Options:
 
-| Option               | Type    | Required | Default | Description                                                                                      |
-| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `--env`, `-e`        | str     | no       |         | Environment in which to run latexmk, if applicable.                                              |
-| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                     |
-| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
-| `--output-dir`       | str     | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
-| `--aux-dir`          | str     | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
-| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
-| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
-| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
-| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                            |
+| Option               | Type    | Required | Default | Description                                                                                                                                         |
+| -------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--env`, `-e`        | str     | no       |         | Environment in which to run latexmk, if applicable.                                                                                                 |
+| `--no-check`         | boolean | no       | False   | Don't check the environment is valid before running latexmk.                                                                                        |
+| `--latexmk-rc`, `-r` | str     | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                    |
+| `--output-dir`       | str     | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                    |
+| `--aux-dir`          | str     | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                     |
+| `--latexmk-arg`      | str     | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                 |
+| `--no-synctex`       | boolean | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                              |
+| `--force`, `-f`      | boolean | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                  |
+| `--verbose`, `-v`    | boolean | no       | False   | Print verbose output.                                                                                                                               |
 | `--provenance`       | boolean | no       | False   | Install calkit.sty beside the document, generate its artifact table, and write <document>.provenance.json from the build's log of injected content. |
 
 <a id="subcommand-latex-tex-diff"></a>

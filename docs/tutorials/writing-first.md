@@ -106,6 +106,7 @@ difference between an open question and an oversight.
 calkit run
 calkit check repro
 calkit check questions
+calkit describe components paper/main.tex
 ```
 
 `check repro` reads the manuscript back and reports any number in it that
@@ -116,7 +117,9 @@ to see them, and `-c numbers` for the weaker list of result-like numbers
 with nothing recorded behind them, most of which will not be results and
 none of which fail the check.
 `check questions` tells you whether each answer still follows from its
-evidence.
+evidence. `describe components` lists every value and figure the document
+takes from the project, with the stage behind it and whether it is current
+--- see [provenance](../provenance.md).
 
 Then read the paper. This is the part that matters: the agent has made the
 sentences true, but only you can decide whether they are worth saying, and

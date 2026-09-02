@@ -76,8 +76,10 @@ building a pipeline from scratch.
 
 4. **Inject, don't copy.** Add a `json-to-latex` stage over the results
    file and reference the values from the manuscript with the generated
-   command. Replace the TODO with the sentence the user wrote, now with
-   `\result[...]` where the hole was.
+   command. Add `\usepackage[provenance]{calkit}` and set `provenance: true`
+   on the `latex` stage so every injected value is marked and the build
+   writes a provenance record. Replace the TODO with the sentence the user
+   wrote, now with `\result[...]` where the hole was.
 
 5. **Make the question match the paper.** A claim in the paper is an answer
    to a question. Add or update the entry under `questions` in

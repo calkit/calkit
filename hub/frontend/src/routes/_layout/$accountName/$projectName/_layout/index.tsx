@@ -5,6 +5,7 @@ import {
   AccordionIcon,
   AccordionItem,
   AccordionPanel,
+  Badge,
   Box,
   Checkbox,
   Flex,
@@ -39,8 +40,13 @@ import { FiGrid } from "react-icons/fi"
 import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
+import Tooltip from "../../../../../components/Common/Tooltip"
 
-import { type QuestionEvidence, ReleasesService } from "../../../../../client"
+import {
+  type QuestionEvidence,
+  type QuestionPublic,
+  ReleasesService,
+} from "../../../../../client"
 import Markdown from "../../../../../components/Common/Markdown"
 import FigureView from "../../../../../components/Figures/FigureView"
 import FileEditorModal from "../../../../../components/Files/FileEditorModal"
@@ -300,6 +306,37 @@ function EvidenceItem({
   )
 }
 
+/**
+ * Whether an answer still follows from its evidence.
+ *
+ * Only when something is wrong: an answer that checks out needs no badge,
+ * and one on every question would make the two that matter invisible. A
+ * question nobody has answered yet is work outstanding rather than a
+ * fault, and `null` means nothing checked --- which is not the same as
+ * nothing being wrong, so it says nothing either.
+ */
+function QuestionStatusBadge({ question }: { question: QuestionPublic }) {
+  if (question.status === "stale") {
+    return (
+      <Tooltip label={question.status_message ?? undefined}>
+        <Badge colorScheme="orange" flexShrink={0} ml={1}>
+          Out of date
+        </Badge>
+      </Tooltip>
+    )
+  }
+  if (question.status === "error") {
+    return (
+      <Tooltip label={question.status_message ?? undefined}>
+        <Badge colorScheme="red" flexShrink={0} ml={1}>
+          Check failed
+        </Badge>
+      </Tooltip>
+    )
+  }
+  return null
+}
+
 function ProjectView() {
   const secBgColor = useColorModeValue("ui.secondary", "ui.darkSlate")
   const { accountName, projectName } = Route.useParams()
@@ -555,14 +592,18 @@ function ProjectView() {
                                 {`${question.number}. ${question.question}`}
                               </Markdown>
                             </Box>
+                            <QuestionStatusBadge question={question} />
                             <AccordionIcon />
                           </AccordionButton>
                         ) : (
-                          <Box flex="1" py={1} sx={{ "& p": { my: 0 } }}>
-                            <Markdown>
-                              {`${question.number}. ${question.question}`}
-                            </Markdown>
-                          </Box>
+                          <>
+                            <Box flex="1" py={1} sx={{ "& p": { my: 0 } }}>
+                              <Markdown>
+                                {`${question.number}. ${question.question}`}
+                              </Markdown>
+                            </Box>
+                            <QuestionStatusBadge question={question} />
+                          </>
                         )}
                         {userHasWriteAccess ? (
                           <IconButton

@@ -4124,6 +4124,14 @@ export type QuestionPublic = {
    * Evidence
    */
   evidence?: Array<QuestionEvidence>
+  /**
+   * Status
+   */
+  status?: "ok" | "stale" | "error" | "unanswered" | "no-evidence" | null
+  /**
+   * Status Message
+   */
+  status_message?: string | null
 }
 
 /**

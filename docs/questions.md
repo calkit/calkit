@@ -76,7 +76,11 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 the one the pipeline produced.
 The hub's project page renders them the same way, from the results file
 as it stands at the ref being browsed --- the same function does both, so
-the two cannot fill one sentence differently.
+the two cannot fill one sentence differently. It runs the same check
+there too, and marks an answer its evidence has moved out from under.
+Judged at the ref, not at whatever the server last checked out: an answer
+that was true when it was written still reads as true at the commit that
+wrote it.
 A placeholder that names no evidence, or a format that its value cannot
 satisfy, is an error in `calkit check questions`.
 

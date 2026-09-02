@@ -7249,6 +7249,29 @@ export const QuestionPublicSchema = {
       title: "Evidence",
       default: [],
     },
+    status: {
+      anyOf: [
+        {
+          type: "string",
+          enum: ["ok", "stale", "error", "unanswered", "no-evidence"],
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status",
+    },
+    status_message: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Status Message",
+    },
   },
   type: "object",
   required: ["id", "project_id", "number", "question"],

@@ -1571,6 +1571,13 @@ class QuestionPublic(SQLModel):
     hypothesis: str | None = None
     answer: str | None = None
     evidence: list[QuestionEvidence] = []
+    # Whether the answer still follows from its evidence, from
+    # `calkit check questions` read at the ref being browsed. None when
+    # nothing checked, which is not the same as nothing being wrong.
+    status: (
+        Literal["ok", "stale", "error", "unanswered", "no-evidence"] | None
+    ) = None
+    status_message: str | None = None
 
 
 class QuestionPut(SQLModel):

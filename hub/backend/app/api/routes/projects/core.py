@@ -54,6 +54,7 @@ from TexSoup import TexSoup
 import app.components
 import app.imports
 import app.projects
+import app.questions
 import app.tasks
 import calkit
 import calkit.core
@@ -203,6 +204,7 @@ from calkit.models.pipeline import LatexStage as CkLatexStage
 from calkit.models.pipeline import Pipeline as CkPipeline
 from calkit.models.pipeline import Stage as CkStage
 from calkit.notebooks import get_executed_notebook_path
+from calkit.questions import QuestionsStatus
 from calkit.reproducibility import ReproCheck, check_reproducibility
 
 logging.basicConfig(level=logging.INFO)
@@ -2355,6 +2357,7 @@ def _build_questions_public(
     session: Session,
     ref: str | None,
     ck_info: dict,
+    status: QuestionsStatus | None = None,
 ) -> list[QuestionPublic]:
     """Merge synced DB questions (for id/number) with the richer calkit.yaml
     question objects, resolving any figure/result evidence.
@@ -2418,6 +2421,9 @@ def _build_questions_public(
             for pub in _build_publications(project=project, repo=repo, ref=ref)
         }
     db_questions = sorted(project.questions, key=lambda q: q.number)
+    # Keyed by the check's own 1-based index, which is the question's
+    # position in calkit.yaml and so the same number the DB rows carry
+    by_index = {q.index: q for q in (status.questions if status else [])}
     result_value_cache: dict[str, dict | None] = {}
     questions_public = []
 
@@ -2460,6 +2466,7 @@ def _build_questions_public(
             publications_by_path=publications_by_path,
             result_value_cache=result_value_cache,
         )
+        check = by_index.get(q_db.number)
         questions_public.append(
             QuestionPublic(
                 id=q_db.id,
@@ -2469,6 +2476,8 @@ def _build_questions_public(
                 hypothesis=hypothesis,
                 answer=answer,
                 evidence=evidence,
+                status=check.status if check else None,
+                status_message=check.message if check else None,
             )
         )
     return questions_public
@@ -2517,6 +2526,12 @@ def get_project_questions(
         session=session,
         ref=ref,
         ck_info=ck_info,
+        status=app.questions.questions_status(
+            ck_info=ck_info,
+            tree=app.projects.get_repo_tree_for_ref(repo, ref),
+            repo=repo,
+            ref=ref or repo.head.commit.hexsha,
+        ),
     )
 
 

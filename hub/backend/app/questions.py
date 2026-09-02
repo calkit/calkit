@@ -1,12 +1,16 @@
 """A project's questions, judged from a repo at a ref.
 
-``calkit.questions`` decides whether an answer still follows from its
-evidence: whether each cited path is still there, whether the value behind
-a placeholder has moved since the answer was last edited, whether anything
-records where the evidence came from. This module only says how to reach a
-project's files and history when the project is a Git tree at a ref rather
-than a checkout on someone's laptop, so the hub and the CLI cannot end up
-giving two answers to the same question.
+``calkit.questions`` decides what is checkable about a question: whether
+each cited path is still there, whether a placeholder resolves, and whether
+the value behind it has moved since the answer was last edited. That last
+one is a prompt to re-read the sentence, not a verdict on it. Whether an
+answer follows from what it cites is a question about the prose, which
+history cannot answer and this does not claim to.
+
+This module only says how to reach a project's files and history when the
+project is a Git tree at a ref rather than a checkout on someone's laptop,
+so the hub and the CLI cannot end up giving two answers to the same
+question.
 """
 
 from __future__ import annotations

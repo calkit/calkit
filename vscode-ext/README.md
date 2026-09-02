@@ -61,8 +61,10 @@ project in a plain folder.
   waiting to be scrolled to: an error for content the project no longer has, a
   warning for content out of date, and a note for content nothing accounts
   for. Questions are reported there too, on the line in `calkit.yaml` that
-  declares them, since an answer that no longer follows from its evidence is a
-  fault in the question rather than in the paper that typesets it.
+  declares them, since a placeholder that fills from nothing, or evidence that
+  has moved since the answer was written, is about the question rather than the
+  paper that typesets it. The editor reports what changed, not whether the
+  answer is still right, which is a question about the sentence.
 - **Stale-output awareness**: Outputs whose stage needs re-running are flagged
   in the sidebar and in the file explorer.
 - **File history**: View a tracked file's history from the sidebar or explorer.

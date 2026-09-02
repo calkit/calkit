@@ -539,11 +539,15 @@ def evidence_change(
 class QuestionsView:
     """What checking a question against its evidence needs of a project.
 
-    Everything written down in ``calkit.yaml`` is answered from it, so the
-    judgment about whether an answer still follows from its evidence stays
-    in one place. Reaching the project's files is left to a subclass,
-    because where they are differs: the CLI has a working directory, and a
-    server has a Git tree at some ref.
+    Everything written down in ``calkit.yaml`` is answered from it, so
+    what counts as evidence having moved stays in one place. Reaching the
+    project's files is left to a subclass, because where they are differs:
+    the CLI has a working directory, and a server has a Git tree at some
+    ref.
+
+    None of this reads the prose. Whether an answer follows from what it
+    cites is a question about the sentence, and no amount of history
+    answers it; see the module docstring.
 
     This is the same split :class:`calkit.components.ProjectView` makes,
     for the same reason --- two implementations of the judgment would

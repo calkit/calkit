@@ -382,11 +382,13 @@ export interface QuestionDiagnostic {
 const QUESTION_DEFAULT_MESSAGES: Record<QuestionStatus, string | undefined> = {
   ok: undefined,
   unanswered: undefined,
-  stale: "The evidence has changed since this answer was last edited.",
-  error: "This answer does not check out against its evidence.",
+  stale:
+    "The evidence has changed since this answer was last edited. Read it " +
+    "again and edit the question, even if the answer still holds.",
+  error: "This question's evidence could not be read as written.",
   "no-evidence":
-    "This question is answered but cites no evidence, so nothing can " +
-    "check whether the answer still holds.",
+    "This question is answered but cites no evidence, so there is nothing " +
+    "to check the answer against.",
 };
 
 const QUESTION_SEVERITIES: Record<

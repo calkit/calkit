@@ -116,8 +116,10 @@ worth running in CI. It summarizes; run `calkit check repro -c retyped`
 to see them, and `-c numbers` for the weaker list of result-like numbers
 with nothing recorded behind them, most of which will not be results and
 none of which fail the check.
-`check questions` tells you whether each answer still follows from its
-evidence. `describe components` lists every value and figure the document
+`check questions` tells you whether the evidence behind each answer is
+still there and still says what it said when the answer was written.
+Whether the answer follows from it is yours to judge, which is what being
+told to re-read one is for. `describe components` lists every value and figure the document
 takes from the project, with the stage behind it and whether it is current
 --- see [provenance](../provenance.md).
 

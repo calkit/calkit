@@ -307,20 +307,26 @@ function EvidenceItem({
 }
 
 /**
- * Whether an answer still follows from its evidence.
+ * What the deterministic check found, which is never a verdict on the
+ * answer itself.
  *
- * Only when something is wrong: an answer that checks out needs no badge,
- * and one on every question would make the two that matter invisible. A
- * question nobody has answered yet is work outstanding rather than a
- * fault, and `null` means nothing checked --- which is not the same as
- * nothing being wrong, so it says nothing either.
+ * A cited value moving means the sentence was written against a number
+ * that has since changed, so somebody should read it again. It does not
+ * mean the answer is wrong, and no badge does not mean it is right: an
+ * answer that never followed from its evidence reads as fine here
+ * forever, because nothing in a commit history can tell.
+ *
+ * So the badge says what happened, not what to conclude. Shown only when
+ * there is something to act on: one on every question would make the two
+ * that matter invisible, an unanswered question is work outstanding
+ * rather than a fault, and `null` means nothing checked.
  */
 function QuestionStatusBadge({ question }: { question: QuestionPublic }) {
   if (question.status === "stale") {
     return (
       <Tooltip label={question.status_message ?? undefined}>
         <Badge colorScheme="orange" flexShrink={0} ml={1}>
-          Out of date
+          Evidence changed
         </Badge>
       </Tooltip>
     )
@@ -329,7 +335,7 @@ function QuestionStatusBadge({ question }: { question: QuestionPublic }) {
     return (
       <Tooltip label={question.status_message ?? undefined}>
         <Badge colorScheme="red" flexShrink={0} ml={1}>
-          Check failed
+          Evidence unreadable
         </Badge>
       </Tooltip>
     )

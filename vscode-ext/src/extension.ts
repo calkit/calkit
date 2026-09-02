@@ -1904,9 +1904,11 @@ async function describeComponents(
   }
 }
 
-// Ask calkit whether each answer still follows from its evidence. Exits
-// non-zero when something is wrong, which is the normal case here rather
-// than a failure, so the report is read off stdout either way.
+// Ask calkit what it can check about each question: that the evidence is
+// there, that placeholders resolve, and whether a cited value has moved
+// since the answer was written. Exits non-zero when it has something to
+// report, which is the normal case here rather than a failure, so the
+// report is read off stdout either way.
 async function checkQuestions(
   workspaceRoot: string,
 ): Promise<QuestionsReport | undefined> {

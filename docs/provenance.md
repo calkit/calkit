@@ -579,11 +579,13 @@ both need you to already be looking at the line. A number that moved on page
 nine is worth knowing about before you go looking for it.
 
 Questions are reported there too, on the line in `calkit.yaml` that declares
-them, from [`calkit check questions`](questions.md). An answer that no longer
-follows from its evidence, or one naming a placeholder nothing fills, is a
-fault in the question rather than in the paper that typesets it, so that is
-where it is flagged. A question nobody has answered yet is work outstanding
-rather than a fault, and is left alone.
+them, from [`calkit check questions`](questions.md). A placeholder that fills
+from nothing, or evidence that has moved since the answer was written, is
+about the question rather than the paper that typesets it, so that is where it
+is flagged. What is reported is what changed, not whether the answer is still
+right: that is a question about the sentence, and reading it is the point of
+being told. A question nobody has answered yet is work outstanding rather than
+a fault, and is left alone.
 
 ### Reading a built document
 

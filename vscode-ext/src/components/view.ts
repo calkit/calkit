@@ -144,11 +144,12 @@ export class ComponentsProvider
   /**
    * Report what `calkit check questions` finds, in `calkit.yaml` itself.
    *
-   * An answer that no longer follows from its evidence, or names a
-   * placeholder nothing fills, is a fault in the question rather than in
-   * the paper that typesets it, so it belongs on the line that declares
-   * it. The document side of the same problem is a `\ckfindings` block
-   * reading `answer-stale`, which `updateDiagnostics` already reports.
+   * A placeholder nothing fills, or evidence that has moved since the
+   * answer was written, is about the question rather than the paper that
+   * typesets it, so it belongs on the line that declares it. Neither says
+   * the answer is wrong: the second one says to read it again. The
+   * document side of the same reading is a `\ckfindings` block marked
+   * `answer-stale`, which `updateDiagnostics` already reports.
    */
   async updateQuestionDiagnostics(
     document: vscode.TextDocument,

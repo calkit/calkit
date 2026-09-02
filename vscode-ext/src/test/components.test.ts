@@ -430,7 +430,9 @@ test("places what the questions check found in calkit.yaml", () => {
     {
       line: 9,
       severity: "warning",
-      message: "The evidence has changed since this answer was last edited.",
+      message:
+        "The evidence has changed since this answer was last edited. Read " +
+        "it again and edit the question, even if the answer still holds.",
     },
   ]);
 });

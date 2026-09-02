@@ -1,9 +1,11 @@
 import {
   Box,
   Button,
+  Code,
   Flex,
   FormControl,
   FormErrorMessage,
+  FormHelperText,
   FormLabel,
   IconButton,
   Input,
@@ -173,14 +175,17 @@ const EditQuestion = ({
             if (!parsed) {
               return []
             }
+            const keyed = KEYED_KINDS.has(parsed.kind) && !!row.key
             return [
               {
-                kind: parsed.kind,
+                // A result with a key is one value inside a file, which
+                // is what "value" means. `calkit check questions` says so
+                // on every run against the older spelling, so saving here
+                // writes the one it asks for.
+                kind: keyed ? "value" : parsed.kind,
                 path: parsed.path,
-                key:
-                  KEYED_KINDS.has(parsed.kind) && row.key ? row.key : undefined,
-                name:
-                  parsed.kind === "value" && row.name ? row.name : undefined,
+                key: keyed ? row.key : undefined,
+                name: keyed && row.name ? row.name : undefined,
                 explanation: row.explanation ? row.explanation : undefined,
               },
             ]
@@ -371,17 +376,45 @@ const EditQuestion = ({
                     </Select>
                   </FormControl>
                   {parsed && KEYED_KINDS.has(parsed.kind) ? (
-                    <FormControl mb={2}>
-                      <FormLabel fontSize="xs" mb={1}>
-                        Key (optional)
-                      </FormLabel>
-                      <Input
-                        autoComplete="off"
-                        {...register(`evidence.${index}.key`)}
-                        placeholder="e.g. mean"
-                        size="sm"
-                      />
-                    </FormControl>
+                    <>
+                      <FormControl mb={2}>
+                        <FormLabel fontSize="xs" mb={1}>
+                          Key (optional)
+                        </FormLabel>
+                        <Input
+                          autoComplete="off"
+                          data-form-type="other"
+                          data-lpignore="true"
+                          {...register(`evidence.${index}.key`)}
+                          placeholder="e.g., mean, or cases.a.cp"
+                          size="sm"
+                        />
+                        <FormHelperText fontSize="xs">
+                          One value inside the file. Dots reach into nested
+                          output, and whole numbers index into lists.
+                        </FormHelperText>
+                      </FormControl>
+                      {watch(`evidence.${index}.key`) ? (
+                        <FormControl mb={2}>
+                          <FormLabel fontSize="xs" mb={1}>
+                            Name (optional)
+                          </FormLabel>
+                          <Input
+                            autoComplete="off"
+                            data-form-type="other"
+                            data-lpignore="true"
+                            {...register(`evidence.${index}.name`)}
+                            placeholder="e.g., improvement"
+                            size="sm"
+                          />
+                          <FormHelperText fontSize="xs">
+                            What to call it in the answer, as{" "}
+                            <Code fontSize="xs">{"{name}"}</Code>. Defaults to
+                            the key, so a key with dots in it needs one.
+                          </FormHelperText>
+                        </FormControl>
+                      ) : null}
+                    </>
                   ) : null}
                   <FormControl>
                     <FormLabel fontSize="xs" mb={1}>

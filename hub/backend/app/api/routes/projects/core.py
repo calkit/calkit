@@ -2612,8 +2612,14 @@ def _apply_question_update(
     evidence = []
     for ev in req.evidence:
         entry: dict = {"kind": ev.kind, "path": ev.path}
-        if ev.kind == "result" and ev.key:
+        # A value is one number inside a results file, so its key is the
+        # whole point of the entry; without one there is nothing to read
+        if ev.kind == "value" and not ev.key:
+            raise HTTPException(422, "Value evidence needs a key")
+        if ev.key and ev.kind in ("value", "result"):
             entry["key"] = ev.key
+        if ev.name and ev.kind == "value":
+            entry["name"] = ev.name
         if ev.explanation:
             entry["explanation"] = ev.explanation
         evidence.append(entry)

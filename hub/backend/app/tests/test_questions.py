@@ -9,6 +9,8 @@ import base64
 import json
 from unittest.mock import patch
 
+import pytest
+
 from app.api.routes.projects.core import (
     _build_question_evidence,
     _read_result_file,
@@ -126,3 +128,64 @@ def test_value_evidence_resolves_rather_than_being_dropped() -> None:
     assert evidence[0].key == "cases.a.cp"
     assert evidence[0].name == "cp"
     assert evidence[0].value == "0.42"
+
+
+def test_a_keyed_entry_is_written_as_value_evidence() -> None:
+    from app.api.routes.projects.core import (
+        QuestionPut,
+        _apply_question_update,
+    )
+    from app.models.core import QuestionEvidencePost
+
+    updated = _apply_question_update(
+        "Does the closure cut error?",
+        QuestionPut(
+            answer="By about {improvement:.1f}x.",
+            evidence=[
+                QuestionEvidencePost(
+                    kind="value",
+                    path="results/bench.json",
+                    key="cases.a.speedup",
+                    name="improvement",
+                    explanation="The best case.",
+                ),
+                QuestionEvidencePost(kind="figure", path="figures/x.png"),
+            ],
+        ),
+    )
+    assert updated["evidence"] == [
+        {
+            "kind": "value",
+            "path": "results/bench.json",
+            "key": "cases.a.speedup",
+            "name": "improvement",
+            "explanation": "The best case.",
+        },
+        {"kind": "figure", "path": "figures/x.png"},
+    ]
+
+
+def test_value_evidence_without_a_key_is_refused() -> None:
+    # It would round-trip into calkit.yaml as an entry the check rejects,
+    # so it is better refused at the edge than written and reported later
+    from fastapi import HTTPException
+
+    from app.api.routes.projects.core import (
+        QuestionPut,
+        _apply_question_update,
+    )
+    from app.models.core import QuestionEvidencePost
+
+    with pytest.raises(HTTPException) as excinfo:
+        _apply_question_update(
+            "Q?",
+            QuestionPut(
+                answer="A.",
+                evidence=[
+                    QuestionEvidencePost(
+                        kind="value", path="results/bench.json"
+                    )
+                ],
+            ),
+        )
+    assert excinfo.value.status_code == 422

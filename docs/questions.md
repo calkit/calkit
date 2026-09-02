@@ -74,6 +74,8 @@ answer: The closure cuts the error by about {improvement:.1f}x.
 `calkit list questions` renders placeholders from the results files
 (`--raw` shows the text as written), so a number in an answer is always
 the one the pipeline produced.
+Giving a results file a key in the hub's question editor records `value`
+evidence, so an answer edited there can template from it too.
 The hub's project page renders them the same way, from the results file
 as it stands at the ref being browsed --- the same function does both, so
 the two cannot fill one sentence differently. It runs the same check

@@ -259,7 +259,13 @@ const splitRowCells = (rawRow: string): string[] => {
       const body = spec ? readBraceGroup(raw, spec.end) : null
       if (body) {
         const label = cleanTexCell(raw.slice(0, spanMatch.index) + body.content)
-        const span = Math.max(1, Number.parseInt(spanMatch[2], 10) || 1)
+        // Only \multicolumn spans columns. \multirow's count is rows, and
+        // it occupies a single column, so repeating it here would insert
+        // columns that aren't there and push the whole row out of line.
+        const span =
+          spanMatch[1] === "multicolumn"
+            ? Math.max(1, Number.parseInt(spanMatch[2], 10) || 1)
+            : 1
         for (let i = 0; i < span; i++) cells.push(label)
         continue
       }

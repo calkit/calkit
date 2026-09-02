@@ -1,5 +1,5 @@
 {
-  "title": "Warm queue",
+  "title": "Warm queue and cache",
   "uid": "warm-queue",
   "schemaVersion": 39,
   "version": 1,
@@ -183,6 +183,158 @@
         {
           "expr": "sum(rq_jobs{job=\"rq\",status=\"queued\"})",
           "legendFormat": "queued"
+        }
+      ]
+    },
+    {
+      "id": 20,
+      "type": "row",
+      "title": "Cache",
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "collapsed": false
+    },
+    {
+      "id": 21,
+      "title": "Cache hit rate",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(redis_keyspace_hits_total{job=\"redis\"}[5m])) / clamp_min(sum(rate(redis_keyspace_hits_total{job=\"redis\"}[5m])) + sum(rate(redis_keyspace_misses_total{job=\"redis\"}[5m])), 1)",
+          "legendFormat": "hit rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "title": "Evicted keys per minute",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(redis_evicted_keys_total{job=\"redis\"}[5m])) * 60",
+          "legendFormat": "evicted/min"
+        }
+      ]
+    },
+    {
+      "id": 23,
+      "title": "Memory used",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes{job=\"redis\"}",
+          "legendFormat": "used"
+        },
+        {
+          "expr": "redis_memory_max_bytes{job=\"redis\"}",
+          "legendFormat": "max"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "title": "Keys stored",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(redis_db_keys{job=\"redis\"})",
+          "legendFormat": "keys"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "title": "Cache up",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "redis_up{job=\"redis\"}",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 26,
+      "title": "Evicted keys (total)",
+      "type": "stat",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum(redis_evicted_keys_total{job=\"redis\"})",
+          "instant": true
         }
       ]
     }

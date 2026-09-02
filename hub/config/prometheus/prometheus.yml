@@ -22,3 +22,10 @@ scrape_configs:
       - targets: ['rq-exporter:9726']
         labels:
           service: worker
+
+  # The cache behind both the queue and everything derived from a commit.
+  - job_name: redis
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: cache

@@ -219,6 +219,20 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
 
+  # The cache itself: hit rate, memory, and what it has had to evict. The
+  # thumbnails are kept until eviction rather than expired deliberately (see
+  # app/thumbnails.py), so whether that is working is something to watch
+  # rather than assume.
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+        restart: true
+    environment:
+      - REDIS_ADDR=redis://cache:6379
+
   # Reads the queue's state out of the cache and offers it to Prometheus.
   # A separate process rather than a route on the API: the queue is one
   # thing, and every API worker reporting it would be the same number over

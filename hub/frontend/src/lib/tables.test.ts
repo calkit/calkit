@@ -178,6 +178,20 @@ describe("parseTable", () => {
       "DOE Report Error",
     ])
     expect(parsedSpanned?.rows).toEqual([["Mass (kg)", "213", "208", "2.4%"]])
+    // \multirow's count is rows, not columns: it takes one column like any
+    // other cell, so repeating it would push the row out of line
+    const multirow = parseTable(
+      "m.tex",
+      [
+        "\\begin{tabular}{lll}",
+        "\\multirow{2}{*}{Group} & a & b \\\\",
+        "\\hline",
+        "x & y & z \\\\",
+        "\\end{tabular}",
+      ].join("\n"),
+    )
+    expect(multirow?.columns).toEqual(["Group", "a", "b"])
+    expect(multirow?.rows).toEqual([["x", "y", "z"]])
     // Nothing tabular in the file means nothing to render as a grid
     expect(parseTable("t.tex", "\\section{Results}")).toBeNull()
     // A paper is not a table: pulling its first tabular out would present a

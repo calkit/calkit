@@ -99,6 +99,12 @@ class SelectiveGZipMiddleware:
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         path = scope.get("path", "")
+        # The router is mounted under API_V1_STR, which is empty here but
+        # need not be, so the prefix comes off before matching -- otherwise
+        # a deployment that sets one would compress app files again and hit
+        # the "Not a gzipped file" failure this exists to avoid.
+        if settings.API_V1_STR and path.startswith(settings.API_V1_STR):
+            path = path[len(settings.API_V1_STR) :]
         # An app's files live under /projects/<owner>/<project>/apps/..., so
         # both halves have to match: a substring test alone would also skip
         # compression on anything else that merely contains "/apps/".

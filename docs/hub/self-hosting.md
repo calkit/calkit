@@ -95,10 +95,11 @@ Leave the webhook off and pages still show the right thing;
 the first person to open one after a push is the one who waits for it.
 Warming needs the `worker` service and a `REDIS_URL` to queue onto,
 both of which are in the bundled compose file.
-The `rq-exporter` service reports what that queue is doing to Prometheus,
-and the bundled Grafana has a **Warm queue** dashboard for it:
-how deep the queue is, whether jobs are failing, and whether a worker is
-alive at all.
+The `rq-exporter` and `redis-exporter` services report what the queue and
+the cache are doing to Prometheus, and the bundled Grafana has a
+**Warm queue and cache** dashboard for them: how deep the queue is, whether
+jobs are failing, whether a worker is alive at all, and what the cache is
+holding, hitting, and evicting.
 
 <!-- prettier-ignore -->
 !!! tip

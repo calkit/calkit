@@ -219,6 +219,22 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
 
+  # Reads the queue's state out of the cache and offers it to Prometheus.
+  # A separate process rather than a route on the API: the queue is one
+  # thing, and every API worker reporting it would be the same number over
+  # and over under a different label.
+  rq-exporter:
+    image: mdawar/rq-exporter:latest
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+        restart: true
+    environment:
+      - RQ_REDIS_HOST=cache
+      - RQ_REDIS_PORT=6379
+      - RQ_REDIS_DB=0
+
   # Runs the work a push makes necessary -- see app/warm.py -- off the
   # API's threadpool, which is what serves requests.
   worker:

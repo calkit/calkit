@@ -1104,12 +1104,10 @@ def test_get_project_presentations_reads_declared_at_ref(
 def test_get_project_publications_tolerates_odd_declarations(
     client: TestClient,
 ) -> None:
-    """calkit.yaml is hand-written, so one odd entry can't 500 the listing.
-
-    A publication with no title, one whose kind the hub doesn't know, and a
-    list item that isn't a mapping at all all showed up in real projects; a
-    strict model turned any of them into a failed page.
-    """
+    # calkit.yaml is hand-written, so one odd entry can't 500 the listing. A
+    # publication with no title, one whose kind the hub doesn't know, and a
+    # list item that isn't a mapping at all all showed up in real projects; a
+    # strict model turned any of them into a failed page
     response, _, _, _ = _get_declared_at_ref(
         client,
         "publications",
@@ -1119,6 +1117,7 @@ def test_get_project_publications_tolerates_odd_declarations(
             {"path": "pubs/JFM/my-paper.pdf", "kind": "journal-article"},
             {"path": "pubs/legacy.pdf", "type": "report"},
             {"path": "pubs/thesis.pdf", "kind": "made-up"},
+            {"path": "pubs/poster.pdf", "kind": "poster"},
             "not-a-mapping",
             {"title": "No path"},
         ],
@@ -1132,16 +1131,18 @@ def test_get_project_publications_tolerates_odd_declarations(
     assert pubs["pubs/JFM/my-paper.pdf"]["title"] == "My paper"
     # The hub wrote `type` before this was renamed to `kind`
     assert pubs["pubs/legacy.pdf"]["kind"] == "report"
-    # An unrecognized kind is dropped rather than refused
+    # An unrecognized kind is dropped rather than refused, as is one that
+    # belongs to a different artifact: posters are presentations
     assert pubs["pubs/thesis.pdf"]["kind"] is None
+    assert pubs["pubs/poster.pdf"]["kind"] is None
     # Entries that name no file are skipped rather than raising
-    assert len(pubs) == 4
+    assert len(pubs) == 5
 
 
 def test_get_project_presentations_tolerates_odd_declarations(
     client: TestClient,
 ) -> None:
-    """Presentations read the same hand-written declarations."""
+    # Presentations read the same hand-written declarations
     response, _, _, _ = _get_declared_at_ref(
         client,
         "presentations",
@@ -1149,13 +1150,14 @@ def test_get_project_presentations_tolerates_odd_declarations(
         [
             {"path": "slides/talk.pdf"},
             {"path": "slides/legacy.pdf", "type": "slides"},
-            {"path": "slides/odd.pdf", "kind": "made-up"},
+            {"path": "slides/odd.pdf", "kind": "talk"},
         ],
     )
     assert response.status_code == 200, response.text
     pres = {p["path"]: p for p in response.json()}
     assert pres["slides/talk.pdf"]["title"] == "Talk"
     assert pres["slides/legacy.pdf"]["kind"] == "slides"
+    # "talk" was a hub-only kind the CLI refuses, so it's no longer one here
     assert pres["slides/odd.pdf"]["kind"] is None
 
 

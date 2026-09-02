@@ -570,8 +570,11 @@ class Table(_CalkitObject):
     """
 
 
+PresentationKind = Literal["slides", "poster"]
+
+
 class Presentation(_CalkitObject):
-    kind: Literal["slides", "poster"] | None = Field(
+    kind: PresentationKind | None = Field(
         default=None, description="What kind of presentation this is."
     )
 

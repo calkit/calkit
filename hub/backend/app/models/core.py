@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, ClassVar, Literal, Union, get_args
 import sqlalchemy
 
 from app import title_from_path, utcnow
+from calkit.models.core import PresentationKind as CkPresentationKind
+from calkit.models.core import PublicationKind as CkPublicationKind
 
 if TYPE_CHECKING:
     # Release lives in app.models.releases (imported into the app.models
@@ -1437,24 +1439,12 @@ class _DeclaredArtifact(BaseModel):
         return data
 
 
-# Every publication kind the CLI, the hub's own forms, and older calkit.yaml
-# files have written. Kept open rather than tight: a declaration is
-# hand-written, and a listing that refuses to load because one entry says
-# something unexpected is worse than one that shows it as written.
-PublicationKind = Literal[
-    "journal-article",
-    "conference-paper",
-    "presentation",
-    "poster",
-    "report",
-    "book",
-    "proposal",
-    "blog",
-    "thesis",
-    "masters-thesis",
-    "phd-thesis",
-    "other",
-]
+# The kinds a publication can be are the CLI's: it's what writes and reads
+# calkit.yaml, and a kind it can't parse is one the project can't use. Note
+# presentations and posters are presentations, not publications, so they're
+# deliberately absent. Anything else declared is dropped rather than refused,
+# per _DeclaredArtifact.
+PublicationKind = CkPublicationKind
 
 
 class Publication(_DeclaredArtifact):
@@ -1556,11 +1546,10 @@ class QuestionPut(SQLModel):
     evidence: list[QuestionEvidencePost] = []
 
 
-PresentationKind = Literal[
-    "slides",
-    "poster",
-    "talk",
-]
+# Like PublicationKind, the CLI's list is the one that counts: it's strict
+# about presentation kinds, so a kind only the hub knows makes it refuse the
+# whole calkit.yaml.
+PresentationKind = CkPresentationKind
 
 
 class Presentation(_DeclaredArtifact):

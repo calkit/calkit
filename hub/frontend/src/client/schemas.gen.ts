@@ -247,11 +247,12 @@ export const Body_projects_post_project_overleaf_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
+        "proposal",
         "report",
+        "blog",
         "book",
-        "masters-thesis",
+        "thesis",
         "phd-thesis",
-        "other",
       ],
       title: "Kind",
     },
@@ -385,10 +386,12 @@ export const Body_projects_post_project_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
-        "presentation",
-        "poster",
+        "proposal",
         "report",
+        "blog",
         "book",
+        "thesis",
+        "phd-thesis",
       ],
       title: "Kind",
     },
@@ -4939,7 +4942,7 @@ export const PresentationSchema = {
       anyOf: [
         {
           type: "string",
-          enum: ["slides", "poster", "talk"],
+          enum: ["slides", "poster"],
         },
         {
           type: "null",
@@ -6567,16 +6570,12 @@ export const PublicationSchema = {
           enum: [
             "journal-article",
             "conference-paper",
-            "presentation",
-            "poster",
-            "report",
-            "book",
             "proposal",
+            "report",
             "blog",
+            "book",
             "thesis",
-            "masters-thesis",
             "phd-thesis",
-            "other",
           ],
         },
         {

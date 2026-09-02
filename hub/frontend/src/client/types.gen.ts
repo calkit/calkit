@@ -146,11 +146,12 @@ export type BodyProjectsPostProjectOverleafPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
-    | "masters-thesis"
+    | "thesis"
     | "phd-thesis"
-    | "other"
   /**
    * Overleaf Project Url
    */
@@ -207,10 +208,12 @@ export type BodyProjectsPostProjectPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
   /**
    * Title
    */
@@ -2943,7 +2946,7 @@ export type Presentation = {
   /**
    * Kind
    */
-  kind?: "slides" | "poster" | "talk" | null
+  kind?: "slides" | "poster" | null
   /**
    * Stage
    */
@@ -3772,16 +3775,12 @@ export type Publication = {
   kind?:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
-    | "report"
-    | "book"
     | "proposal"
+    | "report"
     | "blog"
+    | "book"
     | "thesis"
-    | "masters-thesis"
     | "phd-thesis"
-    | "other"
     | null
   /**
    * Stage

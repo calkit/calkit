@@ -1676,10 +1676,32 @@ def push(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
-        _tell_hub_we_pushed(git_args)
+    _tell_hub_we_pushed(sorted(selected), git_args)
 
 
-def _tell_hub_we_pushed(git_args: list[str]) -> None:
+def _is_connected_to_a_hub() -> bool:
+    """Whether this project belongs to a hub at all.
+
+    Plenty of projects don't: Calkit works on its own, and being logged in
+    somewhere says something about the person, not about the project in
+    front of them. A project is connected if it names a hub in
+    ``calkit.yaml`` or stores its data on a Calkit DVC remote.
+    """
+    try:
+        if calkit.load_calkit_info().get("hub"):
+            return True
+    except Exception:
+        pass
+    try:
+        return any(
+            calkit.dvc.detect_calkit_remote_type(name, url) is not None
+            for name, url in calkit.dvc.get_remotes().items()
+        )
+    except Exception:
+        return False
+
+
+def _tell_hub_we_pushed(targets: list[str], git_args: list[str]) -> None:
     """Let the hub know this project has moved, so it can get ready.
 
     Everything the hub shows for a project is worked out from its latest
@@ -1688,9 +1710,16 @@ def _tell_hub_we_pushed(git_args: list[str]) -> None:
     through GitHub anyway; this arrives sooner, and covers projects it can't
     be told about that way.
 
+    Reported for any push, not only a Git one. Sending data to a DVC remote
+    changes what the hub can show -- which figures resolve, which stages
+    look up to date -- without moving a commit, and the hub can only know
+    that from ``targets``.
+
     Entirely best-effort: a push has already succeeded by the time this runs,
     so nothing here is worth failing it or slowing it down for.
     """
+    if not _is_connected_to_a_hub():
+        return
     try:
         project = calkit.detect_project_name()
     except Exception:
@@ -1698,7 +1727,7 @@ def _tell_hub_we_pushed(git_args: list[str]) -> None:
     # What was pushed and where. The hub reads the repo itself to find the
     # current state, so this is for the record rather than for it to act on,
     # and anything we can't work out is simply left out.
-    body: dict[str, str] = {}
+    body: dict[str, object] = {"targets": targets}
     try:
         repo = calkit.git.get_repo()
         body["git_rev"] = repo.head.commit.hexsha

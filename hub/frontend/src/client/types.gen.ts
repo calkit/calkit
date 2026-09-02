@@ -3694,6 +3694,10 @@ export type ProjectPushEventPost = {
    * Branch
    */
   branch?: string | null
+  /**
+   * Targets
+   */
+  targets?: Array<string> | null
 }
 
 /**

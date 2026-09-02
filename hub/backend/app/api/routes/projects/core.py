@@ -6823,6 +6823,11 @@ class ProjectPushEventPost(BaseModel):
     git_rev: str | None = None
     remote: str | None = None
     branch: str | None = None
+    # What was pushed: "git", "dvc", "docker". A push that sent data
+    # somewhere other than Git changes what the project resolves to without
+    # moving a commit, which is the one thing the hub can't work out for
+    # itself by looking at the repo.
+    targets: list[str] | None = None
 
 
 # One route per kind of event rather than one route with a kind field.
@@ -6867,7 +6872,13 @@ def post_project_push_event(
             "event_branch": req.branch,
         },
     )
-    queued = app.tasks.enqueue_warm(project.owner_account_name, project.name)
+    # Warming is normally skipped when the commit is already warm. That is
+    # the wrong answer for a push that moved data rather than code: the
+    # commit is the same and what it resolves to is not.
+    moved_data = bool(set(req.targets or []) - {"git"})
+    queued = app.tasks.enqueue_warm(
+        project.owner_account_name, project.name, force=moved_data
+    )
     return Message(message="Queued" if queued else "Not queued")
 
 

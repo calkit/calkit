@@ -25,7 +25,9 @@ from app.db import engine
 from app.models import Account, Project, User
 
 
-def warm_project(owner_name: str, project_name: str) -> dict:
+def warm_project(
+    owner_name: str, project_name: str, force: bool = False
+) -> dict:
     """Refresh a project's clone and recompute what the project view reads.
 
     Returns a summary of what ran, for the worker log. Never raises: a warm
@@ -82,7 +84,7 @@ def warm_project(owner_name: str, project_name: str) -> dict:
                 f"Could not read {slug} to warm it: {type(e).__name__}: {e}"
             )
             return {"project": slug, "failed": ["clone"]}
-        if sha and cache.get_json(warmed_key) == sha:
+        if not force and sha and cache.get_json(warmed_key) == sha:
             logger.info(f"{slug} is already warm at {sha[:7]}")
             return {"project": slug, "already_warm_at": sha}
         for label, step in _steps():

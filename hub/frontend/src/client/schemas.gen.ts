@@ -6444,6 +6444,20 @@ export const ProjectPushEventPostSchema = {
       ],
       title: "Branch",
     },
+    targets: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Targets",
+    },
   },
   type: "object",
   title: "ProjectPushEventPost",

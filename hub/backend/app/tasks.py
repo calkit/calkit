@@ -46,11 +46,17 @@ def get_queue() -> Any:
         return None
 
 
-def enqueue_warm(owner_name: str, project_name: str) -> bool:
+def enqueue_warm(
+    owner_name: str, project_name: str, force: bool = False
+) -> bool:
     """Queue a warm for one project. True if it was queued.
 
     The job id is the project, so a burst of pushes coalesces into one
     pending warm instead of one per push.
+
+    ``force`` runs the work even when the project's commit has already been
+    warmed, which is what a push of DVC data rather than code needs: the
+    commit hasn't moved but what it resolves to has.
     """
     queue = get_queue()
     if queue is None:
@@ -64,6 +70,7 @@ def enqueue_warm(owner_name: str, project_name: str) -> bool:
             "app.warm.warm_project",
             owner_name,
             project_name,
+            force,
             job_id=job_id,
             job_timeout=JOB_TIMEOUT,
             ttl=JOB_TTL,

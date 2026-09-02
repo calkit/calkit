@@ -2461,8 +2461,6 @@ def get_project_questions(
         project=project,
         repo=repo,
         ref=ref,
-        # This route only reads; the POST/PUT handlers below load their own
-        # copy through ruamel so their rewrites keep comments intact.,
     )
     project = _sync_questions_with_db(
         ck_info=ck_info, project=project, session=session
@@ -2650,9 +2648,6 @@ def _discover_figures(
         project=project,
         repo=repo,
         ref=ref,
-        # Discovery only reads this metadata, so skip ruamel's round-trip
-        # parser; on a 42 KB calkit.yaml that is ~5 ms instead of ~78 ms,
-        # paid on every page of the listing.,
     )
     figures = ck_info.get("figures", [])
     # Declared figures (from calkit.yaml) may omit a title; fill one in so

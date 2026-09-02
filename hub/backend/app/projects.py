@@ -1284,11 +1284,12 @@ def get_ck_info_for_ref(
     normalized (see ``normalize_ck_info_paths``, which rewrites them in
     place), so what comes back here must never be written to calkit.yaml.
 
-    Which is why there is no choice of parser: ruamel's round-trip mode
-    exists to preserve the comments and quoting a faithful rewrite needs,
-    and nothing may rewrite this. On a large calkit.yaml that is a quarter
-    of a second per request, paid by most of the project view. Callers that
-    do write calkit.yaml back read it through ``get_ck_info_from_repo``
+    Which is why this always parses read-only, and offers no choice about
+    it: ruamel's round-trip mode exists to preserve the comments and
+    quoting a faithful rewrite needs, and nothing may rewrite what comes
+    back from here. Round-tripping a large calkit.yaml costs a quarter of a
+    second per request, paid by most of the project view. Callers that do
+    write calkit.yaml back read it through ``get_ck_info_from_repo``
     instead.
     """
     if ref is None:

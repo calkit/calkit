@@ -238,20 +238,27 @@ async def post_github_event(request: Request) -> Message:
         return Message(message="Ignored")
     # The App is installed on a GitHub repo, which is not always named the
     # same as the Calkit project, so match on the repo we cloned from.
-    gh_owner, gh_name = repo.split("/", 1)
+    # `github_repo` is derived rather than stored, so the query goes against
+    # the URL column it is derived from, with and without the .git suffix
+    # that clone URLs sometimes carry.
+    base = f"https://github.com/{repo}"
     with Session(engine) as session:
         projects = session.exec(
             select(Project).where(
-                func.lower(Project.github_repo) == repo.lower()
+                func.lower(Project.git_repo_url).in_(
+                    [base.lower(), f"{base.lower()}.git"]
+                )
             )
         ).all()
-    if not projects:
+        # Read the names while the session is still open: the owner's name
+        # comes off a relationship, and the objects are detached after this.
+        slugs = [(p.owner_account_name, p.name) for p in projects]
+    if not slugs:
         logger.info(f"No project tracks {repo}")
         return Message(message="Ignored")
-    queued = 0
-    for project in projects:
-        if app.tasks.enqueue_warm(project.owner_account_name, project.name):
-            queued += 1
+    queued = sum(
+        1 for owner, name in slugs if app.tasks.enqueue_warm(owner, name)
+    )
     return Message(message=f"Queued {queued}")
 
 

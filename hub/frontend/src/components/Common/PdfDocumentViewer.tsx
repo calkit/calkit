@@ -26,6 +26,7 @@ import mixpanel from "mixpanel-browser"
 import type { PDFDocumentProxy } from "pdfjs-dist"
 import {
   type MutableRefObject,
+  type ReactElement,
   type ReactNode,
   type RefObject,
   useCallback,
@@ -53,6 +54,7 @@ import {
   FiChevronUp,
   FiDownload,
   FiExternalLink,
+  FiLayers,
   FiList,
   FiMaximize,
   FiPrinter,
@@ -191,7 +193,7 @@ function OutlineTree({
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
-interface PdfDocumentViewerProps {
+export interface PdfDocumentViewerProps {
   url: string
   // Optional highlight integration. Omit for a read-only viewer.
   highlights?: Array<IHighlight>
@@ -218,6 +220,19 @@ interface PdfDocumentViewerProps {
   // then shows `downloadDisabledHint`.
   allowDownload?: boolean
   downloadDisabledHint?: ReactNode
+  // Optional panel beside the document, toggled from the toolbar. It is
+  // given the page currently in view, so it can show what is on the page
+  // the reader is looking at, and a way to jump to another one.
+  sidePanel?: (ctx: {
+    currentPage: number
+    goToPage: (pageNumber: number) => void
+  }) => ReactNode
+  // Tooltip and accessible name for the panel's toolbar toggle.
+  sidePanelLabel?: string
+  sidePanelIcon?: ReactElement
+  // Rendered on the panel's toggle, for something the reader should see
+  // without opening it first -- a count of what has gone out of date.
+  sidePanelBadge?: ReactNode
 }
 
 const highlightSx = {
@@ -243,6 +258,10 @@ export default function PdfDocumentViewer({
   toolbarAction,
   allowDownload = true,
   downloadDisabledHint,
+  sidePanel,
+  sidePanelLabel = "Panel",
+  sidePanelIcon,
+  sidePanelBadge,
 }: PdfDocumentViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Gate rendering until the next animation frame. In React StrictMode dev,
@@ -309,6 +328,10 @@ export default function PdfDocumentViewer({
               toolbarAction={toolbarAction}
               allowDownload={allowDownload}
               downloadDisabledHint={downloadDisabledHint}
+              sidePanel={sidePanel}
+              sidePanelLabel={sidePanelLabel}
+              sidePanelIcon={sidePanelIcon}
+              sidePanelBadge={sidePanelBadge}
             />
           )}
         </PdfLoader>
@@ -340,6 +363,10 @@ function PdfViewerInner({
   toolbarAction,
   allowDownload = true,
   downloadDisabledHint,
+  sidePanel,
+  sidePanelLabel = "Panel",
+  sidePanelIcon,
+  sidePanelBadge,
 }: PdfViewerInnerProps) {
   const toolbarBg = useColorModeValue("ui.secondary", "ui.darkSlate")
   const borderColor = useColorModeValue("gray.200", "gray.600")
@@ -352,6 +379,7 @@ function PdfViewerInner({
   const [scaleValue, setScaleValue] = useState<string>(defaultScale)
   const [outline, setOutline] = useState<OutlineNode[]>([])
   const [outlineOpen, setOutlineOpen] = useState(false)
+  const [sidePanelOpen, setSidePanelOpen] = useState(false)
   const [pageNav, setPageNav] = useState({
     current: 1,
     total: pdfDocument.numPages,
@@ -980,7 +1008,25 @@ function PdfViewerInner({
             />
           </Tooltip>
         )}
-        <Flex align="center" gap={0.5} ml={outline.length > 0 ? 1 : 0}>
+        {sidePanel && (
+          <Flex align="center" gap={0.5}>
+            <Tooltip label={sidePanelLabel}>
+              <IconButton
+                aria-label={`Toggle ${sidePanelLabel.toLowerCase()}`}
+                icon={sidePanelIcon ?? <FiLayers />}
+                size="xs"
+                variant={sidePanelOpen ? "solid" : "ghost"}
+                onClick={() => setSidePanelOpen((o) => !o)}
+              />
+            </Tooltip>
+            {sidePanelBadge}
+          </Flex>
+        )}
+        <Flex
+          align="center"
+          gap={0.5}
+          ml={outline.length > 0 || sidePanel ? 1 : 0}
+        >
           <IconButton
             aria-label="Previous page"
             icon={<FiChevronLeft />}
@@ -1208,6 +1254,19 @@ function PdfViewerInner({
         <Box position="relative" flex="1" minW={0} overflow="hidden">
           {pdfViewer}
         </Box>
+        {sidePanelOpen && sidePanel && (
+          <Box
+            width="300px"
+            flexShrink={0}
+            overflowY="auto"
+            borderLeftWidth={1}
+            borderColor={borderColor}
+            bg={toolbarBg}
+            p={2}
+          >
+            {sidePanel({ currentPage: pageNav.current, goToPage })}
+          </Box>
+        )}
       </Flex>
     </>
   )

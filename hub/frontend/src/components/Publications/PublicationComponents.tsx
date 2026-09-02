@@ -636,6 +636,65 @@ const routeApi = getRouteApi(
   "/_layout/$accountName/$projectName/_layout/publications",
 )
 
+/**
+ * What the publication is made of. Shared so the summary line and the
+ * panel beside the PDF read the same answer out of one cache rather than
+ * asking the server twice for it.
+ */
+export function usePublicationComponents({
+  ownerName,
+  projectName,
+  publication,
+  gitRef,
+}: {
+  ownerName: string
+  projectName: string
+  publication: Publication
+  gitRef?: string
+}) {
+  return useQuery({
+    queryKey: [
+      "projects",
+      ownerName,
+      projectName,
+      "publication-components",
+      publication.path,
+      gitRef,
+    ],
+    queryFn: () =>
+      ProjectsService.getProjectPublicationComponents({
+        owner_name: ownerName,
+        project_name: projectName,
+        path: publication.path,
+        ref: gitRef,
+      }).then((response) => response.data),
+    enabled: Boolean(publication.path),
+    retry: false,
+  })
+}
+
+/** Pages carrying something out of date, in reading order. */
+export function stalePages(items: PublicationComponent[]): number[] {
+  const pages = new Set<number>()
+  for (const item of items) {
+    if (item.status !== "stale" && item.status !== "missing") continue
+    for (const page of item.pages ?? []) pages.add(page)
+  }
+  return [...pages].sort((a, b) => a - b)
+}
+
+/** The page a reader should look at next to find something out of date. */
+export function nextStalePage(
+  items: PublicationComponent[],
+  currentPage: number,
+): number | undefined {
+  const pages = stalePages(items)
+  if (pages.length === 0) return undefined
+  // Wrap, so a reader past the last one is sent back to the first rather
+  // than told there is nothing left when there is
+  return pages.find((page) => page > currentPage) ?? pages[0]
+}
+
 export default function PublicationComponents({
   ownerName,
   projectName,
@@ -657,24 +716,11 @@ export default function PublicationComponents({
   const navigate = useNavigate({
     from: "/$accountName/$projectName/publications",
   })
-  const componentsQuery = useQuery({
-    queryKey: [
-      "projects",
-      ownerName,
-      projectName,
-      "publication-components",
-      publication.path,
-      gitRef,
-    ],
-    queryFn: () =>
-      ProjectsService.getProjectPublicationComponents({
-        owner_name: ownerName,
-        project_name: projectName,
-        path: publication.path,
-        ref: gitRef,
-      }).then((response) => response.data),
-    enabled: Boolean(publication.path),
-    retry: false,
+  const componentsQuery = usePublicationComponents({
+    ownerName,
+    projectName,
+    publication,
+    gitRef,
   })
   const canResolve = userHasWriteAccess && !gitRef
   const data = componentsQuery.data
@@ -757,5 +803,165 @@ export default function PublicationComponents({
         folder={data.folder}
       />
     </Box>
+  )
+}
+
+/**
+ * The components on the page of the built PDF a reader is looking at.
+ *
+ * Reading the paper is when it matters that a number went stale, and the
+ * table above the document is the wrong place to notice it: it lists the
+ * whole publication, in no relation to the page in front of you. This
+ * takes the pages the provenance record gives each component and shows
+ * only what the current page typeset, so the question "is what I am
+ * reading still true" has an answer beside the sentence raising it. When
+ * something elsewhere is out of date it says where, and offers to go.
+ */
+export function PublicationComponentsPagePanel({
+  ownerName,
+  projectName,
+  publication,
+  gitRef,
+  currentPage,
+  goToPage,
+}: {
+  ownerName: string
+  projectName: string
+  publication: Publication
+  gitRef?: string
+  currentPage: number
+  goToPage: (pageNumber: number) => void
+}) {
+  const componentsQuery = usePublicationComponents({
+    ownerName,
+    projectName,
+    publication,
+    gitRef,
+  })
+  const data = componentsQuery.data
+  if (componentsQuery.isLoading)
+    return (
+      <Text fontSize="xs" color="ui.dim">
+        Reading what this document takes from the project…
+      </Text>
+    )
+  // A document built without provenance turned on has no record to read,
+  // which is not a fault worth an error: say what would make one
+  if (!data?.built)
+    return (
+      <Text fontSize="xs" color="ui.dim">
+        This document was not built with provenance recorded, so there is
+        nothing to show per page. Set{" "}
+        <Code fontSize="xs">provenance: true</Code> on its{" "}
+        <Code fontSize="xs">latex</Code> stage and run the pipeline.
+      </Text>
+    )
+  const items = data.items ?? []
+  const onPage = sortComponents(
+    items.filter((item) => (item.pages ?? []).includes(currentPage)),
+  )
+  const stale = stalePages(items)
+  const elsewhere = stale.filter((page) => page !== currentPage)
+  const nextStale = nextStalePage(items, currentPage)
+  return (
+    <Box fontSize="sm">
+      <Text fontWeight="semibold" mb={1}>
+        On page {currentPage}
+      </Text>
+      {onPage.length === 0 ? (
+        <Text fontSize="xs" color="ui.dim">
+          Nothing on this page came from the project.
+        </Text>
+      ) : (
+        <Stack spacing={2}>
+          {onPage.map((item) => (
+            <Box key={`${item.path}:${item.key ?? ""}`}>
+              <Flex align="baseline" gap={1} wrap="wrap">
+                <Badge>{item.kind}</Badge>
+                <Link
+                  as={RouterLink}
+                  to="../files"
+                  search={{ path: item.path } as any}
+                >
+                  <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
+                    {componentLabel(item, data.folder)}
+                  </Code>
+                </Link>
+              </Flex>
+              {item.current_value !== null &&
+              item.current_value !== undefined ? (
+                <Text fontSize="xs" color="ui.dim">
+                  {String(item.current_value)}
+                </Text>
+              ) : null}
+              <Box mt={0.5}>
+                <StateCell item={item} />
+              </Box>
+              {item.stage ? (
+                <Link
+                  as={RouterLink}
+                  to="../pipeline"
+                  search={{ stage: item.stage } as any}
+                  fontSize="xs"
+                >
+                  Open stage <Code fontSize="xs">{item.stage}</Code>
+                </Link>
+              ) : null}
+            </Box>
+          ))}
+        </Stack>
+      )}
+      {elsewhere.length > 0 ? (
+        <Box mt={3} pt={2} borderTopWidth={1}>
+          <Text fontSize="xs" color="ui.dim">
+            Out of date elsewhere: {pagesText(elsewhere)}
+          </Text>
+          {nextStale !== undefined ? (
+            <Button
+              size="xs"
+              variant="outline"
+              mt={1}
+              onClick={() => goToPage(nextStale)}
+            >
+              Go to page {nextStale}
+            </Button>
+          ) : null}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+/**
+ * How much of the document is out of date, shown on the panel's toggle.
+ *
+ * The panel has to be opened to be read, and a reader with no reason to
+ * open it is exactly the one who needs telling. This puts the count where
+ * it is visible while reading, and stays out of the way when the document
+ * is current.
+ */
+export function PublicationStaleBadge({
+  ownerName,
+  projectName,
+  publication,
+  gitRef,
+}: {
+  ownerName: string
+  projectName: string
+  publication: Publication
+  gitRef?: string
+}) {
+  const { data } = usePublicationComponents({
+    ownerName,
+    projectName,
+    publication,
+    gitRef,
+  })
+  const nStale = data?.n_stale ?? 0
+  if (!data?.built || nStale === 0) return null
+  return (
+    <Badge colorScheme="orange" fontSize="0.6rem">
+      {nStale} out of date
+    </Badge>
   )
 }

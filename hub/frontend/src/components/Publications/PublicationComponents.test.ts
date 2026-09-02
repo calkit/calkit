@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest"
 import type { PublicationComponent } from "../../client"
 import {
   componentLabel,
+  nextStalePage,
   pagesText,
   relativeComponentPath,
   sortComponents,
+  stalePages,
   staleExplanation,
 } from "./PublicationComponents"
 
@@ -109,5 +111,49 @@ describe("staleExplanation", () => {
       "its stage needs a rerun, and the project has moved on since this was built",
     )
     expect(staleExplanation(component())).toBe("")
+  })
+})
+
+describe("stalePages", () => {
+  it("collects the pages carrying something out of date, in reading order", () => {
+    expect(
+      stalePages([
+        component({ kind: "value", status: "stale", pages: [7, 2] }),
+        component({ kind: "figure", status: "missing", pages: [2] }),
+        component({ kind: "value", status: "ok", pages: [4] }),
+        component({ kind: "value", status: "unknown", pages: [9] }),
+      ]),
+    ).toEqual([2, 7])
+  })
+
+  it("ignores content that reached no page", () => {
+    expect(stalePages([component({ kind: "value", status: "stale" })])).toEqual(
+      [],
+    )
+  })
+})
+
+describe("nextStalePage", () => {
+  const items = [
+    component({ kind: "value", status: "stale", pages: [2] }),
+    component({ kind: "value", status: "stale", pages: [7] }),
+  ]
+
+  it("finds the next one after the page in view", () => {
+    expect(nextStalePage(items, 1)).toBe(2)
+    expect(nextStalePage(items, 2)).toBe(7)
+  })
+
+  // Past the last one there is still somewhere to go, and saying so beats
+  // a dead button on a document that has something out of date in it
+  it("wraps to the first from past the last", () => {
+    expect(nextStalePage(items, 7)).toBe(2)
+    expect(nextStalePage(items, 99)).toBe(2)
+  })
+
+  it("has nowhere to go when nothing is out of date", () => {
+    expect(nextStalePage([component({ kind: "value", pages: [3] })], 1)).toBe(
+      undefined,
+    )
   })
 })

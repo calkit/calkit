@@ -55,7 +55,10 @@ import PdfAnnotator, {
   commentToHighlight,
   type AnnotationHighlight,
 } from "../../../../../components/Publications/PdfAnnotator"
-import PublicationComponents from "../../../../../components/Publications/PublicationComponents"
+import PublicationComponents, {
+  PublicationComponentsPagePanel,
+  PublicationStaleBadge,
+} from "../../../../../components/Publications/PublicationComponents"
 import PublicationView from "../../../../../components/Publications/PublicationView"
 import ArtifactReleasesPanel from "../../../../../components/Releases/ArtifactReleasesPanel"
 import useAuth from "../../../../../hooks/useAuth"
@@ -629,6 +632,25 @@ function Publications() {
                       showResolved={showResolved}
                       externalScrollRef={pdfScrollRef}
                       toolbarAction={toolbarAction}
+                      sidePanelLabel="Components on this page"
+                      sidePanelBadge={
+                        <PublicationStaleBadge
+                          ownerName={accountName}
+                          projectName={projectName}
+                          publication={selectedPub}
+                          gitRef={ref}
+                        />
+                      }
+                      sidePanel={({ currentPage, goToPage }) => (
+                        <PublicationComponentsPagePanel
+                          ownerName={accountName}
+                          projectName={projectName}
+                          publication={selectedPub}
+                          gitRef={ref}
+                          currentPage={currentPage}
+                          goToPage={goToPage}
+                        />
+                      )}
                     />
                   </Box>
                 ) : (

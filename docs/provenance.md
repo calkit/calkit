@@ -568,3 +568,20 @@ The stage check is the slow part, since it asks the pipeline for its
 status. Pass `--no-stage-check` to skip it -- drift between the document
 and the project is still reported -- and note that a component nothing
 could be checked about reads as `unknown`, never as current.
+
+### Reading a built document
+
+The same answer follows the PDF into the hub. Open a publication and the
+viewer's toolbar carries a **components** panel, which lists what the page
+in view took from the project --- the value or figure, whether it is
+current, and a link to the stage behind it --- so the question a paragraph
+raises is answered beside the paragraph rather than in a table above the
+document. Anything out of date elsewhere in the document is counted on the
+panel's button, and the panel offers to go to the next page carrying it,
+so a reader with no reason to open the panel is still told there is
+something to look at.
+
+The panel reads the same `<document>.provenance.json` as everything else
+on this page, so it is only there for a document built with `provenance`
+turned on; without a record there are no pages to attribute anything to,
+and the panel says so rather than showing an empty list.

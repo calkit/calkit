@@ -555,8 +555,9 @@ unrelated. The distinction matters because the fix differs:
   you that is showing a number or a figure the project no longer produces.
   Rebuild the document.
 - **`answer-stale`** -- for a `\ckfindings` or `\ckanswer` block, the
-  answer no longer matches its evidence, which is what
-  [`calkit check questions`](questions.md) reports. Reread the answer.
+  evidence behind the answer changed after the answer was written, which
+  is what [`calkit check questions`](questions.md) reports. Reread the
+  answer. Whether it still holds is yours to say.
 
 Values are compared value to value rather than by file hash: a results
 file changing in a key the document never cites says nothing about the

@@ -128,7 +128,7 @@ export function displayValue(component: Component): string | undefined {
 const STALE_EXPLANATIONS: Record<StaleReason, string> = {
   "stage-out-of-date": "its stage needs a rerun",
   "changed-since-build": "the project has moved on since this was built",
-  "answer-stale": "the answer no longer matches its evidence",
+  "answer-stale": "its evidence changed after the answer was written",
 };
 
 const PROVENANCE_NOTES: Record<Provenance, string | undefined> = {
@@ -218,7 +218,7 @@ export function lensTitle(components: Component[]): string | undefined {
       return `$(warning) Rerun ${stages.join(", ")}`;
     }
     if (reasons.has("answer-stale")) {
-      return "$(warning) Answer no longer matches its evidence";
+      return "$(warning) Evidence changed since the answer";
     }
     return "$(warning) Changed since this was built";
   }

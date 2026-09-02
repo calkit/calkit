@@ -15,8 +15,9 @@ independent:
 - The **document was built against something that has since changed**, so
   the PDF in front of you shows a number or a figure the project no longer
   produces, whatever the pipeline's state.
-- The **answer behind a generated block** no longer matches its evidence,
-  which is a person's job to fix rather than the pipeline's.
+- The **evidence behind a generated block** changed after its answer was
+  written, so the answer is worth reading again. Whether it still holds is
+  a person's job to say rather than the pipeline's.
 
 All of them are reported, and any of them can hold at once. Separate from
 all of it is whether the component has any provenance at all: a file no

@@ -103,9 +103,10 @@ calkit check questions --json     # for tools
 ```
 
 This is a check of its own rather than part of `calkit status`.
-Judging whether an answer still matches its evidence means reading
-`calkit.yaml`'s history, which nothing else in `calkit status` needs, and
-the report is a page of its own once a project has a few questions.
+Telling whether an answer's evidence has moved since it was written means
+reading `calkit.yaml`'s history, which nothing else in `calkit status`
+needs, and the report is a page of its own once a project has a few
+questions.
 
 A stale question is not fixed by re-running anything; it is fixed by
 reading the rendered answer against the new evidence.

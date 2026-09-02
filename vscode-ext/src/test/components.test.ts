@@ -139,7 +139,7 @@ test("hover explains each way of being out of date", () => {
     }),
   ).join("\n");
   assert.match(answer, /\*\*Question 2\*\*/);
-  assert.match(answer, /answer no longer matches its evidence/);
+  assert.match(answer, /evidence changed after the answer was written/);
   const gone = hoverLines(component({ status: "missing" })).join("\n");
   assert.match(gone, /Missing/);
   assert.doesNotMatch(gone, /Out of date/);

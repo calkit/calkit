@@ -2973,7 +2973,7 @@ Check things.
 | [`env-vars`](#subcommand-check-env-vars)                    | Check that the project's required environmental variables exist.                                             |
 | [`pipeline`](#subcommand-check-pipeline)                    | Check that the project pipeline is defined correctly.                                                        |
 | [`call`](#subcommand-check-call)                            | Check that a command succeeds and run an alternate if not.                                                   |
-| [`questions`](#subcommand-check-questions)                  | Check that answered questions are consistent with their evidence.                                            |
+| [`questions`](#subcommand-check-questions)                  | Check the evidence behind each answered question.                                                            |
 
 <a id="subcommand-check-repro"></a>
 
@@ -3297,9 +3297,11 @@ Options:
 
 #### `calkit check questions`
 
-Check that answered questions are consistent with their evidence.
+Check the evidence behind each answered question.
 
 A question is stale if any of its evidence changed after the commit that last edited the question, in Git history for Git-tracked outputs or in dvc.lock for DVC-tracked ones. Evidence paths must exist, value keys must resolve, every placeholder in the text must render, and a publication label must still be present in the LaTeX source. Exits with an error if any answered question is stale or broken.
+
+Whether the answer follows from the evidence is not checked here and cannot be: that is about the sentence. A stale question is a prompt to read it again, not a finding that it is wrong.
 
 Usage:
 

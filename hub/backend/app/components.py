@@ -2,7 +2,8 @@
 
 ``calkit.components`` decides what counts as out of date -- a stage that
 needs a rerun, a project that has moved on since the document was built, an
-answer that no longer matches its evidence, a file nobody accounts for.
+evidence that changed after its answer was written, a file nobody
+accounts for.
 This module only says how to reach a project's files when the project is a
 Git tree at a ref rather than a checkout on someone's laptop, so the hub
 and the CLI cannot end up giving two answers to the same question.
@@ -118,9 +119,9 @@ class TreeProject(ProjectView):
         return self._stale_stage_names
 
     def stale_answers(self) -> set[str] | None:
-        # Whether an answer still matches its evidence is judged from Git
-        # history, which this doesn't have; saying nothing leaves a block
-        # reading as unchecked rather than as fine
+        # Whether an answer's evidence has moved since it was written is
+        # read from Git history, which this doesn't have; saying nothing
+        # leaves a block reading as unchecked rather than as fine
         return None
 
 

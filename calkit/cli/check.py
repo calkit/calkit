@@ -2059,7 +2059,7 @@ def check_questions(
         bool, typer.Option("--json", help="Output the report as JSON.")
     ] = False,
 ) -> None:
-    """Check that answered questions are consistent with their evidence.
+    """Check the evidence behind each answered question.
 
     A question is stale if any of its evidence changed after the commit
     that last edited the question, in Git history for Git-tracked outputs
@@ -2067,6 +2067,10 @@ def check_questions(
     keys must resolve, every placeholder in the text must render, and a
     publication label must still be present in the LaTeX source. Exits
     with an error if any answered question is stale or broken.
+
+    Whether the answer follows from the evidence is not checked here and
+    cannot be: that is about the sentence. A stale question is a prompt to
+    read it again, not a finding that it is wrong.
     """
     from calkit.questions import check_questions as _check_questions
     from calkit.questions import format_status

@@ -180,7 +180,7 @@ def test_what_nothing_could_be_said_about_is_not_called_current():
     schematic = by["img/schematic.pdf"]
     assert schematic.provenance == "undeclared"
     assert schematic.status == "unknown"
-    # Whether an answer still matches its evidence is judged from Git
+    # Whether an answer's evidence has moved is read from Git
     # history, which a tree doesn't have
     assert by["calkit.yaml"].provenance == "project"
     assert by["calkit.yaml"].status == "unknown"

@@ -40,7 +40,7 @@ export function componentLabel(item: PublicationComponent): string {
 const STALE_EXPLANATIONS: Record<string, string> = {
   "stage-out-of-date": "its stage needs a rerun",
   "changed-since-build": "the project has moved on since this was built",
-  "answer-stale": "the answer no longer matches its evidence",
+  "answer-stale": "its evidence changed after the answer was written",
 };
 
 /**

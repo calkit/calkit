@@ -926,7 +926,7 @@ def format_status(status: QuestionsStatus, verbose: bool = False) -> str:
     )
     if answered:
         lines.append(
-            f"Answers consistent with their evidence: {n_ok}/{len(answered)} "
+            f"Answers whose evidence checks out: {n_ok}/{len(answered)} "
             f"{calkit.check_or_x(n_ok == len(answered))}"
         )
         lines.append(

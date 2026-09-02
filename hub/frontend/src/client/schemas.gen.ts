@@ -3224,40 +3224,6 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
-export const GitSourcePostSchema = {
-  properties: {
-    repo_url: {
-      type: "string",
-      title: "Repo Url",
-    },
-    rev: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Rev",
-    },
-    path: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Path",
-    },
-  },
-  type: "object",
-  required: ["repo_url"],
-  title: "GitSourcePost",
-} as const
-
 export const GithubPullRequestSchema = {
   properties: {
     number: {
@@ -3528,15 +3494,27 @@ export const ImportedFromPostSchema = {
       ],
       title: "Doi",
     },
-    git: {
+    git_repo_url: {
       anyOf: [
         {
-          $ref: "#/components/schemas/GitSourcePost",
+          type: "string",
         },
         {
           type: "null",
         },
       ],
+      title: "Git Repo Url",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
     },
     date: {
       anyOf: [

@@ -138,11 +138,18 @@ def _make_git_auth_env(
     return env
 
 
-# How long a remote's head SHA is trusted. Clones are per user, so ten
-# people looking at one project are ten clones asking git the same question
-# every time their TTL lapses. One answer, shared, serves all of them, and
-# being a few seconds stale only delays noticing a push by that much.
-REMOTE_HEAD_TTL = 30
+# How long a remote's head SHA is trusted.
+#
+# Longer than a clone's own TTL, deliberately: a clone that lapses asks
+# whether the remote moved, so a shorter window here would mean the answer
+# had always expired by the time it was wanted, and every lapse would pay
+# for its own round trip. At several times the clone TTL, one answer covers
+# many lapses, across every user's clone of the project.
+#
+# Being minutes stale costs little now that a push says so directly, through
+# the GitHub App's webhook or `calkit push` (see ``app.warm``). This poll is
+# the fallback for pushes that arrive without either.
+REMOTE_HEAD_TTL = 300
 
 
 def get_remote_head_sha(

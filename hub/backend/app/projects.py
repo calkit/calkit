@@ -37,6 +37,7 @@ def _yaml_load(data: bytes | str):
 
 
 import app.dvc
+from app import cache
 from app.core import (
     CATEGORIES_PLURAL_TO_SINGULAR,
     load_yaml_fast,
@@ -789,6 +790,23 @@ def get_ck_info_and_dvc_outs_from_tree(
             f"(read {t_read * 1000:.0f}ms)"
         )
         return hit_value
+    # Not in this process, which says nothing about whether it has been
+    # worked out: there are several workers, and they all restart on a
+    # deploy. Keyed by the bytes it was derived from, so an entry is never
+    # stale and is shared by every worker and every viewer.
+    shared_key = cache.make_key("ck-dvc", cache_key)
+    shared = cache.get_json(shared_key)
+    if isinstance(shared, list) and len(shared) == 4:
+        result = CkInfoAndOuts(*shared)
+        with _ck_dvc_cache_lock:
+            _ck_dvc_cache[cache_key] = (now, result)
+            if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
+                _ck_dvc_cache.popitem(last=False)
+        logger.info(
+            f"ck/dvc shared cache hit for {owner_name}/{project_name} "
+            f"(read {t_read * 1000:.0f}ms)"
+        )
+        return result
     logger.info(
         f"ck/dvc cache miss for {owner_name}/{project_name} "
         f"(read {t_read * 1000:.0f}ms)"
@@ -827,6 +845,7 @@ def get_ck_info_and_dvc_outs_from_tree(
         _ck_dvc_cache[cache_key] = (now, result)
         if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
             _ck_dvc_cache.popitem(last=False)
+    cache.set_json(shared_key, list(result))
     return result
 
 

@@ -1864,24 +1864,6 @@ export type GitRemoteHead = {
 }
 
 /**
- * GitSourcePost
- */
-export type GitSourcePost = {
-  /**
-   * Repo Url
-   */
-  repo_url: string
-  /**
-   * Rev
-   */
-  rev?: string | null
-  /**
-   * Path
-   */
-  path?: string | null
-}
-
-/**
  * GithubPullRequest
  */
 export type GithubPullRequest = {
@@ -2057,7 +2039,14 @@ export type ImportedFromPost = {
    * Doi
    */
   doi?: string | null
-  git?: GitSourcePost | null
+  /**
+   * Git Repo Url
+   */
+  git_repo_url?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
   /**
    * Date
    */

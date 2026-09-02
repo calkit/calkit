@@ -181,6 +181,61 @@ def get_remote_head_sha(
     return sha
 
 
+# Where the one checkout everybody reads from lives, under CLONE_ROOT. Not a
+# possible account name (see INVALID_ACCOUNT_NAMES), and the leading
+# underscore keeps it from colliding with one anyway.
+SHARED_READER_DIR = "_shared"
+
+
+def is_shared_read_checkout(repo: git.Repo) -> bool:
+    """Whether this repo is the checkout everybody reads from."""
+    return (os.sep + SHARED_READER_DIR + os.sep) in os.path.abspath(
+        str(repo.working_dir)
+    )
+
+
+def refuse_if_shared(repo: git.Repo) -> None:
+    """Stop a write that has landed on the shared checkout.
+
+    Reads share one copy per project; writes each get their own. Committing
+    in the shared one would author it in a tree other people are reading,
+    and push it under whichever credentials that copy happens to hold. A
+    caller that ends up here asked for a shared read and then tried to
+    write, which is a bug in the caller rather than anything a user did.
+    """
+    if is_shared_read_checkout(repo):
+        raise HTTPException(
+            500, "Refusing to write to the shared read-only checkout"
+        )
+
+
+def _shared_read_token(project: Project) -> tuple[bool, str | None]:
+    """Whether this project can be read from one shared checkout, and how.
+
+    A public repo clones with no credentials at all. A private one needs a
+    token, and the App installation token is the right one: it belongs to
+    the project rather than to whoever happened to ask first, so the
+    checkout it produces isn't tied to a user who may later lose access.
+
+    Returns ``(False, None)`` when neither applies, and the caller keeps its
+    own checkout as before.
+    """
+    if project.is_public:
+        return True, None
+    gh_owner, gh_repo = (
+        project.github_repo.split("/", 1)
+        if project.github_repo
+        else (project.owner_github_name, project.name)
+    )
+    try:
+        return True, github.get_app_installation_token(gh_owner, gh_repo)
+    except (github.GitHubAppNotConfigured, HTTPException) as e:
+        logger.info(
+            f"No shared checkout for private {gh_owner}/{gh_repo}: {e}"
+        )
+        return False, None
+
+
 def get_repo(
     project: Project,
     user: User | None,
@@ -188,17 +243,36 @@ def get_repo(
     ttl: int | None = None,
     fresh=False,
     ref: str | None = None,
+    shared_read: bool = False,
 ) -> git.Repo:
     """Ensure that the repo exists and is ready for operating upon for the user.
 
     Handles concurrency in case multiple API calls request the repo
     simultaneously. If TTL is None, the latest version is always fetched.
+
+    ``shared_read`` asks for the checkout everybody reads from rather than
+    this user's own. What a commit contains is the same whoever is looking,
+    so a project needs one copy for reading, not one per viewer -- and one
+    that stays warm for the next person instead of being cloned again.
+
+    It is opt-in, and deliberately so: the shared checkout must never be
+    written to, since a commit made there would be authored in a tree other
+    people are reading. A caller that doesn't ask for it gets its own
+    checkout exactly as before, so the cost of missing one is a slow read
+    rather than a wrong write.
     """
     owner_name = project.owner_github_name
     project_name = project.name
+    shared_token: str | None = None
+    if shared_read:
+        shared_read, shared_token = _shared_read_token(project)
     # Add the file to the repo(s) -- we may need to clone it.
     # Ref-based reads should not mutate this working tree checkout.
-    if user is not None:
+    if shared_read:
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, SHARED_READER_DIR, owner_name, project_name
+        )
+    elif user is not None:
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
         user_dir = user.github_username or user.account.name
@@ -225,7 +299,13 @@ def get_repo(
             os.remove(updated_fpath)
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
-    if user is not None:
+    if shared_read:
+        # The shared checkout belongs to the project, not to whoever asked
+        # for it, so it carries the project's credentials and never a
+        # user's. Nothing here is authorized by this: the caller has
+        # already been through get_project.
+        access_token = shared_token
+    elif user is not None:
         if user.account.github_name is not None:
             # GitHub user: operate with their personal token.
             logger.info(f"Getting {user.email}'s token for Git operations")
@@ -543,7 +623,7 @@ def get_repo(
     # have stored the literal string "None" as the committer, so we
     # re-run on every refresh to repair that -- but not on every cached
     # read, which would be pure overhead.
-    if user is not None and did_refresh:
+    if user is not None and did_refresh and not shared_read:
         _configure_committer(repo, user, session=session)
     if did_refresh:
         record_project_update(project, repo, session)
@@ -612,6 +692,7 @@ def _configure_committer(
     -> ``email`` so we never pass ``None`` (which GitPython would stringify
     to "None").
     """
+    refuse_if_shared(repo)
     email = user.email or f"{user.github_username}@users.noreply.github.com"
     if not user.full_name and session is not None:
         detected = _detect_full_name_from_history(repo, email)

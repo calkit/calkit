@@ -47,10 +47,10 @@ def warm_project(
         if project is None:
             logger.warning(f"Nothing to warm: {owner_name}/{project_name}")
             return {"project": f"{owner_name}/{project_name}", "found": False}
-        # A private project can't be cloned anonymously, so warm it as its
-        # owner. The clone is per user, but everything computed from it is
-        # keyed by content or commit, so one pass fills the shared caches for
-        # everyone regardless of whose checkout produced it.
+        # A shared checkout carries the project's own credentials, so most
+        # projects need no user here at all. The owner is the fallback for a
+        # private project the GitHub App isn't installed on: there is no
+        # shared copy for those, so someone's own checkout has to stand in.
         user: User | None = None
         if not project.is_public:
             user = session.exec(
@@ -76,7 +76,16 @@ def warm_project(
         slug = f"{owner_name}/{project_name}".lower()
         warmed_key = cache.make_key("warmed", slug)
         try:
-            repo = get_repo(project=project, user=user, session=session, ttl=0)
+            # The shared checkout, because that is the one readers land
+            # on: warming a single user's copy would leave everyone else to
+            # clone it again for themselves.
+            repo = get_repo(
+                project=project,
+                user=user,
+                session=session,
+                ttl=0,
+                shared_read=True,
+            )
             done.append("clone")
             sha = resolve_commit_sha(repo, None)
         except Exception as e:

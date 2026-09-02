@@ -479,3 +479,96 @@ def test_get_repo_applies_the_configured_clone_filter(monkeypatch):
         assert not any(a.startswith("--filter") for a in commands[1])
     finally:
         _shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
+    import shutil as _shutil
+
+    from app.config import settings
+
+    project = _StubProject(f"ck-shared-{random.randint(0, 10**9)}")
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+    real_check_call = app.git.subprocess.check_call
+    clones: list[str] = []
+
+    def fake_check_call(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            target = cmd[-1]
+            clones.append(target)
+            os.makedirs(target, exist_ok=True)
+            r = git.Repo.init(target)
+            r.git.config(["user.name", "CI Test"])
+            r.git.config(["user.email", "ci-test@example.com"])
+            (Path(target) / "notes.txt").write_text("one")
+            r.git.add(["notes.txt"])
+            r.git.commit(["-m", "Init"])
+            return 0
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(app.git.subprocess, "check_call", fake_check_call)
+    shared_base = os.path.join(
+        settings.CLONE_ROOT,
+        app.git.SHARED_READER_DIR,
+        project.owner_github_name,
+        project.name,
+    )
+    anon_base = os.path.join(
+        settings.CLONE_ROOT,
+        "anonymous",
+        project.owner_github_name,
+        project.name,
+    )
+    try:
+        # A public project reads from one copy, wherever the request came
+        # from, so a second reader finds it already there
+        repo = app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            shared_read=True,
+        )
+        assert app.git.SHARED_READER_DIR in str(repo.working_dir)
+        assert len(clones) == 1
+        app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            shared_read=True,
+        )
+        assert len(clones) == 1
+        # And it is recognisable as the shared one, so a write that lands
+        # there is refused rather than authored in a tree others are reading
+        assert app.git.is_shared_read_checkout(repo)
+        with pytest.raises(HTTPException) as excinfo:
+            app.git.refuse_if_shared(repo)
+        assert excinfo.value.status_code == 500
+        # Not asking for it gets the caller its own copy, exactly as before
+        own = app.git.get_repo(
+            project=project, user=None, session=None, ttl=600
+        )
+        assert app.git.SHARED_READER_DIR not in str(own.working_dir)
+        assert not app.git.is_shared_read_checkout(own)
+        assert len(clones) == 2
+        # A private project with no App installation has no shared copy to
+        # read from, so it quietly keeps using its own
+        project.is_public = False
+        monkeypatch.setattr(
+            app.github,
+            "get_app_installation_token",
+            lambda *a, **k: (_ for _ in ()).throw(
+                app.github.GitHubAppNotConfigured("no app")
+            ),
+        )
+        private = app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            shared_read=True,
+        )
+        assert app.git.SHARED_READER_DIR not in str(private.working_dir)
+    finally:
+        _shutil.rmtree(shared_base, ignore_errors=True)
+        _shutil.rmtree(anon_base, ignore_errors=True)

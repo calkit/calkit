@@ -217,6 +217,68 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
 
+  # Runs the work a push makes necessary -- see app/warm.py -- off the
+  # API's threadpool, which is what serves requests.
+  worker:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      cache:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - DOMAIN=${DOMAIN}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FERNET_KEY=${FERNET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - FIRST_SUPERUSER_GITHUB_USERNAME=${FIRST_SUPERUSER_GITHUB_USERNAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
+      - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - OBJECT_STORAGE_PREFIX=${OBJECT_STORAGE_PREFIX:-s3://data}
+      - OBJECT_STORAGE_ENDPOINT_URL=${OBJECT_STORAGE_ENDPOINT_URL:-}
+      - OBJECT_STORAGE_KEY=${OBJECT_STORAGE_KEY:-}
+      - OBJECT_STORAGE_SECRET=${OBJECT_STORAGE_SECRET:-}
+      - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
+      - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+      - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
+      - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
+      - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    command: ["rq", "worker", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
+
   backend-dvc:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     restart: always

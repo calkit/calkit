@@ -4,6 +4,7 @@ import logging
 import os
 import time
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import sentry_sdk
 from fastapi import FastAPI, Request
@@ -12,6 +13,7 @@ from fastapi.routing import APIRoute
 from git.exc import GitCommandError
 from pythonjsonlogger import jsonlogger
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.api.main import api_router
 from app.config import settings
@@ -72,9 +74,53 @@ if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    openapi_url="/openapi.json",
     generate_unique_id_function=custom_generate_unique_id,
 )
+
+# Paths that hand back a file's bytes to something that is not a browser.
+#
+# A project's app is a WASM Python runtime reading its own data files over
+# HTTP. The browser decompresses a gzipped response transparently, but the
+# in-browser Python stack passes the original Content-Encoding through to
+# pandas, which then tries to gunzip bytes that are already plain and fails
+# with "Not a gzipped file". Nothing on these paths is text worth shrinking
+# anyway -- it is app assets and data files.
+_NO_COMPRESS_PREFIXES = ("/projects/",)
+_NO_COMPRESS_SEGMENT = "/apps/"
+
+
+class SelectiveGZipMiddleware:
+    """GZip, except on the paths that serve files verbatim."""
+
+    def __init__(self, app: Any, minimum_size: int = 1000) -> None:
+        self.app = app
+        self.gzip_app = GZipMiddleware(app, minimum_size=minimum_size)
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        path = scope.get("path", "")
+        # A whole path, not a suffix: the API is served at api.<domain> with
+        # nothing in front of its routes, so what a request asks for is what
+        # the router matched.
+        # An app's files live under /projects/<owner>/<project>/apps/..., so
+        # both halves have to match: a substring test alone would also skip
+        # compression on anything else that merely contains "/apps/".
+        if (
+            scope["type"] == "http"
+            and path.startswith(_NO_COMPRESS_PREFIXES)
+            and _NO_COMPRESS_SEGMENT in path
+        ):
+            await self.app(scope, receive, send)
+            return
+        await self.gzip_app(scope, receive, send)
+
+
+# Compress responses. The project view returns large JSON documents -- a
+# references listing for a paper-heavy project runs to several megabytes of
+# BibTeX -- which are almost entirely repeated keys and prose, so they shrink
+# by roughly an order of magnitude. Added before CORS so CORS stays the
+# outermost layer and error responses still carry its headers.
+app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:
@@ -108,6 +154,19 @@ Instrumentator(
 # High-frequency endpoints that would otherwise dominate log volume (and
 # cost) without adding diagnostic value.
 _LOG_SKIP_PATHS = {"/metrics"}
+
+
+@app.on_event("startup")
+def queue_startup_warms() -> None:
+    """Get the recently-active projects ready before anyone opens them.
+
+    Enqueue-only: the work itself happens in the worker, so this adds
+    nothing to how long the app takes to come up. Jobs are keyed by project,
+    so every API process doing this on boot still results in one warm each.
+    """
+    import app.tasks
+
+    app.tasks.enqueue_startup_warms(settings.WARM_ON_STARTUP)
 
 
 @app.middleware("http")
@@ -158,4 +217,4 @@ async def git_command_error_handler(
     )
 
 
-app.include_router(api_router, prefix=settings.API_V1_STR)
+app.include_router(api_router)

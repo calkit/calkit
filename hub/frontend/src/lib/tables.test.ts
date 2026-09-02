@@ -84,21 +84,114 @@ describe("parseTable", () => {
       "\\end{tabular}",
       "\\end{table}",
     ].join("\n")
+    // The plain cells -- what search, sorting, and the numeric check read --
+    // have the markup taken out, while the TeX is kept alongside for the grid
+    // to render.
     expect(parseTable("tables/kernels.tex", tex)).toEqual({
       columns: ["Kernel", "Time", "Change"],
       rows: [
         ["set_cache", "12.5", "-54%"],
         ["other", "3.1", "0%"],
       ],
+      texColumns: ["\\textbf{Kernel}", "\\textbf{Time}", "Change"],
+      texRows: [
+        ["set\\_cache", "12.5", "-54\\%"],
+        ["other", "3.1", "0\\%"],
+      ],
     })
-    // \multicolumn keeps its text, and an escaped ampersand stays in its cell
-    // rather than splitting it
+    // Inline math is dropped from the plain cell so a column of numbers still
+    // reads as numbers, and kept in the TeX so it can be typeset
+    const math = parseTable(
+      "v.tex",
+      "\\begin{tabular}{ll}$T_{f,2}$ & $500 \\cdot 10^{-3}$ \\\\\\end{tabular}",
+    )
+    expect(math?.columns).toEqual(["T_f,2", "500 · 10^-3"])
+    expect(math?.texColumns).toEqual(["$T_{f,2}$", "$500 \\cdot 10^{-3}$"])
+    // \multicolumn keeps its text across every column it spans, and an
+    // escaped ampersand stays in its cell rather than splitting it
     expect(
       parseTable(
         "t.tex",
         "\\begin{tabular}{ll}\\multicolumn{2}{c}{R \\& D} & b \\\\\\end{tabular}",
       )?.columns,
-    ).toEqual(["R & D", "b"])
+    ).toEqual(["R & D", "R & D", "b"])
+    // A real generated table: the column spec nests braces, a \\cline sits
+    // between rows, and one row is commented out. None of that is data.
+    const real = [
+      "\\begin{tabular}{lL{0.07\\linewidth}L{0.11\\linewidth}}",
+      "\\toprule",
+      "&& \\multicolumn{2}{c}{Location}\\\\  \\cline{3-6} ",
+      "& Symbol & Humboldt, CA\\\\",
+      "\\midrule ",
+      "%Storm sea states & $H_s$ & - \\\\",
+      "Water depth (m) & $h$ & $45 $ \\\\",
+      "\\bottomrule",
+      "\\end{tabular}",
+    ].join("\n")
+    const parsedReal = parseTable("t.tex", real)
+    // The column spec is gone rather than sitting in the first cell
+    expect(parsedReal?.columns[0]).toBe("")
+    expect(parsedReal?.columns.join("|")).not.toContain("linewidth")
+    // \cline is a rule, not a value
+    expect(parsedReal?.columns.join("|")).not.toContain("cline")
+    // The commented-out row isn't a row
+    expect(
+      parsedReal?.rows.some((r) => r.join("").includes("Storm sea states")),
+    ).toBe(false)
+    expect(parsedReal?.rows.at(-1)?.[0]).toBe("Water depth (m)")
+    // A generator that stopped partway leaves the environment open. The rows
+    // it managed to write are still worth showing, flagged as incomplete.
+    const cut = [
+      "\\begin{tabular}{lll}",
+      "a & b & c\\\\",
+      "\\hline",
+      "$1 $ & $2 $ & $3 $\\\\",
+      "$4 $ & $5 $ & $",
+    ].join("\n")
+    const parsedCut = parseTable("cut.tex", cut)
+    expect(parsedCut?.isTruncated).toBe(true)
+    expect(parsedCut?.columns).toEqual(["a", "b", "c"])
+    expect(parsedCut?.rows[0]).toEqual(["1", "2", "3"])
+    // A complete file is not flagged
+    expect(
+      parseTable("ok.tex", "\\begin{tabular}{ll}a & b \\\\\\end{tabular}")
+        ?.isTruncated,
+    ).toBeUndefined()
+    // A heading spread over two rows, with a group spanning three columns
+    // above the names beneath it. The full-width rule marks where the heading
+    // stops, the span is repeated so the columns line up, and the merged name
+    // says what each column holds. A \\cite in a heading is a pointer, not
+    // part of the name.
+    const spanned = [
+      "\\begin{tabular}{P{0.15\\linewidth}|c|c|r}",
+      "& \\multicolumn{3}{M{0.23\\linewidth}|}{DOE Report \\cite{RM3}} \\\\",
+      "Variable & MDOcean & Actual & Error \\\\",
+      "\\hline",
+      "Mass (kg) & $213 $ & $208 $ & $2.4\\% $ \\\\",
+      "\\end{tabular}",
+    ].join("\n")
+    const parsedSpanned = parseTable("v.tex", spanned)
+    expect(parsedSpanned?.columns).toEqual([
+      "Variable",
+      "DOE Report MDOcean",
+      "DOE Report Actual",
+      "DOE Report Error",
+    ])
+    expect(parsedSpanned?.rows).toEqual([["Mass (kg)", "213", "208", "2.4%"]])
+    // \multirow's count is rows, not columns: it takes one column like any
+    // other cell, so repeating it would push the row out of line
+    const multirow = parseTable(
+      "m.tex",
+      [
+        "\\begin{tabular}{lll}",
+        "\\multirow{2}{*}{Group} & a & b \\\\",
+        "\\hline",
+        "x & y & z \\\\",
+        "\\end{tabular}",
+      ].join("\n"),
+    )
+    expect(multirow?.columns).toEqual(["Group", "a", "b"])
+    expect(multirow?.rows).toEqual([["x", "y", "z"]])
     // Nothing tabular in the file means nothing to render as a grid
     expect(parseTable("t.tex", "\\section{Results}")).toBeNull()
     // A paper is not a table: pulling its first tabular out would present a

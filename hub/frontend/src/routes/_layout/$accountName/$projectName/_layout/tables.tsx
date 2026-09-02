@@ -198,7 +198,7 @@ function TableModal({
           </Flex>
         </ModalHeader>
         <ModalCloseButton />
-        <ModalBody pt={0} pb={6}>
+        <ModalBody pt={0} pb={3}>
           {table.description ? (
             <Box fontSize="sm" color={subtleColor} mb={2}>
               <Markdown>{table.description}</Markdown>
@@ -209,7 +209,7 @@ function TableModal({
             // query rather than keeping the one being left behind.
             key={table.path}
             table={table}
-            maxHeight="calc(92vh - 260px)"
+            maxHeight="calc(92vh - 190px)"
             highlight={highlight}
             onHighlightChange={onHighlightChange}
             search={search}

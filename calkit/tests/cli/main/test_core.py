@@ -2716,3 +2716,71 @@ def test_commit(tmp_dir):
     repo = calkit.git.get_repo()
     assert repo.head.commit.message.strip() == "Resolve conflict"
     assert not repo.is_dirty()
+
+
+def test_push_only_reports_to_a_connected_hub(monkeypatch, tmp_dir):
+    import calkit.cli.main.core as cli_core
+
+    posted: list[str] = []
+    monkeypatch.setattr(
+        calkit.hub, "post", lambda path, **kw: posted.append(path)
+    )
+    monkeypatch.setattr(calkit, "detect_project_name", lambda: "o/p")
+    monkeypatch.setattr(calkit.dvc, "get_remotes", lambda: {})
+
+    # A project that names no hub and stores nothing on one is not connected,
+    # and Calkit works perfectly well that way: say nothing to anyone
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: {})
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == []
+
+    # Declaring a hub in calkit.yaml connects it
+    monkeypatch.setattr(
+        calkit, "load_calkit_info", lambda: {"hub": "https://calkit.io"}
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == ["/projects/o/p/events/push"]
+
+    # So does keeping data on a Calkit DVC remote, with no hub key at all
+    posted.clear()
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: {})
+    monkeypatch.setattr(
+        calkit.dvc, "get_remotes", lambda: {"calkit": "ck://o/p"}
+    )
+    monkeypatch.setattr(
+        calkit.dvc, "detect_calkit_remote_type", lambda name, url: "ck"
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == ["/projects/o/p/events/push"]
+
+    # A remote that isn't Calkit's doesn't connect anything
+    posted.clear()
+    monkeypatch.setattr(
+        calkit.dvc, "get_remotes", lambda: {"s3": "s3://somewhere"}
+    )
+    monkeypatch.setattr(
+        calkit.dvc, "detect_calkit_remote_type", lambda name, url: None
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == []
+
+
+def test_push_reports_what_was_pushed(monkeypatch, tmp_dir):
+    import calkit.cli.main.core as cli_core
+
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        calkit.hub, "post", lambda path, **kw: sent.append(kw["json"])
+    )
+    monkeypatch.setattr(calkit, "detect_project_name", lambda: "o/p")
+    monkeypatch.setattr(
+        calkit, "load_calkit_info", lambda: {"hub": "https://calkit.io"}
+    )
+    monkeypatch.setattr(calkit.dvc, "get_remotes", lambda: {})
+    # A push that only sent data still gets reported: it changes what the
+    # project resolves to without moving a commit, and the hub has no other
+    # way to know that
+    cli_core._tell_hub_we_pushed(["dvc"], [])
+    assert sent[-1]["targets"] == ["dvc"]
+    cli_core._tell_hub_we_pushed(["dvc", "docker", "git"], [])
+    assert sent[-1]["targets"] == ["dvc", "docker", "git"]

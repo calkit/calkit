@@ -30,30 +30,21 @@ from app.pipeline import StageStatus
 def test_get_release_view_unknown_project_returns_404(
     client: TestClient,
 ) -> None:
-    resp = client.get(
-        f"{settings.API_V1_STR}"
-        "/projects/test-owner/test-project/releases/v1/view"
-    )
+    resp = client.get("/projects/test-owner/test-project/releases/v1/view")
     assert resp.status_code == 404
 
 
 def test_get_release_contents_unknown_project_returns_404(
     client: TestClient,
 ) -> None:
-    resp = client.get(
-        f"{settings.API_V1_STR}"
-        "/projects/test-owner/test-project/releases/v1/contents"
-    )
+    resp = client.get("/projects/test-owner/test-project/releases/v1/contents")
     assert resp.status_code == 404
 
 
 def test_get_release_comments_unknown_project_returns_404(
     client: TestClient,
 ) -> None:
-    resp = client.get(
-        f"{settings.API_V1_STR}"
-        "/projects/test-owner/test-project/releases/v1/comments"
-    )
+    resp = client.get("/projects/test-owner/test-project/releases/v1/comments")
     assert resp.status_code == 404
 
 
@@ -61,7 +52,6 @@ def test_post_release_comment_unknown_project_returns_404(
     client: TestClient,
 ) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/v1/comments",
         json={"comment": "hello"},
     )
@@ -70,7 +60,6 @@ def test_post_release_comment_unknown_project_returns_404(
 
 def test_create_release_share_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/v1/shares",
         json={"permission": "comment"},
     )
@@ -78,16 +67,13 @@ def test_create_release_share_requires_auth(client: TestClient) -> None:
 
 
 def test_list_release_shares_requires_auth(client: TestClient) -> None:
-    resp = client.get(
-        f"{settings.API_V1_STR}"
-        "/projects/test-owner/test-project/releases/v1/shares"
-    )
+    resp = client.get("/projects/test-owner/test-project/releases/v1/shares")
     assert resp.status_code == 401
 
 
 def test_post_project_release_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project/releases",
+        "/projects/test-owner/test-project/releases",
         json={"name": "v0.1"},
     )
     assert resp.status_code == 401
@@ -95,7 +81,6 @@ def test_post_project_release_requires_auth(client: TestClient) -> None:
 
 def test_post_external_release_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/external",
         json={"name": "v1.0", "publisher": "arxiv"},
     )
@@ -104,7 +89,6 @@ def test_post_external_release_requires_auth(client: TestClient) -> None:
 
 def test_import_github_releases_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/import-github"
     )
     assert resp.status_code == 401
@@ -113,16 +97,12 @@ def test_import_github_releases_requires_auth(client: TestClient) -> None:
 def test_create_release_github_release_requires_auth(
     client: TestClient,
 ) -> None:
-    resp = client.post(
-        f"{settings.API_V1_STR}"
-        "/projects/test-owner/test-project/releases/v1/github"
-    )
+    resp = client.post("/projects/test-owner/test-project/releases/v1/github")
     assert resp.status_code == 401
 
 
 def test_resolve_release_comment_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/v1/comments/"
         f"{uuid.uuid4()}/resolve",
         json={"resolved": True},
@@ -132,7 +112,6 @@ def test_resolve_release_comment_requires_auth(client: TestClient) -> None:
 
 def test_parse_release_url_requires_auth(client: TestClient) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/parse-url",
         json={"url": "https://arxiv.org/abs/1706.03762"},
     )
@@ -330,7 +309,7 @@ def test_post_project_release_rejects_invalid_name(
     client: TestClient, normal_user_token_headers: dict[str, str]
 ) -> None:
     resp = client.post(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project/releases",
+        "/projects/test-owner/test-project/releases",
         json={"name": "not a tag"},
         headers=normal_user_token_headers,
     )
@@ -350,9 +329,7 @@ def test_get_project_releases_unknown_project_returns_404(
 ) -> None:
     # Listing is read-access (anonymous allowed for public projects), so an
     # unauthenticated request resolves the project first and 404s when missing.
-    resp = client.get(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project/releases"
-    )
+    resp = client.get("/projects/test-owner/test-project/releases")
     assert resp.status_code == 404
 
 
@@ -387,9 +364,7 @@ def test_get_project_releases_includes_calkit_yaml(
             return_value=ck_info,
         ),
     ):
-        resp = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/releases"
-        )
+        resp = client.get("/projects/test-owner/test-project/releases")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
@@ -405,7 +380,6 @@ def test_get_project_releases_includes_calkit_yaml(
 
 def test_get_release_staleness_requires_auth(client: TestClient) -> None:
     resp = client.get(
-        f"{settings.API_V1_STR}"
         "/projects/test-owner/test-project/releases/staleness?path=x.pdf"
     )
     assert resp.status_code == 401
@@ -615,7 +589,7 @@ def test_post_project_release_blocks_non_reproducible(
         ),
     ):
         resp = client.post(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/releases",
+            "/projects/test-owner/test-project/releases",
             json={"name": "v0.1", "path": "paper/paper.pdf"},
             headers=normal_user_token_headers,
         )

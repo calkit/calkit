@@ -129,6 +129,8 @@ INVALID_ACCOUNT_NAMES = [
     "email",
     "environments",
     "envs",
+    # Events from elsewhere are delivered to /events/{source}
+    "events",
     "explore",
     "figs",
     "figures",

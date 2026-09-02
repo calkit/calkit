@@ -185,10 +185,13 @@ function PubInfo({
             },
       )
     }
+    // The references tab takes the collection's path and opens it, which is
+    // where someone following a bibliography link wants to land -- the file
+    // viewer would show them the raw BibTeX instead.
     for (const path of inputs.references)
       referenceLinks.push({
         key: path,
-        to: "../files",
+        to: "../references",
         search: { path },
         label: path,
         code: true,

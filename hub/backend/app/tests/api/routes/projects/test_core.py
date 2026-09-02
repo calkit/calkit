@@ -50,7 +50,7 @@ def test_get_project_contents_forwards_ref(client: TestClient) -> None:
     ):
         response = client.get(
             (
-                f"{settings.API_V1_STR}/projects/test-owner/test-project/contents"
+                "/projects/test-owner/test-project/contents"
                 "?path=README.md&ref=v1.2.3"
             )
         )
@@ -110,7 +110,6 @@ def test_get_project_content_paths_merges_git_and_dvc(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}"
             "/projects/test-owner/test-project/contents-paths"
         )
     assert response.status_code == 200
@@ -158,7 +157,7 @@ def test_get_project_file_history_endpoint(client: TestClient) -> None:
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project"
+            "/projects/test-owner/test-project"
             "/git/file-history?path=figures/my-figure.png"
         )
     assert response.status_code == 200
@@ -173,8 +172,7 @@ def test_get_project_file_history_rejects_absolute_path(
     client: TestClient,
 ) -> None:
     response = client.get(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
-        "/git/file-history?path=/etc/passwd"
+        "/projects/test-owner/test-project/git/file-history?path=/etc/passwd"
     )
     assert response.status_code == 400
 
@@ -183,7 +181,7 @@ def test_get_project_file_history_rejects_traversal(
     client: TestClient,
 ) -> None:
     response = client.get(
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
+        "/projects/test-owner/test-project"
         "/git/file-history?path=../secrets.txt"
     )
     assert response.status_code == 400
@@ -215,8 +213,7 @@ def test_project_routes_are_case_insensitive(client: TestClient) -> None:
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/MyOrg/My-Project/contents"
-            "?path=README.md"
+            "/projects/MyOrg/My-Project/contents?path=README.md"
         )
     assert response.status_code == 200
     mock_get_project.assert_called_once_with(
@@ -299,7 +296,7 @@ def test_get_project_figures_paginates(client: TestClient) -> None:
         url=None,
         storage=None,
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    url = "/projects/test-owner/test-project/figures"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -385,7 +382,7 @@ def test_get_project_figures_search_content_and_single(
         url="https://example.com/fig.png",
         storage="git",
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
+    url = "/projects/test-owner/test-project/figures"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -529,8 +526,7 @@ def test_get_project_figures_autodetects_deeply_nested(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -621,8 +617,7 @@ def test_get_project_figures_autodetects_dvc_stored(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -697,8 +692,7 @@ def test_get_project_figures_dvc_no_duplicates_with_git(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -779,8 +773,7 @@ def test_get_project_figures_autodetects_dvc_pointer_files(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -863,8 +856,7 @@ def test_get_project_figures_dvc_pointer_no_duplicates_with_dvc_lock(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/figures"
-            "?limit=100"
+            "/projects/test-owner/test-project/figures?limit=100"
         )
     assert response.status_code == 200
     returned_figures = response.json()["items"]
@@ -916,8 +908,7 @@ def test_get_project_pipeline_reads_at_ref(client: TestClient) -> None:
         ) as mock_get_ck_info,
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
-            "?ref=some-branch"
+            "/projects/test-owner/test-project/pipeline?ref=some-branch"
         )
 
     assert response.status_code == 200
@@ -976,9 +967,7 @@ def test_get_project_pipeline_reports_invalid_pipeline(
             return_value={},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/pipeline"
-        )
+        response = client.get("/projects/test-owner/test-project/pipeline")
     assert response.status_code == 200
     body = response.json()
     # The reason is reported, and names the conflict so it's actionable.
@@ -1061,8 +1050,7 @@ def _ref_aware_endpoint_reads_declared_at_ref(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/"
-            f"{endpoint}?ref=some-branch"
+            f"/projects/test-owner/test-project/{endpoint}?ref=some-branch"
         )
 
     assert response.status_code == 200, response.text
@@ -1131,7 +1119,7 @@ def test_invitation_create_and_redeem_grants_access(
 ) -> None:
     project, owner_headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     # A GitHub-less user has no access to the private project yet.
     ghless = create_random_user(db)
     assert ghless.account.github_name is None
@@ -1154,7 +1142,7 @@ def test_invitation_create_and_redeem_grants_access(
     token = invite["token"]
     # The GitHub-less user redeems it and gains write membership.
     r = client.post(
-        f"{settings.API_V1_STR}/project-invitations/{token}",
+        f"/project-invitations/{token}",
         headers=ghless_headers,
     )
     assert r.status_code == 200, r.text
@@ -1185,8 +1173,7 @@ def test_invitation_create_requires_admin(
         client=client, email=other.email, db=db
     )
     r = client.post(
-        f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
-        "/invitations",
+        f"/projects/{owner_name}/{project.name}/invitations",
         headers=other_headers,
         json={"role": "write"},
     )
@@ -1198,7 +1185,7 @@ def test_redeem_revoked_invitation_fails(
 ) -> None:
     project, owner_headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     r = client.post(
         f"{base}/invitations", headers=owner_headers, json={"role": "read"}
     )
@@ -1215,7 +1202,7 @@ def test_redeem_revoked_invitation_fails(
         client=client, email=redeemer.email, db=db
     )
     r = client.post(
-        f"{settings.API_V1_STR}/project-invitations/{invite['token']}",
+        f"/project-invitations/{invite['token']}",
         headers=redeemer_headers,
     )
     assert r.status_code == 410
@@ -1272,8 +1259,7 @@ def test_get_project_results_autodetects_and_reads_ref(
         ),
     ):
         response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/results"
-            "?ref=some-branch"
+            "/projects/test-owner/test-project/results?ref=some-branch"
         )
     assert response.status_code == 200, response.text
     paths = {res["path"] for res in response.json()}
@@ -1460,7 +1446,7 @@ def test_post_project_zotero_import_whole_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1558,7 +1544,7 @@ def test_post_project_zotero_import_subset_creates_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1623,7 +1609,7 @@ def test_post_project_zotero_sync_pulls_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     _write_zotero_link(tmp_path)
     with (
@@ -1681,7 +1667,7 @@ def test_post_project_zotero_sync_requires_link(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -1732,7 +1718,7 @@ def test_get_project_zotero_item_pdf(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An items map with a PDF attachment for citekey "a".
     zotero.write_items_info(
@@ -1791,7 +1777,7 @@ def test_put_project_zotero_item_notes(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -1869,7 +1855,7 @@ def test_get_project_reference_notes_from_comment(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  comment = {first note\n\n---\n\nsecond note},\n}\n"
@@ -1891,7 +1877,7 @@ def test_reference_note_highlight_round_trip(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -1947,7 +1933,7 @@ def test_reference_notes_non_linked_use_comment_field(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A plain .bib with no Zotero link.
     (tmp_path / "references.bib").write_text(
@@ -2080,7 +2066,7 @@ def test_post_and_put_reference_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An existing entry with a note in its comment field.
     (tmp_path / "references.bib").write_text(
@@ -2143,7 +2129,7 @@ def test_put_reference_item_no_change_does_not_error(
     # must skip the commit rather than 500 on an empty commit.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     fake_repo.git.diff = lambda *a, **k: ""  # nothing staged -> no commit
     (tmp_path / "references.bib").write_text(
@@ -2171,7 +2157,7 @@ def test_delete_project_reference_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{keep,\n  title = {Keep},\n}\n\n"
@@ -2202,7 +2188,7 @@ def test_add_reference_creates_zotero_item_when_linked(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text("")
     _write_zotero_link(tmp_path)
@@ -2248,7 +2234,7 @@ def test_delete_reference_deletes_zotero_item_when_linked(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{gone,\n  title = {Gone},\n}\n"
@@ -2288,7 +2274,7 @@ def test_zotero_sync_merges_changes_per_item(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A locally-keyed entry mapped to a Zotero item, plus one to be deleted.
     (tmp_path / "references.bib").write_text(
@@ -2371,7 +2357,7 @@ def test_zotero_sync_pulls_note_edits(
     # version is untouched), so sync must still refresh the parent's notes.
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{localkey,\n  title = {T},\n  comment = {Old note},\n}\n"
@@ -2453,7 +2439,7 @@ def test_post_project_zotero_import_rejects_both_modes(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2481,7 +2467,7 @@ def test_post_project_zotero_import_conflict_then_overwrite(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A .bib already present on disk.
     (tmp_path / "references.bib").write_text("@article{old}\n")
@@ -2545,7 +2531,7 @@ def test_post_project_references_creates_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2572,7 +2558,7 @@ def test_post_project_references_existing_path_conflicts(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # A file on disk that isn't declared in calkit.yaml, alongside an empty
     # "references:" key, which parses to None. Creating over it must 409, not
@@ -2599,7 +2585,7 @@ def test_post_project_references_labels_existing_file(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     # An existing .bib file that isn't yet declared in calkit.yaml.
     (tmp_path / "references.bib").write_text("@article{x}\n")
@@ -2628,7 +2614,7 @@ def test_post_project_references_label_existing_missing_file(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2651,7 +2637,7 @@ def test_delete_project_references_collection(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     (tmp_path / "references.bib").write_text(
         "@article{a,\n  title = {A},\n}\n"
@@ -2692,7 +2678,7 @@ def test_delete_project_references_collection_missing(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     fake_repo = _make_fake_repo(str(tmp_path))
     with (
         patch("app.api.routes.projects.core.get_repo", return_value=fake_repo),
@@ -2722,7 +2708,7 @@ def test_project_pipeline_stage_edit(
 ) -> None:
     project, headers = _make_owner_with_project(db, client)
     owner_name = project.owner_account.name
-    base = f"{settings.API_V1_STR}/projects/{owner_name}/{project.name}"
+    base = f"/projects/{owner_name}/{project.name}"
     stages_url = f"{base}/pipeline/stages"
     fake_repo = _make_stage_repo(str(tmp_path))
     # A paper whose class file is only discoverable by reading the source,
@@ -2978,16 +2964,13 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value=ck_info,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     apps = {a["name"]: a for a in response.json()}
     assert list(apps) == ["naca0012"]
     # The URL is ours and derived, never read from calkit.yaml
     assert apps["naca0012"]["url"] == (
-        f"{settings.API_V1_STR}/projects/test-owner/test-project"
-        "/apps/naca0012/serve/"
+        "/projects/test-owner/test-project/apps/naca0012/serve/"
     )
     assert apps["naca0012"]["path"] == "app/index.html"
     assert apps["naca0012"]["stage"] == "build-app"
@@ -3007,9 +2990,7 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value={"app": {"url": "https://old.hf.space"}},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     assert response.json() == []
     # A project with no apps returns an empty list rather than erroring
@@ -3027,9 +3008,7 @@ def test_get_project_apps(client: TestClient) -> None:
             return_value={},
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     assert response.json() == []
 
@@ -3062,9 +3041,7 @@ def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
             return_value=ck_info,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/apps"
-        )
+        response = client.get("/projects/test-owner/test-project/apps")
     assert response.status_code == 200
     apps = response.json()
     assert [a["name"] for a in apps] == ["good"]
@@ -3074,7 +3051,7 @@ def test_get_project_apps_skips_unusable_paths(client: TestClient) -> None:
 
 def test_serve_project_app_file(client: TestClient) -> None:
     ck_info = {"apps": {"myapp": {"path": "app/index.html"}}}
-    base = f"{settings.API_V1_STR}/projects/test-owner/test-project"
+    base = "/projects/test-owner/test-project"
 
     def get(path: str, is_public: bool = True):
         with (
@@ -3185,9 +3162,7 @@ def test_get_project_notebooks_finds_marimo_notebook(
             return_value=repo,
         ),
     ):
-        response = client.get(
-            f"{settings.API_V1_STR}/projects/test-owner/test-project/notebooks"
-        )
+        response = client.get("/projects/test-owner/test-project/notebooks")
     assert response.status_code == 200
     notebooks = response.json()
     # A .py notebook can't be found by scanning for the .ipynb extension, so
@@ -3240,10 +3215,7 @@ def test_get_project_notebooks_respects_ref(
             ),
             patch("app.api.routes.projects.core.get_repo", return_value=repo),
         ):
-            url = (
-                f"{settings.API_V1_STR}/projects/test-owner/test-project"
-                "/notebooks"
-            )
+            url = "/projects/test-owner/test-project/notebooks"
             return client.get(url, params={"ref": ref} if ref else None)
 
     # Undeclared notebooks are scanned from the requested ref, not from
@@ -3351,7 +3323,7 @@ def test_get_project_tables_declares_detects_and_resolves(
         url=None,
         storage="git",
     )
-    url = f"{settings.API_V1_STR}/projects/test-owner/test-project/tables"
+    url = "/projects/test-owner/test-project/tables"
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -3575,7 +3547,7 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
         "FEATURED_PROJECTS",
         [private_slug, public_slug, "nobody/nothing"],
     ):
-        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+        response = client.get("/projects/featured")
     assert response.status_code == 200
     body = response.json()
     slugs = [f"{p['owner_account_name']}/{p['name']}" for p in body["data"]]
@@ -3591,14 +3563,14 @@ def test_get_featured_projects(client: TestClient, db: Session) -> None:
     with patch.object(
         settings, "FEATURED_PROJECTS", [second_slug, public_slug]
     ):
-        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+        response = client.get("/projects/featured")
     assert [
         f"{p['owner_account_name']}/{p['name']}"
         for p in response.json()["data"]
     ] == [second_slug, public_slug]
     # An empty configuration is an empty section, not an error.
     with patch.object(settings, "FEATURED_PROJECTS", []):
-        response = client.get(f"{settings.API_V1_STR}/projects/featured")
+        response = client.get("/projects/featured")
     assert response.status_code == 200
     assert response.json() == {"data": [], "count": 0}
 
@@ -3652,7 +3624,7 @@ def test_post_project_when_account_name_differs_from_github(
         ),
     ):
         resp = client.post(
-            f"{settings.API_V1_STR}/projects",
+            "/projects",
             headers=headers,
             json={
                 "name": f"proj-{suffix}",
@@ -3672,10 +3644,7 @@ def test_post_project_dataset_provenance(
 ) -> None:
     """Each way a dataset joins a project writes the right calkit.yaml."""
     project, headers = _make_owner_with_project(db, client)
-    url = (
-        f"{settings.API_V1_STR}/projects/{project.owner_account.name}/"
-        f"{project.name}/datasets"
-    )
+    url = f"/projects/{project.owner_account.name}/{project.name}/datasets"
     written: list[dict] = []
 
     class FakeRepo:
@@ -3986,7 +3955,7 @@ def test_post_project_upload_validates_before_creating(
     headers = authentication_token_from_email(
         client=client, email=owner.email, db=db
     )
-    url = f"{settings.API_V1_STR}/projects/upload"
+    url = "/projects/upload"
 
     def upload(name: str, content: bytes):
         with patch(
@@ -4080,7 +4049,7 @@ def test_get_project_environments_stays_inside_repo(
             return_value={"environments": envs},
         ),
     ):
-        resp = client.get(f"{settings.API_V1_STR}/projects/o/p/environments")
+        resp = client.get("/projects/o/p/environments")
     assert resp.status_code == 200, resp.text
     by_name = {e["name"]: e for e in resp.json()}
     assert by_name["main"]["file_content"] == "[project]\n"

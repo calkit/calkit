@@ -1348,6 +1348,10 @@ export type Figure = {
    */
   url?: string | null
   /**
+   * Thumbnail
+   */
+  thumbnail?: string | null
+  /**
    * Comment Count
    */
   comment_count?: number
@@ -3669,6 +3673,34 @@ export type ProjectPublic = {
 }
 
 /**
+ * ProjectPushEventPost
+ *
+ * A push that happened somewhere else.
+ *
+ * What was pushed and where, recorded for reference: the hub works out the
+ * current state from the repo itself, so none of this is trusted as input,
+ * but it is what makes a log line worth reading.
+ */
+export type ProjectPushEventPost = {
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Remote
+   */
+  remote?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Targets
+   */
+  targets?: Array<string> | null
+}
+
+/**
  * ProjectStatus
  */
 export type ProjectStatus = {
@@ -4249,10 +4281,6 @@ export type References = {
    */
   entries?: Array<ReferenceEntry> | null
   imported_from?: ImportInfo | null
-  /**
-   * Raw Text
-   */
-  raw_text?: string | null
   zotero?: ReferenceZoteroLink | null
   /**
    * Stages
@@ -9312,6 +9340,12 @@ export type GetProjectFiguresData = {
      * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
      */
     include_content?: boolean
+    /**
+     * Thumbnails
+     *
+     * Send a small WebP preview in `thumbnail` instead of the full-size bytes in `content`. This is what a grid of previews wants: a page of figures is otherwise megabytes of base64 to draw images a couple of hundred pixels tall.
+     */
+    thumbnails?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }
@@ -9900,6 +9934,12 @@ export type GetProjectPublicationsData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each publication's content rather than leaving the caller to fetch it from the returned URL. Off by default: a listing only needs the metadata, and one PDF can otherwise be almost the whole response. Content is still inlined for a file with no URL, since there would be no other way to reach it.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/publications"
 }
@@ -10281,6 +10321,42 @@ export type PostProjectSyncResponses = {
 
 export type PostProjectSyncResponse =
   PostProjectSyncResponses[keyof PostProjectSyncResponses]
+
+export type PostProjectPushEventData = {
+  body: ProjectPushEventPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/events/push"
+}
+
+export type PostProjectPushEventErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPushEventError =
+  PostProjectPushEventErrors[keyof PostProjectPushEventErrors]
+
+export type PostProjectPushEventResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostProjectPushEventResponse =
+  PostProjectPushEventResponses[keyof PostProjectPushEventResponses]
 
 export type GetProjectPipelineData = {
   body?: never

@@ -2397,6 +2397,17 @@ export const FigureSchema = {
       ],
       title: "Url",
     },
+    thumbnail: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Thumbnail",
+    },
     comment_count: {
       type: "integer",
       title: "Comment Count",
@@ -6398,6 +6409,62 @@ export const ProjectPublicSchema = {
   title: "ProjectPublic",
 } as const
 
+export const ProjectPushEventPostSchema = {
+  properties: {
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    remote: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Remote",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    targets: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Targets",
+    },
+  },
+  type: "object",
+  title: "ProjectPushEventPost",
+  description:
+    "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
+} as const
+
 export const ProjectStatusSchema = {
   properties: {
     timestamp: {
@@ -7436,17 +7503,6 @@ export const ReferencesSchema = {
           type: "null",
         },
       ],
-    },
-    raw_text: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Raw Text",
     },
     zotero: {
       anyOf: [

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import fnmatch
-import json
 import os
 from copy import deepcopy
 from typing import Annotated
@@ -225,6 +224,184 @@ def import_dataset(
         result = run_dvc_command(["pull", dvc_fpath])
         if result != 0:
             raise_error("Failed to pull from DVC")
+
+
+@import_app.command(name="path")
+def import_path(
+    src_path: Annotated[
+        str,
+        typer.Argument(
+            help=(
+                "Where to get the file: a URL, including a GitHub or GitLab "
+                "link to a file, an SSH clone URL like "
+                "git@github.com:owner/repo/path, a DOI, a Calkit project "
+                "path like someone/some-project/scripts/setup.sh, or a path "
+                "inside the repo named by --git-repo."
+            )
+        ),
+    ],
+    dest_path: Annotated[
+        str | None,
+        typer.Argument(
+            help=(
+                "Path at which to save it in this project. Defaults to the "
+                "path within the source project for a Calkit project "
+                "source, and to the file's name for a Git repo, a URL, or "
+                "anything else that has no project-relative path."
+            )
+        ),
+    ] = None,
+    kind: Annotated[
+        str,
+        typer.Option(
+            "--kind",
+            help=(
+                "What kind of artifact this is: 'dataset', 'figure', "
+                "'publication', or 'misc' (default), which is where a path "
+                "that isn't one of the typed artifacts belongs."
+            ),
+        ),
+    ] = "misc",
+    git_repo: Annotated[
+        str | None,
+        typer.Option(
+            "--git-repo",
+            help=(
+                "Clone URL of a Git repo to take the file from, for a repo "
+                "that isn't a Calkit project."
+            ),
+        ),
+    ] = None,
+    git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--git-ref",
+            help=(
+                "Branch, tag, or commit to follow, recorded so 'calkit "
+                "sync import' knows where to look next time, and overriding "
+                "one read out of the URL. Needed for a URL whose branch "
+                "name contains a slash. Defaults to the repo's default "
+                "branch."
+            ),
+        ),
+    ] = None,
+    title: Annotated[
+        str | None, typer.Option("--title", help="Title for the entry.")
+    ] = None,
+    description: Annotated[
+        str | None,
+        typer.Option("--description", help="Description for the entry."),
+    ] = None,
+    overwrite: Annotated[
+        bool,
+        typer.Option(
+            "--overwrite",
+            "-f",
+            help="Replace an existing file or entry at this path.",
+        ),
+    ] = False,
+    no_commit: Annotated[
+        bool,
+        typer.Option("--no-commit", help="Do not commit changes to repo."),
+    ] = False,
+) -> None:
+    """Import a file from elsewhere, recording where it came from.
+
+    For a script or config maintained outside this project, e.g., a site
+    setup script shared between projects. The copy is committed here, so
+    the project stays self-contained and the pipeline can depend on it;
+    the entry records the source so it can be refreshed with 'calkit
+    sync import' and so the file isn't one whose origin nobody knows.
+    """
+    from pydantic import TypeAdapter
+
+    from calkit.models.core import ImportedFromType
+    from calkit.provenance import (
+        artifact_kind_to_list,
+        get_importable_artifact_kinds,
+    )
+
+    importable = get_importable_artifact_kinds()
+    if kind not in importable:
+        raise_error(
+            f"Invalid --kind '{kind}'; expected one of {', '.join(importable)}"
+        )
+    # Kinds are singular where a person types one; the lists are plural
+    kind_list = artifact_kind_to_list(kind)
+    # Where it came from, in the shape the entry records it. 'rev' is
+    # filled in from what the fetch actually checked out, so a source
+    # naming a branch still ends up pinned to a commit.
+    try:
+        imported_from = calkit.provenance.source_from_location(
+            src_path, git_repo=git_repo, ref=git_ref
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    if dest_path is None:
+        dest_path = calkit.provenance.default_dest_path(imported_from)
+    if not dest_path:
+        raise_error(
+            f"Cannot tell what to call the file imported from '{src_path}'; "
+            "give a destination path"
+        )
+    # Checked before anything is written or fetched: this path is written
+    # to and then handed to 'git add', so one pointing out of the project
+    # would clobber a file elsewhere and then fail confusingly
+    problem = calkit.provenance.check_project_path(dest_path)
+    if problem:
+        raise_error(problem[0].upper() + problem[1:])
+    ck_info = calkit.load_calkit_info()
+    # Checked across every list and on disk, since either would be
+    # clobbered
+    found = calkit.provenance.find_artifact(ck_info, dest_path)
+    if found is not None and not overwrite:
+        raise_error(
+            f"A {found[0]} entry already exists at '{dest_path}'; pass "
+            "--overwrite to replace it, or use 'calkit sync import' to "
+            "refresh it from where it came from"
+        )
+    if os.path.exists(dest_path) and not overwrite:
+        raise_error(
+            f"'{dest_path}' already exists; pass --overwrite to replace it"
+        )
+    typer.echo(f"Fetching {calkit.provenance.describe_source(imported_from)}")
+    try:
+        imported_from, lock = calkit.provenance.fetch(
+            imported_from, dest_path=dest_path
+        )
+    except ValueError as e:
+        raise_error(str(e))
+    # Validated the same way it would be reading calkit.yaml back, so a
+    # rev that isn't a commit hash, or a DOI that isn't one, is caught
+    # here rather than on the next load
+    try:
+        source = TypeAdapter(ImportedFromType).validate_python(imported_from)
+    except Exception as e:
+        raise_error(f"Failed to record where this came from: {e}")
+    entry: dict = {"path": dest_path}
+    if title:
+        entry["title"] = title
+    if description:
+        entry["description"] = description
+    entry["imported_from"] = source.model_dump(exclude_none=True)
+    if found is not None:
+        ck_info[found[0]].remove(found[1])
+    ck_info.setdefault(kind_list, []).append(entry)
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    # What the fetch resolved to goes in the lock file rather than the
+    # entry, and is committed with it: the entry says what to follow, the
+    # lock says where following it led
+    lock_fpath = calkit.provenance.write_import_lock(dest_path, lock)
+    repo = calkit.git.get_repo()
+    paths = [dest_path, "calkit.yaml", lock_fpath]
+    repo.git.add(paths)
+    typer.echo(f"Imported to {dest_path}")
+    if not no_commit:
+        typer.echo("Committing changes")
+        # Scoped, so unrelated staged work isn't swept into a commit
+        # claiming to be about this import
+        repo.git.commit(paths + ["-m", f"Import {dest_path}"])
 
 
 @import_app.command(name="environment")
@@ -490,29 +667,23 @@ def import_from_zenodo(
         with open("calkit.yaml", "w") as f:
             calkit.ryaml.dump(ck_info, f)
         commit_paths.append("calkit.yaml")
-    # Save a record of this import in .calkit/imports.json
-    import_record = {
-        "from": "zenodo",
-        "record_id": record_id,
-        "src": src,
-        "dest_dir": dest_dir,
-        "timestamp": calkit.utcnow(),
-        "kind": kind,
-        "storage": storage,
-        "name_like": name_like,
-        "name_not_like": name_not_like,
-    }
-    os.makedirs(".calkit", exist_ok=True)
-    imports_fpath = os.path.join(".calkit", "imports.json")
+    # What this import resolved to, alongside every other import's, keyed
+    # by where it landed. Earlier versions appended to a list here, which
+    # nothing ever read.
+    imports_fpath = calkit.provenance.write_import_lock(
+        dest_dir,
+        {
+            "from": "zenodo",
+            "record_id": record_id,
+            "src": src,
+            "fetched": calkit.utcnow().isoformat(),
+            "kind": kind,
+            "storage": storage,
+            "name_like": list(name_like),
+            "name_not_like": list(name_not_like),
+        },
+    )
     commit_paths.append(imports_fpath)
-    if os.path.isfile(imports_fpath):
-        with open(imports_fpath) as f:
-            imports = json.load(f)
-    else:
-        imports = []
-    imports.append(import_record)
-    with open(imports_fpath, "w") as f:
-        json.dump(imports, f, indent=2)
     # Commit if desired
     if not no_commit:
         repo = calkit.git.get_repo()

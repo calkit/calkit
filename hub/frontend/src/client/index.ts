@@ -600,7 +600,6 @@ export type {
   GitItemWithContents,
   GitRef,
   GitRemoteHead,
-  GitSourcePost,
   GlobalSearchData,
   GlobalSearchError,
   GlobalSearchErrors,

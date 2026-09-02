@@ -420,14 +420,16 @@ Arguments:
 
 Options:
 
-| Option             | Type    | Required | Default | Description                                                                                                      |
-| ------------------ | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`     | str     | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided. |
-| `--env-path`, `-p` | str     | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                   |
-| `--wdir`           | str     | no       |         | Working directory. By default will run current working directory.                                                |
-| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                       |
-| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                           |
-| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                            |
+| Option             | Type    | Required | Default | Description                                                                                                                                                                                                                         |
+| ------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`     | str     | no       |         | Environment name in which to run. Only necessary if there are multiple in this project and path is not provided.                                                                                                                    |
+| `--env-path`, `-p` | str     | no       |         | Path of spec of environment in which to run. Will be added to the project if it doesn't exist.                                                                                                                                      |
+| `--wdir`           | str     | no       |         | Working directory. By default will run current working directory.                                                                                                                                                                   |
+| `--no-check`       | boolean | no       | False   | Don't check the environment is valid before running in it.                                                                                                                                                                          |
+| `--relaxed`        | boolean | no       | False   | Check the environment in a relaxed way, if applicable.                                                                                                                                                                              |
+| `--setup`          | str     | no       |         | Shell command to run before the command, in the same shell (repeat for multiple). A pipeline stage gets these from its own 'setup' and its environment's 'default_setup', already combined when the pipeline is compiled.           |
+| `--setup-file`     | str     | no       |         | Path to a JSON list of setup commands, used instead of --setup. This is what a compiled pipeline stage carries, since a path survives being parsed by cmd.exe on Windows and by a POSIX shell elsewhere, and quoted commands don't. |
+| `--verbose`, `-v`  | boolean | no       | False   | Print verbose output.                                                                                                                                                                                                               |
 
 <a id="top-command-install"></a>
 
@@ -1044,7 +1046,7 @@ Options:
 | `--env-var`         | str     | no       |         | Environment variables to set in the container.                                                                                                                                                         |
 | `--gpus`            | str     | no       |         |                                                                                                                                                                                                        |
 | `--arg`             | str     | no       |         | Arguments to use when running container.                                                                                                                                                               |
-| `--dep`             | str     | no       |         | Path to add as a dependency, i.e., a file that gets added to the container.                                                                                                                            |
+| `--input`, `--dep`  | str     | no       |         | Path to a file that gets added to the container, so editing it rebuilds the image.                                                                                                                     |
 | `--wdir`            | str     | no       | /work   | Working directory.                                                                                                                                                                                     |
 | `--command-mode`    | str     | no       | shell   | How to execute commands in the container: 'shell' runs shell -c, 'entrypoint' passes args directly to the image entrypoint.                                                                            |
 | `--user`            | str     | no       |         | User account to use to run the container.                                                                                                                                                              |
@@ -1614,24 +1616,24 @@ calkit new|create jupyter-notebook-stage [OPTIONS]
 
 Options:
 
-| Option                         | Type                   | Required | Default             | Description                                                                                                    |
-| ------------------------------ | ---------------------- | -------- | ------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`                 | str                    | yes      |                     | Stage name, typically kebab-case.                                                                              |
-| `--environment`, `-e`          | str                    | yes      |                     | Environment to use to run the stage.                                                                           |
-| `--notebook-path`              | str                    | yes      |                     | Path to notebook.                                                                                              |
-| `--input`, `-i`                | str                    | no       |                     | A path on which the stage depends.                                                                             |
-| `--output`, `-o`               | str                    | no       |                     | A path that is produced by the stage.                                                                          |
-| `--out-git`                    | str                    | no       |                     | An output that should be stored with Git instead of DVC.                                                       |
-| `--out-git-no-delete`          | str                    | no       |                     | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
-| `--out-no-delete`              | str                    | no       |                     | An output that should not be deleted before running.                                                           |
-| `--out-no-store`               | str                    | no       |                     | An output that should not be stored in version control.                                                        |
-| `--out-no-store-no-delete`     | str                    | no       |                     | An output that should not be stored in version control, and should not be deleted before running.              |
-| `--html-storage`               | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the HTML output of the notebook.                                                       |
-| `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | NotebookStorage.git | In what system to store the cleaned ipynb output of the notebook.                                              |
-| `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | NotebookStorage.dvc | In what system to store the executed ipynb output of the notebook.                                             |
-| `--overwrite`, `--force`, `-f` | boolean                | no       | False               | Overwrite an existing stage with this name if necessary.                                                       |
-| `--no-check`                   | boolean                | no       | False               | Do not check if the target, deps, environment, etc., exist.                                                    |
-| `--no-commit`                  | boolean                | no       | False               | Do not commit changes to Git.                                                                                  |
+| Option                         | Type                   | Required | Default | Description                                                                                                    |
+| ------------------------------ | ---------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`                 | str                    | yes      |         | Stage name, typically kebab-case.                                                                              |
+| `--environment`, `-e`          | str                    | yes      |         | Environment to use to run the stage.                                                                           |
+| `--notebook-path`              | str                    | yes      |         | Path to notebook.                                                                                              |
+| `--input`, `-i`                | str                    | no       |         | A path on which the stage depends.                                                                             |
+| `--output`, `-o`               | str                    | no       |         | A path that is produced by the stage.                                                                          |
+| `--out-git`                    | str                    | no       |         | An output that should be stored with Git instead of DVC.                                                       |
+| `--out-git-no-delete`          | str                    | no       |         | An output that should be tracked with Git instead of DVC, and also should not be deleted before running stage. |
+| `--out-no-delete`              | str                    | no       |         | An output that should not be deleted before running.                                                           |
+| `--out-no-store`               | str                    | no       |         | An output that should not be stored in version control.                                                        |
+| `--out-no-store-no-delete`     | str                    | no       |         | An output that should not be stored in version control, and should not be deleted before running.              |
+| `--html-storage`               | choice(git, dvc, None) | no       | dvc     | In what system to store the HTML output of the notebook.                                                       |
+| `--cleaned-ipynb-storage`      | choice(git, dvc, None) | no       | git     | In what system to store the cleaned ipynb output of the notebook.                                              |
+| `--executed-ipynb-storage`     | choice(git, dvc, None) | no       | dvc     | In what system to store the executed ipynb output of the notebook.                                             |
+| `--overwrite`, `--force`, `-f` | boolean                | no       | False   | Overwrite an existing stage with this name if necessary.                                                       |
+| `--no-check`                   | boolean                | no       | False   | Do not check if the target, deps, environment, etc., exist.                                                    |
+| `--no-commit`                  | boolean                | no       | False   | Do not commit changes to Git.                                                                                  |
 
 <a id="subcommand-new-create-release"></a>
 
@@ -1869,6 +1871,7 @@ List Calkit objects.
 | [`releases`](#subcommand-list-ls-releases)                      | List releases.                                                                                 |
 | [`stages`](#subcommand-list-ls-stages)                          | List pipeline stages.                                                                          |
 | [`remotes`](#subcommand-list-ls-remotes)                        | List Git and DVC remotes.                                                                      |
+| [`imports`](#subcommand-list-ls-imports)                        | List everything in the project that was imported from elsewhere.                               |
 
 <a id="subcommand-list-ls-notebooks-nb"></a>
 
@@ -2169,6 +2172,28 @@ Options:
 | -------- | ------- | -------- | ------- | ---------------------- |
 | `--json` | boolean | no       | False   | Output result as JSON. |
 
+<a id="subcommand-list-ls-imports"></a>
+
+#### `calkit list|ls imports`
+
+List everything in the project that was imported from elsewhere.
+
+Walks every artifact kind, so an import shows up here whichever list it was recorded in. Entries are annotated with the kind they came from and a one-line description of the source, since where a file came from is the question being asked and it's spelled differently for a Git repo, a project, a URL, and a DOI.
+
+What each import resolved to -- the commit, the checksum, when it was fetched -- is read from '.calkit/imports.json' and shown under 'locked', so both halves of the record are in one listing.
+
+Usage:
+
+```text
+calkit list|ls imports [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description            |
+| -------- | ------- | -------- | ------- | ---------------------- |
+| `--json` | boolean | no       | False   | Output result as JSON. |
+
 <a id="command-group-describe-desc"></a>
 
 ### `calkit describe|desc`
@@ -2263,11 +2288,12 @@ Options:
 
 Import objects.
 
-| Command                                         | Description                                 |
-| ----------------------------------------------- | ------------------------------------------- |
-| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                           |
-| [`environment`](#subcommand-import-environment) | Import an environment from another project. |
-| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.          |
+| Command                                         | Description                                                 |
+| ----------------------------------------------- | ----------------------------------------------------------- |
+| [`dataset`](#subcommand-import-dataset)         | Import a dataset.                                           |
+| [`path`](#subcommand-import-path)               | Import a file from elsewhere, recording where it came from. |
+| [`environment`](#subcommand-import-environment) | Import an environment from another project.                 |
+| [`zenodo`](#subcommand-import-zenodo)           | Import files from a Zenodo record.                          |
 
 <a id="subcommand-import-dataset"></a>
 
@@ -2299,6 +2325,39 @@ Options:
 | `--no-dvc-pull`     | boolean | no       | False   | Do not pull imported dataset with DVC.                                          |
 | `--overwrite`, `-f` | boolean | no       | False   | Force adding the dataset even if it already exists.                             |
 | `--http`            | boolean | no       | False   | Use the legacy HTTP URL for the imported project's DVC remote instead of ck://. |
+
+<a id="subcommand-import-path"></a>
+
+#### `calkit import path`
+
+Import a file from elsewhere, recording where it came from.
+
+For a script or config maintained outside this project, e.g., a site setup script shared between projects. The copy is committed here, so the project stays self-contained and the pipeline can depend on it; the entry records the source so it can be refreshed with 'calkit sync import' and so the file isn't one whose origin nobody knows.
+
+Usage:
+
+```text
+calkit import path [OPTIONS] SRC-PATH [DEST-PATH]
+```
+
+Arguments:
+
+| Argument    | Type | Required | Default | Description                                                                                                                                                                                                                                              |
+| ----------- | ---- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src_path`  | str  | yes      |         | Where to get the file: a URL, including a GitHub or GitLab link to a file, an SSH clone URL like git@github.com:owner/repo/path, a DOI, a Calkit project path like someone/some-project/scripts/setup.sh, or a path inside the repo named by --git-repo. |
+| `dest_path` | str  | no       |         | Path at which to save it in this project. Defaults to the path within the source project for a Calkit project source, and to the file's name for a Git repo, a URL, or anything else that has no project-relative path.                                  |
+
+Options:
+
+| Option              | Type    | Required | Default | Description                                                                                                                                                                                                                           |
+| ------------------- | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--kind`            | str     | no       | misc    | What kind of artifact this is: 'dataset', 'figure', 'publication', or 'misc' (default), which is where a path that isn't one of the typed artifacts belongs.                                                                          |
+| `--git-repo`        | str     | no       |         | Clone URL of a Git repo to take the file from, for a repo that isn't a Calkit project.                                                                                                                                                |
+| `--git-ref`         | str     | no       |         | Branch, tag, or commit to follow, recorded so 'calkit sync import' knows where to look next time, and overriding one read out of the URL. Needed for a URL whose branch name contains a slash. Defaults to the repo's default branch. |
+| `--title`           | str     | no       |         | Title for the entry.                                                                                                                                                                                                                  |
+| `--description`     | str     | no       |         | Description for the entry.                                                                                                                                                                                                            |
+| `--overwrite`, `-f` | boolean | no       | False   | Replace an existing file or entry at this path.                                                                                                                                                                                       |
+| `--no-commit`       | boolean | no       | False   | Do not commit changes to repo.                                                                                                                                                                                                        |
 
 <a id="subcommand-import-environment"></a>
 
@@ -2819,10 +2878,11 @@ Arguments:
 
 Options:
 
-| Option                | Type | Required | Default | Description                                           |
-| --------------------- | ---- | -------- | ------- | ----------------------------------------------------- |
-| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                     |
-| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure. |
+| Option                | Type | Required | Default | Description                                                                                                                                                                           |
+| --------------------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`     | str  | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url` | str  | no       |         | URL the figure was imported from.                                                                                                                                                     |
+| `--stage`             | str  | no       |         | Name of the pipeline stage that produces this figure.                                                                                                                                 |
 
 <a id="subcommand-update-dataset"></a>
 
@@ -2844,15 +2904,16 @@ Arguments:
 
 Options:
 
-| Option                     | Type     | Required | Default | Description                                                                         |
-| -------------------------- | -------- | -------- | ------- | ----------------------------------------------------------------------------------- |
-| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                  |
-| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                           |
-| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                            |
-| `--imported-from-git-rev`  | str      | no       |         | Commit hash it was taken from. A branch or tag isn't accepted, since it would move. |
-| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                 |
-| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                              |
-| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                              |
+| Option                     | Type     | Required | Default | Description                                                                                                                                                                           |
+| -------------------------- | -------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--imported-from`          | str      | no       |         | Where this came from, as a URL, a DOI, a Git clone URL, a Calkit project path, or, failing all of those, a description in words. Which one it is is worked out from how it's written. |
+| `--imported-from-url`      | str      | no       |         | URL the dataset was imported from.                                                                                                                                                    |
+| `--imported-from-doi`      | str      | no       |         | DOI the dataset was imported from, e.g. 10.5281/zenodo.1.                                                                                                                             |
+| `--imported-from-git-url`  | str      | no       |         | Clone URL of the Git repo the dataset was imported from.                                                                                                                              |
+| `--imported-from-git-ref`  | str      | no       |         | Branch, tag, or commit to follow, e.g. 'main'. The commit it resolves to is recorded in .calkit/imports.json by 'calkit sync import', not here.                                       |
+| `--imported-from-git-path` | str      | no       |         | Path within that repo, if it isn't the whole thing.                                                                                                                                   |
+| `--imported-from-date`     | datetime | no       |         | Date it was downloaded, as YYYY-MM-DD.                                                                                                                                                |
+| `--stage`                  | str      | no       |         | Name of the pipeline stage that produces this dataset.                                                                                                                                |
 
 <a id="command-group-check"></a>
 
@@ -3599,18 +3660,18 @@ Arguments:
 
 Options:
 
-| Option                  | Type    | Required | Default | Description                                                                                                                                                                                                                                                                             |
-| ----------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--name`, `-n`          | str     | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
-| `--environment`, `-e`   | str     | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
-| `--dep`, `-d`           | str     | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
-| `--out`, `-o`           | str     | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
-| `--option`, `-s`        | str     | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
-| `--setup`               | str     | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
-| `--log-path`            | str     | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
-| `--command`             | boolean | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
-| `--env-default-options` | str     | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
-| `--env-default-setup`   | str     | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
+| Option                  | Type                           | Required | Default | Description                                                                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------ | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--name`, `-n`          | str                            | yes      |         | Job name.                                                                                                                                                                                                                                                                               |
+| `--environment`, `-e`   | str                            | yes      |         | Calkit (scheduler) environment to use for the job.                                                                                                                                                                                                                                      |
+| `--dep`, `-d`           | str                            | no       |         | Additional dependencies to track, which if changed signify a job is invalid.                                                                                                                                                                                                            |
+| `--out`, `-o`           | str                            | no       |         | Non-persistent output files or directories produced by the job, which will be deleted before submitting a new job.                                                                                                                                                                      |
+| `--option`, `-s`        | str                            | no       |         | Additional options to pass to the scheduler submit command (no spaces allowed).                                                                                                                                                                                                         |
+| `--setup`               | str                            | no       |         | Shell setup command to run before launching the target (repeat for multiple commands).                                                                                                                                                                                                  |
+| `--log-path`            | str                            | no       |         | Output log path.                                                                                                                                                                                                                                                                        |
+| `--command`             | boolean                        | no       |         | Whether the target is a command instead of a script.                                                                                                                                                                                                                                    |
+| `--env-default-options` | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default scheduler options: 'replace' (default) uses env defaults only when no options were provided here; 'merge' prepends env defaults (the scheduler's last-occurrence wins, so explicit options still override); 'ignore' never applies env defaults. |
+| `--env-default-setup`   | choice(ignore, replace, merge) | no       | replace | How to apply the environment's default setup commands: 'replace' (default) uses env defaults only when no setup commands were provided here; 'merge' prepends env defaults; 'ignore' never applies env defaults.                                                                        |
 
 <a id="subcommand-scheduler-sch-queue-q"></a>
 
@@ -3714,6 +3775,7 @@ Sync with external systems.
 | [`git`](#subcommand-sync-git)           | Sync the Git repository by pulling and then pushing. |
 | [`dvc`](#subcommand-sync-dvc)           | Sync the DVC repository by pulling and then pushing. |
 | [`all`](#subcommand-sync-all)           | Sync all registered systems.                         |
+| [`import`](#subcommand-sync-import)     | Pull an imported file from where it came from.       |
 | [`overleaf`](#subcommand-sync-overleaf) | Sync folders with Overleaf.                          |
 
 <a id="subcommand-sync-git"></a>
@@ -3763,6 +3825,43 @@ Usage:
 ```text
 calkit sync all
 ```
+
+<a id="subcommand-sync-import"></a>
+
+#### `calkit sync import`
+
+Pull an imported file from where it came from.
+
+For a Git source this takes the latest on whatever the entry follows, which is its 'ref' if it names one and the repo's default branch otherwise, and records the commit it lands on. '--git-ref' changes what it follows, from then on and not just this once, so switching to a tag pins the import to that tag rather than quietly reverting to the default branch next time.
+
+This is a one-way copy from the source, not a merge. An import records that a file came from somewhere else, so a local edit that survived a refresh would make the entry a lie about what is on disk -- but losing that edit silently would be worse, so a file that differs from what was last fetched is reported and left alone until '--force' says otherwise. The checksum recorded in '.calkit/imports.json' is what makes the edit visible.
+
+What the fetch resolves to -- the commit, the checksum, the time -- is written to '.calkit/imports.json' rather than to 'calkit.yaml', which keeps only what a person declared. To pin an import, write the commit hash as its 'ref'. An entry written before that split carries its 'rev' in 'calkit.yaml'; refreshing it moves that across, so nothing has to be migrated by hand.
+
+With '--all', every imported object is refreshed instead, whichever list it was recorded in, and they are committed together. One that can't be refreshed in place -- a dataset tracked by DVC, or a record named only by a DOI -- is reported and skipped rather than stopping the rest, and so is one whose source can't be reached, since a repo being down shouldn't leave every other import stale. Naming a single object that can't be refreshed is still an error, since that is what was asked for. With '--all' the command exits non-zero if anything was skipped.
+
+Only imported paths for now, since that is the only kind of object an import records. An imported environment has no path of its own, so when 'calkit import environment' is finished this is where refreshing it belongs.
+
+Usage:
+
+```text
+calkit sync import [OPTIONS] [PATH]
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                                              |
+| -------- | ---- | -------- | ------- | -------------------------------------------------------- |
+| `path`   | str  | no       |         | Path of the imported object to refresh. Omit with --all. |
+
+Options:
+
+| Option          | Type    | Required | Default | Description                                                                                                                              |
+| --------------- | ------- | -------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `--all`         | boolean | no       | False   | Refresh every imported object in the project, across all artifact kinds. Ones that can't be refreshed in place are reported and skipped. |
+| `--git-ref`     | str     | no       |         | Branch, tag, or commit to follow from now on, for a file imported from a Git repo. Recorded, so later refreshes keep using it.           |
+| `--force`, `-f` | boolean | no       | False   | Overwrite even if the file has been edited since it was imported.                                                                        |
+| `--no-commit`   | boolean | no       | False   | Do not commit changes to repo.                                                                                                           |
 
 <a id="subcommand-sync-overleaf"></a>
 

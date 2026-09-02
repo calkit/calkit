@@ -511,6 +511,32 @@ def _get_julia_manifest_fpath(
     return os.path.join(base_dir, "Manifest.toml")
 
 
+# The shell a system environment's setup commands run in. Setup is the only
+# thing that uses it, and bash is the default because ``source`` is a
+# bashism and sourcing a site setup script is the usual reason to have any.
+SYSTEM_ENV_DEFAULT_SHELL = "bash"
+
+
+def system_env_locks_anything(env: dict) -> bool:
+    """Return whether a ``system`` environment has anything to lock.
+
+    The machine properties under ``lock``, and a ``shell`` that isn't the
+    default. Not ``default_setup``: the pipeline compiler merges that into
+    the stage's command, so DVC already reruns the stage when it changes
+    and a copy here would only add a second reason. The shell isn't in the
+    command, so it stays.
+
+    ``shell`` is compared by value rather than presence: writing
+    ``shell: bash`` says exactly what leaving it out says, so it must not
+    be what decides whether stages gain a dependency.
+    """
+    return bool(
+        env.get("lock")
+        or env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
+        != SYSTEM_ENV_DEFAULT_SHELL
+    )
+
+
 def get_env_lock_fpath(
     env: dict,
     env_name: str,
@@ -617,10 +643,12 @@ def get_env_lock_fpath(
         env_dir = os.path.dirname(env_path)
         lock_fpath = os.path.join(env_dir, "flake.lock")
     elif env_kind == "system":
-        # A system env's "lock" records the machine properties it declared it
-        # depends on. With nothing locked there is nothing to depend on, so
-        # no lock file and no DVC dep.
-        if not env.get("lock"):
+        # A system env's lock file records the machine properties it
+        # declared it depends on, plus a ``shell`` that isn't the default.
+        # Not ``default_setup``: that is compiled into each stage's
+        # command. With neither there is nothing to depend on, so no lock
+        # file and no DVC dep.
+        if not system_env_locks_anything(env):
             return None
         # Written by ``write_system_env_lock`` during environment checks, and
         # referenced as a DVC dep by stage compilation. Note this is the file
@@ -699,9 +727,102 @@ def write_scheduler_env_lock(
             existing = f.read()
         if existing == content:
             return lock_fpath
-    with open(lock_fpath, "w") as f:
+    # newline="\n" so the file is byte-identical on every platform.
+    # Unlike a system env's lock, this one is a dump of the env config
+    # rather than of the machine, so its content is the same
+    # everywhere -- and it is written wherever the check runs, not
+    # where the scheduler lives, so text mode would let a Windows
+    # collaborator flip it to CRLF and back for everyone else.
+    with open(lock_fpath, "w", newline="\n") as f:
         f.write(content)
     return lock_fpath
+
+
+def merge_setup_commands(
+    env_setup: list[str] | None,
+    stage_setup: list[str] | None,
+    mode: str = "replace",
+) -> list[str]:
+    """Combine an environment's default setup commands with a stage's.
+
+    ``replace`` (the default) uses the environment's only when the stage
+    names none of its own; ``merge`` runs the environment's first, then the
+    stage's; ``ignore`` never runs the environment's.
+
+    The one implementation of the rule. A system env's stages have this
+    resolved when the pipeline is compiled, so the merged list ends up in
+    the stage's command; a scheduler env's is resolved by ``calkit
+    scheduler batch`` when the job script is written, which is the last
+    moment before that kind of stage runs.
+    """
+    stage_cmds = [c for c in (stage_setup or []) if c.strip()]
+    env_cmds = [c for c in (env_setup or []) if c.strip()]
+    if mode == "merge":
+        return env_cmds + stage_cmds
+    if mode == "replace" and not stage_cmds:
+        return env_cmds
+    return stage_cmds
+
+
+# Warned once per process, not once per reader: compiling a pipeline reads
+# an environment's inputs several times -- the DVC dep list, the
+# environment check, the run itself -- and a project is only asked to
+# rename the key once.
+_warned_deprecated_deps_key = False
+
+
+def get_env_input_paths(env: dict, env_name: str | None = None) -> list[str]:
+    """Read the files an environment declares it depends on.
+
+    Written as ``inputs``, and also accepted as ``deps``, which is the name
+    this was published under on Docker environments. Extra keys on an
+    environment are ignored rather than refused, so a project still
+    spelling it the old way would otherwise have its files go silently
+    untracked---which is the one failure the field exists to prevent.
+    Setting both is refused rather than resolved one way, since it is the
+    same list written twice in two places that can drift apart.
+
+    This is the only reader of either spelling, so the alias lives in one
+    place: the models accept it through ``AliasChoices``, and everything
+    reading a raw environment dict comes through here.
+    """
+    global _warned_deprecated_deps_key
+    inputs = env.get("inputs")
+    deps = env.get("deps")
+    if inputs is not None and deps is not None:
+        where = f" on environment '{env_name}'" if env_name else ""
+        raise ValueError(
+            f"Both 'inputs' and 'deps' are set{where}; 'deps' is the old "
+            "name for the same key, so merge them into 'inputs'"
+        )
+    if deps is not None and not _warned_deprecated_deps_key:
+        from calkit.cli import warn
+
+        _warned_deprecated_deps_key = True
+        # Written for whoever has to act on it rather than raised as a
+        # UserWarning, whose file-and-line formatting reads as a defect in
+        # Calkit instead of a line to change in their own project
+        where = f" on environment '{env_name}'" if env_name else ""
+        warn(
+            f"The 'deps' key{where} is deprecated; rename it to 'inputs', "
+            "which is what it's called now that scheduler and system "
+            "environments take one too"
+        )
+    paths = list(inputs if inputs is not None else deps or [])
+    # Checked here rather than only on the models: every production caller
+    # reads a raw environment dict, so a model annotation alone would let
+    # '../outside.sh' through to DVC. Docker's list is exempt because it
+    # is the long-published 'deps' under a new name, and tightening it
+    # would retroactively invalidate existing projects.
+    if env.get("kind") in ("system", "slurm", "pbs"):
+        from calkit.provenance import check_project_path
+
+        for path in paths:
+            problem = check_project_path(path)
+            if problem:
+                where = f" on environment '{env_name}'" if env_name else ""
+                raise ValueError(f"Environment input{where}: {problem}")
+    return paths
 
 
 def get_system_lock_data(
@@ -763,12 +884,16 @@ def write_system_env_lock(
     on, say, the Julia version should not reuse a cached result from a box
     with a different one.
 
+    A non-default ``shell`` is recorded alongside the machine properties.
+    It isn't a property of the machine, but it feeds the same question: a
+    stage whose setup commands ran under a different shell should not
+    reuse the old result. The setup commands themselves aren't here --
+    they are compiled into the stage's command, where DVC already watches
+    them.
+
     Returns the lock file path, already prefixed with ``wdir`` if provided,
     or None if the environment locks nothing.
     """
-    lock = env.get("lock") or []
-    if not lock:
-        return None
     # Already prefixed with wdir, so it must not be joined with it again
     lock_fpath = get_env_lock_fpath(
         env=env, env_name=env_name, wdir=wdir, as_posix=True
@@ -778,14 +903,19 @@ def write_system_env_lock(
     # Read before anything is created: a misspelled property or a tool
     # that isn't installed raises here, and an env that failed to lock
     # shouldn't leave a directory behind suggesting it did
-    content = (
-        json.dumps(
-            get_system_lock_data(lock, system_info=system_info),
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
+    lock_data = get_system_lock_data(
+        env.get("lock") or [], system_info=system_info
     )
+    # Named so it can't collide with a locked property, now or when the set
+    # of them grows. The setup commands themselves are not recorded: they
+    # go into the stage's command when the pipeline is compiled, so DVC
+    # sees them change. The shell they run in doesn't, so it does -- and
+    # only when it isn't the default, since writing the default says
+    # nothing that leaving it out doesn't.
+    shell = env.get("shell", SYSTEM_ENV_DEFAULT_SHELL)
+    if shell != SYSTEM_ENV_DEFAULT_SHELL:
+        lock_data["shell"] = shell
+    content = json.dumps(lock_data, indent=2, sort_keys=True) + "\n"
     parent = os.path.dirname(lock_fpath)
     if parent:
         os.makedirs(parent, exist_ok=True)

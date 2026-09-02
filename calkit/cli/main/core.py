@@ -8,6 +8,7 @@ import logging
 import os
 import platform as _platform
 import posixpath
+import shlex
 import shutil
 import signal
 import subprocess
@@ -3175,6 +3176,32 @@ def run_in_env(
             help="Check the environment in a relaxed way, if applicable.",
         ),
     ] = False,
+    setup_cmds: Annotated[
+        list[str],
+        typer.Option(
+            "--setup",
+            help=(
+                "Shell command to run before the command, in the same "
+                "shell (repeat for multiple). A pipeline stage gets these "
+                "from its own 'setup' and its environment's "
+                "'default_setup', already combined when the pipeline is "
+                "compiled."
+            ),
+        ),
+    ] = [],
+    setup_file: Annotated[
+        str | None,
+        typer.Option(
+            "--setup-file",
+            help=(
+                "Path to a JSON list of setup commands, used instead of "
+                "--setup. This is what a compiled pipeline stage carries, "
+                "since a path survives being parsed by cmd.exe on Windows "
+                "and by a POSIX shell elsewhere, and quoted commands "
+                "don't."
+            ),
+        ),
+    ] = None,
     verbose: Annotated[
         bool, typer.Option("--verbose", "-v", help="Print verbose output.")
     ] = False,
@@ -3201,12 +3228,61 @@ def run_in_env(
             calkit.ryaml.dump(ck_info, f)
     env_name = res.name
     env = envs[env_name]
+    # Only a system env runs setup commands here; a scheduler env's go
+    # through 'calkit scheduler batch', and the other kinds hand the
+    # command to a runtime with no shell of its own to prepare. Refused
+    # rather than dropped, since a stage whose setup silently never ran is
+    # a stage that ran against the wrong toolchain.
+    if setup_file is not None:
+        if setup_cmds:
+            raise_error("Give --setup or --setup-file, not both")
+        try:
+            with open(setup_file) as f:
+                setup_cmds = json.load(f)
+        except (OSError, ValueError) as e:
+            raise_error(
+                f"Could not read setup commands from {setup_file}: {e}"
+            )
+    if setup_cmds and env.get("kind") != "system":
+        raise_error(
+            "--setup only applies to a 'system' environment, and "
+            f"'{env_name}' is of kind '{env.get('kind')}'"
+        )
     docker_wdir = env.get("wdir", "/work")
     docker_wdir_mount = docker_wdir
     if wdir is not None:
         docker_wdir = posixpath.join(docker_wdir, wdir)
     shell = env.get("shell", "sh")
     platform = env.get("platform")
+
+    def _with_system_env_setup(shell_cmd: str) -> list[str] | None:
+        """Chain the setup commands before a stage's command.
+
+        The setup commands and the stage share one shell, so a variable the
+        setup sets or a function it defines is in scope for the stage,
+        exported or not -- only a child process needs that. What to run is
+        decided before this point: a pipeline stage arrives with its own
+        ``setup`` and its environment's ``default_setup`` already combined
+        by the compiler, so this just runs what it was given. The chain
+        runs in the environment's shell (bash by default) rather than the
+        platform's, since ``source`` is a bashism and sourcing a setup
+        script is the case this exists for.
+
+        Returns the invocation as a program and its arguments, or None
+        when there is nothing to set up. Left as a list rather than a
+        string so the caller decides how to quote it: over SSH the far end
+        is a POSIX shell, but locally on Windows it would be cmd.exe, which
+        reads single quotes as ordinary characters.
+        """
+        setup = [c for c in setup_cmds if c.strip()]
+        if not setup:
+            return None
+        chained = " && ".join([*setup, shell_cmd])
+        return [
+            env.get("shell", calkit.environments.SYSTEM_ENV_DEFAULT_SHELL),
+            "-c",
+            chained,
+        ]
 
     def save_env_check_cache() -> None:
         """Record a successful check so repeat calls can skip it."""
@@ -3267,7 +3343,7 @@ def run_in_env(
                     env=env, env_name=env_name, as_posix=False
                 ),
                 platform=env.get("platform"),
-                deps=env.get("deps", []),
+                deps=calkit.environments.get_env_input_paths(env, env_name),
                 env_vars=env.get("env_vars", []),
                 ports=env.get("ports", []),
                 gpus=env.get("gpus"),
@@ -3532,6 +3608,10 @@ def run_in_env(
             save_env_check_cache()
         repo = calkit.git.get_repo()
         remote_shell_cmd = _to_shell_cmd(cmd)
+        if (
+            setup_argv := _with_system_env_setup(remote_shell_cmd)
+        ) is not None:
+            remote_shell_cmd = shlex.join(setup_argv)
         try:
             workspace.run_in_workspace(
                 workspace=ws,
@@ -3699,10 +3779,23 @@ def run_in_env(
         # the project from the one DVC is about to hash. Only the stage's
         # own wdir, which is relative to the project root, applies.
         shell_cmd = _to_shell_cmd(cmd)
+        setup_argv = _with_system_env_setup(shell_cmd)
         if verbose:
-            typer.echo(f"Running command: {shell_cmd}")
+            typer.echo(
+                "Running command: "
+                + (shlex.join(setup_argv) if setup_argv else shell_cmd)
+            )
         try:
-            subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
+            if setup_argv is not None:
+                # Run directly rather than through the platform shell, so
+                # the chain reaches bash intact on Windows too. The shell
+                # is found on PATH here rather than left to CreateProcess,
+                # which on Windows looks in System32 first and finds WSL's
+                # stub bash.exe instead of Git Bash.
+                setup_argv[0] = shutil.which(setup_argv[0]) or setup_argv[0]
+                subprocess.check_call(setup_argv, cwd=wdir)
+            else:
+                subprocess.check_call(shell_cmd, shell=True, cwd=wdir)
         except subprocess.CalledProcessError:
             raise_error("Failed to run in system environment")
     else:

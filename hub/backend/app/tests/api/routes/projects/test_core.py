@@ -3778,18 +3778,16 @@ def test_post_project_dataset_provenance(
         {
             "path": "data/repo.csv",
             "imported_from": {
-                "git": {
-                    "repo_url": "https://github.com/a/b",
-                    "rev": "deadbeef",
-                    "path": "out.csv",
-                }
+                "git_repo_url": "https://github.com/a/b",
+                "git_ref": "deadbeef",
+                "path": "out.csv",
             },
         }
     )
     assert resp.status_code == 200, resp.text
     # What was actually fetched is what's written, whatever was asked for
     assert (
-        written[-1]["imported_from"]["git"]["rev"]
+        written[-1]["imported_from"]["git_rev"]
         == "c0ffee0123456789c0ffee0123456789c0ffee01"
     )
     # No revision means the default branch's head, recorded by its commit
@@ -3797,13 +3795,14 @@ def test_post_project_dataset_provenance(
         {
             "path": "data/head.csv",
             "imported_from": {
-                "git": {"repo_url": "https://github.com/a/b", "path": "h.csv"}
+                "git_repo_url": "https://github.com/a/b",
+                "path": "h.csv",
             },
         }
     )
     assert resp.status_code == 200, resp.text
     assert (
-        written[-1]["imported_from"]["git"]["rev"]
+        written[-1]["imported_from"]["git_rev"]
         == "c0ffee0123456789c0ffee0123456789c0ffee01"
     )
     # A branch or tag moves, so it can't be what's recorded; asked for, it
@@ -3812,13 +3811,14 @@ def test_post_project_dataset_provenance(
         {
             "path": "data/branch.csv",
             "imported_from": {
-                "git": {"repo_url": "https://github.com/a/b", "rev": "main"}
+                "git_repo_url": "https://github.com/a/b",
+                "git_ref": "main",
             },
         }
     )
     assert resp.status_code == 200, resp.text
     assert (
-        written[-1]["imported_from"]["git"]["rev"]
+        written[-1]["imported_from"]["git_rev"]
         == "c0ffee0123456789c0ffee0123456789c0ffee01"
     )
     # A plain URL.

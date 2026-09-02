@@ -6,12 +6,8 @@ from app.core import read_last_line_from_csv
 
 
 def test_read_last_line_from_csv(tmp_dir):
-    subprocess.check_call(
-        ["git", "config", "--global", "user.name", "CI Test"]
-    )
-    subprocess.check_call(
-        ["git", "config", "--global", "user.email", "ci-test@example.com"]
-    )
+    # The identity `calkit init` commits with comes from the throwaway global
+    # config the isolate_git_config fixture points git at
     subprocess.check_call(["calkit", "init"])
     subprocess.check_call(
         ["calkit", "new", "status", "completed", "-m", "This is the status."]

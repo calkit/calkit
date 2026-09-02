@@ -1301,8 +1301,12 @@ def get_project(
         # Read at the requested ref. get_repo only fetches a ref, it does
         # not check it out, so get_ck_info_from_repo (working tree) would
         # report the default branch's calkit.yaml keys instead.
+        # Only the key names are wanted, so this takes the C loader rather
+        # than ruamel's round-trip parser: on a large calkit.yaml that is
+        # the difference between a few milliseconds and a quarter of a
+        # second, and this request is what the whole project page waits on.
         ck_info = app.projects.get_ck_info_for_ref(
-            project=project, repo=repo, ref=ref
+            project=project, repo=repo, ref=ref, read_only=True
         )
         resp.calkit_info_keys = list(ck_info.keys())
         # Read status if present
@@ -9980,7 +9984,32 @@ def get_project_repro_check(
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
     )
+    # A pure function of the tree at this commit, and a second and a half of
+    # work on a large project, so it is worked out once per commit rather
+    # than once per visitor.
+    commit_sha = resolve_commit_sha(repo, ref)
+    key = (
+        cache.make_key(
+            "repro-check",
+            f"{project.owner_account_name}/{project.name}".lower(),
+            commit_sha,
+        )
+        if commit_sha
+        else None
+    )
+    if key is not None:
+        cached = cache.get_json(key)
+        if cached is not None:
+            try:
+                return ReproCheck.model_validate(cached)
+            except ValidationError as e:
+                # Written by an older shape of ReproCheck; drop it rather
+                # than recompute past it on every request until it expires.
+                logger.warning(f"Discarding unreadable repro check: {e}")
+                cache.delete(key)
     res = check_reproducibility(wdir=str(repo.working_dir))
+    if key is not None:
+        cache.set_json(key, res.model_dump())
     return res
 
 

@@ -276,12 +276,12 @@ function PubInfo({
           </Link>
         </Text>
       )}
-      {publication.type && (
+      {publication.kind && (
         <Text fontSize="sm" mb={1}>
           <Text as="span" fontWeight="semibold">
             Type:
           </Text>{" "}
-          <Badge>{publication.type}</Badge>
+          <Badge>{publication.kind}</Badge>
         </Text>
       )}
       <Text fontSize="sm" mb={1}>

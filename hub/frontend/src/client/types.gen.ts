@@ -184,11 +184,12 @@ export type BodyProjectsPostProjectOverleafPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
-    | "masters-thesis"
+    | "thesis"
     | "phd-thesis"
-    | "other"
   /**
    * Overleaf Project Url
    */
@@ -245,10 +246,12 @@ export type BodyProjectsPostProjectPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
   /**
    * Title
    */
@@ -2962,6 +2965,8 @@ export type PipelineStagePut = {
 
 /**
  * Presentation
+ *
+ * A presentation declared in calkit.yaml, or auto-detected in the repo.
  */
 export type Presentation = {
   /**
@@ -2977,9 +2982,9 @@ export type Presentation = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?: "slides" | "poster" | "talk" | null
+  kind?: "slides" | "poster" | null
   /**
    * Stage
    */
@@ -3786,6 +3791,8 @@ export type ProjectsPublic = {
 
 /**
  * Publication
+ *
+ * A publication declared in calkit.yaml.
  */
 export type Publication = {
   /**
@@ -3801,15 +3808,17 @@ export type Publication = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?:
+  kind?:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
     | null
   /**
    * Stage

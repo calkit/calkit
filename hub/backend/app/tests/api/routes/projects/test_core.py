@@ -986,23 +986,16 @@ class _EmptyTree:
         return []
 
 
-def _ref_aware_endpoint_reads_declared_at_ref(
-    client: TestClient, endpoint: str, ck_key: str
-) -> None:
-    """Shared assertions: declared metadata + pipeline read at the ref.
-
-    get_repo only fetches a ref, it does not check it out, so the declared
-    publications/presentations list and the DVC pipeline must be read via
-    the ref-aware helpers rather than the live working tree.
-    """
+def _get_declared_at_ref(
+    client: TestClient, endpoint: str, ck_key: str, declared: list
+):
+    """GET an artifact listing at a ref with ``declared`` in calkit.yaml."""
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
     fake_repo = SimpleNamespace(
         working_dir="/tmp/nonexistent",
         commit=lambda _ref: SimpleNamespace(tree=_EmptyTree()),
         head=SimpleNamespace(commit=SimpleNamespace(tree=_EmptyTree())),
     )
-    declared = [{"path": f"declared/from-{ck_key}.pdf", "title": "Declared"}]
-
     with (
         patch(
             "app.api.routes.projects.core.app.projects.get_project",
@@ -1014,7 +1007,11 @@ def _ref_aware_endpoint_reads_declared_at_ref(
         ) as mock_get_repo,
         patch(
             "app.api.routes.projects.core.app.projects.get_ck_info_for_ref",
-            return_value={ck_key: [dict(d) for d in declared]},
+            return_value={
+                ck_key: [
+                    dict(d) if isinstance(d, dict) else d for d in declared
+                ]
+            },
         ) as mock_ck_for_ref,
         patch(
             "app.api.routes.projects.core.app.projects"
@@ -1052,7 +1049,29 @@ def _ref_aware_endpoint_reads_declared_at_ref(
         response = client.get(
             f"/projects/test-owner/test-project/{endpoint}?ref=some-branch"
         )
+    return response, mock_get_repo, mock_ck_for_ref, mock_pipeline_for_ref
 
+
+def _ref_aware_endpoint_reads_declared_at_ref(
+    client: TestClient, endpoint: str, ck_key: str
+) -> None:
+    """Shared assertions: declared metadata + pipeline read at the ref.
+
+    get_repo only fetches a ref, it does not check it out, so the declared
+    publications/presentations list and the DVC pipeline must be read via
+    the ref-aware helpers rather than the live working tree.
+    """
+    (
+        response,
+        mock_get_repo,
+        mock_ck_for_ref,
+        mock_pipeline_for_ref,
+    ) = _get_declared_at_ref(
+        client,
+        endpoint,
+        ck_key,
+        [{"path": f"declared/from-{ck_key}.pdf", "title": "Declared"}],
+    )
     assert response.status_code == 200, response.text
     paths = [item["path"] for item in response.json()]
     assert f"declared/from-{ck_key}.pdf" in paths
@@ -1080,6 +1099,66 @@ def test_get_project_presentations_reads_declared_at_ref(
     _ref_aware_endpoint_reads_declared_at_ref(
         client, "presentations", "presentations"
     )
+
+
+def test_get_project_publications_tolerates_odd_declarations(
+    client: TestClient,
+) -> None:
+    # calkit.yaml is hand-written, so one odd entry can't 500 the listing. A
+    # publication with no title, one whose kind the hub doesn't know, and a
+    # list item that isn't a mapping at all all showed up in real projects; a
+    # strict model turned any of them into a failed page
+    response, _, _, _ = _get_declared_at_ref(
+        client,
+        "publications",
+        "publications",
+        [
+            {"path": "pubs/joss/paper.md"},
+            {"path": "pubs/JFM/my-paper.pdf", "kind": "journal-article"},
+            {"path": "pubs/legacy.pdf", "type": "report"},
+            {"path": "pubs/thesis.pdf", "kind": "made-up"},
+            {"path": "pubs/poster.pdf", "kind": "poster"},
+            "not-a-mapping",
+            {"title": "No path"},
+        ],
+    )
+    assert response.status_code == 200, response.text
+    pubs = {pub["path"]: pub for pub in response.json()}
+    # A missing title falls back to the file name
+    assert pubs["pubs/joss/paper.md"]["title"] == "Paper"
+    assert pubs["pubs/joss/paper.md"]["kind"] is None
+    assert pubs["pubs/JFM/my-paper.pdf"]["kind"] == "journal-article"
+    assert pubs["pubs/JFM/my-paper.pdf"]["title"] == "My paper"
+    # The hub wrote `type` before this was renamed to `kind`
+    assert pubs["pubs/legacy.pdf"]["kind"] == "report"
+    # An unrecognized kind is dropped rather than refused, as is one that
+    # belongs to a different artifact: posters are presentations
+    assert pubs["pubs/thesis.pdf"]["kind"] is None
+    assert pubs["pubs/poster.pdf"]["kind"] is None
+    # Entries that name no file are skipped rather than raising
+    assert len(pubs) == 5
+
+
+def test_get_project_presentations_tolerates_odd_declarations(
+    client: TestClient,
+) -> None:
+    # Presentations read the same hand-written declarations
+    response, _, _, _ = _get_declared_at_ref(
+        client,
+        "presentations",
+        "presentations",
+        [
+            {"path": "slides/talk.pdf"},
+            {"path": "slides/legacy.pdf", "type": "slides"},
+            {"path": "slides/odd.pdf", "kind": "talk"},
+        ],
+    )
+    assert response.status_code == 200, response.text
+    pres = {p["path"]: p for p in response.json()}
+    assert pres["slides/talk.pdf"]["title"] == "Talk"
+    assert pres["slides/legacy.pdf"]["kind"] == "slides"
+    # "talk" was a hub-only kind the CLI refuses, so it's no longer one here
+    assert pres["slides/odd.pdf"]["kind"] is None
 
 
 def _make_owner_with_project(

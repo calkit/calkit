@@ -10081,10 +10081,7 @@ class ProjectApp(BaseModel):
 
 
 def _app_serve_url(owner_name: str, project_name: str, name: str) -> str:
-    return (
-        f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
-        f"/apps/{name}/serve/"
-    )
+    return f"/projects/{owner_name}/{project_name}/apps/{name}/serve/"
 
 
 def _project_apps_from_ck_info(
@@ -10253,7 +10250,7 @@ def serve_project_app_file(
         if resolved is None:
             raise HTTPException(404, "Ref not found")
         base = (
-            f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+            f"/projects/{owner_name}/{project_name}"
             f"/apps/{app_name}/{resolved}/serve/"
         )
         return RedirectResponse(base + path.strip("/"), status_code=302)

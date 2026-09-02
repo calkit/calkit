@@ -8,9 +8,7 @@ import polars as pl
 import yaml
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
-BASE = f"{settings.API_V1_STR}/projects/o/p/dataset-csv"
+BASE = "/projects/o/p/dataset-csv"
 
 
 def _csv(resp) -> str:
@@ -117,7 +115,7 @@ def test_get_project_dataset_hdf5(client: TestClient, tmp_path) -> None:
     repo.git.add(all=True)
     repo.git.commit("-m", "Data")
     fake_project = SimpleNamespace(owner_account_name="o", name="p")
-    base = f"{settings.API_V1_STR}/projects/o/p/dataset-hdf5"
+    base = "/projects/o/p/dataset-hdf5"
     with (
         patch(
             "app.api.routes.projects.datasets.app.projects.get_project",
@@ -235,7 +233,7 @@ def test_imported_dataset_reads_from_source_project(
     assert seen_projects == ["o/p", "src/proj"]
 
 
-URL = f"{settings.API_V1_STR}/projects/o/p/datasets"
+URL = "/projects/o/p/datasets"
 
 
 def _repo(tmp_path):

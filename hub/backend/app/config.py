@@ -76,7 +76,6 @@ class Settings(BaseSettings):
     # a separate setting from the backend's project name, which is used in
     # the default email sender name and in the default frontend title.
     PROJECT_NAME: str
-    API_V1_STR: str = ""
     SECRET_KEY: str = secrets.token_urlsafe(32)
     FERNET_KEY: str  # Can be generated with Fernet.generate_key()
     # Optional comma-separated list of keys for decryption fallback.

@@ -25,10 +25,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 reusable_oauth2 = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/login/access-token", auto_error=True
+    tokenUrl="/login/access-token", auto_error=True
 )
 reusable_oauth2_optional = OAuth2PasswordBearer(
-    tokenUrl=f"{settings.API_V1_STR}/login/access-token", auto_error=False
+    tokenUrl="/login/access-token", auto_error=False
 )
 
 PAT_SELECTOR_LENGTH_BYTES = 8

@@ -4,12 +4,12 @@ Almost everything the project view shows is derived from one commit, and the
 derivations are not cheap: a pipeline's stage statuses walk object storage, a
 file history parses every revision of ``dvc.lock``, a figure grid rasterizes
 every figure. All of it is cached by content or by commit (see ``app.cache``),
-so it only has to happen once -- but today the first person to open the page
+so it only has to happen once--but today the first person to open the page
 is the one who waits for it.
 
 A push is the moment that work becomes necessary and the moment nobody is
 waiting, so that is when it runs. The job is idempotent and safe to drop: the
-worst case is the old behaviour, where the first viewer pays.
+worst case is the old behavior, where the first viewer pays.
 
 It runs in a worker process rather than the API's threadpool, because it takes
 minutes and the threadpool is what serves requests.

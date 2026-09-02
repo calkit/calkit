@@ -56,7 +56,13 @@ project in a plain folder.
   needs a rerun, has drifted from the project since the document was built, or
   came from nowhere at all, and offers to run the stage. The lens also works in
   Quarto and Markdown, where there is no provenance record to read and it falls
-  back to naming the stage behind each figure reference.
+  back to naming the stage behind each figure reference. The same readings go
+  into **Problems**, so a value that moved on page nine is counted rather than
+  waiting to be scrolled to: an error for content the project no longer has, a
+  warning for content out of date, and a note for content nothing accounts
+  for. Questions are reported there too, on the line in `calkit.yaml` that
+  declares them, since an answer that no longer follows from its evidence is a
+  fault in the question rather than in the paper that typesets it.
 - **Stale-output awareness**: Outputs whose stage needs re-running are flagged
   in the sidebar and in the file explorer.
 - **File history**: View a tracked file's history from the sidebar or explorer.

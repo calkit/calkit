@@ -232,6 +232,241 @@ export function lensTitle(components: Component[]): string | undefined {
   return `$(go-to-file) ${stages.join(", ")}`;
 }
 
+/** A problem with one component, at the place in the source that raised it. */
+export interface ComponentDiagnostic {
+  line: number;
+  column: number;
+  /** Editor severities, named so this file needs nothing from `vscode`. */
+  severity: "error" | "warning" | "info";
+  message: string;
+  component: Component;
+}
+
+/**
+ * What is wrong with a document's components, at the places that say it.
+ *
+ * A hover answers a question the reader thought to ask, and a lens sits on
+ * a line already in view. Neither finds the paragraph on page nine whose
+ * number went stale, which is the one worth finding, so the same facts are
+ * reported as diagnostics: the editor collects them into Problems and a
+ * writer sees the count without going looking.
+ *
+ * Only what is genuinely wrong. A component with no provenance is reported
+ * because nothing else will ever catch it, but as information rather than a
+ * warning: it may be perfectly fine and merely undeclared, and a squiggle
+ * under every hand-made schematic would train people to ignore all of them.
+ */
+export function componentDiagnostics(
+  components: Component[],
+  source: string,
+): ComponentDiagnostic[] {
+  const diagnostics: ComponentDiagnostic[] = [];
+  for (const component of components) {
+    const problem = componentProblem(component);
+    if (!problem) {
+      continue;
+    }
+    for (const location of component.locations) {
+      if (location.source !== source) {
+        continue;
+      }
+      diagnostics.push({
+        line: location.line - 1,
+        column: Math.max(location.column - 1, 0),
+        severity: problem.severity,
+        message: problem.message,
+        component,
+      });
+    }
+  }
+  return diagnostics;
+}
+
+/**
+ * How much of a line a diagnostic should underline, from its column.
+ *
+ * The resolver points at where a component starts, which is the backslash
+ * of the macro that injected it. Underlining the whole rest of the line
+ * would cover the prose around it, so the macro and its arguments are
+ * measured; anything else falls back to the rest of the line, which is
+ * still better than a caret nobody can see.
+ */
+export function diagnosticSpan(lineText: string, column: number): number {
+  const rest = lineText.slice(column);
+  const macro = /^\\[a-zA-Z@]+(\[[^\]]*\])?(\{[^}]*\})?/.exec(rest);
+  if (macro) {
+    return macro[0].length;
+  }
+  return Math.max(rest.trimEnd().length, 1);
+}
+
+/** The one thing to say about a component, or nothing if it is fine. */
+function componentProblem(
+  component: Component,
+): { severity: ComponentDiagnostic["severity"]; message: string } | undefined {
+  const what = component.key
+    ? `${component.path}:${component.key}`
+    : component.path;
+  if (component.status === "missing") {
+    return {
+      severity: "error",
+      message:
+        component.kind === "value"
+          ? `${what} is no longer in the project, so this value has ` +
+            "nothing behind it."
+          : `${what} is no longer produced by the project.`,
+    };
+  }
+  if (component.stale_reasons.length > 0) {
+    const why = component.stale_reasons
+      .map((reason) => STALE_EXPLANATIONS[reason])
+      .join(", and ");
+    // The pair is the whole point of the warning when the document drifted:
+    // it says what the page claims and what the project now says instead
+    const drift =
+      component.stale_reasons.includes("changed-since-build") &&
+      component.kind === "value" &&
+      component.build_value !== null &&
+      component.build_value !== undefined
+        ? ` Built with ${String(component.build_value)}, now ` +
+          `${String(component.current_value)}.`
+        : "";
+    return {
+      severity: "warning",
+      message: `${what} is out of date: ${why}.${drift}`,
+    };
+  }
+  if (component.provenance === "undeclared") {
+    return {
+      severity: "info",
+      message:
+        `Nothing in the project produces ${what} or says where it came ` +
+        "from. Running the pipeline will not fix it; it needs an entry in " +
+        "calkit.yaml.",
+    };
+  }
+  return undefined;
+}
+
+// The questions half of the same idea: `calkit check questions --json`
+// reports what a document cannot, because a broken answer is a fault in
+// `calkit.yaml` rather than in the paper that typesets it.
+
+export type QuestionStatus =
+  | "ok"
+  | "stale"
+  | "error"
+  | "unanswered"
+  | "no-evidence";
+
+export interface QuestionCheck {
+  /** 1-based, matching `calkit list questions`. */
+  index: number;
+  question: string;
+  answered: boolean;
+  status: QuestionStatus;
+  message?: string | null;
+}
+
+export interface QuestionsReport {
+  questions: QuestionCheck[];
+}
+
+/** A problem with one question, at the line in `calkit.yaml` that declares it. */
+export interface QuestionDiagnostic {
+  line: number;
+  severity: "error" | "warning" | "info";
+  message: string;
+}
+
+const QUESTION_DEFAULT_MESSAGES: Record<QuestionStatus, string | undefined> = {
+  ok: undefined,
+  unanswered: undefined,
+  stale: "The evidence has changed since this answer was last edited.",
+  error: "This answer does not check out against its evidence.",
+  "no-evidence":
+    "This question is answered but cites no evidence, so nothing can " +
+    "check whether the answer still holds.",
+};
+
+const QUESTION_SEVERITIES: Record<
+  QuestionStatus,
+  QuestionDiagnostic["severity"] | undefined
+> = {
+  ok: undefined,
+  // Not yet answered is work outstanding, not a fault to report
+  unanswered: undefined,
+  stale: "warning",
+  error: "error",
+  "no-evidence": "info",
+};
+
+/**
+ * Where each question sits in `calkit.yaml`, by its position in the list.
+ *
+ * Matching on the question's own text would be the obvious way and the
+ * wrong one: `calkit.yaml` is written at 80 columns, so a question long
+ * enough to be interesting is folded across lines and matches nothing.
+ * The check numbers questions in file order, so counting list items finds
+ * them whatever the prose does.
+ */
+export function questionLines(calkitYaml: string): number[] {
+  const lines = calkitYaml.split(/\r?\n/);
+  const start = lines.findIndex((line) => /^questions:\s*$/.test(line));
+  if (start < 0) {
+    return [];
+  }
+  const found: number[] = [];
+  let itemIndent: number | undefined;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === "" || /^\s*#/.test(line)) {
+      continue;
+    }
+    // A line back at the top level ends the block
+    if (!/^\s/.test(line)) {
+      break;
+    }
+    const item = /^(\s*)-\s/.exec(line);
+    if (!item) {
+      continue;
+    }
+    if (itemIndent === undefined) {
+      itemIndent = item[1].length;
+    }
+    // Deeper dashes belong to a question's own lists, e.g. its evidence
+    if (item[1].length === itemIndent) {
+      found.push(i);
+    }
+  }
+  return found;
+}
+
+/** What `calkit check questions` found, placed in `calkit.yaml`. */
+export function questionDiagnostics(
+  report: QuestionsReport,
+  calkitYaml: string,
+): QuestionDiagnostic[] {
+  const lines = questionLines(calkitYaml);
+  const diagnostics: QuestionDiagnostic[] = [];
+  for (const question of report.questions ?? []) {
+    const severity = QUESTION_SEVERITIES[question.status];
+    const line = lines[question.index - 1];
+    if (!severity || line === undefined) {
+      continue;
+    }
+    diagnostics.push({
+      line,
+      severity,
+      message:
+        question.message ??
+        QUESTION_DEFAULT_MESSAGES[question.status] ??
+        `Question ${question.index} needs attention.`,
+    });
+  }
+  return diagnostics;
+}
+
 /**
  * A figure reference in a source Calkit can't resolve fully, as a component.
  *

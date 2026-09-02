@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import {
+  componentDiagnostics,
   componentsByLine,
+  diagnosticSpan,
+  questionDiagnostics,
   figureComponent,
   definitionLine,
   hoverLines,
@@ -9,7 +12,7 @@ import {
   toAbsolute,
   withCheckedStatus,
 } from "./core";
-import type { Component, DocumentComponents } from "./core";
+import type { Component, DocumentComponents, QuestionsReport } from "./core";
 import {
   extractLatexImageRefs,
   extractMarkdownImageRefs,
@@ -35,6 +38,14 @@ export interface ComponentsDeps {
     args: string[],
   ) => Promise<DocumentComponents | undefined>;
   runStageCommand: string;
+  // Where component problems are reported. Optional so a caller that only
+  // wants hovers and lenses need not make one.
+  diagnostics?: vscode.DiagnosticCollection;
+  // Runs `calkit check questions --json`, for the faults that live in
+  // calkit.yaml rather than in a document.
+  checkQuestions?: (
+    workspaceRoot: string,
+  ) => Promise<QuestionsReport | undefined>;
   // Output path -> producing stage, for documents the resolver can't read
   buildOutputToStageMap: (
     workspaceRoot: string,
@@ -47,6 +58,12 @@ export interface ComponentsDeps {
 // responsive by asking for the cursor position with the check skipped and
 // folding in whatever this last saw.
 const LISTING_TTL_MS = 30_000;
+
+const DIAGNOSTIC_SEVERITIES = {
+  error: vscode.DiagnosticSeverity.Error,
+  warning: vscode.DiagnosticSeverity.Warning,
+  info: vscode.DiagnosticSeverity.Information,
+} as const;
 
 export class ComponentsProvider
   implements
@@ -70,6 +87,98 @@ export class ComponentsProvider
   refresh(): void {
     this.listings.clear();
     this._onDidChangeCodeLenses.fire();
+  }
+
+  /**
+   * Report a document's stale, missing and unaccounted-for components.
+   *
+   * A hover has to be asked and a lens has to be scrolled to. Neither finds
+   * the paragraph on page nine whose number moved, so the same readings go
+   * into Problems, where the editor counts them and a writer sees there is
+   * something to look at without going looking.
+   */
+  async updateDiagnostics(document: vscode.TextDocument): Promise<void> {
+    const collection = this.deps.diagnostics;
+    if (!collection) {
+      return;
+    }
+    const workspaceRoot = this.deps.getWorkspaceRoot();
+    if (
+      !workspaceRoot ||
+      !isLatexDocument(document.uri.fsPath, document.languageId)
+    ) {
+      return;
+    }
+    const relPath = vscode.workspace
+      .asRelativePath(document.uri, false)
+      .replace(/\\/g, "/");
+    const components = await this.listing(workspaceRoot, relPath);
+    if (!components) {
+      // Nothing was read, which is not the same as nothing being wrong:
+      // leave whatever was last reported rather than claiming it is clean
+      return;
+    }
+    collection.set(
+      document.uri,
+      componentDiagnostics(components, relPath)
+        .filter((found) => found.line < document.lineCount)
+        .map((found) => {
+          const lineText = document.lineAt(found.line).text;
+          const length = diagnosticSpan(lineText, found.column);
+          const diagnostic = new vscode.Diagnostic(
+            new vscode.Range(
+              found.line,
+              found.column,
+              found.line,
+              Math.min(found.column + length, lineText.length),
+            ),
+            found.message,
+            DIAGNOSTIC_SEVERITIES[found.severity],
+          );
+          diagnostic.source = "calkit";
+          return diagnostic;
+        }),
+    );
+  }
+
+  /**
+   * Report what `calkit check questions` finds, in `calkit.yaml` itself.
+   *
+   * An answer that no longer follows from its evidence, or names a
+   * placeholder nothing fills, is a fault in the question rather than in
+   * the paper that typesets it, so it belongs on the line that declares
+   * it. The document side of the same problem is a `\ckfindings` block
+   * reading `answer-stale`, which `updateDiagnostics` already reports.
+   */
+  async updateQuestionDiagnostics(
+    document: vscode.TextDocument,
+  ): Promise<void> {
+    const collection = this.deps.diagnostics;
+    const check = this.deps.checkQuestions;
+    const workspaceRoot = this.deps.getWorkspaceRoot();
+    if (!collection || !check || !workspaceRoot) {
+      return;
+    }
+    const report = await check(workspaceRoot);
+    if (!report) {
+      return;
+    }
+    const text = document.getText();
+    collection.set(
+      document.uri,
+      questionDiagnostics(report, text)
+        .filter((found) => found.line < document.lineCount)
+        .map((found) => {
+          const line = document.lineAt(found.line);
+          const diagnostic = new vscode.Diagnostic(
+            line.range,
+            found.message,
+            DIAGNOSTIC_SEVERITIES[found.severity],
+          );
+          diagnostic.source = "calkit";
+          return diagnostic;
+        }),
+    );
   }
 
   private async listing(

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  componentDiagnostics,
   componentsByLine,
+  diagnosticSpan,
   figureComponent,
   definitionLine,
   displayValue,
   hoverLines,
   isLatexDocument,
   lensTitle,
+  questionDiagnostics,
+  questionLines,
   withCheckedStatus,
 } from "../components/core";
 import type { Component } from "../components/core";
@@ -277,4 +281,176 @@ test("a figure reference becomes a component the same lens can render", () => {
   assert.match(lensTitle([orphan]) ?? "", /No provenance/);
   // And it lands on the line it was written on, 0-based for the editor
   assert.deepEqual([...componentsByLine([orphan], "notes.qmd").keys()], [8]);
+});
+
+test("reports only what is actually wrong, at the place that says it", () => {
+  const diagnostics = componentDiagnostics(
+    [
+      component({
+        status: "stale",
+        stale_reasons: ["changed-since-build"],
+        build_value: 5.1,
+        current_value: 5.4,
+        locations: [{ source: "paper/main.tex", line: 12, column: 5 }],
+      }),
+      component({
+        kind: "figure",
+        path: "figures/gone.png",
+        key: null,
+        status: "missing",
+        locations: [{ source: "paper/main.tex", line: 20, column: 1 }],
+      }),
+      // Current and accounted for, so there is nothing to say about it
+      component({
+        locations: [{ source: "paper/main.tex", line: 30, column: 1 }],
+      }),
+    ],
+    "paper/main.tex",
+  );
+  assert.equal(diagnostics.length, 2);
+  assert.equal(diagnostics[0].line, 11);
+  assert.equal(diagnostics[0].column, 4);
+  assert.equal(diagnostics[0].severity, "warning");
+  assert.match(diagnostics[0].message, /results\/findings\.json:ratio/);
+  assert.match(diagnostics[0].message, /moved on since this was built/);
+  // The pair is what makes a drift warning worth reading
+  assert.match(diagnostics[0].message, /Built with 5\.1, now 5\.4/);
+  assert.equal(diagnostics[1].severity, "error");
+  assert.match(diagnostics[1].message, /no longer produced/);
+});
+
+test("a component with no provenance is information, not a warning", () => {
+  // It may be perfectly fine and merely undeclared; a squiggle under every
+  // hand-made schematic would teach people to ignore all of them
+  const [diagnostic] = componentDiagnostics(
+    [
+      component({
+        kind: "figure",
+        path: "paper/schematic.png",
+        key: null,
+        provenance: "undeclared",
+        stage: null,
+        locations: [{ source: "paper/main.tex", line: 4, column: 1 }],
+      }),
+    ],
+    "paper/main.tex",
+  );
+  assert.equal(diagnostic.severity, "info");
+  assert.match(diagnostic.message, /needs an entry in calkit\.yaml/);
+});
+
+test("keeps to the source asked about, and repeats per place", () => {
+  const diagnostics = componentDiagnostics(
+    [
+      component({
+        status: "missing",
+        locations: [
+          { source: "paper/main.tex", line: 3, column: 1 },
+          { source: "paper/main.tex", line: 9, column: 1 },
+          { source: "paper/appendix.tex", line: 2, column: 1 },
+        ],
+      }),
+    ],
+    "paper/main.tex",
+  );
+  assert.deepEqual(
+    diagnostics.map((d) => d.line),
+    [2, 8],
+  );
+});
+
+test("underlines the macro rather than the prose around it", () => {
+  const line = "The error falls by \\result[Improvement]x, which is good.";
+  assert.equal(
+    diagnosticSpan(line, line.indexOf("\\result")),
+    "\\result[Improvement]".length,
+  );
+  assert.equal(
+    diagnosticSpan("\\ckfigure{../figures/a.pdf}", 0),
+    "\\ckfigure{../figures/a.pdf}".length,
+  );
+  // Nothing macro-shaped: the rest of the line beats an invisible caret
+  assert.equal(diagnosticSpan("plain text here   ", 6), "text here".length);
+});
+
+const CALKIT_YAML = `owner: pete
+questions:
+  - question: >-
+      Do the top structures use the rectifier, and does that hold across
+      the whole range rather than at one point?
+    answer: "{n_top} of eight do."
+    evidence:
+      - kind: value
+        path: results/findings.json
+  - question: Does the closure cut error?
+    answer: It does.
+environments:
+  py:
+    kind: uv
+`;
+
+test("finds each question's line however its prose is folded", () => {
+  // calkit.yaml is written at 80 columns, so matching on the question text
+  // would miss exactly the questions long enough to be worth asking
+  assert.deepEqual(questionLines(CALKIT_YAML), [2, 9]);
+});
+
+test("no questions block means nothing to place", () => {
+  assert.deepEqual(questionLines("owner: pete\nname: p\n"), []);
+});
+
+test("places what the questions check found in calkit.yaml", () => {
+  const diagnostics = questionDiagnostics(
+    {
+      questions: [
+        {
+          index: 1,
+          question: "Do the top structures use the rectifier?",
+          answered: true,
+          status: "error",
+          message: "placeholder {n_top} names no evidence",
+        },
+        {
+          index: 2,
+          question: "Does the closure cut error?",
+          answered: true,
+          status: "stale",
+          message: null,
+        },
+      ],
+    },
+    CALKIT_YAML,
+  );
+  assert.deepEqual(diagnostics, [
+    {
+      line: 2,
+      severity: "error",
+      message: "placeholder {n_top} names no evidence",
+    },
+    {
+      line: 9,
+      severity: "warning",
+      message: "The evidence has changed since this answer was last edited.",
+    },
+  ]);
+});
+
+test("an unanswered question is work outstanding, not a fault", () => {
+  assert.deepEqual(
+    questionDiagnostics(
+      {
+        questions: [
+          {
+            index: 1,
+            question: "Open question",
+            answered: false,
+            status: "unanswered",
+          },
+          { index: 2, question: "Fine", answered: true, status: "ok" },
+        ],
+      },
+      CALKIT_YAML,
+    ),
+    [],
+  );
 });

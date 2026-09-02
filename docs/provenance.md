@@ -569,6 +569,22 @@ status. Pass `--no-stage-check` to skip it -- drift between the document
 and the project is still reported -- and note that a component nothing
 could be checked about reads as `unknown`, never as current.
 
+### While writing
+
+In the VS Code extension, the same readings are reported as diagnostics, so
+they reach the Problems panel and get counted: an error for content the
+project no longer has, a warning for content out of date, and a note for
+content nothing accounts for. This is what a hover and a lens cannot do ---
+both need you to already be looking at the line. A number that moved on page
+nine is worth knowing about before you go looking for it.
+
+Questions are reported there too, on the line in `calkit.yaml` that declares
+them, from [`calkit check questions`](questions.md). An answer that no longer
+follows from its evidence, or one naming a placeholder nothing fills, is a
+fault in the question rather than in the paper that typesets it, so that is
+where it is flagged. A question nobody has answered yet is work outstanding
+rather than a fault, and is left alone.
+
 ### Reading a built document
 
 The same answer follows the PDF into the hub. Open a publication and the

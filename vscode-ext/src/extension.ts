@@ -49,7 +49,7 @@ import {
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
-import type { DocumentComponents } from "./components/core";
+import type { DocumentComponents, QuestionsReport } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
 const COMMAND_CREATE_ENV = "calkit-vscode.createCalkitEnvironment";
@@ -1337,13 +1337,48 @@ export function activate(context: vscode.ExtensionContext): void {
   // Hover, go-to-definition/declaration and CodeLenses over the project
   // content a LaTeX document injects: where a value or figure came from, the
   // stage and script behind it, and whether the project has moved on since.
+  const componentDiagnostics =
+    vscode.languages.createDiagnosticCollection("calkit");
+  context.subscriptions.push(componentDiagnostics);
   const componentsProvider = new ComponentsProvider({
     getWorkspaceRoot,
     describeComponents,
     buildOutputToStageMap,
     runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
+    diagnostics: componentDiagnostics,
+    checkQuestions,
     log,
   });
+  // Report on whatever is open now and whenever a document is opened or
+  // brought to the front, so Problems is about the paper being written
+  // rather than only about the last one saved.
+  const refreshComponentDiagnostics = (
+    document: vscode.TextDocument | undefined,
+  ): void => {
+    if (!document) {
+      return;
+    }
+    // A broken answer is a fault in calkit.yaml rather than in the paper
+    // that typesets it, so each document gets the check that can see it
+    if (/(^|[\\/])calkit\.yaml$/i.test(document.uri.fsPath)) {
+      void componentsProvider.updateQuestionDiagnostics(document);
+    } else {
+      void componentsProvider.updateDiagnostics(document);
+    }
+  };
+  context.subscriptions.push(
+    vscode.workspace.onDidOpenTextDocument(refreshComponentDiagnostics),
+    vscode.window.onDidChangeActiveTextEditor((editor) =>
+      refreshComponentDiagnostics(editor?.document),
+    ),
+    // A closed document's problems belong to a file nobody is looking at
+    vscode.workspace.onDidCloseTextDocument((document) =>
+      componentDiagnostics.delete(document.uri),
+    ),
+  );
+  for (const document of vscode.workspace.textDocuments) {
+    refreshComponentDiagnostics(document);
+  }
   const texSelector: vscode.DocumentSelector = [
     { scheme: "file", language: "latex" },
     { scheme: "file", pattern: "**/*.tex" },
@@ -1381,8 +1416,14 @@ export function activate(context: vscode.ExtensionContext): void {
     // A saved document can inject something new, and a finished run changes
     // what is current, so both invalidate what the provider last read
     vscode.workspace.onDidSaveTextDocument((document) => {
-      if (document.uri.fsPath.toLowerCase().endsWith(".tex")) {
+      const saved = document.uri.fsPath.toLowerCase();
+      if (saved.endsWith(".tex")) {
         componentsProvider.refresh();
+        refreshComponentDiagnostics(document);
+      } else if (/(^|[\\/])calkit\.yaml$/.test(saved)) {
+        // Editing a question is how one stops being stale, so the report
+        // it is judged against has to be taken again
+        refreshComponentDiagnostics(document);
       }
     }),
   );
@@ -1411,6 +1452,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const refreshPipelineDerived = (): void => {
     scheduleRefreshPipelineOutputContext(context);
     componentsProvider.refresh();
+    refreshComponentDiagnostics(vscode.window.activeTextEditor?.document);
     // A file only gets stage lenses once calkit.yaml declares it, so these
     // have to be recomputed when that changes
     markdownStageCodeLensProvider.refresh();
@@ -1858,6 +1900,33 @@ async function describeComponents(
     // no calkit on PATH: all of them mean there is nothing to show, and none
     // of them is worth interrupting someone writing a paper
     log(`describe components ${args.join(" ")} failed: ${String(error)}`);
+    return undefined;
+  }
+}
+
+// Ask calkit whether each answer still follows from its evidence. Exits
+// non-zero when something is wrong, which is the normal case here rather
+// than a failure, so the report is read off stdout either way.
+async function checkQuestions(
+  workspaceRoot: string,
+): Promise<QuestionsReport | undefined> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["check", "questions", "--json"],
+      { cwd: workspaceRoot, timeout: 60_000 },
+    );
+    return JSON.parse(stdout) as QuestionsReport;
+  } catch (error) {
+    const stdout = (error as { stdout?: string })?.stdout;
+    if (stdout) {
+      try {
+        return JSON.parse(stdout) as QuestionsReport;
+      } catch {
+        // Fall through to reporting nothing
+      }
+    }
+    log(`check questions failed: ${String(error)}`);
     return undefined;
   }
 }

@@ -320,8 +320,6 @@ import type {
   PostProjectEnvironmentErrors,
   PostProjectEnvironmentResponses,
   PostProjectErrors,
-  PostProjectEventErrors,
-  PostProjectEventResponses,
   PostProjectFigureErrors,
   PostProjectFigureResponses,
   PostProjectFigureScriptErrors,
@@ -350,6 +348,8 @@ import type {
   PostProjectOverleafSyncResponses,
   PostProjectPublicationErrors,
   PostProjectPublicationResponses,
+  PostProjectPushEventErrors,
+  PostProjectPushEventResponses,
   PostProjectQuestionErrors,
   PostProjectQuestionResponses,
   PostProjectReferenceItemErrors,
@@ -389,10 +389,10 @@ import type {
   PostVerifyEmailResponses,
   ProjectCommentPatch,
   ProjectCommentPost,
-  ProjectEventPost,
   ProjectInvitationPost,
   ProjectPatch,
   ProjectPost,
+  ProjectPushEventPost,
   ProjectStatusPost,
   PutOrgSubscriptionErrors,
   PutOrgSubscriptionResponses,
@@ -4798,30 +4798,29 @@ export class ProjectsService {
   }
 
   /**
-   * Post Project Event
+   * Post Project Push Event
    *
-   * Tell the hub something happened to this project elsewhere.
+   * Tell the hub this project has been pushed to somewhere else.
    *
-   * ``calkit push`` reports a push here, so the person who just pushed
-   * doesn't have to be the one who waits for the pipeline, figures and
-   * references to be worked out again. The GitHub App's webhook says the
-   * same thing for anyone pushing through GitHub; this covers the rest, and
-   * arrives sooner.
+   * ``calkit push`` reports here, so the person who just pushed doesn't have
+   * to be the one who waits for the pipeline, figures and references to be
+   * worked out again. The GitHub App's webhook says the same thing for
+   * anyone pushing through GitHub; this covers the rest, and arrives sooner.
    *
    * Needs write access, since it is a request to spend server time on the
    * project, and returns immediately either way: warming is an optimization,
    * and a deployment with no queue configured simply doesn't do it.
    */
-  public static postProjectEvent<ThrowOnError extends boolean = true>(
+  public static postProjectPushEvent<ThrowOnError extends boolean = true>(
     parameters: {
       owner_name: string
       project_name: string
-      projectEventPost: ProjectEventPost
+      projectPushEventPost: ProjectPushEventPost
     },
     options?: Options<never, ThrowOnError>,
   ): RequestResult<
-    PostProjectEventResponses,
-    PostProjectEventErrors,
+    PostProjectPushEventResponses,
+    PostProjectPushEventErrors,
     ThrowOnError
   > {
     const params = buildClientParams(
@@ -4831,19 +4830,19 @@ export class ProjectsService {
           args: [
             { in: "path", key: "owner_name" },
             { in: "path", key: "project_name" },
-            { key: "projectEventPost", map: "body" },
+            { key: "projectPushEventPost", map: "body" },
           ],
         },
       ],
     )
     return (options?.client ?? client).post<
-      PostProjectEventResponses,
-      PostProjectEventErrors,
+      PostProjectPushEventResponses,
+      PostProjectPushEventErrors,
       ThrowOnError
     >({
       responseType: "json",
       security: [{ scheme: "bearer", type: "http" }],
-      url: "/projects/{owner_name}/{project_name}/events",
+      url: "/projects/{owner_name}/{project_name}/events/push",
       ...options,
       ...params,
       headers: {

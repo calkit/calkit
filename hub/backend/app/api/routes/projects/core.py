@@ -6812,33 +6812,40 @@ def post_project_sync(
     return Message(message="success")
 
 
-class ProjectEventPost(BaseModel):
-    """Something that happened to a project somewhere else."""
+class ProjectPushEventPost(BaseModel):
+    """A push that happened somewhere else.
 
-    kind: Literal["push"] = "push"
-    # What was pushed and where, recorded for reference: the hub works out
-    # the current state from the repo itself, so none of this is trusted as
-    # input, but it is what makes a log line worth reading.
+    What was pushed and where, recorded for reference: the hub works out the
+    current state from the repo itself, so none of this is trusted as input,
+    but it is what makes a log line worth reading.
+    """
+
     git_rev: str | None = None
     remote: str | None = None
     branch: str | None = None
 
 
-@router.post("/projects/{owner_name}/{project_name}/events")
-def post_project_event(
+# One route per kind of event rather than one route with a kind field.
+# Events have little in common beyond the project they concern -- a push
+# carries a revision, something else won't -- so a shared body would become a
+# set of fields that only apply sometimes, and a shared handler a branch on
+# which ones. A path per kind keeps each body to what that event actually
+# has, gives the generated clients one typed call each, and leaves room for
+# kinds that need different access than a push does.
+@router.post("/projects/{owner_name}/{project_name}/events/push")
+def post_project_push_event(
     owner_name: str,
     project_name: str,
     current_user: CurrentUser,
     session: SessionDep,
-    req: ProjectEventPost,
+    req: ProjectPushEventPost,
 ) -> Message:
-    """Tell the hub something happened to this project elsewhere.
+    """Tell the hub this project has been pushed to somewhere else.
 
-    ``calkit push`` reports a push here, so the person who just pushed
-    doesn't have to be the one who waits for the pipeline, figures and
-    references to be worked out again. The GitHub App's webhook says the
-    same thing for anyone pushing through GitHub; this covers the rest, and
-    arrives sooner.
+    ``calkit push`` reports here, so the person who just pushed doesn't have
+    to be the one who waits for the pipeline, figures and references to be
+    worked out again. The GitHub App's webhook says the same thing for
+    anyone pushing through GitHub; this covers the rest, and arrives sooner.
 
     Needs write access, since it is a request to spend server time on the
     project, and returns immediately either way: warming is an optimization,
@@ -6852,9 +6859,9 @@ def post_project_event(
         min_access_level="write",
     )
     logger.info(
-        f"{project.owner_account_name}/{project.name} reported a {req.kind}",
+        f"{project.owner_account_name}/{project.name} reported a push",
         extra={
-            "event_kind": req.kind,
+            "event_kind": "push",
             "event_git_rev": req.git_rev,
             "event_remote": req.remote,
             "event_branch": req.branch,

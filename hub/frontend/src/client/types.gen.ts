@@ -3297,30 +3297,6 @@ export type ProjectCommentPost = {
 }
 
 /**
- * ProjectEventPost
- *
- * Something that happened to a project somewhere else.
- */
-export type ProjectEventPost = {
-  /**
-   * Kind
-   */
-  kind?: "push"
-  /**
-   * Git Rev
-   */
-  git_rev?: string | null
-  /**
-   * Remote
-   */
-  remote?: string | null
-  /**
-   * Branch
-   */
-  branch?: string | null
-}
-
-/**
  * ProjectInvitationCreated
  */
 export type ProjectInvitationCreated = {
@@ -3694,6 +3670,30 @@ export type ProjectPublic = {
    * Current User Access
    */
   current_user_access?: "read" | "write" | "admin" | "owner" | null
+}
+
+/**
+ * ProjectPushEventPost
+ *
+ * A push that happened somewhere else.
+ *
+ * What was pushed and where, recorded for reference: the hub works out the
+ * current state from the repo itself, so none of this is trusted as input,
+ * but it is what makes a log line worth reading.
+ */
+export type ProjectPushEventPost = {
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Remote
+   */
+  remote?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
 }
 
 /**
@@ -10318,8 +10318,8 @@ export type PostProjectSyncResponses = {
 export type PostProjectSyncResponse =
   PostProjectSyncResponses[keyof PostProjectSyncResponses]
 
-export type PostProjectEventData = {
-  body: ProjectEventPost
+export type PostProjectPushEventData = {
+  body: ProjectPushEventPost
   path: {
     /**
      * Owner Name
@@ -10331,28 +10331,28 @@ export type PostProjectEventData = {
     project_name: string
   }
   query?: never
-  url: "/projects/{owner_name}/{project_name}/events"
+  url: "/projects/{owner_name}/{project_name}/events/push"
 }
 
-export type PostProjectEventErrors = {
+export type PostProjectPushEventErrors = {
   /**
    * Validation Error
    */
   422: HttpValidationError
 }
 
-export type PostProjectEventError =
-  PostProjectEventErrors[keyof PostProjectEventErrors]
+export type PostProjectPushEventError =
+  PostProjectPushEventErrors[keyof PostProjectPushEventErrors]
 
-export type PostProjectEventResponses = {
+export type PostProjectPushEventResponses = {
   /**
    * Successful Response
    */
   200: Message
 }
 
-export type PostProjectEventResponse =
-  PostProjectEventResponses[keyof PostProjectEventResponses]
+export type PostProjectPushEventResponse =
+  PostProjectPushEventResponses[keyof PostProjectPushEventResponses]
 
 export type GetProjectPipelineData = {
   body?: never

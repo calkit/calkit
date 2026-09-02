@@ -1691,25 +1691,14 @@ def _tell_hub_we_pushed(git_args: list[str]) -> None:
     Entirely best-effort: a push has already succeeded by the time this runs,
     so nothing here is worth failing it or slowing it down for.
     """
-    import requests
-
     try:
         project = calkit.detect_project_name()
-        # Raises when there's no token, which is the answer for anyone not
-        # using a hub. Deliberately not the shared request helper: that one
-        # retries with backoff and can start a device login on a 401, and
-        # neither belongs in the seconds after a push has already succeeded.
-        headers = calkit.hub.get_headers()
-        url = (
-            calkit.hub.get_base_url().rstrip("/")
-            + f"/projects/{project}/events"
-        )
     except Exception:
         return
     # What was pushed and where. The hub reads the repo itself to find the
     # current state, so this is for the record rather than for it to act on,
     # and anything we can't work out is simply left out.
-    body: dict[str, str] = {"kind": "push"}
+    body: dict[str, str] = {}
     try:
         repo = calkit.git.get_repo()
         body["git_rev"] = repo.head.commit.hexsha
@@ -1724,7 +1713,16 @@ def _tell_hub_we_pushed(git_args: list[str]) -> None:
     except Exception:
         body.setdefault("remote", "origin")
     try:
-        requests.post(url, headers=headers, json=body, timeout=5)
+        calkit.hub.post(
+            f"/projects/{project}/events/push",
+            json=body,
+            # The push has already succeeded, so this is worth doing but not
+            # worth waiting on: no backoff, and no stopping to ask someone
+            # who isn't logged in to log in.
+            max_retries=0,
+            allow_login=False,
+            timeout=5,
+        )
     except Exception:
         # Not connected to a hub, not logged in, offline, or a hub that
         # doesn't know this project: none of them are the user's problem

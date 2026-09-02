@@ -5613,53 +5613,6 @@ export const ProjectCommentPostSchema = {
   title: "ProjectCommentPost",
 } as const
 
-export const ProjectEventPostSchema = {
-  properties: {
-    kind: {
-      type: "string",
-      const: "push",
-      title: "Kind",
-      default: "push",
-    },
-    git_rev: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Git Rev",
-    },
-    remote: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Remote",
-    },
-    branch: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Branch",
-    },
-  },
-  type: "object",
-  title: "ProjectEventPost",
-  description: "Something that happened to a project somewhere else.",
-} as const
-
 export const ProjectInvitationCreatedSchema = {
   properties: {
     id: {
@@ -6454,6 +6407,48 @@ export const ProjectPublicSchema = {
     "owner_account_type",
   ],
   title: "ProjectPublic",
+} as const
+
+export const ProjectPushEventPostSchema = {
+  properties: {
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    remote: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Remote",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+  },
+  type: "object",
+  title: "ProjectPushEventPost",
+  description:
+    "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
 } as const
 
 export const ProjectStatusSchema = {

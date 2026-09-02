@@ -1675,6 +1675,42 @@ def push(
             subprocess.check_call(git_cmd + git_args)
         except subprocess.CalledProcessError:
             raise_error("Git push failed")
+        _tell_hub_we_pushed()
+
+
+def _tell_hub_we_pushed() -> None:
+    """Let the hub know this project has moved, so it can get ready.
+
+    Everything the hub shows for a project is worked out from its latest
+    commit, and that work takes long enough to be worth doing before someone
+    opens the page rather than while they wait. The hub hears about pushes
+    through GitHub anyway; this arrives sooner, and covers projects it can't
+    be told about that way.
+
+    Entirely best-effort: a push has already succeeded by the time this runs,
+    so nothing here is worth failing it or slowing it down for.
+    """
+    import requests
+
+    try:
+        project = calkit.detect_project_name()
+        # Raises when there's no token, which is the answer for anyone not
+        # using a hub. Deliberately not the shared request helper: that one
+        # retries with backoff and can start a device login on a 401, and
+        # neither belongs in the seconds after a push has already succeeded.
+        headers = calkit.hub.get_headers()
+        url = (
+            calkit.hub.get_base_url().rstrip("/") + f"/projects/{project}/warm"
+        )
+    except Exception:
+        return
+    try:
+        requests.post(url, headers=headers, timeout=5)
+    except Exception:
+        # Not connected to a hub, not logged in, offline, or a hub that
+        # doesn't know this project: none of them are the user's problem
+        # right now.
+        pass
 
 
 @app.command(name="ignore")

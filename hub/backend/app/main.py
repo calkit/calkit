@@ -146,6 +146,19 @@ Instrumentator(
 _LOG_SKIP_PATHS = {"/metrics"}
 
 
+@app.on_event("startup")
+def queue_startup_warms() -> None:
+    """Get the recently-active projects ready before anyone opens them.
+
+    Enqueue-only: the work itself happens in the worker, so this adds
+    nothing to how long the app takes to come up. Jobs are keyed by project,
+    so every API process doing this on boot still results in one warm each.
+    """
+    import app.tasks
+
+    app.tasks.enqueue_startup_warms(settings.WARM_ON_STARTUP)
+
+
 @app.middleware("http")
 async def log_requests(
     request: Request,

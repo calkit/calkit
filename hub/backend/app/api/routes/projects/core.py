@@ -53,6 +53,7 @@ from TexSoup import TexSoup
 
 import app.imports
 import app.projects
+import app.tasks
 import calkit
 import calkit.core
 import calkit.detect
@@ -6799,6 +6800,35 @@ def post_project_sync(
     # Publications
     # TODO: Update files in Git repo with IDs?
     return Message(message="success")
+
+
+@router.post("/projects/{owner_name}/{project_name}/warm")
+def post_project_warm(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+) -> Message:
+    """Ask for this project's derived data to be recomputed now.
+
+    Called by ``calkit push`` so the person who just pushed doesn't have to
+    be the one who waits for the pipeline, figures and references to be
+    worked out again. The GitHub App's webhook does the same thing for
+    anyone pushing through GitHub; this covers the rest, and arrives sooner.
+
+    Needs write access, since it is a request to spend server time on the
+    project, and returns immediately either way: warming is an optimization,
+    and a deployment with no queue configured simply doesn't do it.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    queued = app.tasks.enqueue_warm(project.owner_account_name, project.name)
+    return Message(message="Queued" if queued else "Not queued")
 
 
 @router.get("/projects/{owner_name}/{project_name}/pipeline")

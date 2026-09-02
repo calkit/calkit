@@ -147,6 +147,12 @@ class Settings(BaseSettings):
     # files nobody is looking at: for one real project, 739 MB of the 957 MB
     # was history, nearly all of it figures and results.
     #
+    # How many recently-active projects to warm when the app starts. A
+    # deploy empties the caches those pages are built from, and this decides
+    # how much of that is paid before anyone asks rather than by whoever
+    # opens the page first. 0 disables it.
+    WARM_ON_STARTUP: int = 25
+
     # Where project clones live. A clone is expensive to make and cheap to
     # keep, so it belongs somewhere that survives a deploy: on the container
     # filesystem every release re-clones every project for every viewer.
@@ -317,6 +323,11 @@ class Settings(BaseSettings):
     # as a GitHub Actions secret. Optional: without it, GitHub-less users can
     # only read public projects.
     GH_APP_PRIVATE_KEY: str | None = None
+    # Shared secret for the GitHub App's webhook. Set the same value on the
+    # App itself; a delivery whose signature doesn't match it is refused.
+    # Unset means the endpoint refuses every delivery, which is the right
+    # default for a deployment that hasn't configured one.
+    GH_WEBHOOK_SECRET: str | None = None
     # Stripe
     STRIPE_SECRET_KEY: str
     STRIPE_PUBLISHABLE_KEY: str

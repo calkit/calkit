@@ -16,6 +16,7 @@ minutes and the threadpool is what serves requests.
 """
 
 import time
+from typing import Any, Callable
 
 from sqlmodel import Session, select
 
@@ -27,7 +28,7 @@ from app.models import Account, Project, User
 
 def warm_project(
     owner_name: str, project_name: str, force: bool = False
-) -> dict:
+) -> dict[str, Any]:
     """Refresh a project's clone and recompute what the project view reads.
 
     Returns a summary of what ran, for the worker log. Never raises: a warm
@@ -130,7 +131,9 @@ def warm_project(
     }
 
 
-def _steps():
+def _steps() -> list[
+    tuple[str, Callable[[Project, User | None, Session], None]]
+]:
     """The warm steps, in the order the project view needs them.
 
     Imported lazily and listed here rather than called inline so one failing
@@ -147,7 +150,9 @@ def _steps():
     """
     from app.api.routes.projects import core as routes
 
-    def pipeline(project, user, session):
+    def pipeline(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_pipeline(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -156,7 +161,7 @@ def _steps():
             ref=None,
         )
 
-    def figures(project, user, session):
+    def figures(project: Project, user: User | None, session: Session) -> None:
         # Every argument is passed, including the ones with defaults: called
         # outside a request, a FastAPI ``Query(...)`` default arrives as the
         # Query object rather than its value, and a Query object is truthy.
@@ -173,7 +178,9 @@ def _steps():
             thumbnails=True,
         )
 
-    def references(project, user, session):
+    def references(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_references(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -182,7 +189,9 @@ def _steps():
             ref=None,
         )
 
-    def questions(project, user, session):
+    def questions(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_questions(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -191,7 +200,9 @@ def _steps():
             ref=None,
         )
 
-    def datasets(project, user, session):
+    def datasets(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_datasets(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -200,7 +211,9 @@ def _steps():
             ref=None,
         )
 
-    def publications(project, user, session):
+    def publications(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_publications(
             owner_name=project.owner_account_name,
             project_name=project.name,

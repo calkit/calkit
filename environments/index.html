@@ -1,0 +1,3365 @@
+<!DOCTYPE html><html class="no-js" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width,initial-scale=1" name="viewport">
+<link href="../requirements/" rel="prev">
+<link href="../pipeline/" rel="next">
+<link href="../assets/images/favicon.png" rel="icon">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.4" name="generator">
+<title>Environments - Calkit</title>
+<link href="../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
+<link href="../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet">
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<script id="__analytics">function __md_analytics(){function e(){dataLayer.push(arguments)}window.dataLayer=window.dataLayer||[],e("js",new Date),e("config","G-B87E6N95DH"),document.addEventListener("DOMContentLoaded",(function(){document.forms.search&&document.forms.search.query.addEventListener("blur",(function(){this.value&&e("event","search",{search_term:this.value})}));document$.subscribe((function(){var t=document.forms.feedback;if(void 0!==t)for(var a of t.querySelectorAll("[type=submit]"))a.addEventListener("click",(function(a){a.preventDefault();var n=document.location.pathname,d=this.getAttribute("data-md-value");e("event","feedback",{page:n,data:d}),t.firstElementChild.disabled=!0;var r=t.querySelector(".md-feedback__note [data-md-value='"+d+"']");r&&(r.hidden=!1)})),t.hidden=!1})),location$.subscribe((function(t){e("config","G-B87E6N95DH",{page_path:t.pathname})}))}));var t=document.createElement("script");t.async=!0,t.src="https://www.googletagmanager.com/gtag/js?id=G-B87E6N95DH",document.getElementById("__analytics").insertAdjacentElement("afterEnd",t)}</script>
+<script>"undefined"!=typeof __md_analytics&&__md_analytics()</script>
+<link href="../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style></head>
+<body data-md-color-accent="cyan" data-md-color-primary="teal" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#environments">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="Calkit" class="md-header__button md-logo" data-md-component="logo" href=".." title="Calkit">
+<img alt="logo" src="../img/c-to-the-k-white.svg">
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            Calkit
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              Environments
+            
+          </span>
+</div>
+</div>
+</div>
+<form class="md-header__option" data-md-component="palette">
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="cyan" data-md-color-media="(prefers-color-scheme)" data-md-color-primary="teal" data-md-color-scheme="default" id="__palette_0" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to light mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"></path></svg>
+</label>
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="cyan" data-md-color-media="(prefers-color-scheme: light)" data-md-color-primary="teal" data-md-color-scheme="default" id="__palette_1" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_2" hidden="" title="Switch to dark mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+<input aria-label="Switch to system preference" class="md-option" data-md-color-accent="cyan" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-primary="teal" data-md-color-scheme="slate" id="__palette_2" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to system preference">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+</form>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text">
+<label class="md-search__icon md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/calkit/calkit.git" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="Calkit" class="md-nav__button md-logo" data-md-component="logo" href=".." title="Calkit">
+<img alt="logo" src="../img/c-to-the-k-white.svg">
+</a>
+    Calkit
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/calkit/calkit.git" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    calkit/calkit
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../installation/">
+<span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../quickstart/">
+<span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_4" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../hub/">
+<span class="md-ellipsis">
+    
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Sharing, collaboration, and backup (Calkit hub)
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../hub/self-hosting/">
+<span class="md-ellipsis">
+    
+  
+    Running your own
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../ai-tools/">
+<span class="md-ellipsis">
+    
+  
+    Use with AI tools
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../questions/">
+<span class="md-ellipsis">
+    
+  
+    Questions, hypotheses, answers, and evidence
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../version-control/">
+<span class="md-ellipsis">
+    
+  
+    Version control
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../calkit-yaml/">
+<span class="md-ellipsis">
+    
+  
+    The calkit.yaml file
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../requirements/">
+<span class="md-ellipsis">
+    
+  
+    Requirements, configuration, and secrets
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox">
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    Environments
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#environment-types-and-definitions">
+<span class="md-ellipsis">
+      
+        Environment types and definitions
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#automatic-detection">
+<span class="md-ellipsis">
+      
+        Automatic detection
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#checking-syncing-and-executing">
+<span class="md-ellipsis">
+      
+        Checking, syncing, and executing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#inspecting-environment-paths">
+<span class="md-ellipsis">
+      
+        Inspecting environment paths
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#choosing-an-environment-type">
+<span class="md-ellipsis">
+      
+        Choosing an environment type
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#examples">
+<span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+</a>
+<nav aria-label="Examples" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#docker">
+<span class="md-ellipsis">
+      
+        Docker
+      
+    </span>
+</a>
+<nav aria-label="Docker" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#caching-images-in-a-registry">
+<span class="md-ellipsis">
+      
+        Caching images in a registry
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#locking-multiple-platforms">
+<span class="md-ellipsis">
+      
+        Locking multiple platforms
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-images-are-fetched">
+<span class="md-ellipsis">
+      
+        How images are fetched
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv">
+<span class="md-ellipsis">
+      
+        uv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#venv">
+<span class="md-ellipsis">
+      
+        venv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#conda">
+<span class="md-ellipsis">
+      
+        Conda
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#julia">
+<span class="md-ellipsis">
+      
+        Julia
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#slurm">
+<span class="md-ellipsis">
+      
+        SLURM
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system">
+<span class="md-ellipsis">
+      
+        System
+      
+    </span>
+</a>
+<nav aria-label="System" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#requirements">
+<span class="md-ellipsis">
+      
+        Requirements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#running-on-another-machine">
+<span class="md-ellipsis">
+      
+        Running on another machine
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#getting-set-up">
+<span class="md-ellipsis">
+      
+        Getting set up
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-the-workspace-is-kept-in-sync">
+<span class="md-ellipsis">
+      
+        How the workspace is kept in sync
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pairing-with-a-runtime">
+<span class="md-ellipsis">
+      
+        Pairing with a runtime
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#matlab">
+<span class="md-ellipsis">
+      
+        MATLAB
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pixi">
+<span class="md-ellipsis">
+      
+        Pixi
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nix">
+<span class="md-ellipsis">
+      
+        Nix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#r">
+<span class="md-ellipsis">
+      
+        R
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system-environments">
+<span class="md-ellipsis">
+      
+        System environments
+      
+    </span>
+</a>
+<nav aria-label="System environments" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#environment-kind-reference">
+<span class="md-ellipsis">
+      
+        Environment kind reference
+      
+    </span>
+</a>
+<nav aria-label="Environment kind reference" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#conda_1">
+<span class="md-ellipsis">
+      
+        conda
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#docker_1">
+<span class="md-ellipsis">
+      
+        docker
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#julia_1">
+<span class="md-ellipsis">
+      
+        julia
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#matlab_1">
+<span class="md-ellipsis">
+      
+        matlab
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nix_1">
+<span class="md-ellipsis">
+      
+        nix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pbs">
+<span class="md-ellipsis">
+      
+        pbs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pixi_1">
+<span class="md-ellipsis">
+      
+        pixi
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#renv">
+<span class="md-ellipsis">
+      
+        renv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#slurm_1">
+<span class="md-ellipsis">
+      
+        slurm
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system_1">
+<span class="md-ellipsis">
+      
+        system
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv_1">
+<span class="md-ellipsis">
+      
+        uv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv-venv">
+<span class="md-ellipsis">
+      
+        uv-venv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#venv_1">
+<span class="md-ellipsis">
+      
+        venv
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_11" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../pipeline/">
+<span class="md-ellipsis">
+    
+  
+    The pipeline
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_11" id="__nav_11_label" tabindex="0">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_11_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_11">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    The pipeline
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../pipeline/markdown/">
+<span class="md-ellipsis">
+    
+  
+    Runnable Markdown
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../pipeline/running-and-logging/">
+<span class="md-ellipsis">
+    
+  
+    Running and logging
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../pipeline/manual-steps/">
+<span class="md-ellipsis">
+    
+  
+    Manual steps
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../notebooks/">
+<span class="md-ellipsis">
+    
+  
+    Notebooks
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../jupyterlab/">
+<span class="md-ellipsis">
+    
+  
+    JupyterLab
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../hpc/">
+<span class="md-ellipsis">
+    
+  
+    High performance computing (HPC)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../datasets/">
+<span class="md-ellipsis">
+    
+  
+    Datasets
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../provenance/">
+<span class="md-ellipsis">
+    
+  
+    Provenance
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../references/">
+<span class="md-ellipsis">
+    
+  
+    References
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../calculations/">
+<span class="md-ellipsis">
+    
+  
+    Calculations
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../apps/">
+<span class="md-ellipsis">
+    
+  
+    Apps
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../releases/">
+<span class="md-ellipsis">
+    
+  
+    Releasing/archiving projects and artifacts
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../local-server/">
+<span class="md-ellipsis">
+    
+  
+    Local server (GUI interaction)
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../latex/">
+<span class="md-ellipsis">
+    
+  
+    LaTeX documents
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../overleaf/">
+<span class="md-ellipsis">
+    
+  
+    Overleaf integration
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_24" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../browser-ext/">
+<span class="md-ellipsis">
+    
+  
+    Browser extension
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_24" id="__nav_24_label" tabindex="0">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_24_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_24">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Browser extension
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../browser-ext/privacy/">
+<span class="md-ellipsis">
+    
+  
+    Privacy policy
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../subprojects/">
+<span class="md-ellipsis">
+    
+  
+    Subprojects
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../examples/">
+<span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle" id="__nav_27" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../tutorials/">
+<span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_27" id="__nav_27_label" tabindex="0">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_27_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_27">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/first-project/">
+<span class="md-ellipsis">
+    
+  
+    🎥 Creating your first project
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/jupyterlab/">
+<span class="md-ellipsis">
+    
+  
+    🎥 Composing a pipeline from multiple Jupyter notebooks in JupyterLab
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/existing-project/">
+<span class="md-ellipsis">
+    
+  
+    Converting an existing project to a Calkit project
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/openfoam/">
+<span class="md-ellipsis">
+    
+  
+    OpenFOAM, Docker, and Reviewer 2
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/adding-latex-pub-docker/">
+<span class="md-ellipsis">
+    
+  
+    Adding a new LaTeX-based publication with its own Docker build environment
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/latex-codespaces/">
+<span class="md-ellipsis">
+    
+  
+    Collaborating on a LaTeX document with GitHub Codespaces
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/notebook-pipeline/">
+<span class="md-ellipsis">
+    
+  
+    Using a Jupyter Notebook as a reproducible pipeline
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/procedures/">
+<span class="md-ellipsis">
+    
+  
+    Defining and executing procedures
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/conda-envs/">
+<span class="md-ellipsis">
+    
+  
+    Keeping track of conda environments
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/office/">
+<span class="md-ellipsis">
+    
+  
+    Using Microsoft Office
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/matlab/">
+<span class="md-ellipsis">
+    
+  
+    🎥 Using MATLAB
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/github-actions/">
+<span class="md-ellipsis">
+    
+  
+    Running Calkit in GitHub Actions
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/runnable-readme/">
+<span class="md-ellipsis">
+    
+  
+    Making a README runnable
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/vscode-slurm-notebook/">
+<span class="md-ellipsis">
+    
+  
+    Connect a Jupyter Notebook to a kernel in a SLURM environment in VS Code
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/ai-agents/">
+<span class="md-ellipsis">
+    
+  
+    Declarative, structured prompting to make AI agents work reproducibly
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../tutorials/writing-first/">
+<span class="md-ellipsis">
+    
+  
+    Writing first: let the paper drive the project
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../cli-reference/">
+<span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../help/">
+<span class="md-ellipsis">
+    
+  
+    Help and support
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../reproducibility/">
+<span class="md-ellipsis">
+    
+  
+    Reproducibility
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../governance/">
+<span class="md-ellipsis">
+    
+  
+    Governance
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../acknowledgements/">
+<span class="md-ellipsis">
+    
+  
+    Acknowledgements
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#environment-types-and-definitions">
+<span class="md-ellipsis">
+      
+        Environment types and definitions
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#automatic-detection">
+<span class="md-ellipsis">
+      
+        Automatic detection
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#checking-syncing-and-executing">
+<span class="md-ellipsis">
+      
+        Checking, syncing, and executing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#inspecting-environment-paths">
+<span class="md-ellipsis">
+      
+        Inspecting environment paths
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#choosing-an-environment-type">
+<span class="md-ellipsis">
+      
+        Choosing an environment type
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#examples">
+<span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+</a>
+<nav aria-label="Examples" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#docker">
+<span class="md-ellipsis">
+      
+        Docker
+      
+    </span>
+</a>
+<nav aria-label="Docker" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#caching-images-in-a-registry">
+<span class="md-ellipsis">
+      
+        Caching images in a registry
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#locking-multiple-platforms">
+<span class="md-ellipsis">
+      
+        Locking multiple platforms
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-images-are-fetched">
+<span class="md-ellipsis">
+      
+        How images are fetched
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv">
+<span class="md-ellipsis">
+      
+        uv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#venv">
+<span class="md-ellipsis">
+      
+        venv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#conda">
+<span class="md-ellipsis">
+      
+        Conda
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#julia">
+<span class="md-ellipsis">
+      
+        Julia
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#slurm">
+<span class="md-ellipsis">
+      
+        SLURM
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system">
+<span class="md-ellipsis">
+      
+        System
+      
+    </span>
+</a>
+<nav aria-label="System" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#requirements">
+<span class="md-ellipsis">
+      
+        Requirements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#running-on-another-machine">
+<span class="md-ellipsis">
+      
+        Running on another machine
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#getting-set-up">
+<span class="md-ellipsis">
+      
+        Getting set up
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-the-workspace-is-kept-in-sync">
+<span class="md-ellipsis">
+      
+        How the workspace is kept in sync
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pairing-with-a-runtime">
+<span class="md-ellipsis">
+      
+        Pairing with a runtime
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#matlab">
+<span class="md-ellipsis">
+      
+        MATLAB
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pixi">
+<span class="md-ellipsis">
+      
+        Pixi
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nix">
+<span class="md-ellipsis">
+      
+        Nix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#r">
+<span class="md-ellipsis">
+      
+        R
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system-environments">
+<span class="md-ellipsis">
+      
+        System environments
+      
+    </span>
+</a>
+<nav aria-label="System environments" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#environment-kind-reference">
+<span class="md-ellipsis">
+      
+        Environment kind reference
+      
+    </span>
+</a>
+<nav aria-label="Environment kind reference" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#conda_1">
+<span class="md-ellipsis">
+      
+        conda
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#docker_1">
+<span class="md-ellipsis">
+      
+        docker
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#julia_1">
+<span class="md-ellipsis">
+      
+        julia
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#matlab_1">
+<span class="md-ellipsis">
+      
+        matlab
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nix_1">
+<span class="md-ellipsis">
+      
+        nix
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pbs">
+<span class="md-ellipsis">
+      
+        pbs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pixi_1">
+<span class="md-ellipsis">
+      
+        pixi
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#renv">
+<span class="md-ellipsis">
+      
+        renv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#slurm_1">
+<span class="md-ellipsis">
+      
+        slurm
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#system_1">
+<span class="md-ellipsis">
+      
+        system
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv_1">
+<span class="md-ellipsis">
+      
+        uv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#uv-venv">
+<span class="md-ellipsis">
+      
+        uv-venv
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#venv_1">
+<span class="md-ellipsis">
+      
+        venv
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<article class="md-content__inner md-typeset">
+<h1 id="environments">Environments</h1>
+<p>A computational environment describes the
+necessary conditions for code to run properly.
+Ensuring that every stage in your pipeline is run within a
+defined environment is a great way to improve reproducibility.
+Typically these will be created inside the global system environment,
+where the system environment has an environment manager installed.
+Because the system environment itself is somewhat of a "primary artifact"
+(cf. <a href="../reproducibility/">reproducibility</a>), i.e.,
+it is manually manipulated by the user,
+we want to minimize its uniqueness or changes to it,
+since there's a risk we may not properly document its state.
+This means we want to limit foundational dependencies to very common tools
+like Git, common shells like Bash, and environment managers.</p>
+<p>There are many different environment management tools out there to choose
+from, and Calkit attempts to provide a similar interface for all of them.
+Calkit also attempts to enforce
+their usage in such a way that all important information about the environment
+is captured locally in the project in so-called "lock files."
+This way, the project can be moved to other machines
+without needing to worry about manually installing packages.</p>
+<p>Calkit provides a means for defining or declaring environments
+inside a project's <code>calkit.yaml</code> file.
+There is also a command line utility <code>calkit xenv</code>
+for executing a command in one
+of these, which ensures that the environment
+matches its specification before execution.</p>
+<h2 id="environment-types-and-definitions">Environment types and definitions</h2>
+<p>Calkit supports the following environment types:</p>
+<ul>
+<li><a href="https://docker.com">Docker</a></li>
+<li><a href="https://docs.conda.io/projects/conda/en/stable/">Conda</a></li>
+<li><a href="https://docs.python.org/3/library/venv.html"><code>venv</code></a>
+  (included in the Python standard library)</li>
+<li><a href="https://docs.astral.sh/uv/"><code>uv</code></a> (both <code>venv</code> and project-based)</li>
+<li><a href="https://github.com/prefix-dev/pixi">Pixi</a></li>
+<li><a href="https://rstudio.github.io/renv/index.html"><code>renv</code></a></li>
+<li><a href="https://julialang.org/">Julia</a></li>
+<li><a href="https://www.mathworks.com/products/matlab.html">MATLAB</a></li>
+<li><a href="https://nixos.org/">Nix</a> (flake-based)</li>
+<li><a href="https://slurm.schedmd.com/documentation.html">SLURM</a></li>
+<li><code>system</code> (the machine itself, local or reached over SSH)</li>
+</ul>
+<p>Environment definitions live in the project's <code>calkit.yaml</code> file
+in the <code>environments</code> section.
+Most environments will have a <code>path</code> property pointing to a file
+that lists the necessary dependencies--the "spec."
+For example, a Python virtual environment or "venv" can be defined as
+a simple list of dependencies in a <code>requirements.txt</code> file,
+which might look like:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>pandas&gt;=2
+</span><span id="__span-0-2"><a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>polars==0.17.1
+</span><span id="__span-0-3"><a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>matplotlib
+</span></code></pre></div>
+<h2 id="automatic-detection">Automatic detection</h2>
+<p>For common environment types,
+Calkit will register a new environment upon its first use with <code>calkit xenv</code>.
+For example, if you run:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>python<span class="w"> </span>scripts/run.py
+</span></code></pre></div>
+<p>Calkit will attempt to find an environment spec, create the environment,
+save it in <code>calkit.yaml</code>, export a lock file,
+and run the command in that environment.
+If there are multiple env specs, e.g., <code>requirements.txt</code> and <code>environment.yml</code>,
+you can provide the path, e.g.,</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-2-1"><a href="#__codelineno-2-1" id="__codelineno-2-1" name="__codelineno-2-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-p<span class="w"> </span>environment.yml<span class="w"> </span>python<span class="w"> </span>scripts/run.py
+</span></code></pre></div>
+<p>and Calkit will use that one to create the environment and save the path in
+<code>calkit.yaml</code>.</p>
+<h2 id="checking-syncing-and-executing">Checking, syncing, and executing</h2>
+<p>An environment can be checked that it matches its specification with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-3-1"><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a>calkit<span class="w"> </span>check<span class="w"> </span>env<span class="w"> </span>--name<span class="w"> </span><span class="o">{</span>env-name<span class="o">}</span>
+</span></code></pre></div>
+<p>This will produce a "lock file"
+(inside the project's <code>.calkit/env-locks</code>
+directory if the environment manager doesn't export lock files by default),
+which uniquely identifies the actual environment that was
+created to help diagnose reproducibility issues down the road.</p>
+<p>A command can be executed in an environment with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-4-1"><a href="#__codelineno-4-1" id="__codelineno-4-1" name="__codelineno-4-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>--name<span class="w"> </span><span class="o">{</span>env-name<span class="o">}</span><span class="w"> </span>--<span class="w"> </span><span class="o">{</span>command<span class="o">}</span>
+</span></code></pre></div>
+<p>Before the command is executed,
+Calkit will check that the environment matches its specification,
+and if it needs to be updated,
+that will be done before execution.</p>
+<p>All project environments can be checked at once with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-5-1"><a href="#__codelineno-5-1" id="__codelineno-5-1" name="__codelineno-5-1"></a>calkit<span class="w"> </span>check<span class="w"> </span>envs
+</span></code></pre></div>
+<h2 id="inspecting-environment-paths">Inspecting environment paths</h2>
+<p>To see where an environment's specification and lock file live, use:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-6-1"><a href="#__codelineno-6-1" id="__codelineno-6-1" name="__codelineno-6-1"></a>calkit<span class="w"> </span>describe<span class="w"> </span>env<span class="w"> </span>--name<span class="w"> </span><span class="o">{</span>env-name<span class="o">}</span>
+</span></code></pre></div>
+<p>Adding <code>--json</code> prints the same information as machine-readable JSON,
+which is handy for other tools that need to locate these files:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-7-1"><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a>calkit<span class="w"> </span>describe<span class="w"> </span>env<span class="w"> </span>--name<span class="w"> </span><span class="o">{</span>env-name<span class="o">}</span><span class="w"> </span>--json
+</span></code></pre></div>
+<p>The output is a single line, shown formatted here for readability
+(pipe it through something like <code>jq</code> to format it yourself):</p>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-8-1"><a href="#__codelineno-8-1" id="__codelineno-8-1" name="__codelineno-8-1"></a><span class="p">{</span>
+</span><span id="__span-8-2"><a href="#__codelineno-8-2" id="__codelineno-8-2" name="__codelineno-8-2"></a><span class="w">  </span><span class="nt">"kind"</span><span class="p">:</span><span class="w"> </span><span class="s2">"uv-venv"</span><span class="p">,</span>
+</span><span id="__span-8-3"><a href="#__codelineno-8-3" id="__codelineno-8-3" name="__codelineno-8-3"></a><span class="w">  </span><span class="nt">"spec_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"requirements.txt"</span><span class="p">,</span>
+</span><span id="__span-8-4"><a href="#__codelineno-8-4" id="__codelineno-8-4" name="__codelineno-8-4"></a><span class="w">  </span><span class="nt">"lock_path"</span><span class="p">:</span><span class="w"> </span><span class="s2">".calkit/env-locks/my-env/linux-64.txt"</span><span class="p">,</span>
+</span><span id="__span-8-5"><a href="#__codelineno-8-5" id="__codelineno-8-5" name="__codelineno-8-5"></a><span class="w">  </span><span class="nt">"prefix"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+</span><span id="__span-8-6"><a href="#__codelineno-8-6" id="__codelineno-8-6" name="__codelineno-8-6"></a><span class="w">  </span><span class="nt">"python"</span><span class="p">:</span><span class="w"> </span><span class="s2">"3.13"</span>
+</span><span id="__span-8-7"><a href="#__codelineno-8-7" id="__codelineno-8-7" name="__codelineno-8-7"></a><span class="p">}</span>
+</span></code></pre></div>
+<p>All keys are always present, so a null value means the field doesn't apply
+to that kind of environment.
+To describe every environment at once, keyed by name, use
+<code>calkit describe envs [--json]</code>.</p>
+<h2 id="choosing-an-environment-type">Choosing an environment type</h2>
+<p>So which type of environment should you use?
+The short answer is: any.
+Any environment is better than none,
+where none means installing dependencies in the global host machine
+environment.
+If you want the long answer, keep reading.</p>
+<p>Docker is probably the most reproducible out of any environment type,
+since a Docker image includes information about the operating system.
+If it's convenient, e.g., if an image already contains all the necessary
+dependencies, go with a Docker environment.
+However, in some cases Docker may be a bit heavier than necessary.</p>
+<p>If you're running Python code, a <code>uv-venv</code> environment is a good default choice.
+<code>uv</code> is very easy to install and very fast.</p>
+<p>If you have non-Python dependencies that depend on complex compiled binaries
+(as scientific and engineering oriented tooling often does)
+and a <code>uv-venv</code> can't be built on your machine,
+A Conda environment is a good choice.
+However, Pixi has access to the same packages and is a bit faster.
+It's sort of like <code>uv</code> for Conda packages,
+and is similarly very easy to install.</p>
+<p>If you're working on a machine for which you don't have control to install
+dependencies,
+or working as part of a team,
+a plain old Python <code>venv</code> could be the best option.</p>
+<p>Again,
+try not to get too hung up on the decision of which environment type to use.
+Try one and see how it goes.
+Calkit should make the experience similar for all types.</p>
+<h2 id="examples">Examples</h2>
+<p>Creating any type of environment from the Calkit CLI
+follows a similar pattern starting with <code>calkit new</code>.
+You can view the help output with <code>calkit new --help</code> and filter it down to
+environment-related commands with <code>calkit new --help | grep env</code>.</p>
+<h3 id="docker">Docker</h3>
+<p>A new Docker environment can be added to the project with
+<code>calkit new docker-env</code>.
+A Docker environment can use an existing image,
+e.g., from Docker Hub, or it can create a new image, e.g.,
+from a <code>Dockerfile</code> stored in the project repo.</p>
+<p>Let's say you want to add an OpenFOAM environment to your project.
+This can be achieved with something like:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-9-1"><a href="#__codelineno-9-1" id="__codelineno-9-1" name="__codelineno-9-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>docker-env<span class="w"> </span>--image<span class="w"> </span>microfluidica/openfoam:2412<span class="w"> </span>--name<span class="w"> </span>foam
+</span></code></pre></div>
+<p>Then you can run a command in that environment with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-10-1"><a href="#__codelineno-10-1" id="__codelineno-10-1" name="__codelineno-10-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>foam<span class="w"> </span>--<span class="w"> </span>icoFoam<span class="w"> </span>-help
+</span></code></pre></div>
+<p>You can similarly jump into an interactive <code>bash</code> terminal with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-11-1"><a href="#__codelineno-11-1" id="__codelineno-11-1" name="__codelineno-11-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>foam<span class="w"> </span>bash
+</span></code></pre></div>
+<p>Some Docker images are CLI tools with an image entrypoint already defined
+(for example <code>minlag/mermaid-cli</code>).
+In that case, use <code>command_mode: entrypoint</code> so Calkit passes your command
+arguments directly to the container entrypoint instead of running
+<code>shell -c ...</code>.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-12-1"><a href="#__codelineno-12-1" id="__codelineno-12-1" name="__codelineno-12-1"></a><span class="c1"># In calkit.yaml</span>
+</span><span id="__span-12-2"><a href="#__codelineno-12-2" id="__codelineno-12-2" name="__codelineno-12-2"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-12-3"><a href="#__codelineno-12-3" id="__codelineno-12-3" name="__codelineno-12-3"></a><span class="w">  </span><span class="nt">mermaid</span><span class="p">:</span>
+</span><span id="__span-12-4"><a href="#__codelineno-12-4" id="__codelineno-12-4" name="__codelineno-12-4"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker</span>
+</span><span id="__span-12-5"><a href="#__codelineno-12-5" id="__codelineno-12-5" name="__codelineno-12-5"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">minlag/mermaid-cli</span>
+</span><span id="__span-12-6"><a href="#__codelineno-12-6" id="__codelineno-12-6" name="__codelineno-12-6"></a><span class="w">    </span><span class="nt">wdir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/data</span>
+</span><span id="__span-12-7"><a href="#__codelineno-12-7" id="__codelineno-12-7" name="__codelineno-12-7"></a><span class="w">    </span><span class="nt">command_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">entrypoint</span>
+</span></code></pre></div>
+<p>Then execute with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-13-1"><a href="#__codelineno-13-1" id="__codelineno-13-1" name="__codelineno-13-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>mermaid<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-2"><a href="#__codelineno-13-2" id="__codelineno-13-2" name="__codelineno-13-2"></a><span class="w">  </span>-i<span class="w"> </span>figures/my-mermaid-diagram.mmd<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-13-3"><a href="#__codelineno-13-3" id="__codelineno-13-3" name="__codelineno-13-3"></a><span class="w">  </span>-o<span class="w"> </span>figures/my-mermaid-diagram.pdf
+</span></code></pre></div>
+<p>But what if there isn't an image out there that has everything you need
+already installed into it?
+In this case, you can define and build a new derived image in the project
+by using the <code>--from</code> parameter,
+optionally adding predefined "layers" to the image with <code>--add-layer</code>.
+This will produce a Dockerfile defining the image,
+and when that environment is run with <code>calkit xenv</code>,
+that image will be built and a lock file produced.</p>
+<p>For example, running:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-14-1"><a href="#__codelineno-14-1" id="__codelineno-14-1" name="__codelineno-14-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>docker-env<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-2"><a href="#__codelineno-14-2" id="__codelineno-14-2" name="__codelineno-14-2"></a><span class="w">    </span>--from<span class="w"> </span>microfluidica/openfoam:2412<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-3"><a href="#__codelineno-14-3" id="__codelineno-14-3" name="__codelineno-14-3"></a><span class="w">    </span>--name<span class="w"> </span>foam2<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-14-4"><a href="#__codelineno-14-4" id="__codelineno-14-4" name="__codelineno-14-4"></a><span class="w">    </span>--add-layer<span class="w"> </span>miniforge
+</span></code></pre></div>
+<p>will create a Dockerfile in the project and add the environment
+named <code>foam2</code> to the <code>calkit.yaml</code> file.
+Calling <code>calkit xenv -n foam2 bash</code> will cause the image to be built
+and a lock file <code>Dockerfile-lock.json</code> to be created.
+Note that the Dockerfile path can be controlled with the <code>--path</code> option.</p>
+<p>You can go in and modify the Dockerfile, e.g.,
+to add more installation commands,
+and another call to <code>calkit xenv -n foam2</code> will kick off a rebuild
+automatically,
+since the lock file will no longer match the Dockerfile.</p>
+<p>If you're copying local files into the Docker image,
+you can declare these
+dependencies in the environment definition so the content of those will be
+tracked as well:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a href="#__codelineno-15-1" id="__codelineno-15-1" name="__codelineno-15-1"></a><span class="c1"># In calkit.yaml</span>
+</span><span id="__span-15-2"><a href="#__codelineno-15-2" id="__codelineno-15-2" name="__codelineno-15-2"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-15-3"><a href="#__codelineno-15-3" id="__codelineno-15-3" name="__codelineno-15-3"></a><span class="w">  </span><span class="nt">foam2</span><span class="p">:</span>
+</span><span id="__span-15-4"><a href="#__codelineno-15-4" id="__codelineno-15-4" name="__codelineno-15-4"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker</span>
+</span><span id="__span-15-5"><a href="#__codelineno-15-5" id="__codelineno-15-5" name="__codelineno-15-5"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">foam2</span>
+</span><span id="__span-15-6"><a href="#__codelineno-15-6" id="__codelineno-15-6" name="__codelineno-15-6"></a><span class="w">    </span><span class="nt">inputs</span><span class="p">:</span>
+</span><span id="__span-15-7"><a href="#__codelineno-15-7" id="__codelineno-15-7" name="__codelineno-15-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">src/mySolver.C</span>
+</span></code></pre></div>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This key used to be called <code>deps</code>, and is still read under that name so
+projects that predate the rename keep working, though Calkit will ask
+you to rename it and support will be dropped in a future release.
+<code>inputs</code> is the documented spelling, and is what <code>system</code>, <code>slurm</code>, and
+<code>pbs</code> environments use for the files their setup commands read.</p>
+</div>
+<p>This highlights Calkit's declarative design philosophy.
+Simply declare the environment and use it in a pipeline stage
+and Calkit will ensure it is built and up to date.
+There is no need to think about building images as a separate step.</p>
+<h4 id="caching-images-in-a-registry">Caching images in a registry</h4>
+<p>An image built from a Dockerfile can take a long time to build,
+and once it's gone from the local Docker image store,
+rebuilding it is the only way to get it back.
+Worse, a rebuild isn't guaranteed to produce the same image,
+since the packages the Dockerfile installs move on over time.</p>
+<p>Setting <code>registry</code> on the environment lets <code>calkit push</code> publish the
+image, so that Calkit can pull it back by digest whenever it's missing
+rather than rebuilding it:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-16-1"><a href="#__codelineno-16-1" id="__codelineno-16-1" name="__codelineno-16-1"></a><span class="c1"># In calkit.yaml</span>
+</span><span id="__span-16-2"><a href="#__codelineno-16-2" id="__codelineno-16-2" name="__codelineno-16-2"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-16-3"><a href="#__codelineno-16-3" id="__codelineno-16-3" name="__codelineno-16-3"></a><span class="w">  </span><span class="nt">foam2</span><span class="p">:</span>
+</span><span id="__span-16-4"><a href="#__codelineno-16-4" id="__codelineno-16-4" name="__codelineno-16-4"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker</span>
+</span><span id="__span-16-5"><a href="#__codelineno-16-5" id="__codelineno-16-5" name="__codelineno-16-5"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Dockerfile</span>
+</span><span id="__span-16-6"><a href="#__codelineno-16-6" id="__codelineno-16-6" name="__codelineno-16-6"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">foam2</span>
+</span><span id="__span-16-7"><a href="#__codelineno-16-7" id="__codelineno-16-7" name="__codelineno-16-7"></a><span class="w">    </span><span class="nt">registry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+</span></code></pre></div>
+<p><code>image</code> can be left out when there's a <code>path</code> to build from,
+in which case the image is named after the project and the environment,
+e.g., <code>someone/some-project.foam2</code>,
+matching how the environment's Jupyter kernel is named.
+An environment defined purely by someone else's image has to name it.</p>
+<p>That name comes from <code>owner</code> and <code>name</code> in <code>calkit.yaml</code>,
+or from the Git remote if they're not set.
+A project with neither says nothing about what it's called,
+and Calkit asks for <code>image</code>, or for <code>owner</code> and <code>name</code>, rather than
+naming the image after the directory the project happens to sit in,
+which would rename the image whenever the directory moved.</p>
+<p><code>ghcr.io</code> on its own resolves to the project's namespace in the GitHub
+Container Registry, e.g., <code>ghcr.io/someone/some-project</code>,
+naming the registry rather than leaving it to be worked out,
+but any registry prefix works,
+and leaving <code>registry</code> unset or null keeps images local.
+The lock file records the image's digest,
+so what gets pulled back is exactly what was built,
+and Calkit checks the image's layers against the lock after pulling.</p>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Pushing to a registry requires being logged into it. When the GitHub
+Container Registry refuses a push, Calkit logs in with the token it
+already holds for the GitHub API and tries again, which is usually
+enough: Calkit's GitHub App is granted permission to write packages.
+Only if that push is refused too does it open GitHub to create a token
+with the <code>write:packages</code> scope, saving that token once a push has
+actually succeeded with it, so it only has to be done once. In GitHub
+Actions, the <code>calkit/calkit/actions/run</code> action logs in automatically,
+so long as the workflow grants the <code>packages: write</code> permission.</p>
+</div>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The token is kept in the system keyring as
+<code>github_packages_token</code>, not in <code>~/.calkit/config.yaml</code>. Read or replace
+it with <code>calkit config get</code>/<code>set github_packages_token</code>. Logging in also
+leaves a copy in Docker's own credential store, which
+<code>docker logout ghcr.io</code> clears.</p>
+</div>
+<p><code>calkit push</code> sends the images of every environment with a <code>registry</code> set,
+alongside Git and DVC, skipping any the registry already has.
+An environment built before its registry was configured is pushed as-is,
+without being rebuilt first.
+A project with no image to send never reaches a registry at all:
+an environment with no <code>registry</code>, or one whose image was never built on
+this machine, is settled locally rather than with a round-trip and a
+request for credentials.
+Writing digests into lock files is a check's job, not a push's,
+so a push leaves the lock files alone.
+Pass <code>--no-docker</code> to skip images, or name what to send:
+<code>calkit push docker</code> publishes the images and nothing else, which is
+handy mid-work when the code isn't ready to go out with them.
+Checking an environment builds or pulls whatever the project needs to
+run, and leaves publishing to <code>calkit push</code>.
+The digest goes into the lock file as soon as the image is built, since a
+manifest is content-addressed: the digest an image is built with is the
+one it has once it's pushed, so pushing it leaves the lock alone.</p>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>That holds where the Docker daemon uses the containerd image store,
+which writes a manifest for an image as it builds it. The older image
+store writes none until the image is pushed, so there's no digest to
+record before then, and checking pushes the image itself to get one.
+With no registry set there's nowhere to push and nothing to record:
+the lock file names no image to pull, so everyone else rebuilds it,
+which Calkit warns about after building. <code>docker info</code> reports which
+store is in use, the containerd one as a driver type of
+<code>io.containerd.snapshotter.v1</code>.</p>
+</div>
+<p>To rebuild or repull an image and write fresh lock files, e.g., after an
+image's tag has been moved out from under the digest in the lock, run:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-17-1"><a href="#__codelineno-17-1" id="__codelineno-17-1" name="__codelineno-17-1"></a>calkit<span class="w"> </span>update<span class="w"> </span>docker-env<span class="w"> </span>--name<span class="w"> </span>foam2<span class="w"> </span>--lock
+</span></code></pre></div>
+<h4 id="locking-multiple-platforms">Locking multiple platforms</h4>
+<p>A Docker environment is locked per architecture, in
+<code>.calkit/env-locks/{name}</code>.
+Calkit reads the image's manifest from the registry and writes a lock file
+for each platform it provides, not just the one it's running on,
+so moving a project between an <code>arm64</code> laptop and an <code>amd64</code> server doesn't
+invalidate every stage in the environment.</p>
+<p>Images from a registry are multi-platform already.
+An image built from a Dockerfile is built for one platform by default;
+to build and lock more than one, declare them:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-18-1"><a href="#__codelineno-18-1" id="__codelineno-18-1" name="__codelineno-18-1"></a><span class="c1"># In calkit.yaml</span>
+</span><span id="__span-18-2"><a href="#__codelineno-18-2" id="__codelineno-18-2" name="__codelineno-18-2"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-18-3"><a href="#__codelineno-18-3" id="__codelineno-18-3" name="__codelineno-18-3"></a><span class="w">  </span><span class="nt">foam2</span><span class="p">:</span>
+</span><span id="__span-18-4"><a href="#__codelineno-18-4" id="__codelineno-18-4" name="__codelineno-18-4"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker</span>
+</span><span id="__span-18-5"><a href="#__codelineno-18-5" id="__codelineno-18-5" name="__codelineno-18-5"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Dockerfile</span>
+</span><span id="__span-18-6"><a href="#__codelineno-18-6" id="__codelineno-18-6" name="__codelineno-18-6"></a><span class="w">    </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">foam2</span>
+</span><span id="__span-18-7"><a href="#__codelineno-18-7" id="__codelineno-18-7" name="__codelineno-18-7"></a><span class="w">    </span><span class="nt">registry</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ghcr.io</span>
+</span><span id="__span-18-8"><a href="#__codelineno-18-8" id="__codelineno-18-8" name="__codelineno-18-8"></a><span class="w">    </span><span class="nt">build_platforms</span><span class="p">:</span>
+</span><span id="__span-18-9"><a href="#__codelineno-18-9" id="__codelineno-18-9" name="__codelineno-18-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linux/amd64</span>
+</span><span id="__span-18-10"><a href="#__codelineno-18-10" id="__codelineno-18-10" name="__codelineno-18-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">linux/arm64</span>
+</span></code></pre></div>
+<p>Building for multiple platforms requires a registry,
+since a multi-platform image can only be kept in one.</p>
+<h4 id="how-images-are-fetched">How images are fetched</h4>
+<p>The lock file for a Docker environment records the exact image its stages
+ran in: its layers, and the digests it can be pulled back by.
+Whenever an environment is checked, e.g., as part of <code>calkit run</code>,
+Calkit works from that record rather than assuming a rebuild will do,
+since building the same Dockerfile again produces a different image once
+the packages it installs have moved on.</p>
+<p>If the image named in <code>calkit.yaml</code> is already in the local Docker image
+store and its layers match the lock, there's nothing to do.
+Otherwise Calkit tries, in order:</p>
+<ol>
+<li><strong>Pull the digest in the lock</strong>, from the environment's registry if it
+   has one, or from wherever the image came from originally. This is the
+   usual case for an image deleted by a <code>docker system prune</code>, or for a
+   collaborator who's never built it. The layers of whatever comes back are
+   checked against the lock, so a tag that's been moved out from under the
+   digest can't quietly substitute a different image.</li>
+<li><strong>Fetch it from a project release.</strong> Releases record the images they
+   archived (see
+   <a href="../releases/#archiving-docker-images">Archiving Docker images</a>), so if
+   no registry can serve the image, Calkit looks through the project's
+   releases for one whose layers match the lock, downloads it from Zenodo,
+   loads it into Docker, and checks its layers again. This is what keeps an
+   old version of a project reproducible after a registry has dropped the
+   image, or after the account that published it is gone.</li>
+<li><strong>Build it</strong>, for an environment with a Dockerfile, or <strong>pull it by
+   tag</strong> for one named after an existing image. Only at this point does the
+   environment get an image that isn't the one the lock describes, and the
+   lock is rewritten to record what was actually built.</li>
+</ol>
+<p>The effect is that deleting an image locally costs a download rather than a
+rebuild, and doesn't invalidate any stage that used it, since the lock file
+doesn't change.</p>
+<p>A downloaded release image is cached under <code>.calkit/local/container-images</code>
+so it isn't fetched twice.
+Fetching from a release needs the release to have been published, since
+that's where the file is downloaded from.</p>
+<h3 id="uv">uv</h3>
+<p>uv can create both <em>project</em> and <em>venv</em> virtual environments.
+Project environments are defined by a <code>pyproject.toml</code> file,
+while venv environments are defined by a <code>requirements.txt</code> file.</p>
+<p>To create a new uv project environment,
+inside a project directory run something like:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-19-1"><a href="#__codelineno-19-1" id="__codelineno-19-1" name="__codelineno-19-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>uv-env<span class="w"> </span>-n<span class="w"> </span>my-env<span class="w"> </span><span class="s2">"polars&gt;=1.0"</span><span class="w"> </span>matplotlib
+</span></code></pre></div>
+<p>By default, this will create a <code>pyproject.toml</code> file in
+<code>.calkit/envs/my-env/pyproject.toml</code>,
+but the path can be controlled with the <code>--path</code> option.</p>
+<p>To create a new uv venv,
+simply replace <code>uv-env</code> with <code>uv-venv</code> in the above command and a
+<code>requirements.txt</code>
+file will be created instead.</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-20-1"><a href="#__codelineno-20-1" id="__codelineno-20-1" name="__codelineno-20-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-env<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import matplotlib, print(matplotlib.__version__)"</span>
+</span></code></pre></div>
+<p>If you were to run something like:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-21-1"><a href="#__codelineno-21-1" id="__codelineno-21-1" name="__codelineno-21-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-env<span class="w"> </span>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import pandas, print(pandas.__version__)"</span>
+</span></code></pre></div>
+<p>it would fail,
+since <code>pandas</code> is not present in the spec file
+(<code>pyproject.toml</code> or <code>requirements.txt</code>).
+However, if you add it in there,
+calling the above command again will succeed because Calkit
+automatically checks or syncs the environment before execution.</p>
+<h3 id="venv">venv</h3>
+<p>A <code>venv</code> environment,
+which uses Python's built-in <code>venv</code> module,
+can be used nearly identically to the <code>uv</code> example above.
+Simply replace <code>uv-venv</code> with <code>venv</code> in the <code>calkit new</code> call.</p>
+<h3 id="conda">Conda</h3>
+<p>As you might expect,
+Conda environments again work nearly identically to <code>uv-venv</code> and <code>venv</code>
+environments.</p>
+<p>You can create a new Conda environment with something like:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-22-1"><a href="#__codelineno-22-1" id="__codelineno-22-1" name="__codelineno-22-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>conda-env<span class="w"> </span>-n<span class="w"> </span>my-conda-env<span class="w"> </span>numpy<span class="w"> </span>matplotlib<span class="w"> </span>--pip<span class="w"> </span>pandas
+</span></code></pre></div>
+<p>Note that in this case, we specified one package, <code>pandas</code>, to be
+installed from the Python Package Index (PyPI)
+with <code>pip</code> using the <code>--pip</code> option.</p>
+<p>The new Conda environment spec will be written to <code>environment.yml</code>
+by default,
+which can be controlled with the <code>--path</code> option.</p>
+<p>A prefix for the environment can be specified to keep all packages under the
+project directory, e.g., by adding <code>--prefix .conda-envs/my-conda-env</code>.
+If this option is omitted, the environment will become part of Conda's
+system-wide collection of environments with a name like
+<code>{project_name}-{env_name}</code>,
+where the project name is added to avoid conflicts.</p>
+<p>Similar to other environment types,
+any time a command is executed with <code>calkit xenv</code>,
+this environment will be checked and created or updated as necessary.</p>
+<p>Calling:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-23-1"><a href="#__codelineno-23-1" id="__codelineno-23-1" name="__codelineno-23-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-conda-env<span class="w"> </span>--<span class="w"> </span>which<span class="w"> </span>python
+</span></code></pre></div>
+<p>will create it.
+If you add any dependencies to <code>environment.yml</code>,
+calling that same command will cause the environment to be rebuilt
+before execution,
+and an updated <code>environment-lock.yml</code> file will be created.
+Again this highlights Calkit's declarative design philosophy.
+Declare the environment and what command should be executed inside,
+and Calkit will handle the rest.</p>
+<h3 id="julia">Julia</h3>
+<p><a href="https://julialang.org/">Julia</a> environments have paths that point to a
+<code>Project.toml</code> file.
+Creating a new Julia environment is similar to creating a Python environment:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-24-1"><a href="#__codelineno-24-1" id="__codelineno-24-1" name="__codelineno-24-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>julia-env<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-2"><a href="#__codelineno-24-2" id="__codelineno-24-2" name="__codelineno-24-2"></a><span class="w">    </span>--name<span class="w"> </span>my-julia-env<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-3"><a href="#__codelineno-24-3" id="__codelineno-24-3" name="__codelineno-24-3"></a><span class="w">    </span>--path<span class="w"> </span>./envs/my-julia-env/Project.toml<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-4"><a href="#__codelineno-24-4" id="__codelineno-24-4" name="__codelineno-24-4"></a><span class="w">    </span>--julia<span class="w"> </span><span class="m">1</span>.11<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-5"><a href="#__codelineno-24-5" id="__codelineno-24-5" name="__codelineno-24-5"></a><span class="w">    </span>WaterLily<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-24-6"><a href="#__codelineno-24-6" id="__codelineno-24-6" name="__codelineno-24-6"></a><span class="w">    </span>Makie
+</span></code></pre></div>
+<p>With Julia environments, it's possible to execute a command:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-25-1"><a href="#__codelineno-25-1" id="__codelineno-25-1" name="__codelineno-25-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-julia-env<span class="w"> </span>--<span class="w"> </span>-e<span class="w"> </span><span class="s2">"println(\"hello world\");"</span>
+</span></code></pre></div>
+<p>or a script:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-26-1"><a href="#__codelineno-26-1" id="__codelineno-26-1" name="__codelineno-26-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-julia-env<span class="w"> </span>--<span class="w"> </span>my_julia_script.jl<span class="w"> </span>arg1<span class="w"> </span>arg2
+</span></code></pre></div>
+<p>Running Julia this was will ensure the global environment is ignored,
+meaning you can be sure if it's successful on your machine,
+it will be successful on others.</p>
+<h3 id="slurm">SLURM</h3>
+<p><a href="https://slurm.schedmd.com/documentation.html">SLURM</a>
+is a job scheduler commonly used for high performance computing (HPC).
+A SLURM environment can be defined in <code>calkit.yaml</code> as follows:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-27-1"><a href="#__codelineno-27-1" id="__codelineno-27-1" name="__codelineno-27-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-27-2"><a href="#__codelineno-27-2" id="__codelineno-27-2" name="__codelineno-27-2"></a><span class="w">  </span><span class="nt">my-hpc-cluster</span><span class="p">:</span>
+</span><span id="__span-27-3"><a href="#__codelineno-27-3" id="__codelineno-27-3" name="__codelineno-27-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slurm</span>
+</span><span id="__span-27-4"><a href="#__codelineno-27-4" id="__codelineno-27-4" name="__codelineno-27-4"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hpc.myinstitute.org</span>
+</span></code></pre></div>
+<p>See the <a href="../hpc/">HPC guide</a> for how to use SLURM (and PBS) environments in pipeline stages.</p>
+<h3 id="system">System</h3>
+<p>A <code>system</code> environment is the machine as it is,
+with nothing built, installed, or isolated by Calkit.
+It's an escape hatch for software Calkit doesn't manage,
+e.g., a site-wide module system or a hand-built toolchain.</p>
+<p>The simplest form is the machine you're on:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-28-1"><a href="#__codelineno-28-1" id="__codelineno-28-1" name="__codelineno-28-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-28-2"><a href="#__codelineno-28-2" id="__codelineno-28-2" name="__codelineno-28-2"></a><span class="w">  </span><span class="nt">local</span><span class="p">:</span>
+</span><span id="__span-28-3"><a href="#__codelineno-28-3" id="__codelineno-28-3" name="__codelineno-28-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-28-4"><a href="#__codelineno-28-4" id="__codelineno-28-4" name="__codelineno-28-4"></a><span class="w">    </span><span class="nt">lock</span><span class="p">:</span>
+</span><span id="__span-28-5"><a href="#__codelineno-28-5" id="__codelineno-28-5" name="__codelineno-28-5"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">os</span>
+</span><span id="__span-28-6"><a href="#__codelineno-28-6" id="__codelineno-28-6" name="__codelineno-28-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python-version</span>
+</span></code></pre></div>
+<p>Nothing is pinned by default, since opting out of isolation is the whole
+point of this kind.
+The <code>lock</code> property is how a project says which properties of the machine
+its results actually depend on.
+Locked properties are written to the environment's lock file,
+which stages depend on,
+so moving to a machine where one of them differs reruns the stage
+rather than silently reusing a cached result.</p>
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:START -->
+<p>The properties that can be locked are:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>os</code></td>
+<td>Operating system name, e.g. 'Linux' or 'Darwin'.</td>
+</tr>
+<tr>
+<td><code>os-version</code></td>
+<td>Operating system release, e.g. a kernel version.</td>
+</tr>
+<tr>
+<td><code>platform</code></td>
+<td>Full platform string, which folds in most of the above.</td>
+</tr>
+<tr>
+<td><code>machine</code></td>
+<td>Machine architecture, e.g. 'x86_64' or 'arm64'.</td>
+</tr>
+<tr>
+<td><code>processor</code></td>
+<td>Processor name, where the OS reports one.</td>
+</tr>
+<tr>
+<td><code>hostname</code></td>
+<td>The machine's name. Pins results to one specific host, but only by name: renaming the machine breaks the pin, and a machine elsewhere with the same name satisfies it. Prefer 'machine-id'.</td>
+</tr>
+<tr>
+<td><code>machine-id</code></td>
+<td>A stable identifier for the machine itself, read from the platform. Pins results to one specific machine, and unlike 'hostname' survives renaming it. Declaring a 'machine_id' on the environment says where to run, not that results depend on it, so lock this to also rerun stages when the machine changes.</td>
+</tr>
+<tr>
+<td><code>cpu-count</code></td>
+<td>Number of CPUs, which can change what a run produces where results depend on how work was divided.</td>
+</tr>
+<tr>
+<td><code>memory-gb</code></td>
+<td>Total memory in GB.</td>
+</tr>
+<tr>
+<td><code>python-version</code></td>
+<td>Version of the Python running Calkit.</td>
+</tr>
+<tr>
+<td><code>python-implementation</code></td>
+<td>Python implementation, e.g. 'CPython'.</td>
+</tr>
+<tr>
+<td><code>git-version</code></td>
+<td>Installed Git version.</td>
+</tr>
+<tr>
+<td><code>docker-version</code></td>
+<td>Installed Docker version.</td>
+</tr>
+<tr>
+<td><code>conda-version</code></td>
+<td>Installed Conda version.</td>
+</tr>
+<tr>
+<td><code>mamba-version</code></td>
+<td>Installed Mamba version.</td>
+</tr>
+<tr>
+<td><code>uv-version</code></td>
+<td>Installed uv version.</td>
+</tr>
+<tr>
+<td><code>pixi-version</code></td>
+<td>Installed Pixi version.</td>
+</tr>
+<tr>
+<td><code>julia-version</code></td>
+<td>Installed Julia version.</td>
+</tr>
+<tr>
+<td><code>juliaup-version</code></td>
+<td>Installed Juliaup version.</td>
+</tr>
+<tr>
+<td><code>rscript-version</code></td>
+<td>Installed Rscript version.</td>
+</tr>
+<tr>
+<td><code>brew-version</code></td>
+<td>Installed Homebrew version. macOS only.</td>
+</tr>
+</tbody>
+</table>
+<p>Run <code>calkit describe system</code> to see what these are on the machine you're on.</p>
+<!-- AUTO-GENERATED: SYSTEM-LOCK-PROPERTIES:END -->
+<p>The built-in <code>_system</code> environment is shorthand for this kind
+on <code>localhost</code> with nothing locked.</p>
+<h4 id="requirements">Requirements</h4>
+<p>A <code>system</code> environment can also declare
+<a href="../requirements/">requirements</a>---what has to be true of that machine
+before stages run on it:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-29-1"><a href="#__codelineno-29-1" id="__codelineno-29-1" name="__codelineno-29-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-29-2"><a href="#__codelineno-29-2" id="__codelineno-29-2" name="__codelineno-29-2"></a><span class="w">  </span><span class="nt">cluster</span><span class="p">:</span>
+</span><span id="__span-29-3"><a href="#__codelineno-29-3" id="__codelineno-29-3" name="__codelineno-29-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-29-4"><a href="#__codelineno-29-4" id="__codelineno-29-4" name="__codelineno-29-4"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">hpc.example.edu</span>
+</span><span id="__span-29-5"><a href="#__codelineno-29-5" id="__codelineno-29-5" name="__codelineno-29-5"></a><span class="w">    </span><span class="nt">requirements</span><span class="p">:</span>
+</span><span id="__span-29-6"><a href="#__codelineno-29-6" id="__codelineno-29-6" name="__codelineno-29-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cpu-count</span>
+</span><span id="__span-29-7"><a href="#__codelineno-29-7" id="__codelineno-29-7" name="__codelineno-29-7"></a><span class="w">        </span><span class="nt">min</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">16</span>
+</span><span id="__span-29-8"><a href="#__codelineno-29-8" id="__codelineno-29-8" name="__codelineno-29-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">julia&gt;=1.10</span>
+</span><span id="__span-29-9"><a href="#__codelineno-29-9" id="__codelineno-29-9" name="__codelineno-29-9"></a><span class="w">    </span><span class="nt">lock</span><span class="p">:</span>
+</span><span id="__span-29-10"><a href="#__codelineno-29-10" id="__codelineno-29-10" name="__codelineno-29-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cpu-count</span>
+</span><span id="__span-29-11"><a href="#__codelineno-29-11" id="__codelineno-29-11" name="__codelineno-29-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">julia-version</span>
+</span></code></pre></div>
+<p><code>requirements</code> and <code>lock</code> answer different questions,
+which is why a property can appear in both.
+A requirement is a precondition: it's checked before anything runs,
+and one that isn't met stops the run and says what was found and what
+was needed.
+A lock is a cache input: nothing is checked, but the property's observed
+value is recorded, and a stage reruns when it changes.
+So the example above means "refuse to run on fewer than 16 CPUs,"
+and separately "rerun everything if the number of CPUs isn't what it was
+last time."</p>
+<p>If you don't care what a property is but do care when it changes,
+lock it and leave it out of <code>requirements</code>.
+A requirement that constrains nothing is rejected, since it asserts
+nothing.</p>
+<p>Requirements are checked <em>on the machine the environment names</em>.
+For a host that isn't this one, that means an app is looked for on that
+host's <code>PATH</code>, a variable is read from the shell a login gets there, and
+a <code>setup</code> requirement's <code>check_command</code> runs there.
+Nothing is offered as a fix in that case---installing something on
+another machine belongs to whoever administers it---so Calkit reports
+what was missing and where.
+Checking a requirement about the machine itself, like <code>cpu-count</code>, needs
+Calkit installed on that host, since that's what reports its properties.</p>
+<p>The project's own top-level <code>requirements</code> describe the host you're
+driving from, which is the <code>_system</code> environment.
+They're checked on every <code>calkit run</code>, wherever stages end up running,
+because that machine still has to be able to drive the pipeline.</p>
+<h4 id="running-on-another-machine">Running on another machine</h4>
+<p>A <code>system</code> environment's <code>host</code> names the machine the work belongs on.
+SSH is how a machine is reached, not a kind of environment in its own
+right, so there's no separate <code>ssh</code> kind:
+if <code>host</code> names the machine you're on, the stage runs right there,
+and otherwise Calkit connects over <code>ssh</code> and copies files with <code>scp</code>.
+This is useful, e.g., for offloading work to a cluster login node
+or a cloud VM with a more powerful GPU.</p>
+<p>It is assumed that dependencies on the other machine are managed
+separately, unless you pair it with an inner environment (see below).</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-30-1"><a href="#__codelineno-30-1" id="__codelineno-30-1" name="__codelineno-30-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-30-2"><a href="#__codelineno-30-2" id="__codelineno-30-2" name="__codelineno-30-2"></a><span class="w">  </span><span class="nt">cluster</span><span class="p">:</span>
+</span><span id="__span-30-3"><a href="#__codelineno-30-3" id="__codelineno-30-3" name="__codelineno-30-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-30-4"><a href="#__codelineno-30-4" id="__codelineno-30-4" name="__codelineno-30-4"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="s">"10.225.22.25"</span>
+</span></code></pre></div>
+<p>The host is the only thing you have to declare.
+Everything else has a sensible default:</p>
+<ul>
+<li><code>user</code> is left to SSH, which resolves it from <code>~/.ssh/config</code> or falls
+  back to your current account.
+  Repeating it here would only be a second place for it to be wrong.</li>
+<li><code>wdir</code>---the project's <em>workspace</em> on that machine, a clone of the
+  project and the directory stages run in---defaults to
+  <code>~/.calkit/workspaces/&lt;hub&gt;/&lt;owner&gt;/&lt;name&gt;</code>.
+  A relative path is taken from the connecting user's home directory.
+  It's qualified by hub and owner because a host is shared: two projects
+  named <code>example-ssh</code> from different owners are different projects.
+  It's hidden because Calkit checks the workspace out with <code>--force</code>, so
+  it must not look like somewhere you'd keep your own work.</li>
+<li><code>ssh_key</code> is left to SSH and its agent.
+  If a particular host needs a particular key, that belongs in
+  <code>~/.ssh/config</code>, which already answers "which key for which host"
+  and is where people look for it.
+  The field is for cases where that isn't available, such as CI
+  dropping a key at a known path.</li>
+</ul>
+<p>So the fuller form, if you do need to be explicit, is:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-31-1"><a href="#__codelineno-31-1" id="__codelineno-31-1" name="__codelineno-31-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-31-2"><a href="#__codelineno-31-2" id="__codelineno-31-2" name="__codelineno-31-2"></a><span class="w">  </span><span class="nt">cluster</span><span class="p">:</span>
+</span><span id="__span-31-3"><a href="#__codelineno-31-3" id="__codelineno-31-3" name="__codelineno-31-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-31-4"><a href="#__codelineno-31-4" id="__codelineno-31-4" name="__codelineno-31-4"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="s">"10.225.22.25"</span>
+</span><span id="__span-31-5"><a href="#__codelineno-31-5" id="__codelineno-31-5" name="__codelineno-31-5"></a><span class="w">    </span><span class="nt">user</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-user-name</span>
+</span><span id="__span-31-6"><a href="#__codelineno-31-6" id="__codelineno-31-6" name="__codelineno-31-6"></a><span class="w">    </span><span class="nt">wdir</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">/home/my-user-name/calkit/example</span>
+</span><span id="__span-31-7"><a href="#__codelineno-31-7" id="__codelineno-31-7" name="__codelineno-31-7"></a><span class="w">    </span><span class="nt">ssh_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ssh/id_ed25519</span>
+</span></code></pre></div>
+<h4 id="getting-set-up">Getting set up</h4>
+<p>Check that the host is actually reachable before running anything:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-32-1"><a href="#__codelineno-32-1" id="__codelineno-32-1" name="__codelineno-32-1"></a>calkit<span class="w"> </span>check<span class="w"> </span>env<span class="w"> </span>-n<span class="w"> </span>cluster
+</span></code></pre></div>
+<p><code>calkit run</code> does the same check for every environment in the pipeline, so
+you don't have to remember to.
+Either way it connects without allowing a password prompt, so an
+unauthorized key is reported now rather than hanging halfway through a
+pipeline.</p>
+<p>In a terminal, that check walks you through whatever is missing, asking
+before each step:</p>
+<ul>
+<li>Any environment variable the definition refers to, such as a host
+  written as <code>${CK_SSH_HOST}</code>, is prompted for and saved to <code>.env</code>, so
+  it's only asked once.
+  <code>.env</code> is added to <code>.gitignore</code> if it isn't already.</li>
+<li>If you have no SSH key, it offers to create one (<code>ed25519</code>, no
+  passphrase, so stages can run unattended).</li>
+<li>If this machine isn't authorized on the host yet, it offers to run
+  <code>ssh-copy-id</code>, then re-checks rather than assuming it worked.</li>
+<li>If Calkit isn't installed on the host, it offers to install it there.
+  That's needed to activate an inner environment or to read the machine's
+  properties for a <code>lock</code>.</li>
+</ul>
+<p>Nothing happens without you agreeing to it, since creating a key and
+authorizing a machine both change things outside the project.</p>
+<p>Without a terminal---in CI, say---none of this is attempted, because
+there's nobody to answer.
+It fails instead with the exact commands to run, e.g.:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-33-1"><a href="#__codelineno-33-1" id="__codelineno-33-1" name="__codelineno-33-1"></a>ssh-copy-id<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_ed25519<span class="w"> </span>my-user-name@10.225.22.25
+</span><span id="__span-33-2"><a href="#__codelineno-33-2" id="__codelineno-33-2" name="__codelineno-33-2"></a>ssh<span class="w"> </span>my-user-name@10.225.22.25<span class="w"> </span><span class="s1">'curl -LsSf install.calkit.org | sh'</span>
+</span></code></pre></div>
+<p>To execute a command in this environment, we can add a stage like this
+to our pipeline in <code>calkit.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-34-1"><a href="#__codelineno-34-1" id="__codelineno-34-1" name="__codelineno-34-1"></a><span class="nt">pipeline</span><span class="p">:</span>
+</span><span id="__span-34-2"><a href="#__codelineno-34-2" id="__codelineno-34-2" name="__codelineno-34-2"></a><span class="w">  </span><span class="nt">stages</span><span class="p">:</span>
+</span><span id="__span-34-3"><a href="#__codelineno-34-3" id="__codelineno-34-3" name="__codelineno-34-3"></a><span class="w">    </span><span class="nt">run-simulation</span><span class="p">:</span>
+</span><span id="__span-34-4"><a href="#__codelineno-34-4" id="__codelineno-34-4" name="__codelineno-34-4"></a><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">shell-script</span>
+</span><span id="__span-34-5"><a href="#__codelineno-34-5" id="__codelineno-34-5" name="__codelineno-34-5"></a><span class="w">      </span><span class="nt">environment</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cluster</span>
+</span><span id="__span-34-6"><a href="#__codelineno-34-6" id="__codelineno-34-6" name="__codelineno-34-6"></a><span class="w">      </span><span class="nt">script_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">script.sh</span>
+</span><span id="__span-34-7"><a href="#__codelineno-34-7" id="__codelineno-34-7" name="__codelineno-34-7"></a><span class="w">      </span><span class="nt">outputs</span><span class="p">:</span>
+</span><span id="__span-34-8"><a href="#__codelineno-34-8" id="__codelineno-34-8" name="__codelineno-34-8"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results</span>
+</span></code></pre></div>
+<h4 id="how-the-workspace-is-kept-in-sync">How the workspace is kept in sync</h4>
+<p>Notice that nothing above says which files to copy back and forth, and
+nothing in the compiled pipeline does either.
+Calkit works it out, because a list of paths written down anywhere is a
+list that can fall behind the pipeline---at which point the stage quietly
+runs against stale inputs, which is the failure you'd least want here.</p>
+<p>Before the command runs, Calkit captures your working tree---including
+edits you haven't committed---as a Git snapshot, pushes it straight to the
+workspace, and checks it out there detached.
+No branch is created on either side, so several people (or several clones)
+can share one workspace without their branch names colliding, and cleaning
+up afterwards is a single reserved namespace rather than a set of names
+someone has to recognize.
+Data that DVC tracks is ignored by Git, so it can't ride along in the
+snapshot.
+It travels through the workspace's own DVC cache instead, which Calkit
+addresses as a DVC remote: only the objects the workspace is missing cross
+the wire, deduplicated by content.</p>
+<p>Afterwards, the workspace is asked what the run produced---anything it
+reports as changed or newly appeared since the snapshot it was given---and
+that is what comes back.
+<code>dvc.lock</code> is deliberately never carried back: your DVC writes its own
+from what it hashes locally.</p>
+<p>The workspace is reused between runs, which is what keeps environments,
+the DVC cache, and the Git history warm---a fresh one would rebuild all
+three every time.
+Because it's a single checkout at a single commit, a run holds a lock on
+it, and a second run that wants the same workspace is told who has it
+rather than checking out over them.
+The lock sits beside the workspace, not inside it, and is released once a
+run's outputs have been collected; if the run is interrupted while the
+remote job is still going, the lock stays, because the workspace really is
+still busy.</p>
+<p>One consequence worth knowing: if the project changes locally while a stage
+is running elsewhere, Calkit refuses to collect the results rather than
+recording them.
+DVC hashes a stage's dependencies from your local files once the command
+returns, so recording a result in that situation would write a <code>dvc.lock</code>
+pairing inputs that were never used with outputs they never produced---and
+unlike a stale stage, which simply reruns, a lock file like that goes on
+looking up to date indefinitely.</p>
+<p><code>lock</code> works the same way here as it does locally, except that the
+properties recorded are the <em>host's</em>---what a stage's results depend on is
+the machine it actually ran on.
+Calkit reads them from that machine when the environment is checked, which
+means Calkit has to be installed there.
+It already is if you pair the environment with a runtime (see below), since
+that's what activates the inner environment on the far end.</p>
+<h4 id="pairing-with-a-runtime">Pairing with a runtime</h4>
+<p>Because a <code>system</code> environment says <em>where</em> a stage runs rather than what
+it runs in, it can wrap another environment the same way a SLURM
+environment can, using the composite <code>&lt;outer&gt;:&lt;inner&gt;</code> syntax:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-35-1"><a href="#__codelineno-35-1" id="__codelineno-35-1" name="__codelineno-35-1"></a><span class="nt">pipeline</span><span class="p">:</span>
+</span><span id="__span-35-2"><a href="#__codelineno-35-2" id="__codelineno-35-2" name="__codelineno-35-2"></a><span class="w">  </span><span class="nt">stages</span><span class="p">:</span>
+</span><span id="__span-35-3"><a href="#__codelineno-35-3" id="__codelineno-35-3" name="__codelineno-35-3"></a><span class="w">    </span><span class="nt">simulate</span><span class="p">:</span>
+</span><span id="__span-35-4"><a href="#__codelineno-35-4" id="__codelineno-35-4" name="__codelineno-35-4"></a><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python-script</span>
+</span><span id="__span-35-5"><a href="#__codelineno-35-5" id="__codelineno-35-5" name="__codelineno-35-5"></a><span class="w">      </span><span class="nt">environment</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">cluster:py</span>
+</span><span id="__span-35-6"><a href="#__codelineno-35-6" id="__codelineno-35-6" name="__codelineno-35-6"></a><span class="w">      </span><span class="nt">script_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">simulate.py</span>
+</span></code></pre></div>
+<p>Calkit dispatches to <code>cluster</code> first, then activates the <code>py</code> environment
+once there, so the workspace on that machine needs both Calkit and the
+project.</p>
+<h3 id="matlab">MATLAB</h3>
+<p>Adding a MATLAB environment to a project will cause Calkit to automatically
+generate a Docker image based on its <code>version</code> and <code>products</code>
+attributes.
+A <code>MATLAB_LICENSE_SERVER</code> environmental variable must be set so the
+container can properly contact a license server.
+This can be done with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-36-1"><a href="#__codelineno-36-1" id="__codelineno-36-1" name="__codelineno-36-1"></a>calkit<span class="w"> </span>set-env-var<span class="w"> </span>MATLAB_LICENSE_SERVER<span class="w"> </span>&lt;XXXX@some.server.edu&gt;
+</span></code></pre></div>
+<p>Note that environmental variables set this way will be ignored by Git,
+and so will need to be set on each new machine on which the project is to
+be run.</p>
+<p>A MATLAB environment (and a pipeline stage that uses it) looks like:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-37-1"><a href="#__codelineno-37-1" id="__codelineno-37-1" name="__codelineno-37-1"></a><span class="c1"># In calkit.yaml</span>
+</span><span id="__span-37-2"><a href="#__codelineno-37-2" id="__codelineno-37-2" name="__codelineno-37-2"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-37-3"><a href="#__codelineno-37-3" id="__codelineno-37-3" name="__codelineno-37-3"></a><span class="w">  </span><span class="nt">my-matlab-2024b</span><span class="p">:</span>
+</span><span id="__span-37-4"><a href="#__codelineno-37-4" id="__codelineno-37-4" name="__codelineno-37-4"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">matlab</span>
+</span><span id="__span-37-5"><a href="#__codelineno-37-5" id="__codelineno-37-5" name="__codelineno-37-5"></a><span class="w">    </span><span class="nt">version</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">R2024b</span>
+</span><span id="__span-37-6"><a href="#__codelineno-37-6" id="__codelineno-37-6" name="__codelineno-37-6"></a><span class="w">    </span><span class="nt">products</span><span class="p">:</span>
+</span><span id="__span-37-7"><a href="#__codelineno-37-7" id="__codelineno-37-7" name="__codelineno-37-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Simulink</span>
+</span><span id="__span-37-8"><a href="#__codelineno-37-8" id="__codelineno-37-8" name="__codelineno-37-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Global_Optimization_Toolbox</span>
+</span><span id="__span-37-9"><a href="#__codelineno-37-9" id="__codelineno-37-9" name="__codelineno-37-9"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Parallel_Computing_Toolbox</span>
+</span><span id="__span-37-10"><a href="#__codelineno-37-10" id="__codelineno-37-10" name="__codelineno-37-10"></a>
+</span><span id="__span-37-11"><a href="#__codelineno-37-11" id="__codelineno-37-11" name="__codelineno-37-11"></a><span class="nt">pipeline</span><span class="p">:</span>
+</span><span id="__span-37-12"><a href="#__codelineno-37-12" id="__codelineno-37-12" name="__codelineno-37-12"></a><span class="w">  </span><span class="nt">stages</span><span class="p">:</span>
+</span><span id="__span-37-13"><a href="#__codelineno-37-13" id="__codelineno-37-13" name="__codelineno-37-13"></a><span class="w">    </span><span class="nt">my-matlab-script</span><span class="p">:</span>
+</span><span id="__span-37-14"><a href="#__codelineno-37-14" id="__codelineno-37-14" name="__codelineno-37-14"></a><span class="w">      </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">matlab-script</span>
+</span><span id="__span-37-15"><a href="#__codelineno-37-15" id="__codelineno-37-15" name="__codelineno-37-15"></a><span class="w">      </span><span class="nt">script_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">scripts/run_sim.m</span>
+</span><span id="__span-37-16"><a href="#__codelineno-37-16" id="__codelineno-37-16" name="__codelineno-37-16"></a><span class="w">      </span><span class="nt">environment</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-matlab-2024b</span>
+</span><span id="__span-37-17"><a href="#__codelineno-37-17" id="__codelineno-37-17" name="__codelineno-37-17"></a><span class="w">      </span><span class="nt">inputs</span><span class="p">:</span>
+</span><span id="__span-37-18"><a href="#__codelineno-37-18" id="__codelineno-37-18" name="__codelineno-37-18"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">config/my-sim-config.json</span>
+</span><span id="__span-37-19"><a href="#__codelineno-37-19" id="__codelineno-37-19" name="__codelineno-37-19"></a><span class="w">      </span><span class="nt">outputs</span><span class="p">:</span>
+</span><span id="__span-37-20"><a href="#__codelineno-37-20" id="__codelineno-37-20" name="__codelineno-37-20"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results/sim-results.h5</span>
+</span></code></pre></div>
+<h3 id="pixi">Pixi</h3>
+<p>Pixi environments typically have the path <code>pixi.toml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-38-1"><a href="#__codelineno-38-1" id="__codelineno-38-1" name="__codelineno-38-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-38-2"><a href="#__codelineno-38-2" id="__codelineno-38-2" name="__codelineno-38-2"></a><span class="w">  </span><span class="nt">my-pixi</span><span class="p">:</span>
+</span><span id="__span-38-3"><a href="#__codelineno-38-3" id="__codelineno-38-3" name="__codelineno-38-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pixi</span>
+</span><span id="__span-38-4"><a href="#__codelineno-38-4" id="__codelineno-38-4" name="__codelineno-38-4"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pixi.toml</span>
+</span></code></pre></div>
+<h3 id="nix">Nix</h3>
+<p>Calkit supports <a href="https://nixos.org/">Nix</a> environments via
+<a href="https://nixos.wiki/wiki/Flakes">flakes</a>.
+Reproducibility comes from <code>flake.lock</code>, which pins every input (including
+<code>nixpkgs</code>) to an exact revision. Calkit tracks <code>flake.lock</code> as a DVC
+dependency, so pipeline stages re-run when the environment changes.</p>
+<p>Create one with:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-39-1"><a href="#__codelineno-39-1" id="__codelineno-39-1" name="__codelineno-39-1"></a>calkit<span class="w"> </span>new<span class="w"> </span>nix-env<span class="w"> </span>--name<span class="w"> </span>my-nix-env<span class="w"> </span>python3<span class="w"> </span>R<span class="w"> </span>uv
+</span></code></pre></div>
+<p>In <code>calkit.yaml</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-40-1"><a href="#__codelineno-40-1" id="__codelineno-40-1" name="__codelineno-40-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-40-2"><a href="#__codelineno-40-2" id="__codelineno-40-2" name="__codelineno-40-2"></a><span class="w">  </span><span class="nt">my-nix-env</span><span class="p">:</span>
+</span><span id="__span-40-3"><a href="#__codelineno-40-3" id="__codelineno-40-3" name="__codelineno-40-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nix</span>
+</span><span id="__span-40-4"><a href="#__codelineno-40-4" id="__codelineno-40-4" name="__codelineno-40-4"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">flake.nix</span>
+</span></code></pre></div>
+<p>Projects can contain multiple Nix envs. The first one lands at the repo
+root (<code>flake.nix</code>); subsequent ones get nested under
+<code>.calkit/envs/{name}/flake.nix</code> so each env has its own independent
+<code>flake.lock</code>. You can override the path with <code>--path</code> if you want a
+different layout.</p>
+<p>To enter a specific dev shell from the flake (instead of the default),
+set <code>shell</code>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-41-1"><a href="#__codelineno-41-1" id="__codelineno-41-1" name="__codelineno-41-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-41-2"><a href="#__codelineno-41-2" id="__codelineno-41-2" name="__codelineno-41-2"></a><span class="w">  </span><span class="nt">my-nix-env</span><span class="p">:</span>
+</span><span id="__span-41-3"><a href="#__codelineno-41-3" id="__codelineno-41-3" name="__codelineno-41-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">nix</span>
+</span><span id="__span-41-4"><a href="#__codelineno-41-4" id="__codelineno-41-4" name="__codelineno-41-4"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">envs/my-nix-env/flake.nix</span>
+</span><span id="__span-41-5"><a href="#__codelineno-41-5" id="__codelineno-41-5" name="__codelineno-41-5"></a><span class="w">    </span><span class="nt">shell</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">r-shell</span>
+</span></code></pre></div>
+<p>Run a command in a Nix environment:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-42-1"><a href="#__codelineno-42-1" id="__codelineno-42-1" name="__codelineno-42-1"></a>calkit<span class="w"> </span>xenv<span class="w"> </span>-n<span class="w"> </span>my-nix-env<span class="w"> </span>--<span class="w"> </span>python<span class="w"> </span>--version
+</span></code></pre></div>
+<p>Add more packages to an existing Nix env (this edits the flake's
+<code>packages = with pkgs; [ ... ]</code> list, refreshes <code>flake.lock</code>, and commits):</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-43-1"><a href="#__codelineno-43-1" id="__codelineno-43-1" name="__codelineno-43-1"></a>calkit<span class="w"> </span>update<span class="w"> </span>env<span class="w"> </span>--name<span class="w"> </span>my-nix-env<span class="w"> </span>--add-package<span class="w"> </span>R<span class="w"> </span>--add-package<span class="w"> </span>polars
+</span></code></pre></div>
+<p>On Linux and macOS, install Nix with <code>calkit install nix</code> — this runs the
+<a href="https://install.determinate.systems">Determinate Systems installer</a>,
+which enables flakes by default. Nix is not supported natively on
+Windows; run Calkit inside
+<a href="https://learn.microsoft.com/en-us/windows/wsl/install">WSL2</a> and install
+Nix there.</p>
+<p>Calkit itself is also available as a flake — see
+<a href="../installation/#nix">Nix in the installation guide</a> to add the Calkit
+CLI to your own Nix environments via <code>inputs.calkit.url =
+"github:calkit/calkit"</code>.</p>
+<h3 id="r">R</h3>
+<p>R environments can be managed with Conda, Pixi, or <code>renv</code> (recommended).
+The env spec path for an renv environment is typically a <code>DESCRIPTION</code> file.</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-44-1"><a href="#__codelineno-44-1" id="__codelineno-44-1" name="__codelineno-44-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-44-2"><a href="#__codelineno-44-2" id="__codelineno-44-2" name="__codelineno-44-2"></a><span class="w">  </span><span class="nt">r</span><span class="p">:</span>
+</span><span id="__span-44-3"><a href="#__codelineno-44-3" id="__codelineno-44-3" name="__codelineno-44-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">renv</span>
+</span><span id="__span-44-4"><a href="#__codelineno-44-4" id="__codelineno-44-4" name="__codelineno-44-4"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">DESCRIPTION</span>
+</span></code></pre></div>
+<p>The imports inside <code>DESCRIPTION</code> are used to create and sync the environment:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-45-1"><a href="#__codelineno-45-1" id="__codelineno-45-1" name="__codelineno-45-1"></a>Package: CalkitProject
+</span><span id="__span-45-2"><a href="#__codelineno-45-2" id="__codelineno-45-2" name="__codelineno-45-2"></a>Version: 0.0.1
+</span><span id="__span-45-3"><a href="#__codelineno-45-3" id="__codelineno-45-3" name="__codelineno-45-3"></a>Title: Auto-generated R environment
+</span><span id="__span-45-4"><a href="#__codelineno-45-4" id="__codelineno-45-4" name="__codelineno-45-4"></a>Imports: tidyverse
+</span></code></pre></div>
+<h2 id="system-environments">System environments</h2>
+<p>A <code>system</code> environment runs things on the machine as it is, with nothing
+built, installed, or isolated.
+It's the escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain.</p>
+<p>Nothing about the machine is pinned by default, since opting out of
+isolation is the point of this kind.
+<code>lock</code> is how a project says which properties its results actually depend
+on:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-46-1"><a href="#__codelineno-46-1" id="__codelineno-46-1" name="__codelineno-46-1"></a><span class="nt">environments</span><span class="p">:</span>
+</span><span id="__span-46-2"><a href="#__codelineno-46-2" id="__codelineno-46-2" name="__codelineno-46-2"></a><span class="w">  </span><span class="nt">cluster</span><span class="p">:</span>
+</span><span id="__span-46-3"><a href="#__codelineno-46-3" id="__codelineno-46-3" name="__codelineno-46-3"></a><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">system</span>
+</span><span id="__span-46-4"><a href="#__codelineno-46-4" id="__codelineno-46-4" name="__codelineno-46-4"></a><span class="w">    </span><span class="nt">host</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gpu-node-1.example.edu</span>
+</span><span id="__span-46-5"><a href="#__codelineno-46-5" id="__codelineno-46-5" name="__codelineno-46-5"></a><span class="w">    </span><span class="nt">lock</span><span class="p">:</span>
+</span><span id="__span-46-6"><a href="#__codelineno-46-6" id="__codelineno-46-6" name="__codelineno-46-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">os</span>
+</span><span id="__span-46-7"><a href="#__codelineno-46-7" id="__codelineno-46-7" name="__codelineno-46-7"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">julia-version</span>
+</span></code></pre></div>
+<p>Locked properties are written to the environment's lock file, which stages
+depend on, so running on a machine where one of them differs invalidates
+the cached result instead of silently reusing it.
+Locking a property the machine can't supply, e.g., a tool that isn't
+installed, is an error rather than a recorded null---a stage that claims to
+be pinned to something it isn't is worse than one that pins nothing.</p>
+<!-- prettier-ignore -->
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>The properties available to <code>lock</code> are a fixed set, so editors can offer
+them and a typo is reported rather than silently locking nothing. See
+the <code>system</code> entry in the reference below for the full list.</p>
+</div>
+<!-- AUTO-GENERATED: ENV-KINDS:START -->
+<h3 id="environment-kind-reference">Environment kind reference</h3>
+<p>Environment definitions belong in the <code>environments</code> section of <code>calkit.yaml</code>.</p>
+<h4 id="conda_1"><code>conda</code></h4>
+<p>Model class: <code>CondaEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['conda']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the Conda environment YAML file.</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>str</td>
+<td>no</td>
+<td>Path at which to create the environment.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="docker_1"><code>docker</code></h4>
+<p>Model class: <code>DockerEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['docker']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>no</td>
+<td>Path to the Dockerfile. Optional, since Docker environments can be defined purely by an image.</td>
+</tr>
+<tr>
+<td>image</td>
+<td>str</td>
+<td>no</td>
+<td>Name of the Docker image. Optional for an environment with a Dockerfile, which is named after the project and environment it belongs to, e.g., 'someone/some-project.my-env'. Required for one defined purely by an image.</td>
+</tr>
+<tr>
+<td>registry</td>
+<td>str</td>
+<td>no</td>
+<td>Registry prefix images built from this environment's Dockerfile are pushed to and pulled from, e.g., 'ghcr.io/someone/some-project', or 'ghcr.io' for the project's own namespace in the GitHub Container Registry. Images are kept local if this is unset or null.</td>
+</tr>
+<tr>
+<td>build_platforms</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Platforms to build the image for, e.g., ['linux/amd64', 'linux/arm64'], as opposed to 'platform', which is the one it's pulled and run as. Building for more than one requires a registry, since a multi-platform image can only be kept in one.</td>
+</tr>
+<tr>
+<td>layers</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Predefined layers to add to the generated Dockerfile.</td>
+</tr>
+<tr>
+<td>shell</td>
+<td>Literal['bash'|'sh']</td>
+<td>no</td>
+<td>Shell used to run commands in the image.</td>
+</tr>
+<tr>
+<td>command_mode</td>
+<td>Literal['shell'|'entrypoint']</td>
+<td>no</td>
+<td>Whether commands run through a shell or the image's entrypoint.</td>
+</tr>
+<tr>
+<td>platform</td>
+<td>str</td>
+<td>no</td>
+<td>Platform to run as, e.g., 'linux/amd64'.</td>
+</tr>
+<tr>
+<td>wdir</td>
+<td>str</td>
+<td>no</td>
+<td>Working directory inside the container. Defaults to '/work'.</td>
+</tr>
+<tr>
+<td>user</td>
+<td>str</td>
+<td>no</td>
+<td>User to run the container as. Defaults to the host user.</td>
+</tr>
+<tr>
+<td>inputs</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Files added to the container as dependencies. Their checksums are recorded in the environment's lock file, so editing one rebuilds the image and reruns the stages that use it.</td>
+</tr>
+<tr>
+<td>env_vars</td>
+<td>dict[str, str]</td>
+<td>no</td>
+<td>Environmental variables to set in the container.</td>
+</tr>
+<tr>
+<td>ports</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Ports to expose, e.g., '8080:80'.</td>
+</tr>
+<tr>
+<td>gpus</td>
+<td>str</td>
+<td>no</td>
+<td>GPUs to make available, passed to 'docker run --gpus'.</td>
+</tr>
+<tr>
+<td>args</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Extra arguments passed to 'docker run'.</td>
+</tr>
+<tr>
+<td>jupyter_kernel</td>
+<td>str</td>
+<td>no</td>
+<td>Name of the Jupyter kernel inside the image, used when executing notebooks with 'calkit nb execute'. Defaults to 'python3', or 'ir' for R images.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="julia_1"><code>julia</code></h4>
+<p>Model class: <code>JuliaEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['julia']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the Julia project's Project.toml.</td>
+</tr>
+<tr>
+<td>julia</td>
+<td>str</td>
+<td>yes</td>
+<td>Julia version to use.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="matlab_1"><code>matlab</code></h4>
+<p>Model class: <code>MatlabEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['matlab']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>version</td>
+<td>str</td>
+<td>no</td>
+<td>MATLAB version to use.</td>
+</tr>
+<tr>
+<td>products</td>
+<td>list[str]</td>
+<td>no</td>
+<td>MATLAB products (toolboxes) required.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="nix_1"><code>nix</code></h4>
+<p>Model class: <code>NixEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['nix']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the project's flake.nix. The flake.lock alongside it is the reproducibility-anchoring lock file tracked as a DVC dependency.</td>
+</tr>
+<tr>
+<td>shell</td>
+<td>str</td>
+<td>no</td>
+<td>Name of the dev shell to enter, passed as #<shell> to 'nix develop'. Defaults to the flake's default dev shell.</shell></td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="pbs"><code>pbs</code></h4>
+<p>Model class: <code>PBSEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['pbs']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>host</td>
+<td>str</td>
+<td>no</td>
+<td>Host on which to submit jobs, over SSH if not localhost.</td>
+</tr>
+<tr>
+<td>default_options</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Options passed to qsub by default.</td>
+</tr>
+<tr>
+<td>default_setup</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Commands run at the start of every job script.</td>
+</tr>
+<tr>
+<td>inputs</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.</td>
+</tr>
+<tr>
+<td>max_concurrent_jobs</td>
+<td>int</td>
+<td>no</td>
+<td>How many of this project's jobs may sit in the queue (running or pending) at once. Null means no limit.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="pixi_1"><code>pixi</code></h4>
+<p>Model class: <code>PixiEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['pixi']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the Pixi manifest file.</td>
+</tr>
+<tr>
+<td>name</td>
+<td>str</td>
+<td>no</td>
+<td>Name of the environment within the Pixi manifest.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="renv"><code>renv</code></h4>
+<p>Model class: <code>REnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['renv']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the project's DESCRIPTION file. The renv lock file is created next to it.</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>str</td>
+<td>no</td>
+<td>Path at which to create the environment.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="slurm_1"><code>slurm</code></h4>
+<p>Model class: <code>SlurmEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['slurm']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>host</td>
+<td>str</td>
+<td>no</td>
+<td>Host on which to submit jobs, over SSH if not localhost.</td>
+</tr>
+<tr>
+<td>default_options</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Options passed to sbatch by default.</td>
+</tr>
+<tr>
+<td>default_setup</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Commands run at the start of every job script.</td>
+</tr>
+<tr>
+<td>inputs</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.</td>
+</tr>
+<tr>
+<td>max_concurrent_jobs</td>
+<td>int</td>
+<td>no</td>
+<td>How many of this project's jobs may sit in the queue (running or pending) at once. Submissions beyond the limit wait for a slot, so an iterated stage does not flood a shared cluster's queue with every one of its jobs at the same time. Null means no limit.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="system_1"><code>system</code></h4>
+<p>Model class: <code>SystemEnvironment</code></p>
+<p>The machine as it is, with nothing built, installed, or isolated.</p>
+<p>An escape hatch for software Calkit doesn't manage, e.g., a site-wide
+module system or a hand-built toolchain. Nothing is pinned by default,
+since opting out of isolation is the whole point of this kind, so
+<code>lock</code> is how a project says which properties of the machine its
+results actually depend on.</p>
+<p>Locked properties are written to the environment's lock file, which
+stages depend on, so moving to a machine where one of them differs
+invalidates the cached result rather than silently reusing it.</p>
+<p><code>requirements</code> is the other half, and answers a different question.
+It says what must be <em>true</em> of this machine -- apps that must be
+installed, variables that must be set, at least this many CPUs -- and
+is checked before anything runs, on the machine the environment names.
+A requirement that fails stops the run and says how to fix it; a locked
+property that changes silently invalidates a cached result. One gates,
+the other pins, so a property that matters both ways is written in both
+places.</p>
+<p><code>default_setup</code> is what has to be <em>done</em> on this machine before a
+stage can run: sourcing a site setup script, loading modules, putting a
+hand-built toolchain on the <code>PATH</code>. It runs in the same shell as the
+stage's own command, so a variable it sets or a function it defines is
+in scope for the stage, whether or not it was exported -- only a child
+process needs that. This is why it can't be a <code>setup</code> requirement:
+those run in a shell of their own and are cached, since they check
+whether something has been done rather than doing it every time.</p>
+<p>It is not recorded in the environment's lock file. The pipeline
+compiler merges it with each stage's own <code>setup</code> and writes the
+result beside the pipeline, which the stage depends on -- so changing
+it reruns exactly the stages that run it, and not the ones whose
+<code>env_default_setup</code> means they never do.</p>
+<p><code>host</code> names the machine. SSH is how a machine is reached, not a kind
+of environment, so there is no separate <code>ssh</code> kind: a system env whose
+host isn't this machine is reached over SSH, and one whose host is this
+machine runs here, the same way a SLURM env does. The built-in
+<code>_system</code> environment is shorthand for this kind on <code>localhost</code>
+with nothing locked.</p>
+<p><code>machine_id</code> says <em>which</em> machine, where <code>host</code> only says what it
+answers to. Names are renamed, resolve differently from different
+networks, and are reused; a project that means one particular machine
+can name it here instead and have that survive all of it. It replaces
+the name in deciding whether this is that machine, and is checked again
+on the far end when it isn't -- so a host that has come to point at a
+different box is reported rather than run on. <code>host</code> is still what
+reaches it, so both are worth declaring for a machine that isn't this
+one. Run <code>calkit describe system</code> on a machine to read its ID.</p>
+<p>Declaring one says where to run, which is a separate question from
+whether results depend on the machine: moving a project to a new one
+and updating this need not invalidate everything computed on the old
+one. Whether it does is left to <code>lock</code>, where <code>machine-id</code> is
+available for projects whose results really are machine-specific.</p>
+<p><code>wdir</code> is the project's workspace on that host -- the directory the
+stage runs in. It defaults to
+<code>~/.calkit/workspaces/&lt;hub&gt;/&lt;owner&gt;/&lt;name&gt;</code>, so a project that just
+names a host lands somewhere predictable rather than having to spell
+out a path that is the same on every machine anyway. Qualified by hub
+and owner because a host is shared, and hidden because transfers check
+out with <code>--force</code>: a path that looks like the user's own checkout is
+one whose edits would be silently destroyed.</p>
+<p>What moves in and out of that workspace is deliberately not declared
+here. An environment doesn't know which files a stage reads, so a list
+kept alongside it can fall behind the pipeline and quietly run against
+stale inputs; the paths are taken from the stage instead.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['system']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>host</td>
+<td>str</td>
+<td>no</td>
+<td>Host on which to run. Reached over SSH unless it names this machine.</td>
+</tr>
+<tr>
+<td>machine_id</td>
+<td>str</td>
+<td>no</td>
+<td>Stable identifier of the machine to run on, as reported by 'calkit describe system'. Decides whether this is that machine, in place of matching 'host' by name; 'host' is still how the machine is reached when it isn't this one. Says where to run, not that results depend on the machine; lock 'machine-id' for that.</td>
+</tr>
+<tr>
+<td>user</td>
+<td>str</td>
+<td>no</td>
+<td>User to connect as. Left to SSH by default, which resolves it from ~/.ssh/config or falls back to the current user.</td>
+</tr>
+<tr>
+<td>ssh_key</td>
+<td>str</td>
+<td>no</td>
+<td>Path to the SSH private key used to reach another host. Left to SSH and its agent by default.</td>
+</tr>
+<tr>
+<td>wdir</td>
+<td>str</td>
+<td>no</td>
+<td>The project's workspace on the host, in which stages run. A relative path is taken from the connecting user's home directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.</name></owner></hub></td>
+</tr>
+<tr>
+<td>default_setup</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Commands run in the same shell, before every stage that uses this environment, e.g. 'module load cuda' or a site setup script that exports compiler paths. Merged with each stage's own 'setup' when the pipeline is compiled and written beside it, which the stage depends on, so changing them reruns the stages that actually run them.</td>
+</tr>
+<tr>
+<td>shell</td>
+<td>Literal['sh'|'bash'|'zsh']</td>
+<td>no</td>
+<td>Shell in which setup commands run, both 'default_setup' and a stage's own 'setup', together with the stage's command. Defaults to bash, since 'source' is a bashism and sourcing a setup script is the usual reason to have setup commands. Ignored when neither this environment nor any stage using it has setup commands. Setting it to anything but 'bash' is recorded in the environment's lock file -- unlike the commands themselves, the shell isn't in the compiled command -- so stages that run setup commands rerun when it changes.</td>
+</tr>
+<tr>
+<td>inputs</td>
+<td>list[str]</td>
+<td>no</td>
+<td>Files in the project that 'default_setup' reads, e.g., a setup script it sources. Added as an input to every stage using this environment, so editing one reruns them. Must be inside the project: a stage can't depend on something the repo doesn't carry.</td>
+</tr>
+<tr>
+<td>lock</td>
+<td>list[Literal['os'|'os-version'|'platform'|'machine'|'processor'|'hostname'|'machine-id'|'cpu-count'|'memory-gb'|'python-version'|'python-implementation'|'git-version'|'docker-version'|'conda-version'|'mamba-version'|'uv-version'|'pixi-version'|'julia-version'|'juliaup-version'|'rscript-version'|'brew-version']]</td>
+<td>no</td>
+<td>Properties of the machine this environment's results depend on. Stages rerun when a locked property changes. Empty means nothing about the machine is pinned.</td>
+</tr>
+<tr>
+<td>requirements</td>
+<td>list[str | SystemNumberRequirement | SystemValueRequirement | SetupRequirement | Requirement | dict[str, RequirementAttrs]]</td>
+<td>no</td>
+<td>What must be true of this machine before stages run on it: apps on PATH, environmental variables, setup steps, and constraints on properties like CPU count. Checked on the machine this environment names, which is not necessarily this one.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="uv_1"><code>uv</code></h4>
+<p>Model class: <code>UvEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['uv']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the uv project's pyproject.toml.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="uv-venv"><code>uv-venv</code></h4>
+<p>Model class: <code>UvVenvEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['uv-venv']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the requirements file, e.g., requirements.txt.</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>str</td>
+<td>no</td>
+<td>Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.</td>
+</tr>
+<tr>
+<td>python</td>
+<td>str</td>
+<td>no</td>
+<td>Python version to use when creating the environment.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="venv_1"><code>venv</code></h4>
+<p>Model class: <code>VenvEnvironment</code></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>kind</td>
+<td>Literal['venv']</td>
+<td>yes</td>
+<td>What kind of environment this is.</td>
+</tr>
+<tr>
+<td>path</td>
+<td>str</td>
+<td>yes</td>
+<td>Path to the requirements file, e.g., requirements.txt.</td>
+</tr>
+<tr>
+<td>prefix</td>
+<td>str</td>
+<td>no</td>
+<td>Path at which to create the environment. If unset, this is resolved on the fly, defaulting to .venv next to the spec file, nesting under .calkit/envs/{name}/.venv on conflict.</td>
+</tr>
+<tr>
+<td>python</td>
+<td>str</td>
+<td>no</td>
+<td>Python version to use when creating the environment.</td>
+</tr>
+<tr>
+<td>description</td>
+<td>str</td>
+<td>no</td>
+<td>A description of the environment.</td>
+</tr>
+</tbody>
+</table>
+<!-- AUTO-GENERATED: ENV-KINDS:END -->
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+<button class="md-top md-icon" data-md-component="top" hidden="" type="button">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+</main>
+<footer class="md-footer">
+<nav aria-label="Footer" class="md-footer__inner md-grid">
+<a aria-label="Previous: Requirements, configuration, and secrets" class="md-footer__link md-footer__link--prev" href="../requirements/">
+<div class="md-footer__button md-icon">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</div>
+<div class="md-footer__title">
+<span class="md-footer__direction">
+                Previous
+              </span>
+<div class="md-ellipsis">
+                Requirements, configuration, and secrets
+              </div>
+</div>
+</a>
+<a aria-label="Next: The pipeline" class="md-footer__link md-footer__link--next" href="../pipeline/">
+<div class="md-footer__title">
+<span class="md-footer__direction">
+                Next
+              </span>
+<div class="md-ellipsis">
+                The pipeline
+              </div>
+</div>
+<div class="md-footer__button md-icon">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"></path></svg>
+</div>
+</a>
+</nav>
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" rel="noopener" target="_blank">
+      Material for MkDocs
+    </a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["content.code.copy", "navigation.footer", "navigation.indexes", "navigation.top"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+<script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>

@@ -371,38 +371,49 @@ pipeline:
       inputs: [paper/generated-numbers.tex, paper/generated-questions.tex]
 ```
 
-and load the package in the document:
+The document itself needs nothing:
+
+```latex
+\input{generated-numbers}
+...
+The error falls by \result[Improvement]x.
+\includegraphics[width=0.7\textwidth]{../figures/dissipation.pdf}
+```
+
+What the document uses is read from its source, the same way
+[`calkit describe components`](#following-a-component-back) reads it, so
+an ordinary `\includegraphics` is a component like anything else. The
+page each one landed on comes from the `.synctex.gz` the build already
+writes, which records where TeX shipped material out rather than where it
+was written, so a float that moved is reported on the page it moved to.
+The values themselves come from the results files as the build read them.
+No package, no special commands, no rewriting a paper that already exists.
+
+`calkit.sty` is for the one thing none of that can do: marking injected
+content on the page. Load it and pass `provenance`, and every injected
+value is colored so a reader can see it came from elsewhere:
 
 ```latex
 \usepackage[provenance]{calkit}
-\input{generated-numbers}
-\input{generated-questions}
-...
-The error falls by \result[Improvement]x (Section~\ref{sec:bench}).
-\ckfigure[width=0.7\textwidth]{../figures/dissipation.pdf}
-...
-\appendix
-\section{Questions and answers}
-\ckfindings
 ```
 
-With the `provenance` option, every injected value is colored so a reader
-can see it came from elsewhere, and nothing else is added to the page:
-the trail itself lives in the provenance record described below, which
-is what the VS Code extension and the hub use to open the file behind a
-value or figure, and from there the stage and the script that produced
-it. Drop the option, or pass `final`, and the document renders as if the
-package were not there, so the markers cost nothing in the version that
-goes to a journal.
+Its `\ckfigure`, `\ckinput` and `\ckblock` also log what they typeset,
+which is worth having for content no parse can see: a path a macro built,
+or a figure inside a conditional. That log is folded into the record
+alongside what the source says. Everything else about the package is
+optional. Drop the option, or pass `final`, and the document renders as if
+it were not there, so the markers cost nothing in the version that goes to
+a journal.
 
-Each build installs `calkit.sty` beside the document (commit it, so the
-paper builds on Overleaf and anywhere else without Calkit), writes a
-per-build artifact table `calkit-provenance.tex` (do not commit it), and
-turns the build's log into `<artifact>.provenance.json`: every value,
-figure and text block the document took from the project, the pages it
-appears on, the stage that produced it, that stage's inputs, the hash
-recorded in `dvc.lock`, and, for a value, the value itself. That file is
-the trail in machine-readable form, for editors, the hub, and checks.
+Each build writes `<artifact>.provenance.json`: every value, figure and
+text block the document took from the project, the pages it appears on,
+the stage that produced it, that stage's inputs, the hash recorded in
+`dvc.lock`, and, for a value, the value itself. That file is the trail in
+machine-readable form, for editors, the hub, and checks. A build that
+loads the package also gets `calkit.sty` installed beside the document
+(commit it, so the paper builds on Overleaf and anywhere else without
+Calkit) and a per-build artifact table `calkit-provenance.tex` (do not
+commit it).
 
 ### What a record says
 

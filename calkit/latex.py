@@ -519,6 +519,107 @@ def provenance_sidecar_path(target_path: str) -> str:
     return os.path.splitext(target_path)[0] + ".provenance.json"
 
 
+def synctex_pages(
+    target_path: str, wdir: str, artifact_path: str | None = None
+) -> dict[str, dict[int, list[int]]]:
+    """Which page of the built PDF each line of each source ended up on.
+
+    Read out of the ``.synctex.gz`` latexmk already writes, so a document
+    needs nothing in it for its components to be placed on pages. TeX
+    records where material was shipped out rather than where it was
+    written, so a float that moved is reported on the page it landed on,
+    which is the whole reason to ask TeX rather than to guess.
+
+    Parsed here rather than shelled out to the ``synctex`` binary, which
+    lives wherever the project's TeX does: for a container environment
+    that is a container start per lookup, where one file read answers
+    every component at once. Keyed by the path TeX recorded, which for a
+    container build is absolute and inside the container, so
+    :func:`pages_at` matches it by suffix rather than by equality.
+    """
+    import gzip
+
+    stem = os.path.splitext(os.path.join(wdir, artifact_path or target_path))[
+        0
+    ]
+    path = next(
+        (
+            p
+            for p in (stem + ".synctex.gz", stem + ".synctex")
+            if os.path.isfile(p)
+        ),
+        None,
+    )
+    if path is None:
+        return {}
+    inputs: dict[int, str] = {}
+    by_tag: dict[int, dict[int, set[int]]] = {}
+    page: int | None = None
+    # Every record naming a place in the source starts with its type, then
+    # the input's tag and the line
+    record = re.compile(r"^[\[(vhxkg$]\s*(\d+),(\d+)")
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", errors="replace") as f:
+            for line in f:
+                line = line.rstrip("\n")
+                named = re.match(r"^Input:(\d+):(.*)$", line)
+                if named:
+                    inputs[int(named.group(1))] = named.group(2)
+                    continue
+                if line.startswith("{"):
+                    try:
+                        page = int(line[1:])
+                    except ValueError:
+                        page = None
+                    continue
+                if line.startswith("}"):
+                    page = None
+                    continue
+                found = record.match(line)
+                if found and page is not None:
+                    tag, at = int(found.group(1)), int(found.group(2))
+                    by_tag.setdefault(tag, {}).setdefault(at, set()).add(page)
+    except OSError:
+        return {}
+    out: dict[str, dict[int, list[int]]] = {}
+    for tag, lines in by_tag.items():
+        raw = inputs.get(tag)
+        if raw is None or not raw.endswith(".tex"):
+            continue
+        norm = Path(os.path.normpath(raw)).as_posix()
+        into = out.setdefault(norm, {})
+        for at, pages in lines.items():
+            into[at] = sorted(set(into.get(at, [])) | pages)
+    return out
+
+
+def pages_at(
+    mapping: dict[str, dict[int, list[int]]], source: str, line: int
+) -> list[int]:
+    """The page one line of a project-relative source landed on.
+
+    TeX records a box against the line it started on, so a line in the
+    middle of a paragraph often has no record of its own. The nearest
+    recorded line at or before it is the box that carried it, which is
+    where it was typeset.
+
+    The first page only. A line whose material spans a break is recorded
+    on both, and naming the second would put the component on a page a
+    reader looking for it would not find it on.
+    """
+    wanted = Path(source).as_posix()
+    base = os.path.basename(wanted)
+    for suffix in ("/" + wanted, "/" + base):
+        for norm, lines in mapping.items():
+            if norm != wanted and not norm.endswith(suffix):
+                continue
+            at = max((n for n in lines if n <= line), default=None)
+            if at is not None and lines[at]:
+                return lines[at][:1]
+    return []
+
+
 def collect_provenance(
     target_path: str,
     ck_info: dict,
@@ -526,20 +627,40 @@ def collect_provenance(
     artifact_path: str | None = None,
     kind: str = "publication",
 ) -> dict:
-    """Turn the build's ``.ckprov`` log into the document's provenance record.
+    r"""Record what a document takes from the project, and where it landed.
 
-    Every component the document took from the project, with the pages it
-    appears on and the stage, inputs and hash of what it came from, so a
-    reader or a tool can follow any number or figure in the PDF back
-    through the pipeline. Written beside the PDF as
-    ``<document>.provenance.json``.
+    Every component the document uses, with the pages it appears on and
+    the stage, inputs and hash of what it came from, so a reader or a tool
+    can follow any number or figure in the PDF back through the pipeline.
+    Written beside the PDF as ``<document>.provenance.json``.
+
+    Nothing in the document is required for this. What it uses is read
+    from its source, the same way ``calkit describe components`` reads it,
+    so a paper that includes figures with a plain ``\includegraphics``
+    gets a record like any other. Pages come from the ``.synctex.gz`` the
+    build already writes. ``calkit.sty``'s log is folded in when the
+    package was used, since it catches what no parse can see: a path built
+    by a macro, or content inside a conditional.
     """
+    from calkit.components import LocalProject, source_components
+
     wdir = wdir or os.getcwd()
     tex_dir = os.path.dirname(target_path)
+    uses: dict[tuple[str, str, str | None], dict] = {}
+    # What the source names, and where each of it is written
+    for rec in source_components(target_path, wdir):
+        key = (rec["kind"], rec["path"], rec.get("key"))
+        uses[key] = {
+            "kind": key[0],
+            "path": key[1],
+            "key": key[2],
+            "pages": [],
+            "locations": rec.get("locations", []),
+        }
+    # What the build logged, for a document that loaded the package
     log_path = os.path.join(
         wdir, os.path.splitext(target_path)[0] + PROVENANCE_LOG_EXT
     )
-    uses: dict[tuple[str, str, str], dict] = {}
     if os.path.isfile(log_path):
         with open(log_path, encoding="utf-8") as f:
             for line in f:
@@ -562,30 +683,47 @@ def collect_provenance(
                             os.path.join(tex_dir, path_as_written)
                         )
                     ).as_posix()
-                key = (entry.get("kind", ""), rel, str(entry.get("key", "")))
+                key = (
+                    entry.get("kind", ""),
+                    rel,
+                    str(entry.get("key", "")) or None,
+                )
                 use = uses.setdefault(
                     key,
                     {
                         "kind": key[0],
-                        "path": rel,
-                        "key": key[2] or None,
+                        "path": key[1],
+                        "key": key[2],
                         "pages": [],
+                        "locations": [],
                     },
                 )
                 page = entry.get("page")
                 if page is not None and page not in use["pages"]:
                     use["pages"].append(page)
+    # Where the source said each thing is, turned into where TeX put it
+    mapping = synctex_pages(target_path, wdir, artifact_path)
+    for use in uses.values():
+        if use["pages"]:
+            continue
+        pages: list[int] = []
+        for location in use.pop("locations", []) or []:
+            source = getattr(location, "source", None) or location["source"]
+            at = getattr(location, "line", None) or location["line"]
+            for page in pages_at(mapping, source, at):
+                if page not in pages:
+                    pages.append(page)
+        use["pages"] = sorted(pages)
     records = {
         r["path"]: r
         for r in artifact_records(
             sorted({u["path"] for u in uses.values()}), ck_info, wdir
         )
     }
-    from calkit.components import LocalProject
-
     view = LocalProject(ck_info, wdir, check_stages=False)
     components = []
     for use in uses.values():
+        use.pop("locations", None)
         rec = records.get(use["path"], {})
         entry = {
             **use,

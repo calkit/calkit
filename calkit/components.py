@@ -795,7 +795,7 @@ def describe_document(
         # and absent from the log. Trusting the log alone would mean that
         # turning provenance on loses components a project gets without
         # it, which is the wrong way round.
-        from_source = _source_components(target, wdir)
+        from_source = source_components(target, wdir)
         components = []
         seen = set()
         for rec in sidecar.get("components", []):
@@ -828,7 +828,7 @@ def describe_document(
         artifact=os.path.splitext(target)[0] + ".pdf",
         source=target,
         built=False,
-        components=enrich(_source_components(target, wdir), view),
+        components=enrich(source_components(target, wdir), view),
     )
 
 
@@ -849,7 +849,7 @@ def _line_col(line_starts: list[int], offset: int) -> tuple[int, int]:
     return index + 1, offset - line_starts[index] + 1
 
 
-def _source_components(target: str, wdir: str) -> list[dict]:
+def source_components(target: str, wdir: str) -> list[dict]:
     """What a document's source uses, and where each of it is written.
 
     Only what the source actually calls: a generated file typically

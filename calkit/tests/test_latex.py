@@ -169,3 +169,107 @@ def test_provenance(tmp_dir):
     )
     with open("paper/gq.tex") as f:
         assert r"\newcommand\ckanswer" in f.read()
+
+
+def test_synctex_places_a_float_where_it_landed(tmp_dir):
+    # The reason to ask TeX rather than to guess from the source: a float
+    # is typeset where it fits, not where it was written
+    import gzip
+
+    import calkit.latex as cl
+
+    os.makedirs("paper")
+    with gzip.open("paper/main.synctex.gz", "wt") as f:
+        f.write(
+            "SyncTeX Version:1\n"
+            "Input:1:/work/paper/./main.tex\n"
+            "Input:2:/usr/share/texmf/tex/latex/base/article.cls\n"
+            "Content:\n"
+            "{1\n"
+            "[1,4:0,0\n"
+            "]\n"
+            "}1\n"
+            "{2\n"
+            "(1,7:0,0\n"
+            ")\n"
+            "}2\n"
+        )
+    mapping = cl.synctex_pages("paper/main.tex", ".")
+    # Keyed by the path TeX recorded, which a container build makes
+    # absolute and inside the container
+    assert "/work/paper/main.tex" in mapping
+    assert cl.pages_at(mapping, "paper/main.tex", 7) == [2]
+    assert cl.pages_at(mapping, "paper/main.tex", 4) == [1]
+    # A line TeX recorded nothing for belongs to the box that carried it,
+    # which is the nearest line at or before it
+    assert cl.pages_at(mapping, "paper/main.tex", 5) == [1]
+    assert cl.pages_at(mapping, "paper/main.tex", 9) == [2]
+    # Nothing before the first record, and nothing for another file
+    assert cl.pages_at(mapping, "paper/main.tex", 1) == []
+    assert cl.pages_at(mapping, "paper/other.tex", 7) == []
+
+
+def test_no_synctex_is_no_pages_rather_than_an_error(tmp_dir):
+    import calkit.latex as cl
+
+    assert cl.synctex_pages("paper/main.tex", ".") == {}
+    assert cl.pages_at({}, "paper/main.tex", 1) == []
+
+
+def test_provenance_without_anything_in_the_document(tmp_dir):
+    # The point of the rework: a paper that uses plain LaTeX gets a record
+    # like any other. No \usepackage{calkit}, no \ckfigure, no build log.
+    import gzip
+    import json
+    import subprocess
+
+    from calkit.latex import collect_provenance
+
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("figures")
+    os.makedirs("results")
+    os.makedirs("paper")
+    with open("figures/plot.pdf", "w") as f:
+        f.write("pdf")
+    with open("results/findings.json", "w") as f:
+        json.dump({"ratio": 5.1014}, f)
+    ck_info = {
+        "pipeline": {
+            "stages": {
+                "plot": {
+                    "kind": "python-script",
+                    "environment": "py",
+                    "script_path": "plot.py",
+                    "inputs": ["results/findings.json"],
+                    "outputs": ["figures/plot.pdf"],
+                }
+            }
+        }
+    }
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\usepackage{graphicx}\n"
+            "\\begin{document}\n"
+            "\\includegraphics{../figures/plot.pdf}\n"
+            "\\end{document}\n"
+        )
+    with gzip.open("paper/main.synctex.gz", "wt") as f:
+        f.write(
+            "SyncTeX Version:1\n"
+            "Input:1:/work/paper/./main.tex\n"
+            "Content:\n"
+            "{3\n"
+            "[1,4:0,0\n"
+            "]\n"
+            "}3\n"
+        )
+    sidecar = collect_provenance("paper/main.tex", ck_info, ".")
+    assert len(sidecar["components"]) == 1
+    figure = sidecar["components"][0]
+    assert figure["kind"] == "figure"
+    assert figure["path"] == "figures/plot.pdf"
+    # The stage behind it, and the page TeX put it on
+    assert figure["stage"] == "plot"
+    assert figure["stage_inputs"] == ["results/findings.json"]
+    assert figure["pages"] == [3]

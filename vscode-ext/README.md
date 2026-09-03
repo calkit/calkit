@@ -46,8 +46,9 @@ project in a plain folder.
   the `\includegraphics` line, where these actions take over.) The CodeLens
   that used to sit above each reference is now part of the components lens
   below, so a line carries one lens rather than two.
-- **Document components**: In a LaTeX document that injects project content
-  (`\result[…]`, `\ckfigure{…}`, `\ckfindings`), hover any of it to see the
+- **Document components**: In a LaTeX document that uses project content
+  (`\result[…]`, an `\includegraphics` of a pipeline output, `\ckfindings`),
+  hover any of it to see the
   value, the file and key it came from, the stage and script behind it, the
   pages it lands on, and whether it is still current. **Go to Definition**
   (F12) opens the results file at that key or the figure itself; **Go to

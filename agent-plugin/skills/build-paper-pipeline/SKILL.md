@@ -36,8 +36,9 @@ a number nobody can check, and it goes stale the moment a stage reruns. The
 number reaches the page through the pipeline: a stage computes it and
 writes it to a results file, a `json-to-latex` stage turns that file into
 LaTeX commands, and the manuscript says `\result[Speedup]`. The same
-applies to figures (`\ckfigure{...}` over a pipeline output) and to the
-answers in `calkit.yaml` (`{name}` placeholders over `value` evidence).
+applies to figures (an ordinary `\includegraphics` over a pipeline
+output, which Calkit traces on its own) and to the answers in
+`calkit.yaml` (`{name}` placeholders over `value` evidence).
 
 If you find yourself about to write `2.4x` into a `.tex` file, stop: that
 is the hole, not the fix. The `check-reproducibility` skill covers finding

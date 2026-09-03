@@ -57,13 +57,15 @@ project in a plain folder.
   needs a rerun, has drifted from the project since the document was built, or
   came from nowhere at all, and offers to run the stage. Beside it, a second
   lens names the stage the line came from and opens it in the Calkit sidebar,
-  where its script, inputs and outputs are. The lens also works in
+  where its script, inputs and outputs are. A figure no stage produces gets a
+  lens to its own sidebar entry instead, which is where its origin is recorded,
+  and says so when nothing records it. The lens also works in
   Quarto and Markdown, where there is no provenance record to read and it falls
   back to naming the stage behind each figure reference. The same readings go
   into **Problems**, so a value that moved on page nine is counted rather than
   waiting to be scrolled to: an error for content the project no longer has, a
-  warning for content out of date, and a note for content nothing accounts
-  for. Questions are reported there too, on the line in `calkit.yaml` that
+  warning for content out of date, and a warning for content nothing accounts
+  for, which no rerun will fix. Questions are reported there too, on the line in `calkit.yaml` that
   declares them, since a placeholder that fills from nothing, or evidence that
   has moved since the answer was written, is about the question rather than the
   paper that typesets it. The editor reports what changed, not whether the

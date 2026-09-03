@@ -1,5 +1,7 @@
 import * as vscode from "vscode";
 import {
+  artifactLensPath,
+  artifactLensTitle,
   componentDiagnostics,
   componentsByLine,
   diagnosticSpan,
@@ -43,6 +45,9 @@ export interface ComponentsDeps {
   // Opens a stage in the sidebar, where its script, inputs and outputs
   // are. Takes the stage's name.
   viewStageCommand: string;
+  // Opens a figure in the sidebar, where its provenance is declared.
+  // Takes the figure's project path.
+  viewComponentFileCommand: string;
   // Where component problems are reported. Optional so a caller that only
   // wants hovers and lenses need not make one.
   diagnostics?: vscode.DiagnosticCollection;
@@ -399,6 +404,19 @@ export class ComponentsProvider
             tooltip: "Open this stage in the Calkit sidebar",
             command: this.deps.viewStageCommand,
             arguments: [stages[0]],
+          }),
+        );
+      }
+      // A file no stage produces, whose origin is declared by hand
+      const artifactTitle = artifactLensTitle(onLine);
+      const artifactPath = artifactLensPath(onLine);
+      if (artifactTitle !== undefined && artifactPath !== undefined) {
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title: artifactTitle,
+            tooltip: "Open this figure in the Calkit sidebar",
+            command: this.deps.viewComponentFileCommand,
+            arguments: [artifactPath],
           }),
         );
       }

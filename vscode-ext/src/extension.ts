@@ -93,6 +93,7 @@ const COMMAND_GO_TO_FIGURE_SOURCE = "calkit-vscode.goToFigureSource";
 const COMMAND_RUN_COMPONENT_STAGE = "calkit-vscode.runComponentStage";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
+const COMMAND_VIEW_COMPONENT_FILE = "calkit-vscode.viewComponentFile";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
 const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
@@ -1348,6 +1349,7 @@ export function activate(context: vscode.ExtensionContext): void {
     buildOutputToStageMap,
     runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
     viewStageCommand: COMMAND_VIEW_STAGE,
+    viewComponentFileCommand: COMMAND_VIEW_COMPONENT_FILE,
     diagnostics: componentDiagnostics,
     checkQuestions,
     log,
@@ -1407,6 +1409,14 @@ export function activate(context: vscode.ExtensionContext): void {
       componentsProvider,
     ),
     vscode.languages.registerCodeLensProvider(lensSelector, componentsProvider),
+    vscode.commands.registerCommand(
+      COMMAND_VIEW_COMPONENT_FILE,
+      async (figurePath?: string) => {
+        if (figurePath) {
+          await revealFigureInSidebar(figurePath);
+        }
+      },
+    ),
     vscode.commands.registerCommand(
       COMMAND_RUN_COMPONENT_STAGE,
       (stageName?: string) => {
@@ -1833,6 +1843,20 @@ function updateSidebarBadge(): void {
 // Reveal a pipeline stage in the sidebar's Pipeline section, expanded and
 // selected. Shared by the "Show Source" affordances (editor toolbar, figures
 // carousel) and the stage context menu.
+// Reveal a figure in the sidebar's Figures section, where its provenance
+// is declared. What a document says about a file it uses is that it uses
+// it; where it came from is said in calkit.yaml, and that is the way in.
+async function revealFigureInSidebar(figurePath: string): Promise<void> {
+  const item = sidebarProvider?.findArtifactItem("figures", figurePath);
+  if (item && sidebarTreeView) {
+    await sidebarTreeView.reveal(item, {
+      select: true,
+      focus: true,
+      expand: true,
+    });
+  }
+}
+
 async function revealStageInSidebar(
   stageName: string,
   focus = true,

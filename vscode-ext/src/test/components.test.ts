@@ -8,6 +8,8 @@ import {
   definitionLine,
   displayValue,
   hoverLines,
+  artifactLensPath,
+  artifactLensTitle,
   isLatexDocument,
   lensStages,
   lensTitle,
@@ -199,12 +201,14 @@ test("a lens says what needs doing, most urgent first", () => {
     ]) ?? "",
     /Missing/,
   );
-  // Nothing stale, but something nobody accounts for
-  assert.match(
+  // Nothing stale, so nothing for this lens to say; a file nobody
+  // accounts for is the artifact lens's business, since that is the one
+  // that can go where it is fixed
+  assert.equal(
     lensTitle([
       component({ stage: null, script: null, provenance: "undeclared" }),
-    ]) ?? "",
-    /No provenance/,
+    ]),
+    undefined,
   );
   // Nothing to say about a current component with no stage
   assert.equal(
@@ -311,7 +315,8 @@ test("a figure reference becomes a component the same lens can render", () => {
   const orphan = figureComponent("img/hand.png", undefined, "notes.qmd", 9);
   assert.equal(orphan.provenance, "undeclared");
   assert.equal(orphan.stage, null);
-  assert.match(lensTitle([orphan]) ?? "", /No provenance/);
+  assert.match(artifactLensTitle([orphan]) ?? "", /No provenance/);
+  assert.equal(artifactLensPath([orphan]), "img/hand.png");
   // And it lands on the line it was written on, 0-based for the editor
   assert.deepEqual([...componentsByLine([orphan], "notes.qmd").keys()], [8]);
 });
@@ -352,9 +357,10 @@ test("reports only what is actually wrong, at the place that says it", () => {
   assert.match(diagnostics[1].message, /no longer produced/);
 });
 
-test("a component with no provenance is information, not a warning", () => {
-  // It may be perfectly fine and merely undeclared; a squiggle under every
-  // hand-made schematic would teach people to ignore all of them
+test("a component nothing accounts for is worth attention", () => {
+  // Nothing produced it, nobody imported it and nobody claims it, and no
+  // rerun will change that: it needs a line in calkit.yaml, which nothing
+  // but a person is going to write
   const [diagnostic] = componentDiagnostics(
     [
       component({
@@ -368,7 +374,7 @@ test("a component with no provenance is information, not a warning", () => {
     ],
     "paper/main.tex",
   );
-  assert.equal(diagnostic.severity, "info");
+  assert.equal(diagnostic.severity, "warning");
   assert.match(diagnostic.message, /needs an entry in calkit\.yaml/);
 });
 
@@ -488,4 +494,36 @@ test("an unanswered question is work outstanding, not a fault", () => {
     ),
     [],
   );
+});
+
+test("a figure with no stage offers the way to declare where it came from", () => {
+  // Nothing produces it, so the stage lens has nothing to open. The file's
+  // own sidebar entry is where its origin gets written down.
+  const undeclared = component({
+    kind: "figure",
+    path: "paper/schematic.png",
+    key: null,
+    stage: null,
+    script: null,
+    provenance: "undeclared",
+  });
+  assert.match(artifactLensTitle([undeclared]) ?? "", /No provenance/);
+  assert.equal(artifactLensPath([undeclared]), "paper/schematic.png");
+  // Already accounted for: still worth a way in, without the warning
+  const imported = component({
+    kind: "figure",
+    path: "paper/logo.png",
+    key: null,
+    stage: null,
+    script: null,
+    provenance: "imported",
+  });
+  assert.equal(artifactLensTitle([imported]), "$(file-media) logo.png");
+  // A figure a stage makes is reached through the stage instead
+  assert.equal(
+    artifactLensTitle([component({ kind: "figure", key: null })]),
+    undefined,
+  );
+  // Values live in results files, which are not declared this way
+  assert.equal(artifactLensTitle([component({ stage: null })]), undefined);
 });

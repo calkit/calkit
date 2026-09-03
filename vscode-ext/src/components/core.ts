@@ -222,12 +222,33 @@ export function lensTitle(components: Component[]): string | undefined {
     }
     return "$(warning) Changed since this was built";
   }
-  if (components.some((c) => c.provenance === "undeclared")) {
-    return "$(question) No provenance";
-  }
-  // Naming the stage is the other lens's job, and a line that is fine
-  // needs no second one saying so
+  // Naming the stage, and saying a file has no provenance, are the other
+  // lenses' jobs; a line that is fine needs no lens saying so
   return undefined;
+}
+
+/**
+ * The lens that opens the file behind a line, in the sidebar.
+ *
+ * For a component no stage produces, which is where its provenance has to
+ * be declared by hand. A file nothing accounts for says so here, because
+ * this is the lens that goes to the one place it can be fixed: the
+ * sidebar entry, whose context menu records where it came from.
+ */
+export function artifactLensTitle(components: Component[]): string | undefined {
+  const orphan = components.find((c) => !c.stage && c.kind === "figure");
+  if (!orphan) {
+    return undefined;
+  }
+  if (orphan.provenance === "undeclared") {
+    return "$(warning) No provenance";
+  }
+  return `$(file-media) ${orphan.path.split("/").pop()}`;
+}
+
+/** The file an artifact lens opens, or undefined when there is none. */
+export function artifactLensPath(components: Component[]): string | undefined {
+  return components.find((c) => !c.stage && c.kind === "figure")?.path;
 }
 
 /**
@@ -359,7 +380,7 @@ function componentProblem(
   }
   if (component.provenance === "undeclared") {
     return {
-      severity: "info",
+      severity: "warning",
       message:
         `Nothing in the project produces ${what} or says where it came ` +
         "from. Running the pipeline will not fix it; it needs an entry in " +

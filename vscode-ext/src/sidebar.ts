@@ -120,6 +120,7 @@ export class CalkitSidebarProvider
   );
   private readonly resultsSectionItem = this.makeSection("Results", "results");
   private stageItemCache = new Map<string, SidebarItem>();
+  private artifactItemCache = new Map<string, SidebarItem>();
   private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
@@ -169,6 +170,7 @@ export class CalkitSidebarProvider
     this.detectedPresentations = detectedPresentations ?? [];
     this.hiddenSections = hiddenSections ?? new Set();
     this.stageItemCache.clear();
+    this.artifactItemCache.clear();
     this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
   }
@@ -268,7 +270,7 @@ export class CalkitSidebarProvider
           nodeKind,
           outputToStage,
         );
-        if (!entry.stage && !entry.imported_from) {
+        if (!entry.stage && !entry.imported_from && !entry.created_by) {
           n++;
         }
       }
@@ -284,6 +286,23 @@ export class CalkitSidebarProvider
       this.getStageItems();
     }
     return this.stageItemCache.get(stageName);
+  }
+
+  /**
+   * The item for one artifact, so it can be revealed by its path.
+   *
+   * Built on demand for the collection it belongs to, since a document
+   * asking about a figure is not a reason to walk every collection the
+   * project has.
+   */
+  findArtifactItem(
+    kind: ArtifactCollection,
+    artifactPath: string,
+  ): SidebarItem | undefined {
+    if (!this.artifactItemCache.has(artifactPath)) {
+      this.getArtifactItems(kind);
+    }
+    return this.artifactItemCache.get(artifactPath);
   }
 
   findEnvItem(envName: string): SidebarItem | undefined {
@@ -946,13 +965,15 @@ export class CalkitSidebarProvider
     nodeKind: ArtifactKind,
   ): SidebarItem {
     const label = path.basename(entry.path);
-    const hasProvenance = !!entry.stage || !!entry.imported_from;
+    const hasProvenance =
+      !!entry.stage || !!entry.imported_from || !!entry.created_by;
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
     const collapsible = hasProvenance
       ? vscode.TreeItemCollapsibleState.Collapsed
       : vscode.TreeItemCollapsibleState.None;
     const item = new SidebarItem(label, collapsible, nodeKind, entry.path);
+    this.artifactItemCache.set(entry.path, item);
     item.description = entry.path;
     if (!hasProvenance) {
       item.iconPath = new vscode.ThemeIcon(

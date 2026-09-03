@@ -593,7 +593,7 @@ could be checked about reads as `unknown`, never as current.
 
 In the VS Code extension, the same readings are reported as diagnostics, so
 they reach the Problems panel and get counted: an error for content the
-project no longer has, a warning for content out of date, and a note for
+project no longer has, and a warning both for content out of date and for
 content nothing accounts for. This is what a hover and a lens cannot do ---
 both need you to already be looking at the line. A number that moved on page
 nine is worth knowing about before you go looking for it.

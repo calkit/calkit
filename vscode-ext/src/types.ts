@@ -36,6 +36,7 @@ export interface FigureEntry {
   path: string;
   stage?: string;
   imported_from?: unknown;
+  created_by?: unknown;
   [key: string]: unknown;
 }
 

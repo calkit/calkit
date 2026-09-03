@@ -33,6 +33,7 @@ import type {
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   formatYamlSyntaxError,
+  stageDefinitionLine,
   yamlSyntaxError,
   type YamlSyntaxError,
 } from "./yaml";
@@ -316,7 +317,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!workspaceRoot) {
           return;
         }
-        await openStageSourceFile(workspaceRoot, stageName);
+        await goToStageDefinition(workspaceRoot, stageName);
       },
     ),
   );
@@ -3800,12 +3801,14 @@ async function openPdfInLatexWorkshop(
 // Open a stage's source file (notebook/script/target), opening .ipynb in the
 // notebook editor. Shared by the sidebar "Open stage file" action and figure
 // go-to-source navigation.
-async function openStageSourceFile(
+// Show where a stage is written down: the block in the Markdown file that
+// declares it, or its entry in calkit.yaml.
+async function goToStageDefinition(
   workspaceRoot: string,
   stageName: string,
 ): Promise<void> {
-  // A stage declared in a Markdown file has no source file of its own, so
-  // open the file that declares it and go to the block
+  // A stage declared in a Markdown file is defined by its block, which is
+  // in that file rather than in calkit.yaml
   const md = splitMarkdownStageName(stageName, currentCalkitConfig);
   if (md) {
     const mdPath = markdownStagePath(currentCalkitConfig, md.markdownStageName);
@@ -3826,6 +3829,42 @@ async function openStageSourceFile(
       }
       return;
     }
+  }
+  // Where the stage itself is written. Its script, notebook or target is
+  // already one click away under the stage's own properties; what the row
+  // has no other way to reach is the definition.
+  const uri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+  let doc: vscode.TextDocument;
+  try {
+    doc = await vscode.workspace.openTextDocument(uri);
+  } catch {
+    void vscode.window.showErrorMessage("No calkit.yaml in this workspace.");
+    return;
+  }
+  const line = stageDefinitionLine(doc.getText(), stageName);
+  const editor = await vscode.window.showTextDocument(doc);
+  if (line === undefined) {
+    return;
+  }
+  const pos = new vscode.Position(line, 0);
+  editor.selection = new vscode.Selection(pos, pos);
+  editor.revealRange(
+    new vscode.Range(pos, pos),
+    vscode.TextEditorRevealType.InCenter,
+  );
+}
+
+// Open the file a stage runs: its script, notebook or LaTeX target. What
+// somebody following a figure back wants is the code that drew it, not the
+// pipeline entry that names it.
+async function openStageSourceFile(
+  workspaceRoot: string,
+  stageName: string,
+): Promise<void> {
+  // A Markdown stage's code is the block that declares it
+  if (splitMarkdownStageName(stageName, currentCalkitConfig)) {
+    await goToStageDefinition(workspaceRoot, stageName);
+    return;
   }
   const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
   const filePath =

@@ -72,6 +72,10 @@ project in a plain folder.
   has moved since the answer was written, is about the question rather than the
   paper that typesets it. The editor reports what changed, not whether the
   answer is still right, which is a question about the sentence.
+- **Stage definitions**: The Calkit sidebar's stage rows open `calkit.yaml`
+  scrolled to where the stage is written, since its script, notebook or target
+  is already listed under the stage's own properties. A stage a Markdown file
+  declares opens that file at its block.
 - **Stale-output awareness**: Outputs whose stage needs re-running are flagged
   in the sidebar and in the file explorer.
 - **File history**: View a tracked file's history from the sidebar or explorer.

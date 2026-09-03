@@ -1,4 +1,10 @@
-import { YAMLParseError } from "yaml";
+import {
+  isMap,
+  isScalar,
+  LineCounter,
+  parseDocument,
+  YAMLParseError,
+} from "yaml";
 
 export interface YamlSyntaxError {
   /** Parser message, with its trailing position and source snippet removed. */
@@ -44,4 +50,31 @@ export function formatYamlSyntaxError(
       ? ` at line ${error.line}`
       : ` at line ${error.line}, column ${error.column}`;
   return `${fileName} has a YAML syntax error${where}: ${error.message}`;
+}
+
+/**
+ * Zero-based line where a pipeline stage is defined in calkit.yaml.
+ *
+ * Located through the parsed document rather than by searching for the
+ * name, so a stage called `plot` is not found in a comment, in another
+ * collection, or in a value that happens to say it.
+ */
+export function stageDefinitionLine(
+  text: string,
+  stageName: string,
+): number | undefined {
+  const counter = new LineCounter();
+  const doc = parseDocument(text, { lineCounter: counter });
+  const stages = doc.getIn(["pipeline", "stages"], true);
+  if (!isMap(stages)) {
+    return undefined;
+  }
+  for (const pair of stages.items) {
+    const key = pair.key;
+    if (!isScalar(key) || String(key.value) !== stageName || !key.range) {
+      continue;
+    }
+    return counter.linePos(key.range[0]).line - 1;
+  }
+  return undefined;
 }

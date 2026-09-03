@@ -107,7 +107,7 @@
       },
       {
         "command": "calkit-vscode.openStageFile",
-        "title": "Open File",
+        "title": "Go to Stage Definition",
         "category": "Calkit",
         "icon": "$(go-to-file)"
       },

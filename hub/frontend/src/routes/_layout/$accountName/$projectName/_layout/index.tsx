@@ -15,6 +15,12 @@ import {
   IconButton,
   Image,
   Link,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalHeader,
+  ModalOverlay,
   Spacer,
   Switch,
   Table,
@@ -40,7 +46,12 @@ import { MdEdit } from "react-icons/md"
 import { z } from "zod"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 
-import { type QuestionEvidence, ReleasesService } from "../../../../../client"
+import {
+  ProjectsService,
+  type QuestionEvidence,
+  ReleasesService,
+} from "../../../../../client"
+import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
 import Markdown from "../../../../../components/Common/Markdown"
 import FigureView from "../../../../../components/Figures/FigureView"
 import FileEditorModal from "../../../../../components/Files/FileEditorModal"
@@ -52,6 +63,7 @@ import ProjectShowcase from "../../../../../components/Projects/ProjectShowcase"
 import RecentChanges from "../../../../../components/Projects/RecentChanges"
 import LatexEditor from "../../../../../components/Publications/LatexEditor"
 import NewRelease from "../../../../../components/Releases/NewRelease"
+import TableView from "../../../../../components/Tables/TableView"
 import useProject, {
   useProjectIssues,
   useProjectQuestions,
@@ -78,6 +90,12 @@ export const Route = createFileRoute(
         // Number of the question whose details are expanded, so the back
         // button and links restore the expanded state.
         expanded_question: z.number().optional(),
+        // Evidence opened in a modal from a question's evidence card, so a
+        // link restores it and the back button returns to the question.
+        evidence_kind: z
+          .enum(["figure", "table", "publication", "result"])
+          .optional(),
+        evidence_path: z.string().optional(),
         // LaTeX editor open state (from a showcase publication), so a link
         // reopens it. editor_tex is the .tex source path.
         editor_open: z.boolean().optional(),
@@ -92,14 +110,10 @@ export const Route = createFileRoute(
 /** Compact display of a single piece of question evidence. */
 function EvidenceItem({
   evidence,
-  accountName,
-  projectName,
-  gitRef,
+  onClick,
 }: {
   evidence: QuestionEvidence
-  accountName: string
-  projectName: string
-  gitRef?: string
+  onClick: () => void
 }) {
   const borderColor = useColorModeValue("gray.200", "gray.600")
   const bg = useColorModeValue("white", "gray.800")
@@ -142,40 +156,33 @@ function EvidenceItem({
       )
     }
     return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/figures`}
-        // Preserve the global ref so the figure opens at the same git ref the
-        // project is being browsed at.
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
+      <Box
+        borderWidth={1}
+        borderColor={borderColor}
+        borderRadius="md"
+        overflow="hidden"
+        bg={bg}
+        width="150px"
+        cursor="pointer"
+        _hover={{ shadow: "md" }}
+        onClick={onClick}
       >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          overflow="hidden"
-          bg={bg}
-          width="150px"
-          _hover={{ shadow: "md" }}
-        >
-          {/* pointerEvents off so a click hits the link, not the Plotly plot */}
-          <Box height="90px" overflow="hidden" pointerEvents="none">
-            {thumb}
-          </Box>
-          {fig?.title ? (
-            <Box fontSize="xs" px={2} py={1}>
-              <Markdown inline noOfLines={1}>
-                {fig.title}
-              </Markdown>
-            </Box>
-          ) : (
-            <Text fontSize="xs" noOfLines={1} px={2} py={1}>
-              {evidence.path}
-            </Text>
-          )}
+        {/* pointerEvents off so a click hits the card, not the Plotly plot */}
+        <Box height="90px" overflow="hidden" pointerEvents="none">
+          {thumb}
         </Box>
-      </Link>
+        {fig?.title ? (
+          <Box fontSize="xs" px={2} py={1}>
+            <Markdown inline noOfLines={1}>
+              {fig.title}
+            </Markdown>
+          </Box>
+        ) : (
+          <Text fontSize="xs" noOfLines={1} px={2} py={1}>
+            {evidence.path}
+          </Text>
+        )}
+      </Box>
     )
   }
   if (evidence.kind === "table") {
@@ -183,77 +190,67 @@ function EvidenceItem({
     // identifies it and why it was cited.
     const table = evidence.result
     return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/tables`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
+      <Box
+        borderWidth={1}
+        borderColor={borderColor}
+        borderRadius="md"
+        bg={bg}
+        px={3}
+        py={2}
+        minW="130px"
+        maxW="100%"
+        cursor="pointer"
+        _hover={{ shadow: "md" }}
+        onClick={onClick}
       >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          bg={bg}
-          px={3}
-          py={2}
-          minW="130px"
-          maxW="100%"
-          _hover={{ shadow: "md" }}
-        >
-          <Flex align="center" gap={1.5}>
-            <Icon as={FiGrid} color="gray.500" flexShrink={0} />
-            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
-              {table?.title ?? evidence.path}
-            </Text>
-          </Flex>
-          <Text fontSize="xs" color="gray.500" noOfLines={1}>
-            {evidence.path}
+        <Flex align="center" gap={1.5}>
+          <Icon as={FiGrid} color="gray.500" flexShrink={0} />
+          <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
+            {table?.title ?? evidence.path}
           </Text>
-          {evidence.explanation ? (
-            <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-              {evidence.explanation}
-            </Text>
-          ) : null}
-        </Box>
-      </Link>
+        </Flex>
+        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+          {evidence.path}
+        </Text>
+        {evidence.explanation ? (
+          <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
+            {evidence.explanation}
+          </Text>
+        ) : null}
+      </Box>
     )
   }
   if (evidence.kind === "publication") {
     const pub = evidence.publication
     return (
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/publications`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        _hover={{ textDecoration: "none" }}
+      <Box
+        borderWidth={1}
+        borderColor={borderColor}
+        borderRadius="md"
+        bg={bg}
+        px={3}
+        py={2}
+        minW="130px"
+        maxW="100%"
+        cursor="pointer"
+        _hover={{ shadow: "md" }}
+        onClick={onClick}
       >
-        <Box
-          borderWidth={1}
-          borderColor={borderColor}
-          borderRadius="md"
-          bg={bg}
-          px={3}
-          py={2}
-          minW="130px"
-          maxW="100%"
-          _hover={{ shadow: "md" }}
-        >
-          <Flex align="center" gap={1.5}>
-            <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
-            <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
-              {pub?.title ?? evidence.path}
-            </Text>
-          </Flex>
-          <Text fontSize="xs" color="gray.500" noOfLines={1}>
-            {evidence.path}
+        <Flex align="center" gap={1.5}>
+          <Icon as={FaRegFileAlt} color="gray.500" flexShrink={0} />
+          <Text fontSize="sm" fontWeight="semibold" noOfLines={1}>
+            {pub?.title ?? evidence.path}
           </Text>
-          {evidence.explanation ? (
-            <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
-              {evidence.explanation}
-            </Text>
-          ) : null}
-        </Box>
-      </Link>
+        </Flex>
+        <Text fontSize="xs" color="gray.500" noOfLines={1}>
+          {evidence.path}
+        </Text>
+        {evidence.explanation ? (
+          <Text fontSize="xs" color="gray.500" noOfLines={2} mt={0.5}>
+            {evidence.explanation}
+          </Text>
+        ) : null}
+      </Box>
     )
   }
   return (
@@ -266,20 +263,15 @@ function EvidenceItem({
       py={2}
       minW="130px"
       maxW="100%"
+      cursor="pointer"
+      _hover={{ shadow: "md" }}
+      onClick={onClick}
     >
-      {/* `path:key` at the top links to the file and identifies the result. */}
-      <Link
-        as={RouterLink}
-        to={`/${accountName}/${projectName}/files`}
-        search={{ path: evidence.path, ref: gitRef } as any}
-        fontSize="xs"
-        fontWeight="semibold"
-        noOfLines={1}
-        display="block"
-      >
+      {/* `path:key` at the top identifies the result. */}
+      <Text fontSize="xs" fontWeight="semibold" noOfLines={1} display="block">
         {evidence.path}
         {evidence.key ? `:${evidence.key}` : ""}
-      </Link>
+      </Text>
       {evidence.value != null ? (
         <Text
           fontSize="xl"
@@ -297,6 +289,67 @@ function EvidenceItem({
         </Text>
       ) : null}
     </Box>
+  )
+}
+
+/** Modal view of a table cited as question evidence, mirroring the tables page. */
+function TableEvidenceModal({
+  evidence,
+  accountName,
+  projectName,
+  gitRef,
+  onClose,
+}: {
+  evidence: QuestionEvidence
+  accountName: string
+  projectName: string
+  gitRef?: string
+  onClose: () => void
+}) {
+  const subtleColor = useColorModeValue("gray.600", "gray.400")
+  // Shares its cache with the Tables page (same query key), so opening a table
+  // already fetched there costs nothing extra.
+  const tablesQuery = useQuery({
+    queryKey: ["projects", accountName, projectName, "tables", gitRef, true],
+    queryFn: () =>
+      ProjectsService.getProjectTables({
+        owner_name: accountName,
+        project_name: projectName,
+        ref: gitRef,
+        include_content: true,
+      }).then((response) => response.data),
+  })
+  const table = tablesQuery.data?.find((t) => t.path === evidence.path)
+  return (
+    <Modal isOpen onClose={onClose} size="full" scrollBehavior="inside">
+      <ModalOverlay />
+      <ModalContent>
+        <ModalHeader pb={1}>
+          <Box minW={0}>
+            <Heading size="md">
+              {table?.title ?? evidence.result?.title ?? evidence.path}
+            </Heading>
+            <Text fontSize="xs" color={subtleColor}>
+              {evidence.path}
+            </Text>
+          </Box>
+        </ModalHeader>
+        <ModalCloseButton />
+        <ModalBody pt={0} pb={6}>
+          {tablesQuery.isPending ? (
+            <LoadingSpinner height="100vh" />
+          ) : table ? (
+            <TableView
+              key={table.path}
+              table={table}
+              maxHeight="calc(100vh - 260px)"
+            />
+          ) : (
+            <Text color="gray.500">Table not found at this ref.</Text>
+          )}
+        </ModalBody>
+      </ModalContent>
+    </Modal>
   )
 }
 
@@ -378,6 +431,8 @@ function ProjectView() {
     editor_open: editorOpen,
     editor_tex: editorTexPath,
     edit_file: editFile,
+    evidence_kind: evidenceKind,
+    evidence_path: evidencePath,
   } = Route.useSearch()
   const setEditFile = (path?: string) =>
     navigate({ search: (prev) => ({ ...prev, edit_file: path }) })
@@ -423,6 +478,24 @@ function ProjectView() {
         expanded_question: index >= 0 ? questions[index]?.number : undefined,
       }),
     })
+  // The evidence view open in a modal also lives in the URL, so a link
+  // restores it and the back button returns to the question that cited it.
+  // The path identifies the artifact; the kind picks which modal to open.
+  const closeEvidence = () =>
+    navigate({
+      search: (prev) => ({
+        ...prev,
+        evidence_kind: undefined,
+        evidence_path: undefined,
+      }),
+    })
+  const selectedEvidence =
+    evidencePath && evidenceKind
+      ? questions
+          .flatMap((q) => q.evidence ?? [])
+          .find((e) => e.kind === evidenceKind && e.path === evidencePath) ??
+        null
+      : null
 
   return (
     <>
@@ -619,9 +692,15 @@ function ProjectView() {
                                   <EvidenceItem
                                     key={`${evidence.kind}:${evidence.path}:${i}`}
                                     evidence={evidence}
-                                    accountName={accountName}
-                                    projectName={projectName}
-                                    gitRef={ref}
+                                    onClick={() =>
+                                      navigate({
+                                        search: (prev) => ({
+                                          ...prev,
+                                          evidence_kind: evidence.kind,
+                                          evidence_path: evidence.path,
+                                        }),
+                                      })
+                                    }
                                   />
                                 ))}
                               </Flex>
@@ -915,6 +994,50 @@ function ProjectView() {
           path={editFile}
         />
       ) : null}
+      {selectedEvidence?.kind === "figure" && (
+        <ArtifactCompareModal
+          isOpen
+          onClose={closeEvidence}
+          ownerName={accountName}
+          projectName={projectName}
+          path={selectedEvidence.path}
+          kind="figure"
+          initialRef={ref}
+          initialArtifact={selectedEvidence.figure ?? undefined}
+        />
+      )}
+      {selectedEvidence?.kind === "publication" && (
+        <ArtifactCompareModal
+          isOpen
+          onClose={closeEvidence}
+          ownerName={accountName}
+          projectName={projectName}
+          path={selectedEvidence.path}
+          kind="publication"
+          initialRef={ref}
+          initialArtifact={selectedEvidence.publication ?? undefined}
+        />
+      )}
+      {selectedEvidence?.kind === "result" && (
+        <ArtifactCompareModal
+          isOpen
+          onClose={closeEvidence}
+          ownerName={accountName}
+          projectName={projectName}
+          path={selectedEvidence.path}
+          kind="file"
+          initialRef={ref}
+        />
+      )}
+      {selectedEvidence?.kind === "table" && (
+        <TableEvidenceModal
+          evidence={selectedEvidence}
+          accountName={accountName}
+          projectName={projectName}
+          gitRef={ref}
+          onClose={closeEvidence}
+        />
+      )}
     </>
   )
 }

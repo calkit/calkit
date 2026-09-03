@@ -411,3 +411,34 @@ def test_a_build_log_adds_to_the_source_rather_than_replacing_it(tmp_dir):
     assert [(loc.source, loc.line) for loc in extra.locations] == [
         ("paper/main.tex", 10)
     ]
+
+
+def test_a_document_reaching_outside_its_own_folder(tmp_dir):
+    # A LaTeX document is meant to be a folder somebody can hand over,
+    # sync to Overleaf, or move. Reaching up for a figure builds fine and
+    # quietly costs that, so it is worth saying.
+    import calkit.components as cc
+
+    ck_info = _project()
+    with open("paper/main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\begin{document}\n"
+            "\\includegraphics{../figures/plot.pdf}\n"
+            "\\includegraphics{figures/local.png}\n"
+            "\\input{generated-numbers}\n"
+            "Ratio \\result[ratio].\n"
+            "\\end{document}\n"
+        )
+    os.makedirs("paper/figures", exist_ok=True)
+    with open("paper/figures/local.png", "w") as f:
+        f.write("png")
+    _generate(ck_info)
+    doc = cc.describe_document("paper/main.tex", check_stages=False)
+    by = {c.location: c for c in doc.components}
+    assert by["figures/plot.pdf"].outside_document is True
+    # One the document keeps beside itself is what this is asking for
+    assert by["paper/figures/local.png"].outside_document is False
+    # A value is not a file the source names: it reaches the page through
+    # a generated .tex inside the folder, wherever its results file sits
+    assert by["results/findings.json:ratio"].outside_document is False

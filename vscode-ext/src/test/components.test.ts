@@ -542,3 +542,38 @@ test("every kind of thing a document uses opens in the sidebar", () => {
   assert.equal(objectLensTitle([]), undefined);
   assert.equal(objectLensTarget([]), undefined);
 });
+
+test("a document reaching outside its folder is worth a warning", () => {
+  // Everything about it is fine except that the document stops being
+  // self-contained, which nothing else reports
+  const [diagnostic] = componentDiagnostics(
+    [
+      component({
+        kind: "figure",
+        path: "figures/plot.png",
+        key: null,
+        outside_document: true,
+        locations: [{ source: "paper/main.tex", line: 4, column: 5 }],
+      }),
+    ],
+    "paper/main.tex",
+  );
+  assert.equal(diagnostic.severity, "warning");
+  assert.match(diagnostic.message, /outside this document's folder/);
+  assert.match(diagnostic.message, /map-paths/);
+  // A file it keeps beside itself has nothing to report
+  assert.deepEqual(
+    componentDiagnostics(
+      [
+        component({
+          kind: "figure",
+          path: "paper/figures/plot.png",
+          key: null,
+          locations: [{ source: "paper/main.tex", line: 4, column: 5 }],
+        }),
+      ],
+      "paper/main.tex",
+    ),
+    [],
+  );
+});

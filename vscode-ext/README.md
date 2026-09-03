@@ -78,6 +78,10 @@ project in a plain folder.
   way the sidebar's own input and output rows do it. Which strings are paths is
   decided by what is on disk, not by a list of keys, so a path a new stage kind
   introduces works without the extension knowing about it.
+- **Document toolbar**: A `.tex` or `.qmd` with a build stage gets a button to
+  its rendered PDF, opened in the same pane rather than a split. The PDF gets
+  the way back to its source, and a play button to run the stage that builds
+  it.
 - **Stage definitions**: The Calkit sidebar's stage rows open `calkit.yaml`
   scrolled to where the stage is written, since its script, notebook or target
   is already listed under the stage's own properties. A stage a Markdown file

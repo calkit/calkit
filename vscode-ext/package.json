@@ -363,6 +363,12 @@
         "title": "Reopen as Text",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.openPdfSource",
+        "title": "Open Document Source",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -560,12 +566,17 @@
         },
         {
           "command": "calkit-vscode.runStageForFile",
-          "when": "calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "(calkit.activeFileHasStage || resourceExtname == .pdf) && !calkit.isSettingKernel",
           "group": "navigation"
         },
         {
           "command": "calkit-vscode.openStagePdf",
-          "when": "resourceExtname == .qmd && calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "when": "(resourceExtname == .qmd || resourceExtname == .tex) && calkit.activeFileHasStage && !calkit.isSettingKernel",
+          "group": "navigation"
+        },
+        {
+          "command": "calkit-vscode.openPdfSource",
+          "when": "resourceExtname == .pdf",
           "group": "navigation"
         }
       ],

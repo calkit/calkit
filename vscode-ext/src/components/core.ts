@@ -45,6 +45,8 @@ export interface Component {
   status: ComponentStatus;
   stale_reasons: StaleReason[];
   locations: Location[];
+  /** Whether the source reaches outside the document's own folder. */
+  outside_document?: boolean;
 }
 
 export interface DocumentComponents {
@@ -403,6 +405,16 @@ function componentProblem(
     return {
       severity: "warning",
       message: `${what} is out of date: ${why}.${drift}`,
+    };
+  }
+  if (component.outside_document) {
+    return {
+      severity: "warning",
+      message:
+        `${what} is outside this document's folder. The build works, and ` +
+        "what it costs is that the document is no longer a folder somebody " +
+        "can hand over, sync to Overleaf, or move. Copy it in with a " +
+        "map-paths stage and reference it from beside the document.",
     };
   }
   if (component.provenance === "undeclared") {

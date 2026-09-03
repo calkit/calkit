@@ -98,6 +98,7 @@ const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_COMPONENT_OBJECT = "calkit-vscode.viewComponentObject";
 const COMMAND_OPEN_PATH = "calkit-vscode.openPath";
+const COMMAND_OPEN_PDF_SOURCE = "calkit-vscode.openPdfSource";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
 const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
@@ -347,7 +348,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_SHOW_PROVENANCE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           void vscode.window.showErrorMessage(
             "No file selected to show source for.",
@@ -460,7 +461,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_RUN_STAGE_FOR_FILE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -484,7 +485,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_OPEN_STAGE_PDF,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -523,6 +524,40 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  // The way back from a rendered PDF to the document that produced it, in
+  // the pane the PDF is in, so reading and editing are the same place
+  // rather than two halves of a split.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_PDF_SOURCE,
+      async (uri?: vscode.Uri) => {
+        const fileUri = uri ?? activeFileUri();
+        const workspaceRoot = getWorkspaceRoot();
+        if (!fileUri || !workspaceRoot) {
+          return;
+        }
+        const stageName = await findStageForFile(workspaceRoot, fileUri);
+        const stage = stageName
+          ? currentCalkitConfig?.pipeline?.stages?.[stageName]
+          : undefined;
+        const target =
+          typeof stage?.target_path === "string"
+            ? stage.target_path
+            : undefined;
+        if (!target) {
+          void vscode.window.showErrorMessage(
+            `No document source found for '${path.basename(fileUri.fsPath)}'.`,
+          );
+          return;
+        }
+        await vscode.window.showTextDocument(
+          vscode.Uri.file(path.join(workspaceRoot, target)),
+          { viewColumn: vscode.ViewColumn.Active },
+        );
       },
     ),
   );
@@ -828,7 +863,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(
       COMMAND_DEFINE_PROVENANCE,
       async (uri?: vscode.Uri) => {
-        const fileUri = uri ?? vscode.window.activeTextEditor?.document.uri;
+        const fileUri = uri ?? activeFileUri();
         if (!fileUri) {
           return;
         }
@@ -3984,6 +4019,19 @@ async function buildOutputToStageMap(
     }
   }
   return map;
+}
+
+// The file the user is looking at, including one shown by a custom editor
+// such as the PDF viewer, where there is no active text editor at all.
+function activeFileUri(): vscode.Uri | undefined {
+  const fromText = vscode.window.activeTextEditor?.document.uri;
+  if (fromText) {
+    return fromText;
+  }
+  const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input as
+    | { uri?: vscode.Uri }
+    | undefined;
+  return input?.uri;
 }
 
 async function findStageForFile(

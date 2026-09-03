@@ -167,6 +167,8 @@ def _component_line(c) -> str:
         bits.append("p. " + ", ".join(str(p) for p in c.pages))
     if c.stale_reasons:
         bits.append("; ".join(c.stale_reasons))
+    if c.outside_document:
+        bits.append("OUTSIDE THE DOCUMENT")
     if c.kind == "value" and c.current_value is not None:
         drifted = (
             c.build_value is not None and c.build_value != c.current_value

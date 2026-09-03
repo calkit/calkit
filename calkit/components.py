@@ -125,6 +125,12 @@ class Component(BaseModel):
     #: Every place in the source this component is written. Empty for one
     #: the built document used and the source no longer names.
     locations: list[Location] = Field(default_factory=list)
+    #: Whether the source reaches outside the document's own folder for
+    #: this file, e.g., ``\includegraphics{../figures/plot.png}``. The
+    #: file is real and the build works; what it costs is that the
+    #: document is no longer a folder somebody can hand over, sync to
+    #: Overleaf, or move. A ``map-paths`` stage copying it in is the fix.
+    outside_document: bool = False
 
     @property
     def location(self) -> str:
@@ -651,6 +657,7 @@ def enrich(raw: list[dict], view: ProjectView) -> list[Component]:
             build_value=rec.get("value"),
             build_hash=rec.get("hash"),
             locations=rec.get("locations") or [],
+            outside_document=bool(rec.get("outside_document")),
         )
         component.current_hash = view.current_hash(path)
         if kind == "value":
@@ -809,12 +816,16 @@ def describe_document(
                 ),
                 None,
             )
-            # The build knows the pages and the value it used; only the
+            # The build knows the pages and the value it used. Only the
             # source knows how the document typesets it, which is what a
-            # reader sees and so what a hover should lead with
+            # reader sees, and how it names the file, which is what says
+            # whether the document reaches outside its own folder.
             components.append(
                 {
                     "document_value": (found or {}).get("document_value"),
+                    "outside_document": bool(
+                        (found or {}).get("outside_document")
+                    ),
                     **rec,
                     "locations": found["locations"] if found else [],
                 }
@@ -906,12 +917,20 @@ def source_components(target: str, wdir: str) -> list[dict]:
             for body in _bodies(entries, match.group(2)):
                 for rec in expand_components(body, commands):
                     add(rec, rel, match.start(), starts)
+        folder = Path(target).parent.as_posix()
         for span, rec in _path_commands(tex, target, rel, wdir):
             # Pulling in a generated file is the mechanism, not a
             # component: what it carries is already listed as the values
             # and blocks the document shows
             if rec["kind"] == "text" and _is_generated(rec["path"], wdir):
                 continue
+            # A file the document names from outside its own folder. Only
+            # a file the source points at: a value reaches the page
+            # through a generated .tex inside the folder, whatever
+            # results file is behind it.
+            rec["outside_document"] = not (
+                folder in (".", "") or rec["path"].startswith(folder + "/")
+            )
             add(rec, rel, span[0], starts)
     return out
 

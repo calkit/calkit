@@ -535,6 +535,30 @@ no sidecar and no pages, but the question still has an answer: the
 generated `.tex` files say which results file and key each command came
 from, so the trail holds in a project that has never been built.
 
+### Documents that reach outside their own folder
+
+A document is meant to be a folder somebody can hand over, sync to Overleaf,
+or move somewhere else. `\includegraphics{../figures/plot.png}` builds
+perfectly well and quietly costs that: the folder is no longer the document.
+
+A component the source names from outside the document's folder is reported
+as such, in the listing and as a warning in the editor. The fix is a
+`map-paths` stage copying it in, after which the document references it from
+beside itself:
+
+```yaml
+paper-figures:
+  kind: map-paths
+  paths:
+    - kind: file-to-file
+      src: figures/plot.png
+      dest: paper/figures/plot.png
+```
+
+Only a file the source points at. A value reaches the page through a
+generated `.tex` inside the folder, so where its results file sits says
+nothing about whether the document is self-contained.
+
 ### Components with nothing behind them
 
 Being current is not the only thing worth knowing about a component. The

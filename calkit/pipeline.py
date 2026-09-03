@@ -1133,6 +1133,26 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
             out_path = out.get("path") if isinstance(out, dict) else out
             if out_path and Path(out_path).as_posix() == target:
                 return name
+        # A map-paths stage says what it produces under 'paths' rather
+        # than 'outputs': copying a file in is the whole of what it does,
+        # so its destinations are its outputs. Mirrors each mapping's
+        # own out_path, since 'file-to-dir' writes dest/<name> rather
+        # than dest.
+        if stage.get("kind") == "map-paths":
+            for mapping in stage.get("paths", []) or []:
+                if not isinstance(mapping, dict):
+                    continue
+                dest = mapping.get("dest")
+                src = mapping.get("src")
+                if not dest:
+                    continue
+                if mapping.get("kind") == "file-to-dir" and src:
+                    out = Path(dest, Path(src).name).as_posix()
+                else:
+                    out = Path(dest).as_posix()
+                # A directory mapping produces everything it writes into
+                if target == out or target.startswith(out + "/"):
+                    return name
     return None
 
 

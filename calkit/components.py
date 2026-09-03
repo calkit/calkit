@@ -784,23 +784,37 @@ def describe_document(
     view = LocalProject(ck_info, wdir, check_stages)
     if sidecar is not None:
         target = sidecar.get("source") or source_path(document)
-        # The build says what the document shows; only the source says
-        # where it is written, which is what an editor needs to put a
-        # marker on the right line. A component with no location is one
-        # the source stopped naming after the build.
-        locations = {
-            (rec["kind"], rec["path"], rec.get("key")): rec["locations"]
-            for rec in _source_components(target, wdir)
-        }
-        components = [
-            {
-                **rec,
-                "locations": locations.get(
-                    (rec.get("kind"), rec.get("path"), rec.get("key")), []
+        # The build says what the document shows and on which pages; only
+        # the source says where it is written, which is what an editor
+        # needs to put a marker on the right line. A component with no
+        # location is one the source stopped naming after the build.
+        #
+        # The two are merged rather than the build's list being taken as
+        # the whole of it. calkit.sty logs what its own macros typeset, so
+        # a figure included with a plain \includegraphics is on the page
+        # and absent from the log. Trusting the log alone would mean that
+        # turning provenance on loses components a project gets without
+        # it, which is the wrong way round.
+        from_source = _source_components(target, wdir)
+        components = []
+        seen = set()
+        for rec in sidecar.get("components", []):
+            key = (rec.get("kind"), rec.get("path"), rec.get("key"))
+            seen.add(key)
+            found = next(
+                (
+                    src
+                    for src in from_source
+                    if (src["kind"], src["path"], src.get("key")) == key
                 ),
-            }
-            for rec in sidecar.get("components", [])
-        ]
+                None,
+            )
+            components.append(
+                {**rec, "locations": found["locations"] if found else []}
+            )
+        for src in from_source:
+            if (src["kind"], src["path"], src.get("key")) not in seen:
+                components.append(src)
         return DocumentComponents(
             artifact=sidecar.get("artifact")
             or (os.path.splitext(target)[0] + ".pdf"),

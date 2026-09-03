@@ -346,3 +346,51 @@ def test_component_helpers(tmp_dir):
         == "x\\y"
     )
     assert cc.components_in_tex(r"\ckvalue{a}{1}") == []
+
+
+def test_a_build_log_adds_to_the_source_rather_than_replacing_it(tmp_dir):
+    # calkit.sty logs what its own macros typeset. A figure included with
+    # a plain \includegraphics is on the page and not in the log, so a
+    # listing that trusted the log alone would lose it the moment
+    # provenance was turned on, which is the wrong way round.
+    import calkit.components as cc
+
+    ck_info = _project()
+    with open("figures/extra.pdf", "w") as f:
+        f.write("pdf")
+    with open("paper/main.tex", "a") as f:
+        f.write("\\includegraphics{../figures/extra.pdf}\n")
+    _generate(ck_info)
+    # A build that logged only the marked figure
+    with open("paper/main.provenance.json", "w") as f:
+        json.dump(
+            {
+                "artifact": "paper/main.pdf",
+                "source": "paper/main.tex",
+                "kind": "publication",
+                "components": [
+                    {
+                        "kind": "figure",
+                        "path": "figures/plot.pdf",
+                        "key": None,
+                        "pages": [2],
+                        "stage": "plot",
+                        "stage_inputs": [],
+                        "hash": "abc",
+                    }
+                ],
+            },
+            f,
+        )
+    doc = cc.describe_document("paper/main.tex", check_stages=False)
+    assert doc.built
+    figures = {c.path: c for c in doc.components if c.kind == "figure"}
+    # The logged one keeps what only the build knows
+    assert figures["figures/plot.pdf"].pages == [2]
+    # The unlogged one is still a component, and the source says where
+    assert "figures/extra.pdf" in figures
+    extra = figures["figures/extra.pdf"]
+    assert extra.pages == []
+    assert [(loc.source, loc.line) for loc in extra.locations] == [
+        ("paper/main.tex", 10)
+    ]

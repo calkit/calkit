@@ -208,6 +208,32 @@ Options:
   Only compatible when adding one path.
 - `--push`: Push to the Git or DVC remote after committing.
 
+## Line endings across platforms
+
+Windows writes CRLF line endings where macOS and Linux write LF, and Git
+rewrites text files on checkout to match when `core.autocrlf` is on, which
+is the default for Git for Windows. DVC hashes files as they are on disk,
+so the same file can hash differently on two machines, and a stage nobody
+touched reads as stale.
+
+Calkit handles its own generated files. When a project has an environment
+that writes a lock file, compiling the pipeline adds a managed block to
+`.gitattributes` pinning everything under `.calkit` to LF, which holds
+whatever `core.autocrlf` is set to. Nothing to do.
+
+Files your project commits itself are a different matter, and worth
+thinking about if you collaborate across platforms---a text file that is
+also a stage dependency has the same problem. DVC's
+[guide to running on Windows](https://doc.dvc.org/user-guide/how-to/run-dvc-on-windows)
+covers the options.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Adding a `.gitattributes` rule to a repository that already has CRLF
+    files committed makes Git renormalize them on the next checkout, so
+    expect one commit's worth of churn as they settle.
+
 ## Large folders of many small files
 
 DVC is designed to track individual files efficiently,

@@ -5,9 +5,7 @@ import git
 import yaml
 from fastapi.testclient import TestClient
 
-from app.config import settings
-
-URL = f"{settings.API_V1_STR}/projects/o/p/figures/script"
+URL = "/projects/o/p/figures/script"
 
 SCRIPT = (
     "import matplotlib.pyplot as plt\n"

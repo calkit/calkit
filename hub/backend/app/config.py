@@ -76,7 +76,6 @@ class Settings(BaseSettings):
     # a separate setting from the backend's project name, which is used in
     # the default email sender name and in the default frontend title.
     PROJECT_NAME: str
-    API_V1_STR: str = ""
     SECRET_KEY: str = secrets.token_urlsafe(32)
     FERNET_KEY: str  # Can be generated with Fernet.generate_key()
     # Optional comma-separated list of keys for decryption fallback.
@@ -141,6 +140,51 @@ class Settings(BaseSettings):
             port=self.POSTGRES_PORT,
             path=self.POSTGRES_DB,
         )  # type: ignore
+
+    # What to leave out of a clone. A research project keeps its results in
+    # Git, so most of what a full clone downloads is old revisions of large
+    # files nobody is looking at: for one real project, 739 MB of the 957 MB
+    # was history, nearly all of it figures and results.
+    #
+    # How many recently-active projects to warm when the app starts. A
+    # deploy empties the caches those pages are built from, and this decides
+    # how much of that is paid before anyone asks rather than by whoever
+    # opens the page first. 0 disables it.
+    WARM_ON_STARTUP: int = 25
+
+    # Where project clones live. A clone is expensive to make and cheap to
+    # keep, so it belongs somewhere that survives a deploy: on the container
+    # filesystem every release re-clones every project for every viewer.
+    CLONE_ROOT: str = "/tmp"
+
+    # Off by default, because the clone is not where the time goes.
+    #
+    # A partial clone is dramatically faster to make -- ``blob:none`` took one
+    # real project from ~350 s and 957 MB to 26 s and 274 MB -- but every read
+    # that touches a blob the filter skipped then fetches it over the network,
+    # one object at a time. That is invisible on a README and ruinous on a
+    # file history, which walks dvc.lock at hundreds of commits: 444 s under
+    # ``blob:none``, and still 105-138 s under a size limit, against a
+    # fraction of a second on a full clone. Raising the limit did not help,
+    # so the cost is not one stray large file.
+    #
+    # A clone is paid once per project and then cached; a lazy fetch is paid
+    # on every read that lands on a missing object. Set this to
+    # ``blob:limit=1m`` or ``blob:none`` only where slow history reads are an
+    # acceptable trade for a faster first clone.
+    GIT_CLONE_FILTER: str = ""
+
+    # Shared cache. Everything the project view derives from a repo -- stage
+    # statuses, parsed pipelines, figure listings -- is a pure function of a
+    # commit SHA, so it can be cached until that SHA moves. Running several
+    # workers means a per-process cache is cold most of the time, hence a
+    # shared one. Unset disables caching entirely, which is a supported way
+    # to run: every read just recomputes.
+    REDIS_URL: str | None = None
+    # How long a cached entry lives. Entries are keyed by commit SHA and so
+    # are never stale, but they still expire so a repo nobody visits again
+    # doesn't hold memory forever.
+    CACHE_TTL_S: int = 86400
 
     # Object storage configuration
     # The root under which this hub stores all of its objects, usually
@@ -278,6 +322,11 @@ class Settings(BaseSettings):
     # as a GitHub Actions secret. Optional: without it, GitHub-less users can
     # only read public projects.
     GH_APP_PRIVATE_KEY: str | None = None
+    # Shared secret for the GitHub App's webhook. Set the same value on the
+    # App itself; a delivery whose signature doesn't match it is refused.
+    # Unset means the endpoint refuses every delivery, which is the right
+    # default for a deployment that hasn't configured one.
+    GH_WEBHOOK_SECRET: str | None = None
     # Stripe
     STRIPE_SECRET_KEY: str
     STRIPE_PUBLISHABLE_KEY: str

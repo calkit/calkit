@@ -572,12 +572,15 @@ def test_run_in_env_detect_default(tmp_dir):
 
 
 def test_run_in_env_system(tmp_dir):
+    def _write_envs_to_ck_info(environments: dict) -> None:
+        # Dumped rather than written as literal YAML so the test says what
+        # the environment is, not how it's spelled
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump({"environments": environments}, f)
+
     # A named system env runs the command on this machine, like the built-in
     # '_system' env, but with a lock file recording what it pinned
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n  sys:\n    kind: system\n    lock:\n      - os\n"
-        )
+    _write_envs_to_ck_info({"sys": {"kind": "system", "lock": ["os"]}})
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "sys", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -585,14 +588,136 @@ def test_run_in_env_system(tmp_dir):
     assert "hi" in out
     with open(os.path.join(".calkit", "env-locks", "sys", "info.json")) as f:
         assert set(json.load(f)) == {"os"}
+    # '--setup' runs its commands in the same shell as the command, so
+    # what they set is visible there, and it runs in bash by default so
+    # 'source' works---the reason most of these exist. What to run is
+    # decided by the pipeline compiler, which merges the environment's
+    # 'default_setup' with the stage's own; 'calkit xenv' just runs what
+    # it is handed.
+    with open("setup_env.sh", "w") as f:
+        f.write("export CK_TEST_SETUP=from-setup\n")
+    _write_envs_to_ck_info(
+        {"sys2": {"kind": "system", "inputs": ["setup_env.sh"]}}
+    )
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup",
+            "source setup_env.sh",
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_SETUP'])",
+        ],
+        text=True,
+    )
+    assert "from-setup" in out
+    # Several are chained in order, into the one shell
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup",
+            "export CK_TEST_ORDER=first",
+            "--setup",
+            "export CK_TEST_ORDER=$CK_TEST_ORDER-second",
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_ORDER'])",
+        ],
+        text=True,
+    )
+    assert out.strip() == "first-second"
+    # A compiled stage passes a file rather than quoted commands, since a
+    # path survives cmd.exe on Windows and a POSIX shell elsewhere while
+    # quoted text survives neither
+    os.makedirs(os.path.join(".calkit", "stage-setup"), exist_ok=True)
+    setup_json = os.path.join(".calkit", "stage-setup", "s.json")
+    with open(setup_json, "w") as f:
+        json.dump(["source setup_env.sh"], f)
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup-file",
+            setup_json,
+            "--",
+            "python",
+            "-c",
+            "import os; print(os.environ['CK_TEST_SETUP'])",
+        ],
+        text=True,
+    )
+    assert "from-setup" in out
+    # Saying it twice in two ways is refused rather than one winning
+    res = subprocess.run(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "sys2",
+            "--setup-file",
+            setup_json,
+            "--setup",
+            "true",
+            "--",
+            "echo",
+            "hi",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "not both" in res.stdout + res.stderr
+    # Nothing about the machine is locked and the shell is the default, so
+    # there is no lock file: the setup commands live in the stage's
+    # command, where DVC already watches them
+    assert not os.path.isfile(
+        os.path.join(".calkit", "env-locks", "sys2", "info.json")
+    )
+    # Setup commands are refused for an env kind that has nowhere to run
+    # them, rather than silently dropped
+    _write_envs_to_ck_info({"img": {"kind": "docker", "image": "x"}})
+    res = subprocess.run(
+        ["calkit", "xenv", "-n", "img", "--setup", "true", "--", "echo", "hi"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "only applies to a 'system' environment" in res.stdout + res.stderr
+    # A failing setup command stops the stage rather than running it
+    # without whatever the setup was meant to provide
+    _write_envs_to_ck_info({"bad": {"kind": "system"}})
+    res = subprocess.run(
+        [
+            "calkit",
+            "xenv",
+            "-n",
+            "bad",
+            "--setup",
+            "exit 3",
+            "--",
+            "python",
+            "-c",
+            "print('ran')",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "ran" not in res.stdout
     # A host naming this machine runs here rather than connecting to it
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  here:\n"
-            "    kind: system\n"
-            f"    host: {socket.gethostname()}\n"
-        )
+    _write_envs_to_ck_info(
+        {"here": {"kind": "system", "host": socket.gethostname()}}
+    )
     out = subprocess.check_output(
         ["calkit", "xenv", "-n", "here", "--", "python", "-c", "print('hi')"],
         text=True,
@@ -602,13 +727,9 @@ def test_run_in_env_system(tmp_dir):
     # without one has nothing to derive from and says so rather than
     # picking a directory it was never told about. No user is needed: SSH
     # resolves that itself.
-    with open("calkit.yaml", "w") as f:
-        f.write(
-            "environments:\n"
-            "  remote:\n"
-            "    kind: system\n"
-            "    host: not-this-box.invalid\n"
-        )
+    _write_envs_to_ck_info(
+        {"remote": {"kind": "system", "host": "not-this-box.invalid"}}
+    )
     res = subprocess.run(
         ["calkit", "xenv", "-n", "remote", "--", "echo", "hi"],
         capture_output=True,
@@ -2595,3 +2716,71 @@ def test_commit(tmp_dir):
     repo = calkit.git.get_repo()
     assert repo.head.commit.message.strip() == "Resolve conflict"
     assert not repo.is_dirty()
+
+
+def test_push_only_reports_to_a_connected_hub(monkeypatch, tmp_dir):
+    import calkit.cli.main.core as cli_core
+
+    posted: list[str] = []
+    monkeypatch.setattr(
+        calkit.hub, "post", lambda path, **kw: posted.append(path)
+    )
+    monkeypatch.setattr(calkit, "detect_project_name", lambda: "o/p")
+    monkeypatch.setattr(calkit.dvc, "get_remotes", lambda: {})
+
+    # A project that names no hub and stores nothing on one is not connected,
+    # and Calkit works perfectly well that way: say nothing to anyone
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: {})
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == []
+
+    # Declaring a hub in calkit.yaml connects it
+    monkeypatch.setattr(
+        calkit, "load_calkit_info", lambda: {"hub": "https://calkit.io"}
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == ["/projects/o/p/events/push"]
+
+    # So does keeping data on a Calkit DVC remote, with no hub key at all
+    posted.clear()
+    monkeypatch.setattr(calkit, "load_calkit_info", lambda: {})
+    monkeypatch.setattr(
+        calkit.dvc, "get_remotes", lambda: {"calkit": "ck://o/p"}
+    )
+    monkeypatch.setattr(
+        calkit.dvc, "detect_calkit_remote_type", lambda name, url: "ck"
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == ["/projects/o/p/events/push"]
+
+    # A remote that isn't Calkit's doesn't connect anything
+    posted.clear()
+    monkeypatch.setattr(
+        calkit.dvc, "get_remotes", lambda: {"s3": "s3://somewhere"}
+    )
+    monkeypatch.setattr(
+        calkit.dvc, "detect_calkit_remote_type", lambda name, url: None
+    )
+    cli_core._tell_hub_we_pushed(["git"], [])
+    assert posted == []
+
+
+def test_push_reports_what_was_pushed(monkeypatch, tmp_dir):
+    import calkit.cli.main.core as cli_core
+
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        calkit.hub, "post", lambda path, **kw: sent.append(kw["json"])
+    )
+    monkeypatch.setattr(calkit, "detect_project_name", lambda: "o/p")
+    monkeypatch.setattr(
+        calkit, "load_calkit_info", lambda: {"hub": "https://calkit.io"}
+    )
+    monkeypatch.setattr(calkit.dvc, "get_remotes", lambda: {})
+    # A push that only sent data still gets reported: it changes what the
+    # project resolves to without moving a commit, and the hub has no other
+    # way to know that
+    cli_core._tell_hub_we_pushed(["dvc"], [])
+    assert sent[-1]["targets"] == ["dvc"]
+    cli_core._tell_hub_we_pushed(["dvc", "docker", "git"], [])
+    assert sent[-1]["targets"] == ["dvc", "docker", "git"]

@@ -86,12 +86,28 @@ const EditQuestion = ({
   const showToast = useCustomToast()
   const routeApi = getRouteApi("/_layout/$accountName/$projectName")
   const { accountName, projectName } = routeApi.useParams()
-  const { figuresRequest } = useProjectFigures(accountName, projectName, gitRef)
-  const { resultsRequest } = useProjectResults(accountName, projectName, gitRef)
+  // These four feed the evidence picker and are only needed once the modal is
+  // showing. The modal itself stays mounted while closed, so without the gate
+  // every project home page load pays for them, including for visitors who
+  // can't edit a question at all. Figures and publications are the two most
+  // expensive reads the API has.
+  const { figuresRequest } = useProjectFigures(
+    accountName,
+    projectName,
+    gitRef,
+    isOpen,
+  )
+  const { resultsRequest } = useProjectResults(
+    accountName,
+    projectName,
+    gitRef,
+    isOpen,
+  )
   const { publicationsRequest } = useProjectPublications(
     accountName,
     projectName,
     gitRef,
+    isOpen,
   )
   // Metadata only: the dropdown needs paths, not the rows themselves.
   const { tablesRequest } = useProjectTables(
@@ -99,6 +115,7 @@ const EditQuestion = ({
     projectName,
     gitRef,
     false,
+    isOpen,
   )
   const {
     register,

@@ -522,3 +522,57 @@ def list_remotes(
         typer.echo(f"(Git) {name}: {url}")
     for name, url in result["dvc"].items():
         typer.echo(f"(DVC) {name}: {url}")
+
+
+@list_app.command(name="imports")
+def list_imports(
+    json_output: Annotated[
+        bool, typer.Option("--json", help="Output result as JSON.")
+    ] = False,
+):
+    """List everything in the project that was imported from elsewhere.
+
+    Walks every artifact kind, so an import shows up here whichever list it
+    was recorded in. Entries are annotated with the kind they came from and
+    a one-line description of the source, since where a file came from is
+    the question being asked and it's spelled differently for a Git repo, a
+    project, a URL, and a DOI.
+
+    What each import resolved to -- the commit, the checksum, when it was
+    fetched -- is read from '.calkit/imports.json' and shown under
+    'locked', so both halves of the record are in one listing.
+    """
+    from calkit.provenance import (
+        describe_source,
+        get_artifact_types_with_imports,
+        read_import_locks,
+    )
+
+    ck_info = calkit.load_calkit_info()
+    # calkit.yaml says what each import follows; the lock file says where
+    # following it led. Joined here so a listing answers both without the
+    # reader opening two files.
+    locks = read_import_locks()
+    imports = []
+    for kind in get_artifact_types_with_imports():
+        for obj in ck_info.get(kind, []) or []:
+            if not isinstance(obj, dict) or not obj.get("imported_from"):
+                continue
+            entry = dict(obj, kind=kind)
+            lock = locks.get(obj.get("path"))
+            if lock:
+                entry["locked"] = lock
+            imports.append(entry)
+    if json_output:
+        echo_json(imports)
+        return
+    if not imports:
+        typer.echo("No imported artifacts found")
+        return
+    for obj in imports:
+        obj = dict(obj)
+        source = describe_source(obj["imported_from"])
+        # Rendered as a line of its own rather than left as the nested
+        # mapping, so a listing can be skimmed for where things came from
+        obj["source"] = source
+        _echo_object(obj)

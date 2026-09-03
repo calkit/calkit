@@ -61,11 +61,12 @@ interface OverleafImportPost {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "masters-thesis"
-    | "phd-thesis"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
-    | "other"
+    | "thesis"
+    | "phd-thesis"
   overleaf_url: string
   stage?: string | null
   environment?: string | null
@@ -506,11 +507,12 @@ const ImportOverleaf = ({
               >
                 <option value="journal-article">Journal article</option>
                 <option value="conference-paper">Conference paper</option>
+                <option value="proposal">Proposal</option>
                 <option value="report">Report</option>
+                <option value="blog">Blog</option>
                 <option value="book">Book</option>
-                <option value="masters-thesis">Master's thesis</option>
+                <option value="thesis">Thesis</option>
                 <option value="phd-thesis">PhD thesis</option>
-                <option value="other">Other</option>
               </Select>
             </FormControl>
             {/* Title */}

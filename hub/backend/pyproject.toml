@@ -46,6 +46,15 @@ dependencies = [
   "pypdf>=6.1.1",
   "polars>=1.38.1",
   "h5py",
+  # Shared cache across workers; see app/cache.py, and the work queue behind
+  # it; see app/tasks.py
+  "redis>=5.2.0",
+  "rq>=2.0.0",
+  # Figure thumbnails; see app/thumbnails.py. pypdfium2 rather than PyMuPDF
+  # because it is Apache/BSD rather than AGPL, and a self-contained wheel
+  # with no system packages behind it.
+  "pillow>=11.0.0",
+  "pypdfium2>=4.30.0",
 ]
 
 [dependency-groups]

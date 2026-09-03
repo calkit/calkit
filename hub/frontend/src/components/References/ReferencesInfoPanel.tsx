@@ -179,7 +179,7 @@ const ReferencesInfoPanel = ({
                   to="../pipeline"
                   search={{ stage } as any}
                 >
-                  <Code fontSize="xs" cursor="pointer">
+                  <Code fontSize="xs" cursor="pointer" wordBreak="break-all">
                     {stage}
                   </Code>
                 </Link>

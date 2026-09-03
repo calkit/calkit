@@ -146,11 +146,12 @@ export type BodyProjectsPostProjectOverleafPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
-    | "masters-thesis"
+    | "thesis"
     | "phd-thesis"
-    | "other"
   /**
    * Overleaf Project Url
    */
@@ -207,10 +208,12 @@ export type BodyProjectsPostProjectPublication = {
   kind:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
   /**
    * Title
    */
@@ -1348,6 +1351,10 @@ export type Figure = {
    */
   url?: string | null
   /**
+   * Thumbnail
+   */
+  thumbnail?: string | null
+  /**
    * Comment Count
    */
   comment_count?: number
@@ -1864,24 +1871,6 @@ export type GitRemoteHead = {
 }
 
 /**
- * GitSourcePost
- */
-export type GitSourcePost = {
-  /**
-   * Repo Url
-   */
-  repo_url: string
-  /**
-   * Rev
-   */
-  rev?: string | null
-  /**
-   * Path
-   */
-  path?: string | null
-}
-
-/**
  * GithubPullRequest
  */
 export type GithubPullRequest = {
@@ -2057,7 +2046,14 @@ export type ImportedFromPost = {
    * Doi
    */
   doi?: string | null
-  git?: GitSourcePost | null
+  /**
+   * Git Repo Url
+   */
+  git_repo_url?: string | null
+  /**
+   * Git Ref
+   */
+  git_ref?: string | null
   /**
    * Date
    */
@@ -2931,6 +2927,8 @@ export type PipelineStagePut = {
 
 /**
  * Presentation
+ *
+ * A presentation declared in calkit.yaml, or auto-detected in the repo.
  */
 export type Presentation = {
   /**
@@ -2946,9 +2944,9 @@ export type Presentation = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?: "slides" | "poster" | "talk" | null
+  kind?: "slides" | "poster" | null
   /**
    * Stage
    */
@@ -3680,6 +3678,34 @@ export type ProjectPublic = {
 }
 
 /**
+ * ProjectPushEventPost
+ *
+ * A push that happened somewhere else.
+ *
+ * What was pushed and where, recorded for reference: the hub works out the
+ * current state from the repo itself, so none of this is trusted as input,
+ * but it is what makes a log line worth reading.
+ */
+export type ProjectPushEventPost = {
+  /**
+   * Git Rev
+   */
+  git_rev?: string | null
+  /**
+   * Remote
+   */
+  remote?: string | null
+  /**
+   * Branch
+   */
+  branch?: string | null
+  /**
+   * Targets
+   */
+  targets?: Array<string> | null
+}
+
+/**
  * ProjectStatus
  */
 export type ProjectStatus = {
@@ -3727,6 +3753,8 @@ export type ProjectsPublic = {
 
 /**
  * Publication
+ *
+ * A publication declared in calkit.yaml.
  */
 export type Publication = {
   /**
@@ -3742,15 +3770,17 @@ export type Publication = {
    */
   description?: string | null
   /**
-   * Type
+   * Kind
    */
-  type?:
+  kind?:
     | "journal-article"
     | "conference-paper"
-    | "presentation"
-    | "poster"
+    | "proposal"
     | "report"
+    | "blog"
     | "book"
+    | "thesis"
+    | "phd-thesis"
     | null
   /**
    * Stage
@@ -4260,10 +4290,6 @@ export type References = {
    */
   entries?: Array<ReferenceEntry> | null
   imported_from?: ImportInfo | null
-  /**
-   * Raw Text
-   */
-  raw_text?: string | null
   zotero?: ReferenceZoteroLink | null
   /**
    * Stages
@@ -9323,6 +9349,12 @@ export type GetProjectFiguresData = {
      * Inline each figure's content. Set false for a metadata-only listing that skips object storage entirely.
      */
     include_content?: boolean
+    /**
+     * Thumbnails
+     *
+     * Send a small WebP preview in `thumbnail` instead of the full-size bytes in `content`. This is what a grid of previews wants: a page of figures is otherwise megabytes of base64 to draw images a couple of hundred pixels tall.
+     */
+    thumbnails?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/figures"
 }
@@ -9911,6 +9943,12 @@ export type GetProjectPublicationsData = {
      * Ref
      */
     ref?: string | null
+    /**
+     * Include Content
+     *
+     * Inline each publication's content rather than leaving the caller to fetch it from the returned URL. Off by default: a listing only needs the metadata, and one PDF can otherwise be almost the whole response. Content is still inlined for a file with no URL, since there would be no other way to reach it.
+     */
+    include_content?: boolean
   }
   url: "/projects/{owner_name}/{project_name}/publications"
 }
@@ -10292,6 +10330,42 @@ export type PostProjectSyncResponses = {
 
 export type PostProjectSyncResponse =
   PostProjectSyncResponses[keyof PostProjectSyncResponses]
+
+export type PostProjectPushEventData = {
+  body: ProjectPushEventPost
+  path: {
+    /**
+     * Owner Name
+     */
+    owner_name: string
+    /**
+     * Project Name
+     */
+    project_name: string
+  }
+  query?: never
+  url: "/projects/{owner_name}/{project_name}/events/push"
+}
+
+export type PostProjectPushEventErrors = {
+  /**
+   * Validation Error
+   */
+  422: HttpValidationError
+}
+
+export type PostProjectPushEventError =
+  PostProjectPushEventErrors[keyof PostProjectPushEventErrors]
+
+export type PostProjectPushEventResponses = {
+  /**
+   * Successful Response
+   */
+  200: Message
+}
+
+export type PostProjectPushEventResponse =
+  PostProjectPushEventResponses[keyof PostProjectPushEventResponses]
 
 export type GetProjectPipelineData = {
   body?: never

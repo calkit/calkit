@@ -1,5 +1,8 @@
 """Miscellaneous routes."""
 
+import hashlib
+import hmac
+import json
 import logging
 import os
 import uuid
@@ -10,10 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from pydantic.networks import EmailStr
+from sqlalchemy import func
 from sqlalchemy.exc import DataError
-from sqlmodel import and_, or_, select
+from sqlmodel import Session, and_, or_, select
 from starlette.requests import Request
 
+import app.tasks
 from app import arxiv, version
 from app.api.deps import (
     CurrentUser,
@@ -21,7 +26,9 @@ from app.api.deps import (
     SessionDep,
     get_current_active_superuser,
 )
+from app.config import settings
 from app.core import utcnow
+from app.db import engine
 from app.messaging import generate_test_email, send_email
 from app.models import (
     PLAN_IDS,
@@ -197,6 +204,70 @@ def post_discount_code(
     session.commit()
     session.refresh(code)
     return code
+
+
+@router.post("/events/github", include_in_schema=False)
+async def post_github_event(request: Request) -> Message:
+    """Receive the GitHub App's webhook deliveries.
+
+    A push means everything the project view derives from the repo is now out
+    of date, and that nobody is waiting on it yet -- so it's the moment to
+    recompute. The work is queued rather than done here; see ``app.warm``.
+
+    One webhook is configured on the App, not per repository, so every repo
+    the App is installed on delivers here. Namespaced under ``/events``
+    alongside anywhere else news about a project might come from.
+    """
+    body = await request.body()
+    secret = settings.GH_WEBHOOK_SECRET
+    if not secret:
+        # Refusing is the safe default: without a secret there is no way to
+        # tell a real delivery from anyone who found the URL.
+        logger.warning("Refused a GitHub webhook: no GH_WEBHOOK_SECRET set")
+        raise HTTPException(503, "Webhooks are not configured")
+    expected = (
+        "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    )
+    signature = request.headers.get("x-hub-signature-256", "")
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(401, "Bad signature")
+    if request.headers.get("x-github-event") != "push":
+        return Message(message="Ignored")
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        # Signed, so this came from GitHub, but it isn't what we expect.
+        # A bad request is the honest answer; a 500 would say it was ours.
+        raise HTTPException(400, "Body is not JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Body is not an object")
+    repo = (payload.get("repository") or {}).get("full_name")
+    if not repo or "/" not in repo:
+        return Message(message="Ignored")
+    # The App is installed on a GitHub repo, which is not always named the
+    # same as the Calkit project, so match on the repo we cloned from.
+    # `github_repo` is derived rather than stored, so the query goes against
+    # the URL column it is derived from, with and without the .git suffix
+    # that clone URLs sometimes carry.
+    base = f"https://github.com/{repo}"
+    with Session(engine) as session:
+        projects = session.exec(
+            select(Project).where(
+                func.lower(Project.git_repo_url).in_(
+                    [base.lower(), f"{base.lower()}.git"]
+                )
+            )
+        ).all()
+        # Read the names while the session is still open: the owner's name
+        # comes off a relationship, and the objects are detached after this.
+        slugs = [(p.owner_account_name, p.name) for p in projects]
+    if not slugs:
+        logger.info(f"No project tracks {repo}")
+        return Message(message="Ignored")
+    queued = sum(
+        1 for owner, name in slugs if app.tasks.enqueue_warm(owner, name)
+    )
+    return Message(message=f"Queued {queued}")
 
 
 @router.post("/stripe-events", include_in_schema=False)

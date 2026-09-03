@@ -524,7 +524,7 @@ def check_environment(
             alt_lock_fpaths_delete=[str(legacy_lock_fpath)],
             alt_lock_fpaths=alt_lock_fpaths,
             platform=env.get("platform"),
-            deps=env.get("deps", []),
+            deps=calkit.environments.get_env_input_paths(env, env_name),
             env_vars=env.get("env_vars", []),
             ports=env.get("ports", []),
             gpus=env.get("gpus"),
@@ -727,12 +727,13 @@ def check_environment(
                     system_info=system_info,
                     verbose=verbose,
                 )
-                if locks:
-                    write_system_env_lock(
-                        env_name=env_name,
-                        env=env,
-                        system_info=system_info,
-                    )
+                # Returns None when the env locks nothing, so nothing is
+                # written for an env with nothing to record
+                write_system_env_lock(
+                    env_name=env_name,
+                    env=env,
+                    system_info=system_info,
+                )
             except ValueError as e:
                 raise_error(f"Environment '{env_name}': {e}")
     elif env["kind"] == "nix":

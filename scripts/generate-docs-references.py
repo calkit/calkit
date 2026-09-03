@@ -7,6 +7,7 @@ import inspect
 import re
 import types
 from collections.abc import Sequence
+from enum import Enum
 from pathlib import Path
 from typing import Any, Union, cast, get_args, get_origin
 
@@ -153,8 +154,17 @@ def _default_value(param: TyperOption | TyperArgument) -> str:
     if callable(default):
         return "<dynamic>"
     if isinstance(default, (list, tuple)):
-        return ", ".join(str(v) for v in default)
-    return str(default)
+        return ", ".join(_scalar_default(v) for v in default)
+    return _scalar_default(default)
+
+
+def _scalar_default(value: object) -> str:
+    # An option whose type is an Enum has an Enum member as its default,
+    # whose str() is 'ClassName.member'. What the user types is the value,
+    # which is also what the choices in the same row are written as.
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
 
 
 def _param_help(param: TyperOption | TyperArgument) -> str:

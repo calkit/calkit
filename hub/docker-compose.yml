@@ -19,6 +19,29 @@ services:
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
       - POSTGRES_DB=${POSTGRES_DB?Variable not set}
 
+  cache:
+    image: valkey/valkey:8-alpine
+    restart: always
+    # Everything cached is derived from a commit that is still in Git, so
+    # losing the cache costs recomputation and nothing else. No volume, and
+    # eviction rather than an out-of-memory error when it fills.
+    command:
+      [
+        "valkey-server",
+        "--save",
+        "",
+        "--maxmemory",
+        "512mb",
+        "--maxmemory-policy",
+        "allkeys-lru",
+      ]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      retries: 5
+      start_period: 10s
+      timeout: 5s
+
   adminer:
     image: adminer
     restart: always
@@ -71,6 +94,8 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -83,6 +108,7 @@ services:
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET:-}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
@@ -104,8 +130,13 @@ services:
       db:
         condition: service_healthy
         restart: true
+      cache:
+        condition: service_healthy
+        restart: true
       prestart:
         condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
     environment:
       - PROJECT_NAME=${PROJECT_NAME}
       - DOMAIN=${DOMAIN}
@@ -122,6 +153,8 @@ services:
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - FEEDBACK_EMAIL=${FEEDBACK_EMAIL-}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -135,6 +168,7 @@ services:
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET:-}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
@@ -185,7 +219,39 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.middlewares=https-redirect,${STACK_NAME?Variable not set}-www-redirect
       - traefik.http.routers.${STACK_NAME?Variable not set}-backend-https.middlewares=${STACK_NAME?Variable not set}-www-redirect
 
-  backend-dvc:
+  # The cache itself: hit rate, memory, and what it has had to evict. The
+  # thumbnails are kept until eviction rather than expired deliberately (see
+  # app/thumbnails.py), so whether that is working is something to watch
+  # rather than assume.
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+        restart: true
+    environment:
+      - REDIS_ADDR=redis://cache:6379
+
+  # Reads the queue's state out of the cache and offers it to Prometheus.
+  # A separate process rather than a route on the API: the queue is one
+  # thing, and every API worker reporting it would be the same number over
+  # and over under a different label.
+  rq-exporter:
+    image: mdawar/rq-exporter:latest
+    restart: always
+    depends_on:
+      cache:
+        condition: service_healthy
+        restart: true
+    environment:
+      - RQ_REDIS_HOST=cache
+      - RQ_REDIS_PORT=6379
+      - RQ_REDIS_DB=0
+
+  # Runs the work a push makes necessary -- see app/warm.py -- off the
+  # API's threadpool, which is what serves requests.
+  worker:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     restart: always
     pull_policy: never # We build locally on deploy
@@ -196,8 +262,13 @@ services:
       db:
         condition: service_healthy
         restart: true
+      cache:
+        condition: service_healthy
+        restart: true
       prestart:
         condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
     environment:
       - PROJECT_NAME=${PROJECT_NAME}
       - DOMAIN=${DOMAIN}
@@ -213,6 +284,8 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD}
       - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
       - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
       - POSTGRES_PORT=${POSTGRES_PORT}
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER?Variable not set}
@@ -225,6 +298,68 @@ services:
       - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
       - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
       - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET:-}
+      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
+      - ZENODO_CLIENT_ID=${ZENODO_CLIENT_ID?Variable not set}
+      - ZENODO_CLIENT_SECRET=${ZENODO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID?Variable not set}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET?Variable not set}
+      - ZOTERO_CLIENT_KEY=${ZOTERO_CLIENT_KEY?Variable not set}
+      - ZOTERO_CLIENT_SECRET=${ZOTERO_CLIENT_SECRET?Variable not set}
+      - GOOGLE_CREDENTIALS=${GOOGLE_CREDENTIALS-}
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prometheus_multiproc
+    command: ["rq", "worker", "--url", "${REDIS_URL:-redis://cache:6379/0}", "warm"]
+
+  backend-dvc:
+    image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
+    restart: always
+    pull_policy: never # We build locally on deploy
+    networks:
+      - traefik-public
+      - default
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+      cache:
+        condition: service_healthy
+        restart: true
+      prestart:
+        condition: service_completed_successfully
+    volumes:
+      - project-clones:/clones
+    environment:
+      - PROJECT_NAME=${PROJECT_NAME}
+      - DOMAIN=${DOMAIN}
+      - ENVIRONMENT=${ENVIRONMENT}
+      - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS}
+      - SECRET_KEY=${SECRET_KEY?Variable not set}
+      - FERNET_KEY=${FERNET_KEY?Variable not set}
+      - FIRST_SUPERUSER=${FIRST_SUPERUSER?Variable not set}
+      - FIRST_SUPERUSER_PASSWORD=${FIRST_SUPERUSER_PASSWORD?Variable not set}
+      - FIRST_SUPERUSER_GITHUB_USERNAME=${FIRST_SUPERUSER_GITHUB_USERNAME}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - EMAILS_FROM_EMAIL=${EMAILS_FROM_EMAIL}
+      - POSTGRES_SERVER=db
+      - REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
+      - CLONE_ROOT=${CLONE_ROOT:-/clones}
+      - POSTGRES_PORT=${POSTGRES_PORT}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER?Variable not set}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD?Variable not set}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - OBJECT_STORAGE_PREFIX=${OBJECT_STORAGE_PREFIX:-s3://data}
+      - OBJECT_STORAGE_ENDPOINT_URL=${OBJECT_STORAGE_ENDPOINT_URL:-}
+      - OBJECT_STORAGE_KEY=${OBJECT_STORAGE_KEY:-}
+      - OBJECT_STORAGE_SECRET=${OBJECT_STORAGE_SECRET:-}
+      - GH_CLIENT_ID=${GH_CLIENT_ID?Variable not set}
+      - GH_CLIENT_SECRET=${GH_CLIENT_SECRET?Variable not set}
+      - GH_APP_PRIVATE_KEY=${GH_APP_PRIVATE_KEY:-}
+      - GH_WEBHOOK_SECRET=${GH_WEBHOOK_SECRET:-}
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - MIXPANEL_TOKEN=${MIXPANEL_TOKEN?Variable not set}
@@ -418,6 +553,7 @@ services:
       - traefik.http.services.${STACK_NAME?Variable not set}-grafana.loadbalancer.server.port=3000
 
 volumes:
+  project-clones:
   app-db-data:
   minio-data:
     driver: local

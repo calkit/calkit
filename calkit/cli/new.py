@@ -1017,13 +1017,14 @@ def new_docker_env(
             help="Arguments to use when running container.",
         ),
     ] = [],
-    deps: Annotated[
+    inputs: Annotated[
         list[str],
         typer.Option(
+            "--input",
             "--dep",
             help=(
-                "Path to add as a dependency, i.e., "
-                "a file that gets added to the container."
+                "Path to a file that gets added to the container, so "
+                "editing it rebuilds the image."
             ),
         ),
     ] = [],
@@ -1185,8 +1186,8 @@ def new_docker_env(
             env["env_vars"][key] = value
     if args:
         env["args"] = args  # type: ignore
-    if deps:
-        env["deps"] = deps  # type: ignore
+    if inputs:
+        env["inputs"] = inputs  # type: ignore
     if ports:
         env["ports"] = ports  # type: ignore
     envs[name] = env

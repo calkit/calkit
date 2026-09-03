@@ -739,6 +739,13 @@ export interface CitedValue {
   by: string[];
 }
 
+/** One value a document was found to reference, from its own source. */
+export interface DocumentCitation {
+  path: string;
+  key: string;
+  document: string;
+}
+
 /**
  * The values a results file is actually cited for, and by what.
  *
@@ -746,17 +753,16 @@ export interface CitedValue {
  * three and a question answers with one. Those are the ones worth seeing
  * beside the file: the rest are only its contents.
  *
- * Read from calkit.yaml alone. A question names its evidence there, and a
- * `json-to-latex` stage names under `keys` exactly what it puts within a
- * document's reach. Without `keys` a stage exposes every top-level key,
- * which is not a citation of any of them, so it says nothing here.
+ * A citation is a reference, not an availability. A `json-to-latex`
+ * stage's `keys` say what a document *could* reference, which is why they
+ * are not read here; `documentCitations` comes from resolving each
+ * document's own source, so it says what one does. Question evidence is a
+ * citation in the same sense: the answer rests on that value.
  */
 export function citedValues(
   resultsPath: string,
-  config: {
-    questions?: unknown[];
-    pipeline?: { stages?: Record<string, Record<string, unknown>> };
-  },
+  config: { questions?: unknown[] },
+  documentCitations: DocumentCitation[] = [],
 ): CitedValue[] {
   const by = new Map<string, string[]>();
   const cite = (key: string, who: string): void => {
@@ -782,22 +788,9 @@ export function citedValues(
       }
     }
   });
-  for (const [name, stage] of Object.entries(config.pipeline?.stages ?? {})) {
-    if (stage?.kind !== "json-to-latex") {
-      continue;
-    }
-    const inputs = (stage.inputs ?? []) as (string | { path?: string })[];
-    const reads = inputs.some(
-      (input) =>
-        (typeof input === "string" ? input : input?.path) === resultsPath,
-    );
-    if (!reads) {
-      continue;
-    }
-    for (const key of (stage.keys ?? []) as string[]) {
-      if (typeof key === "string" && key) {
-        cite(key, name);
-      }
+  for (const citation of documentCitations) {
+    if (citation.path === resultsPath && citation.key) {
+      cite(citation.key, citation.document);
     }
   }
   return [...by.entries()]

@@ -79,10 +79,11 @@ project in a plain folder.
   decided by what is on disk, not by a list of keys, so a path a new stage kind
   introduces works without the extension knowing about it.
 - **Cited values**: A results file in the sidebar lists the values something
-  in the project actually quotes, and what quotes them: a question's evidence,
-  or the `json-to-latex` stage that puts them within a document's reach. A
-  results file holds every number a stage wrote; these are the few that are
-  load-bearing.
+  in the project actually quotes, and what quotes them: the document whose
+  source references one, or the question whose answer rests on it. A results
+  file holds every number a stage wrote; these are the few that are
+  load-bearing. A `json-to-latex` stage putting a key within a document's
+  reach is not the document quoting it, so availability does not count.
 - **Questions**: Each question opens `calkit.yaml` where it is written, which
   is the only place it lives.
 - **map-paths stages**: A copy stage shows what it copies, one row per

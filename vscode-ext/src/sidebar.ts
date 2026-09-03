@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import {
   citedValues,
+  type DocumentCitation,
   isMappedCopy,
   mappingOutPath,
   type PathMapping,
@@ -136,6 +137,7 @@ export class CalkitSidebarProvider
   private stageItemCache = new Map<string, SidebarItem>();
   private artifactItemCache = new Map<string, SidebarItem>();
   private questionItemCache = new Map<string, SidebarItem>();
+  private documentCitations: DocumentCitation[] = [];
   private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
@@ -152,6 +154,7 @@ export class CalkitSidebarProvider
     detectedPresentations?: string[],
     hiddenSections?: Set<string>,
     staleStageDetails?: Record<string, StaleStageDetail>,
+    documentCitations?: DocumentCitation[],
   ): void {
     const nextFingerprint = JSON.stringify([
       calkitConfig,
@@ -166,6 +169,7 @@ export class CalkitSidebarProvider
       detectedPresentations,
       [...(hiddenSections ?? [])].sort(),
       staleStageDetails,
+      documentCitations,
     ]);
     if (nextFingerprint === this.lastFingerprint) {
       return;
@@ -176,6 +180,7 @@ export class CalkitSidebarProvider
     this.dvcYaml = dvcYaml;
     this.staleStageNames = staleStageNames;
     this.staleStageDetails = staleStageDetails ?? {};
+    this.documentCitations = documentCitations ?? [];
     this.runningStageNames = runningStageNames ?? new Set();
     this.envDescriptions = envDescriptions;
     this.detectedNotebooks = detectedNotebooks ?? [];
@@ -1028,7 +1033,8 @@ export class CalkitSidebarProvider
     // when nothing says where the file itself came from
     const hasCited =
       nodeKind === "result" &&
-      citedValues(entry.path, this.calkitConfig ?? {}).length > 0;
+      citedValues(entry.path, this.calkitConfig ?? {}, this.documentCitations)
+        .length > 0;
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
     const collapsible =
@@ -1102,7 +1108,11 @@ export class CalkitSidebarProvider
     // something in the project actually quotes, which is a much shorter
     // list and the one worth reading
     if (nodeKind === "result") {
-      for (const cited of citedValues(artifactPath, this.calkitConfig ?? {})) {
+      for (const cited of citedValues(
+        artifactPath,
+        this.calkitConfig ?? {},
+        this.documentCitations,
+      )) {
         const item = new SidebarItem(
           cited.key,
           vscode.TreeItemCollapsibleState.None,

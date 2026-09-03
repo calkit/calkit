@@ -193,6 +193,11 @@ let currentDetectedNotebooks: string[] = [];
 let currentDetectedFigures: string[] = [];
 let currentDetectedDatasets: string[] = [];
 let currentDetectedResults: string[] = [];
+let currentDocumentCitations: {
+  path: string;
+  key: string;
+  document: string;
+}[] = [];
 let currentDetectedPresentations: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
@@ -2135,6 +2140,44 @@ async function listDetectedArtifacts(
   }
 }
 
+// Which values each document actually references, resolved from its LaTeX
+// rather than from what a stage made available. A json-to-latex stage's
+// `keys` say what a document could reference; only the source says what it
+// does, and a results file's useful list is the second one.
+async function scanDocumentCitations(
+  workspaceRoot: string,
+): Promise<{ path: string; key: string; document: string }[]> {
+  const stages = currentCalkitConfig?.pipeline?.stages ?? {};
+  const documents = new Set<string>();
+  for (const stage of Object.values(stages)) {
+    if (
+      (stage?.kind === "latex" || stage?.kind === "quarto") &&
+      typeof stage.target_path === "string"
+    ) {
+      documents.add(stage.target_path);
+    }
+  }
+  const found: { path: string; key: string; document: string }[] = [];
+  for (const document of documents) {
+    const result = await describeComponents(workspaceRoot, [
+      "--source",
+      document,
+      "--no-stage-check",
+      "--json",
+    ]);
+    for (const component of result?.components ?? []) {
+      if (component.kind === "value" && component.key) {
+        found.push({
+          path: component.path,
+          key: component.key,
+          document,
+        });
+      }
+    }
+  }
+  return found;
+}
+
 async function scanDetectedFiles(
   workspaceRoot: string,
   calkitYamlExists: boolean,
@@ -2148,6 +2191,7 @@ async function scanDetectedFiles(
     currentDetectedDatasets = [];
     currentDetectedResults = [];
     currentDetectedPresentations = [];
+    currentDocumentCitations = [];
     return;
   }
   const [
@@ -2178,6 +2222,7 @@ async function scanDetectedFiles(
   currentDetectedDatasets = detectedDatasets;
   currentDetectedResults = detectedResults;
   currentDetectedPresentations = detectedPresentations;
+  currentDocumentCitations = await scanDocumentCitations(workspaceRoot);
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -2332,6 +2377,7 @@ function renderSidebarFromState(): void {
     currentDetectedPresentations,
     getHiddenSections(),
     staleStageDetails,
+    currentDocumentCitations,
   );
   updateSidebarBadge();
 }

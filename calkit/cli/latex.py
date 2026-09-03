@@ -392,6 +392,12 @@ def build(
         subprocess.check_call(cmd)
     except subprocess.CalledProcessError:
         raise_error("latexmk failed")
+    if not no_synctex:
+        # A build in a container records the container's paths, which a
+        # viewer's reverse search cannot open. Worth doing whether or not
+        # provenance was asked for: jumping from the PDF to the source is
+        # the thing people already expect from a LaTeX viewer.
+        calkit.latex.localize_synctex(tex_file, os.getcwd())
     if provenance:
         # latexmk writes the PDF into --output-dir when one is given, so
         # the artifact the record describes is not always beside its source

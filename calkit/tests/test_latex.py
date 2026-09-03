@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -273,3 +274,47 @@ def test_provenance_without_anything_in_the_document(tmp_dir):
     assert figure["stage"] == "plot"
     assert figure["stage_inputs"] == ["results/findings.json"]
     assert figure["pages"] == [3]
+
+
+def test_synctex_paths_are_pointed_at_the_files_that_exist(tmp_dir):
+    # A container build records the container's paths. Reverse search then
+    # finds the right line of a file the editor cannot open, which reads
+    # as the feature being broken rather than the path being someone
+    # else's.
+    import gzip
+
+    import calkit.latex as cl
+
+    os.makedirs("paper")
+    with open("paper/main.tex", "w") as f:
+        f.write("\\documentclass{article}\n")
+    with gzip.open("paper/main.synctex.gz", "wt") as f:
+        f.write(
+            "SyncTeX Version:1\n"
+            "Input:1:/work/paper/./main.tex\n"
+            "Input:2:/usr/local/texlive/2025/tex/latex/base/article.cls\n"
+            "Content:\n"
+            "{1\n"
+            "[1,1:0,0\n"
+            "]\n"
+            "}1\n"
+        )
+    assert cl.localize_synctex("paper/main.tex", ".") is True
+    with gzip.open("paper/main.synctex.gz", "rt") as f:
+        text = f.read()
+    here = (Path(".").resolve() / "paper/main.tex").as_posix()
+    assert f"Input:1:{here}" in text
+    # A file the project does not have is somebody else's to resolve
+    assert "Input:2:/usr/local/texlive/2025/tex/latex/base/article.cls" in text
+    # Already local, so nothing to do and nothing rewritten
+    assert cl.localize_synctex("paper/main.tex", ".") is False
+    # Still readable for pages afterwards
+    assert cl.pages_at(
+        cl.synctex_pages("paper/main.tex", "."), "paper/main.tex", 1
+    ) == [1]
+
+
+def test_localize_synctex_without_one_is_not_an_error(tmp_dir):
+    import calkit.latex as cl
+
+    assert cl.localize_synctex("paper/main.tex", ".") is False

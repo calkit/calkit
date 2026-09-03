@@ -594,6 +594,77 @@ def synctex_pages(
     return out
 
 
+def localize_synctex(
+    target_path: str, wdir: str, artifact_path: str | None = None
+) -> bool:
+    """Point a build's SyncTeX at where its sources actually are.
+
+    TeX records the paths it saw, so a build in a container records the
+    container's: ``/work/paper/main.tex``, which nothing outside it can
+    open. Reverse search in a PDF viewer then finds the right line of a
+    file that does not exist, which looks like the feature being broken
+    rather than the path being someone else's.
+
+    Each recorded input that names a file this project has is rewritten to
+    that file's path here. Matched by the longest trailing part that
+    exists, so it needs to know nothing about where the container mounted
+    anything. Anything else, such as a class file from the TeX
+    distribution, is left as it was.
+
+    Returns whether the file was changed.
+    """
+    import gzip
+
+    stem = os.path.splitext(os.path.join(wdir, artifact_path or target_path))[
+        0
+    ]
+    path = next(
+        (
+            p
+            for p in (stem + ".synctex.gz", stem + ".synctex")
+            if os.path.isfile(p)
+        ),
+        None,
+    )
+    if path is None:
+        return False
+    root = Path(wdir).resolve()
+
+    def local(raw: str) -> str | None:
+        parts = Path(os.path.normpath(raw)).as_posix().split("/")
+        for i in range(len(parts)):
+            rel = "/".join(parts[i:])
+            if not rel or rel.startswith(".."):
+                continue
+            if (root / rel).is_file():
+                return (root / rel).as_posix()
+        return None
+
+    opener = gzip.open if path.endswith(".gz") else open
+    try:
+        with opener(path, "rt", errors="replace") as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return False
+    changed = False
+    for i, line in enumerate(lines):
+        named = re.match(r"^(Input:\d+:)(.*)$", line)
+        if named is None:
+            continue
+        found = local(named.group(2))
+        if found is not None and found != named.group(2):
+            lines[i] = named.group(1) + found
+            changed = True
+    if not changed:
+        return False
+    try:
+        with opener(path, "wt") as f:
+            f.write("\n".join(lines))
+    except OSError:
+        return False
+    return True
+
+
 def pages_at(
     mapping: dict[str, dict[int, list[int]]], source: str, line: int
 ) -> list[int]:

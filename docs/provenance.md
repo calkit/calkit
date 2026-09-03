@@ -389,6 +389,14 @@ was written, so a float that moved is reported on the page it moved to.
 The values themselves come from the results files as the build read them.
 No package, no special commands, no rewriting a paper that already exists.
 
+The same file is what a viewer uses to jump from a spot in the PDF to the
+line of source behind it. A build in a container records the container's
+paths, which nothing outside it can open, so those are rewritten after
+each build to point at the files as they actually sit. Reverse search in
+[LaTeX Workshop](https://github.com/James-Yu/LaTeX-Workshop) then lands on
+the real line, where the components lens takes over: from a number on the
+page to the stage that computed it, without leaving the editor.
+
 `calkit.sty` is for the one thing none of that can do: marking injected
 content on the page. Load it and pass `provenance`, and every injected
 value is colored so a reader can see it came from elsewhere:

@@ -84,8 +84,11 @@ project in a plain folder.
   file holds every number a stage wrote; these are the few that are
   load-bearing. A `json-to-latex` stage putting a key within a document's
   reach is not the document quoting it, so availability does not count.
-- **Questions**: Each question opens `calkit.yaml` where it is written, which
-  is the only place it lives.
+- **Questions**: An answer is shown with its placeholders filled from the
+  evidence behind them, so it reads "the proof (1)" rather than "the proof
+  ({proof})"; the value evidence row names the key and what the answer calls
+  it. Each question opens `calkit.yaml` where it is written, which is the only
+  place it lives.
 - **map-paths stages**: A copy stage shows what it copies, one row per
   mapping, opening the source it copies from. Its copies are left out of the
   figure and dataset lists, since the file they came from is already there and

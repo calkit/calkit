@@ -66,6 +66,8 @@ export interface QuestionEvidence {
   kind?: string;
   path?: string;
   key?: string;
+  /** What the answer's "{name}" placeholders call this value. */
+  name?: string;
   explanation?: string;
   [key: string]: unknown;
 }

@@ -53,6 +53,7 @@ import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
 import { questionLines, stagePdfOutput } from "./components/core";
+import type { RenderedQuestion } from "./sidebar";
 import type { DocumentComponents, QuestionsReport } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
@@ -198,6 +199,7 @@ let currentDocumentCitations: {
   key: string;
   document: string;
 }[] = [];
+let currentRenderedQuestions: RenderedQuestion[] = [];
 let currentDetectedPresentations: string[] = [];
 let sidebarProvider: CalkitSidebarProvider | undefined;
 let sidebarTreeView:
@@ -2144,6 +2146,30 @@ async function listDetectedArtifacts(
 // rather than from what a stage made available. A json-to-latex stage's
 // `keys` say what a document could reference; only the source says what it
 // does, and a results file's useful list is the second one.
+// The project's questions with every {name} placeholder filled from the
+// evidence behind it, which is what a reader should see: the answer says
+// "the proof (1)", not "the proof ({proof})". Rendered by calkit rather
+// than here, so the sidebar and `calkit list questions` cannot disagree
+// about what an answer says.
+async function scanRenderedQuestions(
+  workspaceRoot: string,
+): Promise<RenderedQuestion[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "calkit",
+      ["list", "questions", "--json"],
+      { cwd: workspaceRoot, timeout: 30_000 },
+    );
+    const parsed = JSON.parse(stdout) as unknown;
+    return Array.isArray(parsed) ? (parsed as RenderedQuestion[]) : [];
+  } catch (error) {
+    // No project, no calkit on PATH, or a template that cannot render:
+    // the sidebar falls back to the text as written
+    log(`list questions failed: ${String(error)}`);
+    return [];
+  }
+}
+
 async function scanDocumentCitations(
   workspaceRoot: string,
 ): Promise<{ path: string; key: string; document: string }[]> {
@@ -2192,6 +2218,7 @@ async function scanDetectedFiles(
     currentDetectedResults = [];
     currentDetectedPresentations = [];
     currentDocumentCitations = [];
+    currentRenderedQuestions = [];
     return;
   }
   const [
@@ -2223,6 +2250,7 @@ async function scanDetectedFiles(
   currentDetectedResults = detectedResults;
   currentDetectedPresentations = detectedPresentations;
   currentDocumentCitations = await scanDocumentCitations(workspaceRoot);
+  currentRenderedQuestions = await scanRenderedQuestions(workspaceRoot);
 }
 
 function scheduleRefreshPipelineOutputContext(
@@ -2378,6 +2406,7 @@ function renderSidebarFromState(): void {
     getHiddenSections(),
     staleStageDetails,
     currentDocumentCitations,
+    currentRenderedQuestions,
   );
   updateSidebarBadge();
 }

@@ -52,6 +52,7 @@ import {
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
+import { stagePdfOutput } from "./components/core";
 import type { DocumentComponents, QuestionsReport } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
@@ -501,13 +502,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
-        const pdfRelPath = (Array.isArray(stage?.outputs) ? stage.outputs : [])
-          .map((out) => (typeof out === "string" ? out : out.path))
-          .find(
-            (outPath) =>
-              typeof outPath === "string" &&
-              outPath.toLowerCase().endsWith(".pdf"),
-          );
+        const pdfRelPath = stage ? stagePdfOutput(stage) : undefined;
         if (!pdfRelPath) {
           void vscode.window.showErrorMessage(
             `Stage '${stageName}' has no PDF output to open.`,

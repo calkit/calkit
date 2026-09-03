@@ -697,3 +697,37 @@ export function isMappedCopy(
   }
   return false;
 }
+
+/**
+ * The PDF a stage renders, as calkit.yaml describes it.
+ *
+ * A latex stage does not list its PDF under `outputs`: the path is
+ * derived from `target_path`, and `output_dir` moves it, which is why
+ * reading `outputs` alone finds nothing for an ordinary paper. Mirrors
+ * the stage model's own `pdf_path`.
+ */
+export function stagePdfOutput(stage: {
+  outputs?: (string | { path?: string })[];
+  target_path?: string;
+  output_dir?: string;
+}): string | undefined {
+  const declared = (stage.outputs ?? [])
+    .map((out) => (typeof out === "string" ? out : out?.path))
+    .find(
+      (out) => typeof out === "string" && out.toLowerCase().endsWith(".pdf"),
+    );
+  if (declared) {
+    return declared;
+  }
+  const target = stage.target_path;
+  if (!target) {
+    return undefined;
+  }
+  const name = target.split("/").pop() ?? target;
+  const stem = name.includes(".") ? name.slice(0, name.lastIndexOf(".")) : name;
+  if (stage.output_dir) {
+    return `${stage.output_dir.replace(/\/+$/, "")}/${stem}.pdf`;
+  }
+  const dir = target.slice(0, target.length - name.length);
+  return `${dir}${stem}.pdf`;
+}

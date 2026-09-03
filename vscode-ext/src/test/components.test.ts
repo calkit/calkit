@@ -18,6 +18,7 @@ import {
   mappingOutPath,
   questionLines,
   stageLensTitle,
+  stagePdfOutput,
   withCheckedStatus,
 } from "../components/core";
 import type { Component } from "../components/core";
@@ -629,4 +630,38 @@ test("a mapping says where it writes", () => {
     "c",
   );
   assert.equal(mappingOutPath({ kind: "file-to-file", src: "a" }), undefined);
+});
+
+test("a latex stage's PDF is derived, not declared", () => {
+  // What broke: a latex stage lists no PDF under outputs, so reading
+  // outputs alone reported "no PDF output to open" for every ordinary
+  // paper. The path comes from target_path, and output_dir moves it.
+  assert.equal(
+    stagePdfOutput({ target_path: "report/main.tex" }),
+    "report/main.pdf",
+  );
+  assert.equal(stagePdfOutput({ target_path: "main.tex" }), "main.pdf");
+  assert.equal(
+    stagePdfOutput({ target_path: "paper/main.tex", output_dir: "build" }),
+    "build/main.pdf",
+  );
+  assert.equal(
+    stagePdfOutput({ target_path: "paper/main.tex", output_dir: "build/" }),
+    "build/main.pdf",
+  );
+  // A declared PDF wins, since the stage said where it goes
+  assert.equal(
+    stagePdfOutput({
+      target_path: "paper/main.tex",
+      outputs: ["paper/rendered.pdf"],
+    }),
+    "paper/rendered.pdf",
+  );
+  assert.equal(
+    stagePdfOutput({ outputs: [{ path: "slides/deck.pdf" }] }),
+    "slides/deck.pdf",
+  );
+  // Nothing to open for a stage that renders nothing
+  assert.equal(stagePdfOutput({ outputs: ["results/x.json"] }), undefined);
+  assert.equal(stagePdfOutput({}), undefined);
 });

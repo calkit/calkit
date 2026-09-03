@@ -4,6 +4,7 @@ import YAML from "yaml";
 
 import {
   formatYamlSyntaxError,
+  pathLikeScalars,
   stageDefinitionLine,
   yamlSyntaxError,
 } from "../yaml";
@@ -98,5 +99,67 @@ test("a file with no pipeline has no stage to go to", () => {
   assert.equal(
     stageDefinitionLine("pipeline:\n  stages:\n   - [", "plot"),
     undefined,
+  );
+});
+
+test("offers every value that could be a path, and no keys", () => {
+  const text = [
+    "owner: pete",
+    "pipeline:",
+    "  stages:",
+    "    plot:",
+    "      kind: python-script",
+    "      script_path: scripts/plot.py",
+    "      outputs:",
+    "        - figures/plot.png",
+    '        - "figures/quoted.png"',
+    "figures:",
+    "  - path: figures/plot.png",
+    "    title: A plot of things",
+    "    imported_from:",
+    "      url: https://example.com/plot.png",
+    "notes: |",
+    "  A long note",
+    "  over two lines",
+  ].join("\n");
+  const found = pathLikeScalars(text);
+  const values = found.map((f) => f.value);
+  // Values, including inside sequences, and the same path twice where it
+  // is written twice
+  assert.ok(values.includes("scripts/plot.py"));
+  assert.deepEqual(
+    values.filter((v) => v === "figures/plot.png"),
+    ["figures/plot.png", "figures/plot.png"],
+  );
+  // A quoted value is offered without its quotes, and the span covers
+  // exactly the text
+  const quoted = found.find((f) => f.value === "figures/quoted.png");
+  assert.ok(quoted);
+  assert.equal(
+    text.slice(quoted.offset, quoted.offset + quoted.length),
+    "figures/quoted.png",
+  );
+  // Keys are field names, not paths
+  assert.ok(!values.includes("script_path"));
+  assert.ok(!values.includes("path"));
+  assert.ok(!values.includes("stages"));
+  // A URL is somebody else's to resolve, and a block scalar is prose
+  assert.ok(!values.some((v) => v.startsWith("https://")));
+  assert.ok(!values.some((v) => v.includes("over two lines")));
+});
+
+test("every span points at the text it says it does", () => {
+  // The provider turns these into ranges, so an offset that is off by the
+  // width of a quote underlines the wrong characters
+  const text = "a: plain/path.py\nb: \"quoted/path.py\"\nc: 'single/path.py'\n";
+  for (const found of pathLikeScalars(text)) {
+    assert.equal(
+      text.slice(found.offset, found.offset + found.length),
+      found.value,
+    );
+  }
+  assert.deepEqual(
+    pathLikeScalars(text).map((f) => f.value),
+    ["plain/path.py", "quoted/path.py", "single/path.py"],
   );
 });

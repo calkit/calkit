@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -33,6 +34,7 @@ import type {
 import { dvcStageOutputPaths } from "./pipeline/core";
 import {
   formatYamlSyntaxError,
+  pathLikeScalars,
   stageDefinitionLine,
   yamlSyntaxError,
   type YamlSyntaxError,
@@ -1440,6 +1442,45 @@ export function activate(context: vscode.ExtensionContext): void {
         refreshComponentDiagnostics(document);
       }
     }),
+  );
+
+  // Paths in calkit.yaml open the file they name. Which strings are paths
+  // is decided by what is actually on disk rather than by a list of keys:
+  // every stage kind brings its own, and a link that opens nothing is
+  // worse than no link.
+  context.subscriptions.push(
+    vscode.languages.registerDocumentLinkProvider(
+      { scheme: "file", pattern: "**/calkit.yaml" },
+      {
+        provideDocumentLinks(document) {
+          const root = path.dirname(document.uri.fsPath);
+          const links: vscode.DocumentLink[] = [];
+          for (const found of pathLikeScalars(document.getText())) {
+            const target = path.resolve(root, found.value);
+            // Only what the project holds: a value that escapes the
+            // project is not its file, and a directory has nothing to
+            // open in an editor
+            if (
+              !target.startsWith(root + path.sep) ||
+              !fs.existsSync(target) ||
+              !fs.statSync(target).isFile()
+            ) {
+              continue;
+            }
+            const link = new vscode.DocumentLink(
+              new vscode.Range(
+                document.positionAt(found.offset),
+                document.positionAt(found.offset + found.length),
+              ),
+              vscode.Uri.file(target),
+            );
+            link.tooltip = `Open ${found.value}`;
+            links.push(link);
+          }
+          return links;
+        },
+      },
+    ),
   );
 
   // Puts a "Run stage" action above each stage a Markdown file declares

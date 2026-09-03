@@ -55,7 +55,9 @@ project in a plain folder.
   Declaration** opens the producing script, so the loop is: hover a number,
   jump to the script, tweak, come back. A CodeLens flags a line whose content
   needs a rerun, has drifted from the project since the document was built, or
-  came from nowhere at all, and offers to run the stage. The lens also works in
+  came from nowhere at all, and offers to run the stage. Beside it, a second
+  lens names the stage the line came from and opens it in the Calkit sidebar,
+  where its script, inputs and outputs are. The lens also works in
   Quarto and Markdown, where there is no provenance record to read and it falls
   back to naming the stage behind each figure reference. The same readings go
   into **Problems**, so a value that moved on page nine is counted rather than

@@ -225,11 +225,32 @@ export function lensTitle(components: Component[]): string | undefined {
   if (components.some((c) => c.provenance === "undeclared")) {
     return "$(question) No provenance";
   }
+  // Naming the stage is the other lens's job, and a line that is fine
+  // needs no second one saying so
+  return undefined;
+}
+
+/**
+ * The lens that opens the stage behind a line, in the sidebar.
+ *
+ * Which stage made this, and from what, is a question about the pipeline,
+ * and the sidebar is where the pipeline is: the script, the inputs and
+ * the outputs are all there once the stage is selected. Naming it here
+ * and opening it there beats restating any of it on a lens.
+ */
+export function stageLensTitle(components: Component[]): string | undefined {
   const stages = [...new Set(components.map((c) => c.stage).filter(Boolean))];
   if (stages.length === 0) {
     return undefined;
   }
-  return `$(go-to-file) ${stages.join(", ")}`;
+  return `$(layers) ${stages.join(", ")}`;
+}
+
+/** The stages a line's components come from, in the order they appear. */
+export function lensStages(components: Component[]): string[] {
+  return [
+    ...new Set(components.map((c) => c.stage).filter(Boolean)),
+  ] as string[];
 }
 
 /** A problem with one component, at the place in the source that raised it. */

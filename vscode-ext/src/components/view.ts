@@ -8,7 +8,9 @@ import {
   definitionLine,
   hoverLines,
   isLatexDocument,
+  lensStages,
   lensTitle,
+  stageLensTitle,
   toAbsolute,
   withCheckedStatus,
 } from "./core";
@@ -38,6 +40,9 @@ export interface ComponentsDeps {
     args: string[],
   ) => Promise<DocumentComponents | undefined>;
   runStageCommand: string;
+  // Opens a stage in the sidebar, where its script, inputs and outputs
+  // are. Takes the stage's name.
+  viewStageCommand: string;
   // Where component problems are reported. Optional so a caller that only
   // wants hovers and lenses need not make one.
   diagnostics?: vscode.DiagnosticCollection;
@@ -366,20 +371,37 @@ export class ComponentsProvider
     }
     const lenses: vscode.CodeLens[] = [];
     for (const [line, onLine] of componentsByLine(components, relPath)) {
-      const title = lensTitle(onLine);
-      if (title === undefined || line >= document.lineCount) {
+      if (line >= document.lineCount) {
         continue;
       }
-      // Running the stage is the action worth one keystroke; without one
-      // there is nothing to run, so the lens just reports
-      const stage = onLine.find((c) => c.status !== "ok" && c.stage)?.stage;
-      lenses.push(
-        new vscode.CodeLens(new vscode.Range(line, 0, line, 0), {
-          title,
-          command: stage ? this.deps.runStageCommand : "",
-          arguments: stage ? [stage] : undefined,
-        }),
-      );
+      const range = new vscode.Range(line, 0, line, 0);
+      // What is wrong, if anything, and running the stage that would fix
+      // it. Without a stage there is nothing to run, so the lens reports.
+      const title = lensTitle(onLine);
+      if (title !== undefined) {
+        const stage = onLine.find((c) => c.status !== "ok" && c.stage)?.stage;
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title,
+            command: stage ? this.deps.runStageCommand : "",
+            arguments: stage ? [stage] : undefined,
+          }),
+        );
+      }
+      // Where it came from: the sidebar, which is where the script, the
+      // inputs and the outputs are
+      const stageTitle = stageLensTitle(onLine);
+      const stages = lensStages(onLine);
+      if (stageTitle !== undefined) {
+        lenses.push(
+          new vscode.CodeLens(range, {
+            title: stageTitle,
+            tooltip: "Open this stage in the Calkit sidebar",
+            command: this.deps.viewStageCommand,
+            arguments: [stages[0]],
+          }),
+        );
+      }
     }
     return lenses;
   }

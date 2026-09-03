@@ -9,9 +9,11 @@ import {
   displayValue,
   hoverLines,
   isLatexDocument,
+  lensStages,
   lensTitle,
   questionDiagnostics,
   questionLines,
+  stageLensTitle,
   withCheckedStatus,
 } from "../components/core";
 import type { Component } from "../components/core";
@@ -174,7 +176,9 @@ test("hover names the pages a value lands on", () => {
 
 test("a lens says what needs doing, most urgent first", () => {
   assert.equal(lensTitle([]), undefined);
-  assert.match(lensTitle([component()]) ?? "", /summarize/);
+  // A line that is fine needs no lens saying so; naming its stage is the
+  // other lens's job
+  assert.equal(lensTitle([component()]), undefined);
   assert.match(
     lensTitle([
       component({ status: "stale", stale_reasons: ["stage-out-of-date"] }),
@@ -207,6 +211,33 @@ test("a lens says what needs doing, most urgent first", () => {
     lensTitle([component({ stage: null, provenance: "project" })]),
     undefined,
   );
+});
+
+test("a lens offers the stage behind the line, wherever it stands", () => {
+  // The sidebar is where the script, the inputs and the outputs are, so
+  // the way in is worth a lens whether or not anything is wrong
+  assert.match(stageLensTitle([component()]) ?? "", /summarize/);
+  assert.match(
+    stageLensTitle([
+      component({ status: "stale", stale_reasons: ["stage-out-of-date"] }),
+    ]) ?? "",
+    /summarize/,
+  );
+  // Two components from two stages name both, and the lens opens the first
+  assert.match(
+    stageLensTitle([component(), component({ stage: "plot", key: "b" })]) ?? "",
+    /summarize, plot/,
+  );
+  assert.deepEqual(
+    lensStages([component(), component({ stage: "plot", key: "b" })]),
+    ["summarize", "plot"],
+  );
+  // Nothing to open for something no stage produces
+  assert.equal(
+    stageLensTitle([component({ stage: null, provenance: "undeclared" })]),
+    undefined,
+  );
+  assert.deepEqual(lensStages([component({ stage: null })]), []);
 });
 
 test("groups components by the line they are written on", () => {
@@ -273,7 +304,9 @@ test("a figure reference becomes a component the same lens can render", () => {
   // rather than reading as current
   assert.equal(made.status, "unknown");
   assert.deepEqual(made.pages, []);
-  assert.match(lensTitle([made]) ?? "", /plot/);
+  // Nothing wrong with it, so the way into the sidebar is the lens it gets
+  assert.equal(lensTitle([made]), undefined);
+  assert.match(stageLensTitle([made]) ?? "", /plot/);
   // A figure no stage produces is the same gap it is in a LaTeX document
   const orphan = figureComponent("img/hand.png", undefined, "notes.qmd", 9);
   assert.equal(orphan.provenance, "undeclared");

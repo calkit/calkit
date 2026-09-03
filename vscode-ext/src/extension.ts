@@ -624,8 +624,10 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       COMMAND_VIEW_STAGE,
-      async (item?: import("./sidebar").SidebarItem) => {
-        const stageName = item?.nodeId;
+      // A sidebar item when the tree invoked it, a bare name when a code
+      // lens did: both are asking for the same stage
+      async (target?: string | import("./sidebar").SidebarItem) => {
+        const stageName = typeof target === "string" ? target : target?.nodeId;
         if (!stageName) {
           return;
         }
@@ -1345,6 +1347,7 @@ export function activate(context: vscode.ExtensionContext): void {
     describeComponents,
     buildOutputToStageMap,
     runStageCommand: COMMAND_RUN_COMPONENT_STAGE,
+    viewStageCommand: COMMAND_VIEW_STAGE,
     diagnostics: componentDiagnostics,
     checkQuestions,
     log,

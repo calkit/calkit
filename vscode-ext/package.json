@@ -369,6 +369,12 @@
         "title": "Open Document Source",
         "category": "Calkit",
         "icon": "$(go-to-file)"
+      },
+      {
+        "command": "calkit-vscode.goToQuestion",
+        "title": "Go to Question Definition",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
       }
     ],
     "menus": {
@@ -423,6 +429,11 @@
         {
           "command": "calkit-vscode.addQuestion",
           "when": "view == calkit-sidebar && viewItem == section-questions",
+          "group": "inline"
+        },
+        {
+          "command": "calkit-vscode.goToQuestion",
+          "when": "view == calkit-sidebar && viewItem == question",
           "group": "inline"
         },
         {
@@ -797,6 +808,10 @@
         },
         {
           "command": "calkit-vscode.openPath",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.goToQuestion",
           "when": "false"
         }
       ]

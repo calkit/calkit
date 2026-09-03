@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  citedValues,
   componentDiagnostics,
   componentsByLine,
   diagnosticSpan,
@@ -664,4 +665,64 @@ test("a latex stage's PDF is derived, not declared", () => {
   // Nothing to open for a stage that renders nothing
   assert.equal(stagePdfOutput({ outputs: ["results/x.json"] }), undefined);
   assert.equal(stagePdfOutput({}), undefined);
+});
+
+test("a results file shows the values something actually cites", () => {
+  // A results file can hold hundreds of numbers; three of them are in the
+  // paper and one is a question's answer, and those are the ones worth
+  // seeing beside the file
+  const config = {
+    questions: [
+      "A plain question with no evidence",
+      {
+        question: "How much faster?",
+        evidence: [
+          { kind: "value", path: "results/bench.json", key: "improvement" },
+          { kind: "figure", path: "figures/plot.png" },
+          { kind: "value", path: "results/other.json", key: "elsewhere" },
+        ],
+      },
+    ],
+    pipeline: {
+      stages: {
+        "paper-numbers": {
+          kind: "json-to-latex",
+          inputs: ["results/bench.json"],
+          keys: ["improvement", "n_cases"],
+        },
+        "other-numbers": {
+          kind: "json-to-latex",
+          inputs: ["results/other.json"],
+          keys: ["elsewhere"],
+        },
+        plot: { kind: "python-script", inputs: ["results/bench.json"] },
+      },
+    },
+  };
+  const cited = citedValues("results/bench.json", config);
+  assert.deepEqual(
+    cited.map((c) => c.key),
+    ["improvement", "n_cases"],
+  );
+  // One value cited both ways names both, without repeating either
+  assert.deepEqual(cited[0].by, ["Question 2", "paper-numbers"]);
+  assert.deepEqual(cited[1].by, ["paper-numbers"]);
+  // Another file's citations are its own
+  assert.deepEqual(
+    citedValues("results/other.json", config).map((c) => c.key),
+    ["elsewhere"],
+  );
+  // A stage that merely reads the file cites nothing in it, and a stage
+  // naming no keys exposes everything, which is not a citation
+  assert.deepEqual(
+    citedValues("results/bench.json", {
+      pipeline: {
+        stages: {
+          all: { kind: "json-to-latex", inputs: ["results/bench.json"] },
+        },
+      },
+    }),
+    [],
+  );
+  assert.deepEqual(citedValues("results/bench.json", {}), []);
 });

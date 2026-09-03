@@ -731,3 +731,76 @@ export function stagePdfOutput(stage: {
   const dir = target.slice(0, target.length - name.length);
   return `${dir}${stem}.pdf`;
 }
+
+/** A value in a results file that something in the project cites. */
+export interface CitedValue {
+  key: string;
+  /** What cites it, for a person: "Question 2", "paper/main.tex". */
+  by: string[];
+}
+
+/**
+ * The values a results file is actually cited for, and by what.
+ *
+ * A results file can hold hundreds of numbers, of which a paper quotes
+ * three and a question answers with one. Those are the ones worth seeing
+ * beside the file: the rest are only its contents.
+ *
+ * Read from calkit.yaml alone. A question names its evidence there, and a
+ * `json-to-latex` stage names under `keys` exactly what it puts within a
+ * document's reach. Without `keys` a stage exposes every top-level key,
+ * which is not a citation of any of them, so it says nothing here.
+ */
+export function citedValues(
+  resultsPath: string,
+  config: {
+    questions?: unknown[];
+    pipeline?: { stages?: Record<string, Record<string, unknown>> };
+  },
+): CitedValue[] {
+  const by = new Map<string, string[]>();
+  const cite = (key: string, who: string): void => {
+    const existing = by.get(key);
+    if (!existing) {
+      by.set(key, [who]);
+    } else if (!existing.includes(who)) {
+      existing.push(who);
+    }
+  };
+  (config.questions ?? []).forEach((question, index) => {
+    if (typeof question !== "object" || question === null) {
+      return;
+    }
+    const evidence = (question as { evidence?: unknown[] }).evidence ?? [];
+    for (const entry of evidence) {
+      if (typeof entry !== "object" || entry === null) {
+        continue;
+      }
+      const { path, key } = entry as { path?: string; key?: string };
+      if (path === resultsPath && key) {
+        cite(key, `Question ${index + 1}`);
+      }
+    }
+  });
+  for (const [name, stage] of Object.entries(config.pipeline?.stages ?? {})) {
+    if (stage?.kind !== "json-to-latex") {
+      continue;
+    }
+    const inputs = (stage.inputs ?? []) as (string | { path?: string })[];
+    const reads = inputs.some(
+      (input) =>
+        (typeof input === "string" ? input : input?.path) === resultsPath,
+    );
+    if (!reads) {
+      continue;
+    }
+    for (const key of (stage.keys ?? []) as string[]) {
+      if (typeof key === "string" && key) {
+        cite(key, name);
+      }
+    }
+  }
+  return [...by.entries()]
+    .map(([key, who]) => ({ key, by: who }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}

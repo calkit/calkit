@@ -52,7 +52,7 @@ import {
 import { MarkdownStageCodeLensProvider } from "./markdown/view";
 import { openFiguresCarousel } from "./figures/view";
 import { ComponentsProvider } from "./components/view";
-import { stagePdfOutput } from "./components/core";
+import { questionLines, stagePdfOutput } from "./components/core";
 import type { DocumentComponents, QuestionsReport } from "./components/core";
 
 const COMMAND_SELECT_ENV = "calkit-vscode.selectCalkitEnvironment";
@@ -100,6 +100,7 @@ const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_COMPONENT_OBJECT = "calkit-vscode.viewComponentObject";
 const COMMAND_OPEN_PATH = "calkit-vscode.openPath";
 const COMMAND_OPEN_PDF_SOURCE = "calkit-vscode.openPdfSource";
+const COMMAND_GO_TO_QUESTION = "calkit-vscode.goToQuestion";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
 const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
@@ -519,6 +520,44 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         await openPdfInLatexWorkshop(context, pdfUri);
+      },
+    ),
+  );
+
+  // A question is written in calkit.yaml and nowhere else, so that is
+  // where looking at one takes you.
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      COMMAND_GO_TO_QUESTION,
+      async (item?: import("./sidebar").SidebarItem | string) => {
+        const id = typeof item === "string" ? item : item?.nodeId;
+        const workspaceRoot = getWorkspaceRoot();
+        if (!id || !workspaceRoot) {
+          return;
+        }
+        const uri = vscode.Uri.file(path.join(workspaceRoot, "calkit.yaml"));
+        let doc: vscode.TextDocument;
+        try {
+          doc = await vscode.workspace.openTextDocument(uri);
+        } catch {
+          void vscode.window.showErrorMessage(
+            "No calkit.yaml in this workspace.",
+          );
+          return;
+        }
+        // The sidebar numbers questions from one, in file order, which is
+        // the order these come back in
+        const line = questionLines(doc.getText())[Number(id) - 1];
+        const editor = await vscode.window.showTextDocument(doc);
+        if (line === undefined || line >= doc.lineCount) {
+          return;
+        }
+        const pos = new vscode.Position(line, 0);
+        editor.selection = new vscode.Selection(pos, pos);
+        editor.revealRange(
+          new vscode.Range(pos, pos),
+          vscode.TextEditorRevealType.InCenter,
+        );
       },
     ),
   );

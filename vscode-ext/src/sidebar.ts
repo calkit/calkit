@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import {
+  citedValues,
   isMappedCopy,
   mappingOutPath,
   type PathMapping,
@@ -1023,11 +1024,17 @@ export class CalkitSidebarProvider
     const label = path.basename(entry.path);
     const hasProvenance =
       !!entry.stage || !!entry.imported_from || !!entry.created_by;
+    // A results file with values something cites has those to show, even
+    // when nothing says where the file itself came from
+    const hasCited =
+      nodeKind === "result" &&
+      citedValues(entry.path, this.calkitConfig ?? {}).length > 0;
     const isStale =
       typeof entry.stage === "string" && this.staleStageNames.has(entry.stage);
-    const collapsible = hasProvenance
-      ? vscode.TreeItemCollapsibleState.Collapsed
-      : vscode.TreeItemCollapsibleState.None;
+    const collapsible =
+      hasProvenance || hasCited
+        ? vscode.TreeItemCollapsibleState.Collapsed
+        : vscode.TreeItemCollapsibleState.None;
     const item = new SidebarItem(label, collapsible, nodeKind, entry.path);
     this.artifactItemCache.set(entry.path, item);
     item.description = entry.path;
@@ -1091,6 +1098,24 @@ export class CalkitSidebarProvider
       this.buildOutputToStageMap(),
     );
     const items: SidebarItem[] = [];
+    // A results file holds every number a stage wrote; these are the ones
+    // something in the project actually quotes, which is a much shorter
+    // list and the one worth reading
+    if (nodeKind === "result") {
+      for (const cited of citedValues(artifactPath, this.calkitConfig ?? {})) {
+        const item = new SidebarItem(
+          cited.key,
+          vscode.TreeItemCollapsibleState.None,
+          "artifact-cited-value",
+        );
+        item.description = cited.by.join(", ");
+        item.iconPath = new vscode.ThemeIcon("symbol-numeric");
+        item.tooltip = `${artifactPath}:${cited.key}, cited by ${cited.by.join(
+          ", ",
+        )}`;
+        items.push(item);
+      }
+    }
     if (typeof entry.stage === "string") {
       const stageName = entry.stage;
       const stageItem = new SidebarItem(

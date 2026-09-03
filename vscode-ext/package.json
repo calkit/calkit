@@ -188,6 +188,12 @@
         "icon": "$(layers)"
       },
       {
+        "command": "calkit-vscode.openPath",
+        "title": "Open Path",
+        "category": "Calkit",
+        "icon": "$(go-to-file)"
+      },
+      {
         "command": "calkit-vscode.viewComponentObject",
         "title": "View in Calkit Sidebar",
         "category": "Calkit",
@@ -772,6 +778,14 @@
         },
         {
           "command": "calkit-vscode.runComponentStage",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.viewComponentObject",
+          "when": "false"
+        },
+        {
+          "command": "calkit-vscode.openPath",
           "when": "false"
         }
       ]

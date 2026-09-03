@@ -72,10 +72,12 @@ project in a plain folder.
   has moved since the answer was written, is about the question rather than the
   paper that typesets it. The editor reports what changed, not whether the
   answer is still right, which is a question about the sentence.
-- **Clickable paths**: Every value in `calkit.yaml` that names a file in the
-  project is a link that opens it. Which strings are paths is decided by what
-  is on disk, not by a list of keys, so a path a new stage kind introduces
-  works without the extension knowing about it.
+- **Clickable paths**: Every value in `calkit.yaml` that names something in the
+  project is a link. A file opens in the editor; a directory, such as a stage
+  input that names a whole folder, is focused and expanded in the file tree the
+  way the sidebar's own input and output rows do it. Which strings are paths is
+  decided by what is on disk, not by a list of keys, so a path a new stage kind
+  introduces works without the extension knowing about it.
 - **Stage definitions**: The Calkit sidebar's stage rows open `calkit.yaml`
   scrolled to where the stage is written, since its script, notebook or target
   is already listed under the stage's own properties. A stage a Markdown file

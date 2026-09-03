@@ -97,6 +97,7 @@ const COMMAND_RUN_COMPONENT_STAGE = "calkit-vscode.runComponentStage";
 const COMMAND_SAVE = "calkit-vscode.save";
 const COMMAND_VIEW_STAGE = "calkit-vscode.viewStage";
 const COMMAND_VIEW_COMPONENT_OBJECT = "calkit-vscode.viewComponentObject";
+const COMMAND_OPEN_PATH = "calkit-vscode.openPath";
 const COMMAND_VIEW_ENVIRONMENT = "calkit-vscode.viewEnvironment";
 const COMMAND_HIDE_SECTION = "calkit-vscode.hideSection";
 const COMMAND_MANAGE_SECTIONS = "calkit-vscode.manageSections";
@@ -1412,6 +1413,19 @@ export function activate(context: vscode.ExtensionContext): void {
       componentsProvider,
     ),
     vscode.languages.registerCodeLensProvider(lensSelector, componentsProvider),
+    // Opening a directory is how the sidebar's input and output rows focus
+    // and expand it in the file tree, so a path in calkit.yaml does the same
+    vscode.commands.registerCommand(
+      COMMAND_OPEN_PATH,
+      async (fsPath?: string) => {
+        if (fsPath) {
+          await vscode.commands.executeCommand(
+            "vscode.open",
+            vscode.Uri.file(fsPath),
+          );
+        }
+      },
+    ),
     vscode.commands.registerCommand(
       COMMAND_VIEW_COMPONENT_OBJECT,
       async (target?: { path?: string; question?: string }) => {
@@ -1457,14 +1471,15 @@ export function activate(context: vscode.ExtensionContext): void {
           const links: vscode.DocumentLink[] = [];
           for (const found of pathLikeScalars(document.getText())) {
             const target = path.resolve(root, found.value);
-            // Only what the project holds: a value that escapes the
-            // project is not its file, and a directory has nothing to
-            // open in an editor
-            if (
-              !target.startsWith(root + path.sep) ||
-              !fs.existsSync(target) ||
-              !fs.statSync(target).isFile()
-            ) {
+            // Only what the project holds: a value that escapes it is not
+            // its file
+            if (!target.startsWith(root + path.sep)) {
+              continue;
+            }
+            let isDirectory: boolean;
+            try {
+              isDirectory = fs.statSync(target).isDirectory();
+            } catch {
               continue;
             }
             const link = new vscode.DocumentLink(
@@ -1472,9 +1487,18 @@ export function activate(context: vscode.ExtensionContext): void {
                 document.positionAt(found.offset),
                 document.positionAt(found.offset + found.length),
               ),
-              vscode.Uri.file(target),
+              // A directory has nothing to open in an editor, so it goes
+              // through the command that reveals it in the file tree
+              isDirectory
+                ? vscode.Uri.parse(
+                    `command:${COMMAND_OPEN_PATH}?` +
+                      encodeURIComponent(JSON.stringify([target])),
+                  )
+                : vscode.Uri.file(target),
             );
-            link.tooltip = `Open ${found.value}`;
+            link.tooltip = isDirectory
+              ? `Reveal ${found.value}`
+              : `Open ${found.value}`;
             links.push(link);
           }
           return links;

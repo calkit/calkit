@@ -280,8 +280,22 @@ export class ComponentsProvider
         );
         links.push(`[Open script](${scriptUri.toString()})`);
       }
+      // Into the sidebar, which is where the project says what a thing is
+      // and where a figure's origin gets recorded. Same two destinations
+      // the lens offers, for whoever hovered instead of looking up.
+      const target = objectLensTarget([component]);
+      if (target !== undefined) {
+        const args = encodeURIComponent(JSON.stringify([target]));
+        links.push(
+          `[Show in sidebar](command:${this.deps.viewComponentObjectCommand}` +
+            `?${args})`,
+        );
+      }
       if (component.stage) {
         const args = encodeURIComponent(JSON.stringify([component.stage]));
+        links.push(
+          `[Show stage](command:${this.deps.viewStageCommand}?${args})`,
+        );
         links.push(`[Run stage](command:${this.deps.runStageCommand}?${args})`);
       }
       md.appendMarkdown(`\n\n${links.join(" · ")}`);

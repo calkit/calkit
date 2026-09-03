@@ -50,7 +50,8 @@ project in a plain folder.
   (`\result[…]`, an `\includegraphics` of a pipeline output, `\ckfindings`),
   hover any of it to see the
   value, the file and key it came from, the stage and script behind it, the
-  pages it lands on, and whether it is still current. **Go to Definition**
+  pages it lands on, and whether it is still current, with links to open the
+  file, its script, and the thing itself or its stage in the Calkit sidebar. **Go to Definition**
   (F12) opens the results file at that key or the figure itself; **Go to
   Declaration** opens the producing script, so the loop is: hover a number,
   jump to the script, tweak, come back. A CodeLens flags a line whose content

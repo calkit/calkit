@@ -377,13 +377,30 @@ def test_a_build_log_adds_to_the_source_rather_than_replacing_it(tmp_dir):
                         "stage": "plot",
                         "stage_inputs": [],
                         "hash": "abc",
-                    }
+                    },
+                    {
+                        "kind": "value",
+                        "path": "results/findings.json",
+                        "key": "ratio",
+                        "pages": [1],
+                        "stage": "summarize",
+                        "stage_inputs": [],
+                        "hash": None,
+                        "value": 5.1014,
+                    },
                 ],
             },
             f,
         )
     doc = cc.describe_document("paper/main.tex", check_stages=False)
     assert doc.built
+    # A component in both keeps what only the build knows, its pages and
+    # the value it was built with, and gains what only the source knows:
+    # how the document typesets it, which is what a reader sees
+    ratio = next(c for c in doc.components if c.key == "ratio")
+    assert ratio.pages == [1]
+    assert ratio.build_value == 5.1014
+    assert ratio.document_value == "5.1014"
     figures = {c.path: c for c in doc.components if c.kind == "figure"}
     # The logged one keeps what only the build knows
     assert figures["figures/plot.pdf"].pages == [2]

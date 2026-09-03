@@ -809,8 +809,15 @@ def describe_document(
                 ),
                 None,
             )
+            # The build knows the pages and the value it used; only the
+            # source knows how the document typesets it, which is what a
+            # reader sees and so what a hover should lead with
             components.append(
-                {**rec, "locations": found["locations"] if found else []}
+                {
+                    "document_value": (found or {}).get("document_value"),
+                    **rec,
+                    "locations": found["locations"] if found else [],
+                }
             )
         for src in from_source:
             if (src["kind"], src["path"], src.get("key")) not in seen:

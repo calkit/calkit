@@ -35,6 +35,14 @@ type ArtifactCollection =
   | "publications"
   | "presentations";
 
+const ARTIFACT_COLLECTIONS: ArtifactCollection[] = [
+  "figures",
+  "results",
+  "datasets",
+  "publications",
+  "presentations",
+];
+
 // The displayed text of a question, which may be a plain string or a structured
 // entry carrying a hypothesis/answer/evidence alongside the question itself.
 function questionText(question: string | QuestionEntry): string {
@@ -121,6 +129,7 @@ export class CalkitSidebarProvider
   private readonly resultsSectionItem = this.makeSection("Results", "results");
   private stageItemCache = new Map<string, SidebarItem>();
   private artifactItemCache = new Map<string, SidebarItem>();
+  private questionItemCache = new Map<string, SidebarItem>();
   private envItemCache = new Map<string, SidebarItem>();
 
   refresh(
@@ -171,6 +180,7 @@ export class CalkitSidebarProvider
     this.hiddenSections = hiddenSections ?? new Set();
     this.stageItemCache.clear();
     this.artifactItemCache.clear();
+    this.questionItemCache.clear();
     this.envItemCache.clear();
     this._onDidChangeTreeData.fire();
   }
@@ -305,6 +315,30 @@ export class CalkitSidebarProvider
     return this.artifactItemCache.get(artifactPath);
   }
 
+  /** The item for one question, by its 1-based position in calkit.yaml. */
+  findQuestionItem(index: string): SidebarItem | undefined {
+    if (this.questionItemCache.size === 0) {
+      this.getQuestionItems();
+    }
+    return this.questionItemCache.get(index);
+  }
+
+  /**
+   * The item for one artifact, wherever the project declares it.
+   *
+   * A document knows it uses a file, not which collection it was written
+   * down under, so the collections are tried rather than asked for.
+   */
+  findArtifactItemAnywhere(artifactPath: string): SidebarItem | undefined {
+    for (const kind of ARTIFACT_COLLECTIONS) {
+      const found = this.findArtifactItem(kind, artifactPath);
+      if (found) {
+        return found;
+      }
+    }
+    return undefined;
+  }
+
   findEnvItem(envName: string): SidebarItem | undefined {
     if (this.envItemCache.size === 0) {
       this.getEnvItems();
@@ -335,6 +369,18 @@ export class CalkitSidebarProvider
     }
     if (element.nodeKind === "dataset") {
       return this.datasetsSectionItem;
+    }
+    if (element.nodeKind === "result") {
+      return this.resultsSectionItem;
+    }
+    if (element.nodeKind === "publication") {
+      return this.publicationsSectionItem;
+    }
+    if (element.nodeKind === "presentation") {
+      return this.presentationsSectionItem;
+    }
+    if (element.nodeKind === "question") {
+      return this.questionsSectionItem;
     }
     return undefined;
   }
@@ -467,6 +513,7 @@ export class CalkitSidebarProvider
       item.iconPath = new vscode.ThemeIcon("question");
       item.tooltip = text;
       item.contextValue = "question";
+      this.questionItemCache.set(String(index), item);
       return item;
     });
   }

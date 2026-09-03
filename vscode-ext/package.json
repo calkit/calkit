@@ -188,8 +188,8 @@
         "icon": "$(layers)"
       },
       {
-        "command": "calkit-vscode.viewComponentFile",
-        "title": "View Figure in Sidebar",
+        "command": "calkit-vscode.viewComponentObject",
+        "title": "View in Calkit Sidebar",
         "category": "Calkit",
         "icon": "$(file-media)"
       },

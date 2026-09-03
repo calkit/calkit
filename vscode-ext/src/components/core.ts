@@ -227,28 +227,55 @@ export function lensTitle(components: Component[]): string | undefined {
   return undefined;
 }
 
-/**
- * The lens that opens the file behind a line, in the sidebar.
- *
- * For a component no stage produces, which is where its provenance has to
- * be declared by hand. A file nothing accounts for says so here, because
- * this is the lens that goes to the one place it can be fixed: the
- * sidebar entry, whose context menu records where it came from.
- */
-export function artifactLensTitle(components: Component[]): string | undefined {
-  const orphan = components.find((c) => !c.stage && c.kind === "figure");
-  if (!orphan) {
-    return undefined;
-  }
-  if (orphan.provenance === "undeclared") {
-    return "$(warning) No provenance";
-  }
-  return `$(file-media) ${orphan.path.split("/").pop()}`;
+/** What a line's component is, in the sidebar: an artifact, or a question. */
+export interface ObjectLensTarget {
+  path?: string;
+  question?: string;
 }
 
-/** The file an artifact lens opens, or undefined when there is none. */
-export function artifactLensPath(components: Component[]): string | undefined {
-  return components.find((c) => !c.stage && c.kind === "figure")?.path;
+const OBJECT_ICONS: Record<ComponentKind, string> = {
+  figure: "$(file-media)",
+  value: "$(symbol-numeric)",
+  text: "$(file)",
+  block: "$(question)",
+};
+
+/**
+ * The lens that opens what a line uses, in the sidebar.
+ *
+ * The stage lens says how a thing is made; this one says what it is. They
+ * are different questions, and only the second has an answer for a figure
+ * somebody drew or a question somebody wrote. The sidebar entry is also
+ * the only place a file's origin can be recorded, so one that nothing
+ * accounts for says so here, on the lens that goes where it is fixed.
+ */
+export function objectLensTitle(components: Component[]): string | undefined {
+  const target = components[0];
+  if (target === undefined) {
+    return undefined;
+  }
+  if (target.kind === "block") {
+    return target.key ? `$(question) Question ${target.key}` : undefined;
+  }
+  if (target.kind === "figure" && target.provenance === "undeclared") {
+    return "$(warning) No provenance";
+  }
+  const name = target.key ?? target.path.split("/").pop() ?? target.path;
+  return `${OBJECT_ICONS[target.kind]} ${name}`;
+}
+
+/** What that lens opens: an artifact by path, or a question by number. */
+export function objectLensTarget(
+  components: Component[],
+): ObjectLensTarget | undefined {
+  const target = components[0];
+  if (target === undefined) {
+    return undefined;
+  }
+  if (target.kind === "block") {
+    return target.key ? { question: target.key } : undefined;
+  }
+  return { path: target.path };
 }
 
 /**

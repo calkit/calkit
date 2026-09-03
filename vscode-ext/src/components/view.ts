@@ -1,7 +1,5 @@
 import * as vscode from "vscode";
 import {
-  artifactLensPath,
-  artifactLensTitle,
   componentDiagnostics,
   componentsByLine,
   diagnosticSpan,
@@ -11,6 +9,8 @@ import {
   hoverLines,
   isLatexDocument,
   lensStages,
+  objectLensTarget,
+  objectLensTitle,
   lensTitle,
   stageLensTitle,
   toAbsolute,
@@ -45,9 +45,9 @@ export interface ComponentsDeps {
   // Opens a stage in the sidebar, where its script, inputs and outputs
   // are. Takes the stage's name.
   viewStageCommand: string;
-  // Opens a figure in the sidebar, where its provenance is declared.
-  // Takes the figure's project path.
-  viewComponentFileCommand: string;
+  // Opens what a line uses in the sidebar: an artifact by path, or a
+  // question by its number.
+  viewComponentObjectCommand: string;
   // Where component problems are reported. Optional so a caller that only
   // wants hovers and lenses need not make one.
   diagnostics?: vscode.DiagnosticCollection;
@@ -407,16 +407,17 @@ export class ComponentsProvider
           }),
         );
       }
-      // A file no stage produces, whose origin is declared by hand
-      const artifactTitle = artifactLensTitle(onLine);
-      const artifactPath = artifactLensPath(onLine);
-      if (artifactTitle !== undefined && artifactPath !== undefined) {
+      // What it is, as the project declares it. The place a figure's
+      // origin gets recorded, and the only lens a question block gets.
+      const objectTitle = objectLensTitle(onLine);
+      const objectTarget = objectLensTarget(onLine);
+      if (objectTitle !== undefined && objectTarget !== undefined) {
         lenses.push(
           new vscode.CodeLens(range, {
-            title: artifactTitle,
-            tooltip: "Open this figure in the Calkit sidebar",
-            command: this.deps.viewComponentFileCommand,
-            arguments: [artifactPath],
+            title: objectTitle,
+            tooltip: "Open this in the Calkit sidebar",
+            command: this.deps.viewComponentObjectCommand,
+            arguments: [objectTarget],
           }),
         );
       }

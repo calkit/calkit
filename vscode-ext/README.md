@@ -57,9 +57,10 @@ project in a plain folder.
   needs a rerun, has drifted from the project since the document was built, or
   came from nowhere at all, and offers to run the stage. Beside it, a second
   lens names the stage the line came from and opens it in the Calkit sidebar,
-  where its script, inputs and outputs are. A figure no stage produces gets a
-  lens to its own sidebar entry instead, which is where its origin is recorded,
-  and says so when nothing records it. The lens also works in
+  where its script, inputs and outputs are. A third names what the line uses,
+  and opens that: the figure, the results file, or the question, wherever the
+  project declares it. A figure nothing accounts for says so on that lens,
+  since its sidebar entry is where its origin gets recorded. The lens also works in
   Quarto and Markdown, where there is no provenance record to read and it falls
   back to naming the stage behind each figure reference. The same readings go
   into **Problems**, so a value that moved on page nine is counted rather than

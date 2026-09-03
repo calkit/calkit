@@ -8,11 +8,11 @@ import {
   definitionLine,
   displayValue,
   hoverLines,
-  artifactLensPath,
-  artifactLensTitle,
   isLatexDocument,
   lensStages,
   lensTitle,
+  objectLensTarget,
+  objectLensTitle,
   questionDiagnostics,
   questionLines,
   stageLensTitle,
@@ -315,8 +315,8 @@ test("a figure reference becomes a component the same lens can render", () => {
   const orphan = figureComponent("img/hand.png", undefined, "notes.qmd", 9);
   assert.equal(orphan.provenance, "undeclared");
   assert.equal(orphan.stage, null);
-  assert.match(artifactLensTitle([orphan]) ?? "", /No provenance/);
-  assert.equal(artifactLensPath([orphan]), "img/hand.png");
+  assert.match(objectLensTitle([orphan]) ?? "", /No provenance/);
+  assert.deepEqual(objectLensTarget([orphan]), { path: "img/hand.png" });
   // And it lands on the line it was written on, 0-based for the editor
   assert.deepEqual([...componentsByLine([orphan], "notes.qmd").keys()], [8]);
 });
@@ -496,9 +496,10 @@ test("an unanswered question is work outstanding, not a fault", () => {
   );
 });
 
-test("a figure with no stage offers the way to declare where it came from", () => {
-  // Nothing produces it, so the stage lens has nothing to open. The file's
-  // own sidebar entry is where its origin gets written down.
+test("every kind of thing a document uses opens in the sidebar", () => {
+  // The stage lens says how a thing is made, which has no answer for a
+  // figure somebody drew or a question somebody wrote. This one says what
+  // it is, and every kind of component has that.
   const undeclared = component({
     kind: "figure",
     path: "paper/schematic.png",
@@ -507,23 +508,37 @@ test("a figure with no stage offers the way to declare where it came from", () =
     script: null,
     provenance: "undeclared",
   });
-  assert.match(artifactLensTitle([undeclared]) ?? "", /No provenance/);
-  assert.equal(artifactLensPath([undeclared]), "paper/schematic.png");
-  // Already accounted for: still worth a way in, without the warning
+  assert.match(objectLensTitle([undeclared]) ?? "", /No provenance/);
+  assert.deepEqual(objectLensTarget([undeclared]), {
+    path: "paper/schematic.png",
+  });
+  // Accounted for, so named rather than flagged
   const imported = component({
     kind: "figure",
     path: "paper/logo.png",
     key: null,
     stage: null,
-    script: null,
     provenance: "imported",
   });
-  assert.equal(artifactLensTitle([imported]), "$(file-media) logo.png");
-  // A figure a stage makes is reached through the stage instead
+  assert.equal(objectLensTitle([imported]), "$(file-media) logo.png");
+  // A figure a stage makes still gets one; the stage lens answers a
+  // different question and both are worth having
   assert.equal(
-    artifactLensTitle([component({ kind: "figure", key: null })]),
-    undefined,
+    objectLensTitle([
+      component({ kind: "figure", path: "f/p.png", key: null }),
+    ]),
+    "$(file-media) p.png",
   );
-  // Values live in results files, which are not declared this way
-  assert.equal(artifactLensTitle([component({ stage: null })]), undefined);
+  // A value is named by its key, which is what the document wrote
+  assert.equal(objectLensTitle([component()]), "$(symbol-numeric) ratio");
+  assert.deepEqual(objectLensTarget([component()]), {
+    path: "results/findings.json",
+  });
+  // A question block opens the question itself, by its number
+  const block = component({ kind: "block", path: "calkit.yaml", key: "2" });
+  assert.equal(objectLensTitle([block]), "$(question) Question 2");
+  assert.deepEqual(objectLensTarget([block]), { question: "2" });
+  // Nothing on the line, nothing to open
+  assert.equal(objectLensTitle([]), undefined);
+  assert.equal(objectLensTarget([]), undefined);
 });

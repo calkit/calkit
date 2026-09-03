@@ -1,4 +1,9 @@
 import * as vscode from "vscode";
+import {
+  isMappedCopy,
+  mappingOutPath,
+  type PathMapping,
+} from "./components/core";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import type {
@@ -987,7 +992,11 @@ export class CalkitSidebarProvider
         allPaths.push(p);
       }
     }
-    return allPaths;
+    // A file a map-paths stage copied in is the same artifact as the file
+    // it was copied from, which is already listed. Showing both says
+    // there are two of a thing there is one of.
+    const stages = this.calkitConfig?.pipeline?.stages ?? {};
+    return allPaths.filter((p) => !isMappedCopy(p, stages));
   }
 
   private getArtifactItems(kind: ArtifactCollection): SidebarItem[] {
@@ -1337,6 +1346,23 @@ export class CalkitSidebarProvider
     if (calkitStage) {
       if (typeof calkitStage.kind === "string") {
         prop("Kind", calkitStage.kind, "symbol-enum");
+      }
+      // What a map-paths stage does is its list of copies, so that is what
+      // there is to inspect. Opens the source, which is the file somebody
+      // would change; the copy is written by the stage.
+      if (calkitStage.kind === "map-paths") {
+        for (const mapping of (calkitStage.paths ?? []) as PathMapping[]) {
+          const out = mappingOutPath(mapping);
+          if (!mapping.src || !out) {
+            continue;
+          }
+          prop(
+            mapping.kind?.startsWith("dir-") ? "Copies dir" : "Copies",
+            `${mapping.src} → ${out}`,
+            "arrow-right",
+            mapping.src,
+          );
+        }
       }
       // The stage command itself changed (e.g. its args), independent of any
       // individual input/output file.

@@ -649,3 +649,51 @@ export function definitionLine(
 export function toAbsolute(workspaceRoot: string, relPath: string): string {
   return path.join(workspaceRoot, relPath);
 }
+
+/** One file or directory a map-paths stage copies into place. */
+export interface PathMapping {
+  kind?: string;
+  src?: string;
+  dest?: string;
+}
+
+/**
+ * Where a map-paths mapping writes, mirroring the stage model's own
+ * out_path: `file-to-dir` writes `dest/<name>`, everything else writes
+ * `dest` itself.
+ */
+export function mappingOutPath(mapping: PathMapping): string | undefined {
+  const dest = mapping.dest;
+  if (!dest) {
+    return undefined;
+  }
+  if (mapping.kind === "file-to-dir" && mapping.src) {
+    return `${dest.replace(/\/+$/, "")}/${mapping.src.split("/").pop()}`;
+  }
+  return dest;
+}
+
+/**
+ * Whether a path is something a map-paths stage copied into place.
+ *
+ * A copy is not its own artifact: it has a source in the project, and
+ * listing both says there are two of a thing there is one of. A directory
+ * mapping covers everything written into it.
+ */
+export function isMappedCopy(
+  artifactPath: string,
+  stages: Record<string, { kind?: string; paths?: PathMapping[] }>,
+): boolean {
+  for (const stage of Object.values(stages ?? {})) {
+    if (stage?.kind !== "map-paths") {
+      continue;
+    }
+    for (const mapping of stage.paths ?? []) {
+      const out = mappingOutPath(mapping);
+      if (out && (artifactPath === out || artifactPath.startsWith(out + "/"))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}

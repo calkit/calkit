@@ -847,6 +847,15 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
         const stage = currentCalkitConfig?.pipeline?.stages?.[stageName];
+        // The editor is built around a stage that runs something: a
+        // source file, an environment, inputs and outputs. A map-paths
+        // stage has none of those, only its list of copies, and the CLI
+        // has no way to set them, so editing it means editing where it is
+        // written rather than a form that cannot hold it.
+        if (stage?.kind === "map-paths") {
+          await goToStageDefinition(workspaceRoot, stageName);
+          return;
+        }
         await showStageEditor(
           context,
           workspaceRoot,

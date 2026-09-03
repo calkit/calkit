@@ -78,6 +78,11 @@ project in a plain folder.
   way the sidebar's own input and output rows do it. Which strings are paths is
   decided by what is on disk, not by a list of keys, so a path a new stage kind
   introduces works without the extension knowing about it.
+- **map-paths stages**: A copy stage shows what it copies, one row per
+  mapping, opening the source it copies from. Its copies are left out of the
+  figure and dataset lists, since the file they came from is already there and
+  two rows for one figure is two things to keep track of. Editing one opens
+  `calkit.yaml` where it is written, which is the only place its mappings live.
 - **Document toolbar**: A `.tex` or `.qmd` with a build stage gets a button to
   its rendered PDF, opened in the same pane rather than a split. The PDF gets
   the way back to its source, and a play button to run the stage that builds

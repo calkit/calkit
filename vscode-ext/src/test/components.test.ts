@@ -14,6 +14,8 @@ import {
   objectLensTarget,
   objectLensTitle,
   questionDiagnostics,
+  isMappedCopy,
+  mappingOutPath,
   questionLines,
   stageLensTitle,
   withCheckedStatus,
@@ -576,4 +578,55 @@ test("a document reaching outside its folder is worth a warning", () => {
     ),
     [],
   );
+});
+
+test("a map-paths copy is not its own artifact", () => {
+  // The copy has a source in the project, which is already listed; two
+  // rows for one figure is two things to keep track of
+  const stages = {
+    copy: {
+      kind: "map-paths",
+      paths: [
+        {
+          kind: "file-to-file",
+          src: "figures/a.png",
+          dest: "paper/figures/a.png",
+        },
+        { kind: "file-to-dir", src: "figures/b.png", dest: "paper/figures" },
+        { kind: "dir-to-dir-merge", src: "shared", dest: "paper/shared" },
+      ],
+    },
+    plot: { kind: "python-script" },
+  };
+  assert.equal(isMappedCopy("paper/figures/a.png", stages), true);
+  // file-to-dir writes dest/<name>, not dest
+  assert.equal(isMappedCopy("paper/figures/b.png", stages), true);
+  // A directory mapping covers everything written into it
+  assert.equal(isMappedCopy("paper/shared/deep/c.png", stages), true);
+  // The source is the artifact, and stays listed
+  assert.equal(isMappedCopy("figures/a.png", stages), false);
+  // Something that merely lives beside a copy is not one
+  assert.equal(isMappedCopy("paper/figures/hand-drawn.png", stages), false);
+  assert.equal(isMappedCopy("paper/figures/a.png", {}), false);
+});
+
+test("a mapping says where it writes", () => {
+  assert.equal(
+    mappingOutPath({ kind: "file-to-file", src: "a/b.png", dest: "c/d.png" }),
+    "c/d.png",
+  );
+  assert.equal(
+    mappingOutPath({ kind: "file-to-dir", src: "a/b.png", dest: "c" }),
+    "c/b.png",
+  );
+  // A trailing slash on the destination is not a second one in the path
+  assert.equal(
+    mappingOutPath({ kind: "file-to-dir", src: "a/b.png", dest: "c/" }),
+    "c/b.png",
+  );
+  assert.equal(
+    mappingOutPath({ kind: "dir-to-dir-replace", src: "a", dest: "c" }),
+    "c",
+  );
+  assert.equal(mappingOutPath({ kind: "file-to-file", src: "a" }), undefined);
 });

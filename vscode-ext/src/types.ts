@@ -1,6 +1,8 @@
 import type { CalkitEnvironment } from "./environments";
 
 export interface PipelineStage {
+  /** map-paths: the copies the stage makes. */
+  paths?: { kind?: string; src?: string; dest?: string }[];
   kind?: string;
   notebook_path?: string;
   script_path?: string;

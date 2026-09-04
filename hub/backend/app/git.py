@@ -182,27 +182,22 @@ def get_remote_head_sha(
     return sha
 
 
-# Where the one checkout everybody reads from lives, under CLONE_ROOT. A
-# GitHub name can hold only letters, digits and hyphens, so no owner can
-# ever be spelled this way; ``_clone_dir_segment`` keeps the per-user
-# directories out of it too, since an account name is not so constrained.
+# Where the one checkout everybody reads from lives, under CLONE_ROOT. No
+# GitHub name can be spelled this way, and ``_clone_dir_segment`` keeps the
+# per-user directories out of it too.
 SHARED_READER_DIR = "_shared"
 
 
 def _clone_dir_segment(name: str) -> str:
     """Make ``name`` safe to use as one directory under ``CLONE_ROOT``.
 
-    The per-user checkout directory is named after the requester, and an
-    account name is whatever they typed at signup -- it is unique and
-    non-empty, and nothing else. A name of ``..`` would put their checkouts
-    outside ``CLONE_ROOT`` entirely, and one of ``_shared`` would put their
-    *writable* checkouts on top of the tree every reader of that project
-    reads from. Both are one signup away, so neither is left to convention.
+    An account name is whatever someone typed at signup, so ``..`` (outside
+    CLONE_ROOT) and ``_shared`` (on top of the tree everyone reads) are both
+    one signup away.
     """
     segment = name.replace(os.sep, "_").replace("/", "_")
     if segment in ("", ".", "..", SHARED_READER_DIR):
-        # Distinct from the name it stands in for, and still stable for
-        # this account, so the checkout is found again next time.
+        # Stable, so the account finds its checkout again next time.
         segment = "acct_" + hashlib.sha256(name.encode()).hexdigest()[:16]
     return segment
 
@@ -217,12 +212,8 @@ def is_shared_read_checkout(repo: git.Repo) -> bool:
 def refuse_if_shared(repo: git.Repo) -> None:
     """Stop a write that has landed on the shared checkout.
 
-    Reads share one copy per project; writes each get their own. Committing
-    in the shared one would author it in a tree other people are reading,
-    and push it under whichever credentials that copy happens to hold. A
-    caller that ends up here asked ``get_repo`` for a read-only repo and
-    then wrote to it, which is a bug in the caller rather than anything
-    a user did.
+    Committing there would author it in a tree other people are reading, and
+    push it under whatever credentials that copy holds.
     """
     if is_shared_read_checkout(repo):
         raise HTTPException(
@@ -230,12 +221,9 @@ def refuse_if_shared(repo: git.Repo) -> None:
         )
 
 
-# Hooks that make the shared checkout refuse to be written to, from inside
-# Git itself. `pre-commit` is the one that matters -- a commit there would be
-# authored in a tree other people are reading -- and `pre-push` goes with it
-# because the shared checkout is the one carrying the project's own
-# credentials, so a push from it is the version of that mistake that leaves
-# the machine.
+# Refuse writes to the shared checkout from inside Git itself. `pre-push`
+# goes with `pre-commit` because that copy carries the project's own
+# credentials.
 _SHARED_HOOKS = ("pre-commit", "pre-push")
 _SHARED_HOOK_SCRIPT = (
     "#!/bin/sh\n"
@@ -249,23 +237,16 @@ _SHARED_HOOK_SCRIPT = (
 def _install_read_only_hooks(repo_dir: str) -> None:
     """Make ``repo_dir`` refuse commits and pushes at the Git level.
 
-    ``refuse_if_shared`` catches a caller that asked ``get_repo`` for a
-    read-only repo and then wrote to it, but only where we thought to call
-    it, and only for writes that go through our own helpers. The hooks sit
-    under all of it: anything reaching ``git commit`` in this tree fails,
-    whether it came through GitPython, a subprocess, or DVC.
-
-    Best effort by design -- a checkout we cannot write a hook into is
-    still readable, and refusing to serve it would turn a hardening measure
-    into an outage.
+    ``refuse_if_shared`` only catches writes going through our own helpers;
+    these catch anything reaching ``git commit``. Best effort: a checkout we
+    can't write a hook into is still readable.
     """
     hooks_dir = os.path.join(repo_dir, ".git", "hooks")
     try:
         os.makedirs(hooks_dir, exist_ok=True)
         for name in _SHARED_HOOKS:
             fpath = os.path.join(hooks_dir, name)
-            # Written once per checkout, so the common case is two stats.
-            # An existing hook that isn't executable is one Git ignores.
+            # A hook that isn't executable is one Git ignores.
             if os.path.isfile(fpath) and os.access(fpath, os.X_OK):
                 continue
             with open(fpath, "w") as f:
@@ -278,13 +259,9 @@ def _install_read_only_hooks(repo_dir: str) -> None:
 def _shared_read_token(project: Project) -> tuple[bool, str | None]:
     """Whether this project can be read from one shared checkout, and how.
 
-    A public repo clones with no credentials at all. A private one needs a
-    token, and the App installation token is the right one: it belongs to
-    the project rather than to whoever happened to ask first, so the
-    checkout it produces isn't tied to a user who may later lose access.
-
-    Returns ``(False, None)`` when neither applies, and the caller keeps its
-    own checkout as before.
+    A public repo needs no credentials; a private one takes the App
+    installation token, which belongs to the project rather than to whoever
+    asked first. Returns ``(False, None)`` when neither applies.
     """
     if project.is_public:
         return True, None
@@ -317,22 +294,15 @@ def get_repo(
     simultaneously. If TTL is None, the latest version is always fetched.
 
     ``read_only`` promises the caller will only read, which lets every
-    reader of a project share one checkout instead of cloning their own.
-    What a commit contains is the same whoever is looking, so a project
-    needs one copy for reading, not one per viewer -- and one that stays
-    warm for the next person rather than being cloned again.
-
-    It is opt-in, and deliberately so: a caller that doesn't ask for it
-    gets its own checkout exactly as before, so the cost of missing one is
-    a slow read rather than a wrong write. Breaking the promise is caught
-    rather than trusted -- see ``refuse_if_shared``.
+    reader of a project share one warm checkout instead of cloning their
+    own. Opt-in, so the cost of missing one is a slow read rather than a
+    wrong write; breaking the promise is caught by ``refuse_if_shared``.
     """
     owner_name = project.owner_github_name
     project_name = project.name
     shared_token: str | None = None
-    # Read-only is what the caller asks for; sharing is how it's answered,
-    # and a private repo the App isn't installed on can't be answered that
-    # way at all. Those fall back to a per-user checkout, still read-only.
+    # A private repo the App isn't installed on falls back to a per-user
+    # checkout, still read-only.
     shared = False
     if read_only:
         shared, shared_token = _shared_read_token(project)
@@ -372,10 +342,8 @@ def get_repo(
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
     if shared:
-        # The shared checkout belongs to the project, not to whoever asked
-        # for it, so it carries the project's credentials and never a
-        # user's. Nothing here is authorized by this: the caller has
-        # already been through get_project.
+        # The project's credentials, never a user's. This authorizes
+        # nothing; the caller has already been through get_project.
         access_token = shared_token
     elif user is not None:
         if user.account.github_name is not None:
@@ -542,9 +510,8 @@ def get_repo(
             headers={"Retry-After": "5"},
         )
     if shared:
-        # Here rather than next to the clone so it also covers the checkouts
-        # that already exist, and the TTL fast path that returns below
-        # without ever going near the clone code.
+        # Here rather than next to the clone so it covers existing checkouts
+        # and the TTL fast path that returns below.
         _install_read_only_hooks(repo_dir)
     last_updated = os.path.getmtime(updated_fpath)
     did_refresh = newly_cloned
@@ -837,10 +804,8 @@ def get_ck_info(
 ) -> dict:
     """Load the calkit.yaml file contents into a dictionary.
 
-    ``read_only`` promises the caller only inspects the result and never
-    writes it back, which lets both the checkout and the parser take their
-    cheap forms: the shared read-only clone (see ``get_repo``) and the C
-    loader rather than ruamel's round-trip one.
+    ``read_only`` promises the caller never writes the result back, which
+    buys both the shared checkout and the fast parser.
     """
     repo = get_repo(
         project=project,
@@ -1692,23 +1657,17 @@ class RepoTree(ABC):
 class WorkingTree(RepoTree):
     """RepoTree backed by a live filesystem checkout.
 
-    Unlike ``GitTree``, which can only name objects that are actually in a
-    commit, this reaches the filesystem -- so "the path is inside the repo"
-    is a claim to check rather than one to assume. Paths arrive here from
-    ``calkit.yaml`` and from request URLs, and every project's checkout sits
-    at a predictable path beside every other project's under ``CLONE_ROOT``
-    (``_shared/<owner>/<project>/repo`` most predictably of all). A path
-    that walks out of this repo walks straight into someone else's, whether
-    or not the reader can see that project.
+    Unlike ``GitTree``, this reaches the filesystem, and paths arrive here
+    from ``calkit.yaml`` and from request URLs. Every project's checkout
+    sits beside every other one under ``CLONE_ROOT``, so a path that walks
+    out of this repo walks into someone else's.
     """
 
     def __init__(self, root: str) -> None:
         self._root = root
         self._root_norm = os.path.normpath(root)
-        # Resolved once here rather than per call, and kept apart from the
-        # normalized form: CLONE_ROOT itself may be a symlink, so a resolved
-        # path has to be compared against a resolved root or every read in
-        # the checkout looks like it escapes.
+        # Kept apart from the normalized form: CLONE_ROOT may itself be a
+        # symlink, so a resolved path needs a resolved root to compare to.
         try:
             self._root_real = os.path.realpath(root)
         except (OSError, ValueError):
@@ -1722,8 +1681,7 @@ class WorkingTree(RepoTree):
         """Absolute path for ``path``, or ``None`` if it leaves the checkout.
 
         Lexical, so it costs no syscalls in the directory listings that call
-        it once per entry. Symlinks pointing out of the tree are a separate
-        question, answered by ``is_safe_symlink`` and by ``read_bytes``.
+        it once per entry; symlinks are ``is_safe_symlink``'s job.
         """
         if not path:
             return self._root
@@ -1760,9 +1718,8 @@ class WorkingTree(RepoTree):
 
     def read_bytes(self, path: str) -> bytes:
         fpath = self._abs(path)
-        # Content is what actually leaves the machine, so this one pays for
-        # a resolved check too: a symlink out of the tree reads whatever it
-        # points at, and `..` is only the obvious way to spell that.
+        # Content is what leaves the machine, so this one also pays for a
+        # resolved check: `..` isn't the only way out of the tree.
         if fpath is None or not self.is_safe_symlink(path):
             raise HTTPException(404)
         with open(fpath, "rb") as f:

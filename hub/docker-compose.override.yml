@@ -158,12 +158,17 @@ services:
       - "5173:5173"
     volumes:
       - ./frontend/:/app
-      # Do not mount node_modules from host, use container's node_modules
-      - /app/node_modules
+      # Do not mount node_modules from host, use container's node_modules.
+      # Named rather than anonymous so `docker compose run` writes into the
+      # same one `up` reads from (see the end-to-end job in test-hub.yml).
+      - frontend-node-modules:/app/node_modules
     command:
       - sh
       - -c
       - "npm install && npm run dev"
+
+volumes:
+  frontend-node-modules:
 
 networks:
   traefik-public:

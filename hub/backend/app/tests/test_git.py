@@ -519,8 +519,8 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
         project.name,
     )
     try:
-        # A public project reads from one copy, wherever the request came
-        # from, so a second reader finds it already there
+        # A public project reads from one copy, so a second reader finds
+        # it already there
         repo = app.git.get_repo(
             project=project,
             user=None,
@@ -538,14 +538,13 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
             read_only=True,
         )
         assert len(clones) == 1
-        # And it is recognisable as the shared one, so a write that lands
-        # there is refused rather than authored in a tree others are reading
+        # A write that lands there is refused, not authored in a tree
+        # others are reading
         assert app.git.is_shared_read_checkout(repo)
         with pytest.raises(HTTPException) as excinfo:
             app.git.refuse_if_shared(repo)
         assert excinfo.value.status_code == 500
-        # Git itself refuses too, so a write that never goes through our
-        # helpers is stopped as well
+        # Git refuses too, so a write bypassing our helpers is stopped
         hooks_dir = os.path.join(str(repo.working_dir), ".git", "hooks")
         for hook in app.git._SHARED_HOOKS:
             assert os.access(os.path.join(hooks_dir, hook), os.X_OK)
@@ -561,8 +560,7 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
         assert app.git.SHARED_READER_DIR not in str(own.working_dir)
         assert not app.git.is_shared_read_checkout(own)
         assert len(clones) == 2
-        # A private project with no App installation has no shared copy to
-        # read from, so it quietly keeps using its own
+        # A private project with no App installation keeps its own copy
         project.is_public = False
         monkeypatch.setattr(
             app.github,
@@ -579,16 +577,15 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
             read_only=True,
         )
         assert app.git.SHARED_READER_DIR not in str(private.working_dir)
-        # An account name is whatever someone typed at signup, so the two
-        # that would land their writable checkout somewhere it must never go
-        # are renamed rather than trusted
+        # The account names that would land a writable checkout somewhere
+        # it must never go are renamed rather than trusted
         assert app.git._clone_dir_segment("octocat") == "octocat"
         for hostile in ("..", ".", "", app.git.SHARED_READER_DIR):
             segment = app.git._clone_dir_segment(hostile)
             assert segment.startswith("acct_")
             assert segment != app.git.SHARED_READER_DIR
         assert app.git._clone_dir_segment("a/b") == "a_b"
-        # Stable, so the same account finds its checkout again next time
+        # Stable across calls
         assert app.git._clone_dir_segment("..") == app.git._clone_dir_segment(
             ".."
         )
@@ -598,7 +595,7 @@ def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
 
 
 def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
-    # Two checkouts side by side, the way CLONE_ROOT holds every project's
+    # Two checkouts side by side, the way CLONE_ROOT holds them
     victim = tmp_path / "_shared" / "victim-owner" / "victim-proj" / "repo"
     ours = tmp_path / "_shared" / "us" / "our-proj" / "repo"
     victim.mkdir(parents=True)
@@ -611,7 +608,7 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
     assert tree.read_bytes("ours.csv") == b"ours\n"
     assert tree.size("ours.csv") == 5
     assert "ours.csv" in tree.listdir(None)
-    # Walking out of the checkout finds nothing, however it is spelled
+    # Walking out finds nothing, however it is spelled
     escapes = [
         "../../../victim-owner/victim-proj/repo/private.csv",
         "a/../../../../victim-owner/victim-proj/repo/private.csv",
@@ -626,13 +623,13 @@ def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
         assert excinfo.value.status_code == 404
     with pytest.raises(HTTPException):
         tree.listdir("../../../victim-owner/victim-proj/repo")
-    # A symlink is the other way to spell it, so content reads resolve
+    # A symlink is the other way out, so content reads resolve
     (ours / "link.csv").symlink_to(victim / "private.csv")
     assert tree.is_file("link.csv")
     assert not tree.is_safe_symlink("link.csv")
     with pytest.raises(HTTPException):
         tree.read_bytes("link.csv")
-    # And a symlink that stays inside the checkout still reads
+    # One that stays inside still reads
     (ours / "inside.csv").symlink_to(ours / "ours.csv")
     assert tree.is_safe_symlink("inside.csv")
     assert tree.read_bytes("inside.csv") == b"ours\n"

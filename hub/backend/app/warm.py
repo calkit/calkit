@@ -48,14 +48,9 @@ def warm_project(
         if project is None:
             logger.warning(f"Nothing to warm: {owner_name}/{project_name}")
             return {"project": f"{owner_name}/{project_name}", "found": False}
-        # A read-only checkout is shared, and carries the project's own
-        # credentials, so most projects need no user here at all. The owner
-        # is the fallback for a private project the GitHub App isn't
-        # installed on: there is no shared copy for those, so someone's own
-        # checkout has to stand in. Not finding one is not a reason to stop
-        # -- an org account has no user behind it at all, and its projects
-        # warm perfectly well from the shared checkout. Whether this one can
-        # be read is settled by trying, below, rather than guessed at here.
+        # A shared checkout carries the project's own credentials, so only
+        # a private project the App isn't installed on needs a user, and an
+        # org has none. Whether it can be read is settled by trying below.
         user: User | None = None
         if not project.is_public:
             user = session.exec(
@@ -73,9 +68,7 @@ def warm_project(
         slug = f"{owner_name}/{project_name}".lower()
         warmed_key = cache.make_key("warmed", slug)
         try:
-            # Read-only, so this warms the checkout readers land on:
-            # warming a single user's copy would leave everyone else to
-            # clone it again for themselves.
+            # Read-only, so this warms the checkout readers land on.
             repo = get_repo(
                 project=project,
                 user=user,

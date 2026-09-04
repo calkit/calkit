@@ -342,12 +342,9 @@ def read_project_file(
     than ``max_bytes``, checked before reading and again after, since a
     DVC output's recorded size is what the pusher said it was.
 
-    Raises 400 for a path that isn't inside the project. Callers reach here
-    with a path straight out of a request URL (the dataset viewers take one
-    as ``{path:path}``), and ``WorkingTree`` reads the live checkout, which
-    sits next to every other project's under ``CLONE_ROOT``. The tree
-    refuses such a path too; this says so in the answer rather than
-    reporting a file that "isn't in this project".
+    Raises 400 for a path outside the project: callers reach here with one
+    straight out of a request URL, and ``WorkingTree`` reads the live
+    checkout. The tree refuses it too; this just answers more clearly.
     """
     if os.path.isabs(path) or ".." in path.split("/"):
         raise HTTPException(400, "Path traversal is not allowed")
@@ -1290,16 +1287,12 @@ def get_ck_info_for_ref(
 
     Always returns a dict; an empty one when calkit.yaml doesn't exist at
     the ref or doesn't hold a mapping. Declared artifact paths come back
-    normalized (see ``normalize_ck_info_paths``, which rewrites them in
-    place), so what comes back here must never be written to calkit.yaml.
+    normalized in place (see ``normalize_ck_info_paths``), so what comes
+    back must never be written to calkit.yaml.
 
-    Which is why this always parses read-only, and offers no choice about
-    it: ruamel's round-trip mode exists to preserve the comments and
-    quoting a faithful rewrite needs, and nothing may rewrite what comes
-    back from here. Round-tripping a large calkit.yaml costs a quarter of a
-    second per request, paid by most of the project view. Callers that do
-    write calkit.yaml back read it through ``get_ck_info_from_repo``
-    instead.
+    Hence it always parses read-only: round-tripping a large calkit.yaml
+    costs a quarter of a second, and only a faithful rewrite needs that.
+    Callers that do write it back use ``get_ck_info_from_repo``.
     """
     if ref is None:
         return normalize_ck_info_paths(

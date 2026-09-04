@@ -1,6 +1,7 @@
 """Functionality for working with Git."""
 
 import atexit
+import hashlib
 import json
 import os
 import posixpath
@@ -181,10 +182,29 @@ def get_remote_head_sha(
     return sha
 
 
-# Where the one checkout everybody reads from lives, under CLONE_ROOT. Not a
-# possible account name (see INVALID_ACCOUNT_NAMES), and the leading
-# underscore keeps it from colliding with one anyway.
+# Where the one checkout everybody reads from lives, under CLONE_ROOT. A
+# GitHub name can hold only letters, digits and hyphens, so no owner can
+# ever be spelled this way; ``_clone_dir_segment`` keeps the per-user
+# directories out of it too, since an account name is not so constrained.
 SHARED_READER_DIR = "_shared"
+
+
+def _clone_dir_segment(name: str) -> str:
+    """Make ``name`` safe to use as one directory under ``CLONE_ROOT``.
+
+    The per-user checkout directory is named after the requester, and an
+    account name is whatever they typed at signup -- it is unique and
+    non-empty, and nothing else. A name of ``..`` would put their checkouts
+    outside ``CLONE_ROOT`` entirely, and one of ``_shared`` would put their
+    *writable* checkouts on top of the tree every reader of that project
+    reads from. Both are one signup away, so neither is left to convention.
+    """
+    segment = name.replace(os.sep, "_").replace("/", "_")
+    if segment in ("", ".", "..", SHARED_READER_DIR):
+        # Distinct from the name it stands in for, and still stable for
+        # this account, so the checkout is found again next time.
+        segment = "acct_" + hashlib.sha256(name.encode()).hexdigest()[:16]
+    return segment
 
 
 def is_shared_read_checkout(repo: git.Repo) -> bool:
@@ -208,6 +228,51 @@ def refuse_if_shared(repo: git.Repo) -> None:
         raise HTTPException(
             500, "Refusing to write to the shared read-only checkout"
         )
+
+
+# Hooks that make the shared checkout refuse to be written to, from inside
+# Git itself. `pre-commit` is the one that matters -- a commit there would be
+# authored in a tree other people are reading -- and `pre-push` goes with it
+# because the shared checkout is the one carrying the project's own
+# credentials, so a push from it is the version of that mistake that leaves
+# the machine.
+_SHARED_HOOKS = ("pre-commit", "pre-push")
+_SHARED_HOOK_SCRIPT = (
+    "#!/bin/sh\n"
+    "# Installed by Calkit. This is the shared read-only checkout every\n"
+    "# reader of this project sees; writes get their own copy.\n"
+    'echo "calkit: refusing to write to the shared read-only checkout" >&2\n'
+    "exit 1\n"
+)
+
+
+def _install_read_only_hooks(repo_dir: str) -> None:
+    """Make ``repo_dir`` refuse commits and pushes at the Git level.
+
+    ``refuse_if_shared`` catches a caller that asked ``get_repo`` for a
+    read-only repo and then wrote to it, but only where we thought to call
+    it, and only for writes that go through our own helpers. The hooks sit
+    under all of it: anything reaching ``git commit`` in this tree fails,
+    whether it came through GitPython, a subprocess, or DVC.
+
+    Best effort by design -- a checkout we cannot write a hook into is
+    still readable, and refusing to serve it would turn a hardening measure
+    into an outage.
+    """
+    hooks_dir = os.path.join(repo_dir, ".git", "hooks")
+    try:
+        os.makedirs(hooks_dir, exist_ok=True)
+        for name in _SHARED_HOOKS:
+            fpath = os.path.join(hooks_dir, name)
+            # Written once per checkout, so the common case is two stats.
+            # An existing hook that isn't executable is one Git ignores.
+            if os.path.isfile(fpath) and os.access(fpath, os.X_OK):
+                continue
+            with open(fpath, "w") as f:
+                f.write(_SHARED_HOOK_SCRIPT)
+            os.chmod(fpath, 0o755)
+    except OSError as e:
+        logger.warning(f"Could not install read-only hooks in {repo_dir}: {e}")
 
 
 def _shared_read_token(project: Project) -> tuple[bool, str | None]:
@@ -280,7 +345,9 @@ def get_repo(
     elif user is not None:
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
-        user_dir = user.github_username or user.account.name
+        user_dir = _clone_dir_segment(
+            user.github_username or user.account.name
+        )
         base_dir = os.path.join(
             settings.CLONE_ROOT, user_dir, owner_name, project_name
         )
@@ -474,6 +541,11 @@ def get_repo(
             "This project is still being prepared. Try again in a moment.",
             headers={"Retry-After": "5"},
         )
+    if shared:
+        # Here rather than next to the clone so it also covers the checkouts
+        # that already exist, and the TTL fast path that returns below
+        # without ever going near the clone code.
+        _install_read_only_hooks(repo_dir)
     last_updated = os.path.getmtime(updated_fpath)
     did_refresh = newly_cloned
     if not newly_cloned:
@@ -761,16 +833,24 @@ def get_ck_info(
     session: Session,
     ttl=None,
     ref: str | None = None,
+    read_only: bool = False,
 ) -> dict:
-    """Load the calkit.yaml file contents into a dictionary."""
+    """Load the calkit.yaml file contents into a dictionary.
+
+    ``read_only`` promises the caller only inspects the result and never
+    writes it back, which lets both the checkout and the parser take their
+    cheap forms: the shared read-only clone (see ``get_repo``) and the C
+    loader rather than ruamel's round-trip one.
+    """
     repo = get_repo(
         project=project,
         user=user,
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=read_only,
     )
-    return get_ck_info_from_repo(repo=repo)
+    return get_ck_info_from_repo(repo=repo, read_only=read_only)
 
 
 def get_dvc_pipeline(
@@ -1610,46 +1690,95 @@ class RepoTree(ABC):
 
 
 class WorkingTree(RepoTree):
-    """RepoTree backed by a live filesystem checkout."""
+    """RepoTree backed by a live filesystem checkout.
+
+    Unlike ``GitTree``, which can only name objects that are actually in a
+    commit, this reaches the filesystem -- so "the path is inside the repo"
+    is a claim to check rather than one to assume. Paths arrive here from
+    ``calkit.yaml`` and from request URLs, and every project's checkout sits
+    at a predictable path beside every other project's under ``CLONE_ROOT``
+    (``_shared/<owner>/<project>/repo`` most predictably of all). A path
+    that walks out of this repo walks straight into someone else's, whether
+    or not the reader can see that project.
+    """
 
     def __init__(self, root: str) -> None:
         self._root = root
+        self._root_norm = os.path.normpath(root)
+        # Resolved once here rather than per call, and kept apart from the
+        # normalized form: CLONE_ROOT itself may be a symlink, so a resolved
+        # path has to be compared against a resolved root or every read in
+        # the checkout looks like it escapes.
+        try:
+            self._root_real = os.path.realpath(root)
+        except (OSError, ValueError):
+            self._root_real = self._root_norm
 
-    def _abs(self, path: str | None) -> str:
-        return self._root if not path else os.path.join(self._root, path)
+    @staticmethod
+    def _within(root: str, candidate: str) -> bool:
+        return candidate == root or candidate.startswith(root + os.sep)
+
+    def _abs(self, path: str | None) -> str | None:
+        """Absolute path for ``path``, or ``None`` if it leaves the checkout.
+
+        Lexical, so it costs no syscalls in the directory listings that call
+        it once per entry. Symlinks pointing out of the tree are a separate
+        question, answered by ``is_safe_symlink`` and by ``read_bytes``.
+        """
+        if not path:
+            return self._root
+        full = os.path.join(self._root, path)
+        if not self._within(self._root_norm, os.path.normpath(full)):
+            logger.warning(f"Refusing path outside {self._root}: {path!r}")
+            return None
+        return full
 
     def exists(self, path: str) -> bool:
-        return os.path.exists(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.exists(fpath)
 
     def is_file(self, path: str) -> bool:
-        return os.path.isfile(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.isfile(fpath)
 
     def is_dir(self, path: str | None) -> bool:
-        return os.path.isdir(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.isdir(fpath)
 
     def is_symlink(self, path: str) -> bool:
-        return os.path.islink(self._abs(path))
+        fpath = self._abs(path)
+        return fpath is not None and os.path.islink(fpath)
 
     def is_safe_symlink(self, path: str) -> bool:
+        fpath = self._abs(path)
+        if fpath is None:
+            return False
         try:
-            resolved = os.path.realpath(self._abs(path))
-            root_real = os.path.realpath(self._root)
-            return (
-                resolved.startswith(root_real + os.sep)
-                or resolved == root_real
-            )
+            return self._within(self._root_real, os.path.realpath(fpath))
         except (OSError, ValueError):
             return False
 
     def read_bytes(self, path: str) -> bytes:
-        with open(self._abs(path), "rb") as f:
+        fpath = self._abs(path)
+        # Content is what actually leaves the machine, so this one pays for
+        # a resolved check too: a symlink out of the tree reads whatever it
+        # points at, and `..` is only the obvious way to spell that.
+        if fpath is None or not self.is_safe_symlink(path):
+            raise HTTPException(404)
+        with open(fpath, "rb") as f:
             return f.read()
 
     def size(self, path: str) -> int:
-        return os.path.getsize(self._abs(path))
+        fpath = self._abs(path)
+        if fpath is None:
+            raise HTTPException(404)
+        return os.path.getsize(fpath)
 
     def listdir(self, path: str | None) -> list[str]:
-        return os.listdir(self._abs(path))
+        fpath = self._abs(path)
+        if fpath is None:
+            raise HTTPException(404)
+        return os.listdir(fpath)
 
 
 _ODB_LOCK_ATTR = "_calkit_odb_lock"

@@ -341,7 +341,16 @@ def read_project_file(
     project) or its object was never pushed, and 413 when it's larger
     than ``max_bytes``, checked before reading and again after, since a
     DVC output's recorded size is what the pusher said it was.
+
+    Raises 400 for a path that isn't inside the project. Callers reach here
+    with a path straight out of a request URL (the dataset viewers take one
+    as ``{path:path}``), and ``WorkingTree`` reads the live checkout, which
+    sits next to every other project's under ``CLONE_ROOT``. The tree
+    refuses such a path too; this says so in the answer rather than
+    reporting a file that "isn't in this project".
     """
+    if os.path.isabs(path) or ".." in path.split("/"):
+        raise HTTPException(400, "Path traversal is not allowed")
     if not dvc_only and tree.is_file(path):
         data = bytes(tree.read_bytes(path))
         if len(data) > max_bytes:

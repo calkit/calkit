@@ -52,20 +52,15 @@ def warm_project(
         # credentials, so most projects need no user here at all. The owner
         # is the fallback for a private project the GitHub App isn't
         # installed on: there is no shared copy for those, so someone's own
-        # checkout has to stand in.
+        # checkout has to stand in. Not finding one is not a reason to stop
+        # -- an org account has no user behind it at all, and its projects
+        # warm perfectly well from the shared checkout. Whether this one can
+        # be read is settled by trying, below, rather than guessed at here.
         user: User | None = None
         if not project.is_public:
             user = session.exec(
                 select(User).where(User.id == project.owner_account.user_id)
             ).first()
-            if user is None:
-                logger.warning(
-                    f"No user to warm private {owner_name}/{project_name}"
-                )
-                return {
-                    "project": f"{owner_name}/{project_name}",
-                    "private_no_user": True,
-                }
         # The clone is what tells us which commit we would be warming, so
         # it happens here rather than as a step: everything after it is
         # derived from that commit and keyed by it, so if the last warm

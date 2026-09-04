@@ -1292,6 +1292,7 @@ def get_project(
             session=session,
             ttl=DEFAULT_REPO_TTL,
             ref=ref,
+            read_only=True,
         )
         # Read at the requested ref. get_repo only fetches a ref, it does
         # not check it out, so get_ck_info_from_repo (working tree) would
@@ -2923,6 +2924,7 @@ def get_project_figures(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     ctx = _discover_figures(project=project, repo=repo, ref=ref)
     # Filter before paging, so search covers every figure in the project
@@ -3369,6 +3371,7 @@ def get_project_figure(
         session=session,
         ttl=ttl,
         ref=ref,
+        read_only=True,
     )
     ctx = _discover_figures(project=project, repo=repo, ref=ref)
     matched = [fig for fig in ctx.figures if fig["path"] == figure_path]
@@ -4232,6 +4235,7 @@ def get_project_datasets(
         session=session,
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
+        read_only=True,
     )
     project = _sync_datasets_with_db(
         ck_info=ck_info, project=project, session=session

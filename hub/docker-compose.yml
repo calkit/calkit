@@ -231,7 +231,9 @@ services:
         condition: service_healthy
         restart: true
     environment:
-      - REDIS_ADDR=redis://cache:6379
+      # The same URL the app and the worker use, so the exporter can never
+      # end up watching a different Redis than the one being written to.
+      - REDIS_ADDR=${REDIS_URL:-redis://cache:6379/0}
 
   # Reads the queue's state out of the cache and offers it to Prometheus.
   # A separate process rather than a route on the API: the queue is one
@@ -245,9 +247,9 @@ services:
         condition: service_healthy
         restart: true
     environment:
-      - RQ_REDIS_HOST=cache
-      - RQ_REDIS_PORT=6379
-      - RQ_REDIS_DB=0
+      # As above: one URL for the queue, whoever is reading or writing it.
+      # RQ_REDIS_URL takes precedence over the host/port/db variables.
+      - RQ_REDIS_URL=${REDIS_URL:-redis://cache:6379/0}
 
   # Runs the work a push makes necessary -- see app/warm.py -- off the
   # API's threadpool, which is what serves requests.

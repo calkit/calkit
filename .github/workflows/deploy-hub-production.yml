@@ -107,6 +107,17 @@ jobs:
           fetch-depth: 0
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} build
       - run: docker compose -f docker-compose.yml --project-name ${{ vars.STACK_NAME }} up -d --remove-orphans
+      # `up -d` doesn't recreate a container when only its bind-mounted
+      # config changed, so Prometheus and Alloy are reloaded (SIGHUP, which
+      # avoids a scrape gap) and Loki and Grafana restarted (they don't
+      # reload).
+      - name: Reload bind-mounted configs
+        # Up but blind is worth a warning, not a failed deploy.
+        run: |
+          dc() { docker compose -f docker-compose.yml --project-name "$STACK_NAME" "$@"; }
+          try() { "$@" || echo "::warning::Config reload failed: $*"; }
+          try dc kill -s HUP prometheus alloy
+          try dc restart grafana loki
       - name: Verify the deployed version
         # The image derives its version from the Git tags at build time,
         # which has silently gone wrong before: the build reused a wheel

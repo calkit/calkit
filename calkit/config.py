@@ -234,6 +234,7 @@ KEYRING_FIELDS = frozenset(
     HUB_SCOPED_FIELDS
     + [
         "github_token",
+        "github_packages_token",
         "zenodo_token",
         "caltechdata_token",
         "overleaf_token",
@@ -400,6 +401,10 @@ class Settings(BaseSettings):
     dataframe_engine: Literal["pandas", "polars"] = "pandas"
     run_history_length: int = 10
     github_token: KeyringOptionalSecret | None = None
+    # Kept apart from github_token, since pushing to the GitHub Container
+    # Registry needs the 'write:packages' scope, which the token Calkit uses
+    # for the GitHub API doesn't carry
+    github_packages_token: KeyringOptionalSecret | None = None
     zenodo_token: KeyringOptionalSecret | None = None
     caltechdata_token: KeyringOptionalSecret | None = None
     overleaf_token: KeyringOptionalSecret | None = None

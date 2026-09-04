@@ -5,7 +5,11 @@ import subprocess
 
 import calkit
 from calkit.dvc import run_dvc_command
-from calkit.reproducibility import ReproCheck, check_reproducibility
+from calkit.reproducibility import (
+    ReproCheck,
+    check_reproducibility,
+    find_retyped_values,
+)
 
 
 def test_check_reproducibility(tmp_dir):
@@ -199,3 +203,66 @@ def test_check_call():
     )
     out = [v.strip() for v in out]
     assert "yo" in out
+
+
+def test_find_retyped_values():
+    def values(tex, project_values=None):
+        return [
+            (f["value"], f["line"], f["column"])
+            for f in find_retyped_values(tex, "main.tex", project_values)
+        ]
+
+    project = {"0.42": "results.json:Cd", "1.25e-05": "results.json:Nu"}
+    # The problem worth solving: a value the pipeline produces, typed into
+    # the prose, correct today and wrong the next time the stage runs
+    assert values("The drag coefficient is 0.42.", project) == [
+        ("0.42", 1, 25)
+    ]
+    assert values("$\\nu = 1.25e-05$", project) == [("1.25e-05", 1, 8)]
+    # Every occurrence, since each one goes stale separately
+    assert len(values("0.42 and again 0.42", project)) == 2
+    # A number the project does not produce is not the paper's problem: a
+    # quantity quoted from a reference, chosen by the author, or written
+    # as prose has nothing to be traced to
+    assert values("Others report 4.75 at that Reynolds number.", project) == []
+    assert values("a coefficient of order 0.03", project) == []
+    # Not a substring of a longer number
+    assert values("10.425 and 0.4251", project) == []
+    # Somewhere a number can appear without being a result: a citation, a
+    # link, a label, and the options of a figure macro, Calkit's included
+    widths = {"0.55": "results.json:Width"}
+    assert values(r"\\ckfigure[width=0.55\\textwidth]{../f.pdf}", widths) == []
+    assert (
+        values(r"\\includegraphics[width=0.55\\textwidth]{f.pdf}", widths)
+        == []
+    )
+    assert values(r"\\cite{smith0.42}", project) == []
+    assert values(r"\\href{https://x.org/0.42}{link}", project) == []
+    assert values("% a comment with 0.42", project) == []
+    assert values(r"\\setlength{\\parindent}{0.55in}", widths) == []
+    # A value has to be distinctive before its appearance means anything:
+    # a small integer or a one-digit decimal turns up in every paper
+    assert values("we ran 3 cases", {"3": "results.json:NCases"}) == []
+    assert values("about 0.5 of them", {"0.5": "results.json:Frac"}) == []
+    assert values("a value of 0.50", {"0.50": "results.json:Frac"}) == [
+        ("0.50", 1, 12)
+    ]
+    # A larger integer is distinctive: a bare 500 in prose is very likely
+    # the 500 the config names, where a bare 8 is not
+    assert values("500 random restarts", {"500": "results.json:NRandom"}) == [
+        ("500", 1, 1)
+    ]
+    assert values("we used 99 seeds", {"99": "results.json:NSeeds"}) == []
+    # Nothing to compare against means nothing to say
+    assert values("The drag coefficient is 0.42.") == []
+    # A finding names where the value came from, so the fix is obvious
+    findings = find_retyped_values(
+        "line one\nand then 0.42 here\n", "paper/main.tex", project
+    )
+    assert len(findings) == 1
+    assert findings[0]["source"] == "results.json:Cd"
+    assert findings[0]["file"] == "paper/main.tex"
+    assert findings[0]["line"] == 2
+    assert findings[0]["context"] == "and then 0.42 here"
+    assert "results.json:Cd" in findings[0]["reason"]
+    assert "json-to-latex" in findings[0]["suggestion"]

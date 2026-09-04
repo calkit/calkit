@@ -39,11 +39,16 @@ dependencies = [
   "pillow",
   "pydantic[email]",
   "pydantic-settings",
+  # pygtrie 2.6.0 moved _NONE_STEP off the Trie class, but sqltrie (via
+  # DVC) still reads Trie._NONE_STEP in longest_prefix, so every DVC index
+  # diff raises AttributeError; see treeverse/sqltrie#97
+  "pygtrie<2.6.0",
   "pyjwt",
   "python-dotenv>=1",
   "pywin32; platform_system == 'Windows'",
   "requests",
-  "typer==0.25.1",
+  "rich",
+  "typer==0.27.2",
   "uvicorn",
   "tqdm>=4.67.1",
   "psutil>=7.0.0",
@@ -106,7 +111,7 @@ ck = "calkit.fs:CalkitFileSystem"
 
 [project.scripts]
 calkit = "calkit.cli:run"
-calk9 = "calkit.cli:run"
+ck9 = "calkit.cli:run"
 ck = "calkit.cli:run"
 
 [tool.hatch.build.targets.wheel]
@@ -180,7 +185,7 @@ show_error_codes = true
 
 # Third-party modules that ship no type stubs.
 [[tool.mypy.overrides]]
-module = ["sqlitedict", "networkx", "yaml"]
+module = ["sqlitedict", "networkx", "yaml", "dvc", "dvc.*", "requests"]
 ignore_missing_imports = true
 
 # jsonschema's stubs come from the types-jsonschema dev dependency, which

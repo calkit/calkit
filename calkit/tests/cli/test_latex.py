@@ -20,20 +20,24 @@ skipif_windows_docker = pytest.mark.skipif(
 )
 
 
-def test_from_json(tmp_dir):
-    # Extract the value defined for a given key in a generated .tex file,
-    # i.e., what LaTeX would print for \<command>[<key>]
-    def get_value(tex: str, key: str) -> str:
-        match = re.search(
-            r"\\pdfstrcmp\{#1\}\{"
-            + re.escape(key)
-            + r"\}=0%\s*\\def\\\w+@out\{%\s*(.*?)\}%",
-            tex,
-            flags=re.DOTALL,
-        )
-        assert match is not None, f"No definition found for '{key}'"
-        return match.group(1).strip()
+def get_value(tex: str, key: str) -> str:
+    """The value a generated .tex defines for a key.
 
+    That is, what LaTeX would print for ``\\<command>[<key>]``. Shared by
+    the tests that check what ``from-json`` generated.
+    """
+    match = re.search(
+        r"\\pdfstrcmp\{#1\}\{"
+        + re.escape(key)
+        + r"\}=0%\s*\\def\\\w+@out\{%\s*(.*?)\}%",
+        tex,
+        flags=re.DOTALL,
+    )
+    assert match is not None, f"No definition found for '{key}'"
+    return match.group(1).strip()
+
+
+def test_from_json(tmp_dir):
     # Test setup
     data = {"sup": 5.555, "lol": 3}
     with open("test.json", "w") as f:
@@ -120,6 +124,64 @@ def test_from_json(tmp_dir):
     assert r"\newcommand\results" in tex
     assert get_value(tex, "result4") == "hello"
     assert get_value(tex, "sup") == "5.555"
+
+
+def test_from_json_keys(tmp_dir):
+    with open("nested.json", "w") as f:
+        json.dump(
+            {
+                "top": 1.5,
+                "cases": {"a": {"cp": 0.42}},
+                "stations": [{"cf": 0.003}],
+                "unused": 9.9,
+            },
+            f,
+        )
+    # Named keys reach into nested output, so a value can get to the paper
+    # without exposing everything around it
+    subprocess.check_call(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "nested.json",
+            "-o",
+            "out.tex",
+            "--command",
+            "result",
+            "--key",
+            "top",
+            "--key",
+            "cases.a.cp",
+            "--key",
+            "stations.0.cf",
+        ]
+    )
+    with open("out.tex") as f:
+        tex = f.read()
+    assert get_value(tex, "top") == "1.5"
+    assert get_value(tex, "cases.a.cp") == "0.42"
+    assert get_value(tex, "stations.0.cf") == "0.003"
+    # Only what was named, so a results file exported wholesale doesn't
+    # drag its whole structure into the document
+    assert "unused" not in tex
+    # A key that isn't there is a typo, not something to leave out
+    out = subprocess.run(
+        [
+            "calkit",
+            "latex",
+            "from-json",
+            "nested.json",
+            "-o",
+            "x.tex",
+            "--key",
+            "cases.b.cp",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert out.returncode != 0
+    assert "not in nested.json" in out.stderr
 
 
 @skipif_windows_docker

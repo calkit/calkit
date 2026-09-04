@@ -20,6 +20,7 @@ import type { Table } from "../../client"
 import { decodeBase64Utf8 } from "../../lib/strings"
 import { parseTable } from "../../lib/tables"
 import Markdown from "../Common/Markdown"
+import TexText from "../Common/TexText"
 
 // A card's worth of table. More than this is unreadable at thumbnail size,
 // and the full grid is one click away.
@@ -82,7 +83,11 @@ export default function TableThumbnail({
                       whiteSpace="nowrap"
                       fontSize="2xs"
                     >
-                      {column}
+                      {parsed.texColumns ? (
+                        <TexText>{parsed.texColumns[i] ?? column}</TexText>
+                      ) : (
+                        column
+                      )}
                     </Th>
                   ))}
                 </Tr>
@@ -101,7 +106,13 @@ export default function TableThumbnail({
                         overflow="hidden"
                         textOverflow="ellipsis"
                       >
-                        {cell}
+                        {parsed.texRows ? (
+                          <TexText>
+                            {parsed.texRows[rowIndex]?.[cellIndex] ?? cell}
+                          </TexText>
+                        ) : (
+                          cell
+                        )}
                       </Td>
                     ))}
                   </Tr>

@@ -71,7 +71,74 @@ When this is called, Calkit will:
 - Add the release to the `releases` section of the `calkit.yaml` file.
 - Add a BibTeX entry for the release to a references file
   (`references.bib` by default).
+- Archive the images of any Docker environments built from a Dockerfile in
+  the project (see [Archiving Docker images](#archiving-docker-images)).
 - Create a GitHub release with a link to the Zenodo record.
+
+## Archiving Docker images
+
+A registry makes no promise to keep an image forever,
+and an image built from a Dockerfile can't be rebuilt to the same bytes once
+the packages it installs have moved on,
+so a project release carries its Docker images itself.
+
+For each environment whose image is built in the project,
+Calkit exports the image with `docker save`
+and uploads it to the record alongside the project archive as
+`docker-image-{environment_name}.tar.gz`.
+An environment named after someone else's image is left out,
+since it can be pulled from wherever it came from,
+and images like TeX Live's would add gigabytes to every release
+for something the project doesn't own.
+The images are uploaded as their own files rather than being folded into
+`archive.zip`, so that a reader who only wants the data doesn't have to
+download several gigabytes of image, and vice versa.
+
+Calkit also writes
+`.calkit/releases/{release_name}/docker-images.yaml`,
+which is committed to Git,
+recording for each image its SHA-256 ID, the environment and image name,
+the file it was uploaded as, its architecture, and its layers:
+
+```yaml
+sha256:928d7b8bd38205143f...:
+  environment: blsim
+  image: blsim
+  path: docker-image-blsim.tar.gz
+  architecture: arm64
+  os: linux
+  layers:
+    - sha256:...
+    - sha256:...
+  repo_digests:
+    - ghcr.io/someone/some-project/blsim@sha256:...
+```
+
+This is what lets a checkout of the project find its way back to the image
+later, described in
+[Fetching images](environments.md#how-images-are-fetched).
+
+The archive is a gzipped tarball written by `docker save`.
+Its contents follow the
+[OCI image layout](https://github.com/opencontainers/image-spec/blob/main/image-layout.md)
+--- an `oci-layout` marker, an `index.json`, and content-addressed blobs
+under `blobs/sha256/` --- so it can be read by any OCI-aware tool, not only
+Docker, with a legacy `manifest.json` written alongside for older versions
+of Docker to load.
+Note that this format comes from the Docker daemon rather than from Calkit:
+a daemon using the containerd image store writes an OCI layout, while one
+using the legacy image store writes the older Docker image format instead.
+Either loads with `docker load`.
+
+<!-- prettier-ignore -->
+!!! note
+
+    Images are archived for whole-project releases published to Zenodo or
+    CaltechDATA. Releases of a single artifact don't include them, and
+    neither do internal (local) releases. Pass `--no-docker-images` to skip
+    them, e.g., if an image is large and already published somewhere durable.
+    `docker save` exports the image for the platform it's run on, so a
+    multi-platform image is archived for one platform only.
 
 ## Licenses and authors
 

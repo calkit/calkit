@@ -7,10 +7,12 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import (
+    AliasChoices,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Discriminator,
     Field,
@@ -23,23 +25,63 @@ from typing_extensions import Annotated
 
 from calkit.calc import CalculationType
 from calkit.models.iteration import ParametersType
-from calkit.models.pipeline import Pipeline
+from calkit.models.pipeline import Pipeline, RelativeChildPathString
 
 
 class _ImportedFromProject(BaseModel):
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
+
     project: str
     path: str | None = None
-    git_rev: str | None = None
+    date: date_type | None = Field(
+        default=None, description="When the data was downloaded."
+    )
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; recorded in .calkit/imports.json instead, with "
+            "the other things a fetch resolves to."
+        ),
+    )
     filter_paths: list[str] | None = None
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
+    )
 
 
 class _ImportedFromUrl(BaseModel):
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
+
     url: str
     date: date_type | None = Field(
         default=None,
         description=(
             "When the data was downloaded. Optional: without it, the commit "
             "that added this entry says when, to within a commit."
+        ),
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
         ),
     )
 
@@ -50,6 +92,14 @@ class _ImportedFromDoi(BaseModel):
     Kept apart from a URL so it can be cited and resolved as a DOI rather
     than being one more address that happens to start with https.
     """
+
+    # An unrecognized key is refused rather than dropped. These entries
+    # exist to be trusted, and an untagged union silently ignoring what it
+    # doesn't understand means a misspelled key, a key at the wrong level,
+    # or two sources named at once all validate while saying less than
+    # whoever wrote them meant. Stages already forbid extras for the same
+    # reason.
+    model_config = ConfigDict(extra="forbid")
 
     doi: str = Field(
         description=(
@@ -80,43 +130,79 @@ class _ImportedFromDoi(BaseModel):
             )
         return bare
 
-
-class _GitSource(BaseModel):
-    repo_url: str = Field(
-        description="Clone URL of the repo the data came from."
-    )
-    rev: str = Field(
+    description: str | None = Field(
+        default=None,
         description=(
-            "The commit hash it came from. A branch or tag would move, so "
-            "the data behind this entry could change without the entry "
-            "changing, which is the thing recording it is meant to prevent."
-        )
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
+    )
+
+
+class _ImportedFromGit(BaseModel):
+    """Data from a Git repo that isn't a Calkit project.
+
+    Written flat, the way a project source is: everything here is already
+    inside ``imported_from``, and the source-naming key beside it says
+    what ``path`` is a path within, so nesting adds a level without
+    adding clarity.
+    """
+
+    # See the note on the other variants
+    model_config = ConfigDict(extra="forbid")
+    git_repo_url: str = Field(
+        description="Clone URL of the repo the data came from."
     )
     path: str | None = Field(
         default=None,
         description="Path within that repo, if it isn't the whole thing.",
     )
-
-    @field_validator("rev")
-    @classmethod
-    def _check_rev_is_a_hash(cls, v: str) -> str:
-        # Abbreviated hashes are fine -- Git resolves them -- but a name is
-        # not a revision, and accepting one here would quietly make the
-        # import irreproducible.
-        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
-            raise ValueError(
-                f"rev must be a commit hash, not a branch or tag (got {v!r})"
-            )
-        return v
-
-
-class _ImportedFromGit(BaseModel):
-    """Data from a Git repo that isn't a Calkit project."""
-
-    git: _GitSource
+    git_ref: str | None = Field(
+        default=None,
+        description=(
+            "Branch, tag, or commit to follow when refreshing this, e.g., "
+            "'main'. Optional: an entry that names none is refreshed from "
+            "the repo's default branch. The commit it resolves to is "
+            "recorded in .calkit/imports.json, so the entry says both what "
+            "it tracks and what it got."
+        ),
+    )
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; the commit an import resolved to is recorded in "
+            ".calkit/imports.json, which is committed alongside it. Still "
+            "read for entries written before the split, and moved across "
+            "the next time 'calkit sync import' runs."
+        ),
+    )
     date: date_type | None = Field(
         default=None, description="When the data was downloaded."
     )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "Where it came from, in words, for whatever the other fields "
+            "can't say."
+        ),
+    )
+
+    @field_validator("git_rev")
+    @classmethod
+    def _check_rev_is_a_hash(cls, v: str | None) -> str | None:
+        # Abbreviated hashes are fine -- Git resolves them -- but a name is
+        # not a revision, and accepting one here would quietly make the
+        # import irreproducible. A branch belongs in 'git_ref', which is
+        # where something that moves is meant to be written.
+        if v is None:
+            return v
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", v):
+            raise ValueError(
+                f"git_rev must be a commit hash, not a branch or tag "
+                f"(got {v!r}); a branch or tag to follow goes in 'git_ref'"
+            )
+        return v
 
 
 class _Person(BaseModel):
@@ -245,12 +331,70 @@ class _CalkitObject(BaseModel):
 
 # Every place an artifact can have come from. One union shared by every
 # artifact that can be imported, so they all accept the same forms.
-ImportedFromType = (
+class _ImportedFromDescription(BaseModel):
+    """Data whose origin can be stated but not resolved.
+
+    Some things arrive by other means --- emailed by a person, provided
+    by a company, handed over on a drive. There is no URL, DOI, repo or
+    project to point at, and recording that in words is better than
+    recording nothing. Weaker provenance than the others, deliberately:
+    it says where something came from without saying how to get it again,
+    so anyone reading it knows they have a name to ask rather than an
+    address to fetch.
+    """
+
+    # See the note on the other variants
+    model_config = ConfigDict(extra="forbid")
+    description: str = Field(
+        description=(
+            "Where it came from, in words, for an origin that can be "
+            "stated but not resolved, e.g. 'Emailed by "
+            "someone@example.com' or 'Provided by Acme, Inc.'"
+        )
+    )
+    date: date_type | None = Field(
+        default=None, description="When the data was received."
+    )
+
+
+def _normalize_imported_from(v: object) -> object:
+    """Accept the shorthands people reach for, in the canonical shape.
+
+    A bare string is a URL or a DOI --- writing ``imported_from:
+    https://doi.org/10.5281/zenodo.123`` is the obvious thing to do, and
+    telling which it is is the same job ``calkit import path`` already
+    does when it reads a source off the command line.
+
+    A Git source nested under ``git`` is refused rather than read. There
+    is one way to write each source; a second spelling accepted quietly
+    is one that never goes away.
+    """
+    if isinstance(v, str):
+        from calkit.provenance import source_from_location
+
+        try:
+            return source_from_location(v)
+        except ValueError:
+            # Not something we can place; leave it to fail with the
+            # union's own message rather than a less specific one
+            return v
+    if isinstance(v, dict) and "git" in v:
+        raise ValueError(
+            "a Git source is written flat, as 'git_repo_url' with 'path' "
+            "and 'git_ref', the way a project source is --- not nested "
+            "under 'git'"
+        )
+    return v
+
+
+ImportedFromType = Annotated[
     _ImportedFromProject
     | _ImportedFromUrl
     | _ImportedFromDoi
     | _ImportedFromGit
-)
+    | _ImportedFromDescription,
+    BeforeValidator(_normalize_imported_from),
+]
 
 _IMPORTED_FROM_DESCRIPTION = "Where this came from, if imported."
 
@@ -426,10 +570,25 @@ class Table(_CalkitObject):
     """
 
 
+PresentationKind = Literal["slides", "poster"]
+
+
 class Presentation(_CalkitObject):
-    kind: Literal["slides", "poster"] | None = Field(
+    kind: PresentationKind | None = Field(
         default=None, description="What kind of presentation this is."
     )
+
+
+PublicationKind = Literal[
+    "journal-article",
+    "conference-paper",
+    "proposal",
+    "report",
+    "blog",
+    "book",
+    "thesis",
+    "phd-thesis",
+]
 
 
 class Publication(_CalkitObject):
@@ -444,19 +603,7 @@ class Publication(_CalkitObject):
     # presented rather than published, and carry no DOI or venue of record.
     # Optional since publications can be created without a kind, e.g., by
     # ``calkit overleaf sync``, whose ``--kind`` option has no default.
-    kind: (
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "proposal",
-            "report",
-            "blog",
-            "book",
-            "thesis",
-            "phd-thesis",
-        ]
-        | None
-    ) = None
+    kind: PublicationKind | None = None
     doi: str | None = Field(
         default=None,
         description=(
@@ -473,15 +620,23 @@ class Publication(_CalkitObject):
 
     @model_validator(mode="before")
     @classmethod
-    def _drop_written_is_published(cls, data: object) -> object:
+    def _read_legacy_keys(cls, data: object) -> object:
         # ``is_published`` used to be a plain field, so older calkit.yaml
         # files may still write it. It's accepted and dropped rather than
         # refused: extra keys are ignored by default anyway, and the
         # computed property below is the only reading of it. A written
         # ``true`` with no DOI isn't honored, since a claim with nothing
         # resolvable behind it is exactly what the derivation replaces.
-        if isinstance(data, dict):
-            data = {k: v for k, v in data.items() if k != "is_published"}
+        #
+        # ``type`` is the spelling the web app wrote before it was renamed to
+        # ``kind``, so publications created there still have it on disk.
+        if not isinstance(data, dict):
+            return data
+        data = {k: v for k, v in data.items() if k != "is_published"}
+        if not data.get("kind") and data.get("type") in get_args(
+            PublicationKind
+        ):
+            data["kind"] = data.pop("type")
         return data
 
     @computed_field  # type: ignore[prop-decorator]
@@ -540,7 +695,7 @@ class Requirement(BaseModel):
     These name a thing that must be present, so each has a ``name``. The
     properties of a machine that can't be installed -- how many CPUs it
     has, what OS it runs -- are constrained by
-    :class:`SystemNumberRequirement` and :class:`SystemValueRequirement`
+    ``SystemNumberRequirement`` and ``SystemValueRequirement``
     instead, which name a property rather than a thing.
     """
 
@@ -814,6 +969,28 @@ class NixEnvironment(Environment):
 
 
 class DockerEnvironment(Environment):
+    # A Docker environment has to say either what image to use or what to
+    # build one from. With neither there is nothing to run in, so the schema
+    # says so rather than leaving it to fail at run time
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            # Both fields are nullable, and 'required' only asks that the
+            # key is there, so each branch asks for a string as well:
+            # 'image: null' says no more about what to run in than leaving
+            # it out does
+            "anyOf": [
+                {
+                    "required": ["image"],
+                    "properties": {"image": {"type": "string"}},
+                },
+                {
+                    "required": ["path"],
+                    "properties": {"path": {"type": "string"}},
+                },
+            ]
+        },
+    )
     kind: Literal["docker"] = "docker"
     path: str | None = Field(
         default=None,
@@ -822,7 +999,35 @@ class DockerEnvironment(Environment):
             "be defined purely by an image."
         ),
     )
-    image: str = Field(description="Name of the Docker image.")
+    image: str | None = Field(
+        default=None,
+        description=(
+            "Name of the Docker image. Optional for an environment with a "
+            "Dockerfile, which is named after the project and environment "
+            "it belongs to, e.g., 'someone/some-project.my-env'. Required "
+            "for one defined purely by an image."
+        ),
+    )
+    registry: str | None = Field(
+        default=None,
+        description=(
+            "Registry prefix images built from this environment's Dockerfile "
+            "are pushed to and pulled from, e.g., "
+            "'ghcr.io/someone/some-project', or 'ghcr.io' for the "
+            "project's own namespace in the GitHub Container Registry. "
+            "Images are kept local if this is unset or null."
+        ),
+    )
+    build_platforms: list[str] | None = Field(
+        default=None,
+        description=(
+            "Platforms to build the image for, e.g., "
+            "['linux/amd64', 'linux/arm64'], as opposed to 'platform', which "
+            "is the one it's pulled and run as. Building for more than one "
+            "requires a registry, since a multi-platform image can only be "
+            "kept in one."
+        ),
+    )
     layers: list[str] | None = Field(
         default=None,
         description="Predefined layers to add to the generated Dockerfile.",
@@ -847,9 +1052,13 @@ class DockerEnvironment(Environment):
         default=None,
         description="User to run the container as. Defaults to the host user.",
     )
-    deps: list[str] | None = Field(
+    inputs: list[str] | None = Field(
         default=None,
-        description="Files added to the container as dependencies.",
+        # See the note on the other environments that take this field
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files added to the container as dependencies. Their "
+        "checksums are recorded in the environment's lock file, so editing "
+        "one rebuilds the image and reruns the stages that use it.",
     )
     env_vars: dict[str, str] | None = Field(
         default=None,
@@ -873,6 +1082,15 @@ class DockerEnvironment(Environment):
             "'ir' for R images."
         ),
     )
+
+    @model_validator(mode="after")
+    def check_image_or_path(self) -> "DockerEnvironment":
+        if not self.image and not self.path:
+            raise ValueError(
+                "A Docker environment must define 'image', naming an image "
+                "to run in, or 'path', naming a Dockerfile to build one from"
+            )
+        return self
 
 
 class REnvironment(Environment):
@@ -915,6 +1133,19 @@ class SlurmEnvironment(Environment):
         default=None,
         description="Commands run at the start of every job script.",
     )
+    inputs: list[RelativeChildPathString] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
+    )
     max_concurrent_jobs: int | None = Field(
         default=None,
         ge=1,
@@ -937,6 +1168,19 @@ class PBSEnvironment(Environment):
     default_setup: list[str] | None = Field(
         default=None,
         description="Commands run at the start of every job script.",
+    )
+    inputs: list[RelativeChildPathString] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
     )
     max_concurrent_jobs: int | None = Field(
         default=None,
@@ -997,6 +1241,21 @@ class SystemEnvironment(Environment):
     property that changes silently invalidates a cached result. One gates,
     the other pins, so a property that matters both ways is written in both
     places.
+
+    ``default_setup`` is what has to be *done* on this machine before a
+    stage can run: sourcing a site setup script, loading modules, putting a
+    hand-built toolchain on the ``PATH``. It runs in the same shell as the
+    stage's own command, so a variable it sets or a function it defines is
+    in scope for the stage, whether or not it was exported -- only a child
+    process needs that. This is why it can't be a ``setup`` requirement:
+    those run in a shell of their own and are cached, since they check
+    whether something has been done rather than doing it every time.
+
+    It is not recorded in the environment's lock file. The pipeline
+    compiler merges it with each stage's own ``setup`` and writes the
+    result beside the pipeline, which the stage depends on -- so changing
+    it reruns exactly the stages that run it, and not the ones whose
+    ``env_default_setup`` means they never do.
 
     ``host`` names the machine. SSH is how a machine is reached, not a kind
     of environment, so there is no separate ``ssh`` kind: a system env whose
@@ -1067,6 +1326,40 @@ class SystemEnvironment(Environment):
         "run. A relative path is taken from the connecting user's home "
         "directory. Defaults to '.calkit/workspaces/<hub>/<owner>/<name>'.",
     )
+    default_setup: list[str] | None = Field(
+        default=None,
+        description="Commands run in the same shell, before every stage "
+        "that uses this environment, e.g. 'module load cuda' or a site "
+        "setup script that exports compiler paths. Merged with each "
+        "stage's own 'setup' when the pipeline is compiled and written "
+        "beside it, which the stage depends on, so changing them reruns "
+        "the stages that actually run them.",
+    )
+    shell: Literal["sh", "bash", "zsh"] = Field(
+        default="bash",
+        description="Shell in which setup commands run, both "
+        "'default_setup' and a stage's own 'setup', together with the "
+        "stage's command. Defaults to bash, since 'source' is a bashism "
+        "and sourcing a setup script is the usual reason to have setup "
+        "commands. Ignored when neither this environment nor any stage "
+        "using it has setup commands. Setting it to anything but 'bash' "
+        "is recorded in the environment's lock file -- unlike the commands "
+        "themselves, the shell isn't in the compiled command -- so stages "
+        "that run setup commands rerun when it changes.",
+    )
+    inputs: list[RelativeChildPathString] | None = Field(
+        default=None,
+        # 'deps' is the name this was published under on Docker
+        # environments, and extra keys on an environment are ignored rather
+        # than refused, so a project still spelling it that way would
+        # otherwise go silently untracked. Accepted, not documented: one
+        # name for one thing.
+        validation_alias=AliasChoices("inputs", "deps"),
+        description="Files in the project that 'default_setup' reads, e.g., "
+        "a setup script it sources. Added as an input to every stage using "
+        "this environment, so editing one reruns them. Must be inside the "
+        "project: a stage can't depend on something the repo doesn't carry.",
+    )
     lock: list[SystemLockProperty] = Field(
         default=[],
         description="Properties of the machine this environment's results "
@@ -1104,6 +1397,16 @@ class Notebook(BaseModel):
         default=None,
         description="Name of the environment in which to run this notebook, "
         "if it is not part of the pipeline.",
+    )
+    imported_from: ImportedFromType | None = Field(
+        default=None,
+        description=(
+            "Where this came from, if it was taken from somewhere else. "
+            "Notebooks are usually written by a project's own authors, so "
+            "there is no 'calkit import notebook'; this is here so an "
+            "entry that does say where it came from is kept rather than "
+            "dropped, and so 'calkit sync import' can refresh it."
+        ),
     )
 
 
@@ -1227,7 +1530,14 @@ class Release(BaseModel):
         "model",
     ]
     path: str | None = None
-    git_rev: str | None = None
+    git_rev: str | None = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated; recorded in .calkit/imports.json instead, with "
+            "the other things a fetch resolves to."
+        ),
+    )
     # Version of Calkit that created the release, for reproducibility.
     calkit_version: str | None = None
     date: str | None = None
@@ -1382,11 +1692,51 @@ class FigureEvidence(BaseModel):
 
 
 class ResultsEvidence(BaseModel):
-    """Evidence in the form of a result."""
+    """Evidence in the form of a results file: a set of values, a table, a
+    map, whatever the pipeline wrote. For one value inside such a file, use
+    ``value`` evidence, which can be templated into the answer.
+    """
 
     kind: Literal["result"] = "result"
     path: str
-    key: str | None = None
+    key: str | None = Field(
+        default=None,
+        description=(
+            "Deprecated: use 'value' evidence for a single value within a "
+            "results file."
+        ),
+    )
+    explanation: str | None = None
+
+
+_KEY_DESCRIPTION = (
+    "Key of the value within the results file. A key present at the top "
+    "level is used as-is; otherwise it is split on dots and walked into "
+    "nested objects, with integers indexing lists."
+)
+
+
+class ValueEvidence(BaseModel):
+    """Evidence in the form of one value from a results file.
+
+    The value is never copied into ``calkit.yaml``: the pipeline owns it,
+    and the entry only points at it. Under its ``name`` it can be templated
+    into the question's prose with Python format syntax, e.g.,
+    ``"about {improvement:.1f}x"``, so a number in an answer is read from
+    the results file when the question is displayed and cannot go stale.
+    """
+
+    kind: Literal["value"] = "value"
+    path: str
+    key: str = Field(description=_KEY_DESCRIPTION)
+    name: str | None = Field(
+        default=None,
+        description=(
+            "Name under which the value can be templated into the "
+            "question's text, as in '{name:.2f}'. Defaults to the key. Must "
+            "be unique within the question."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1399,10 +1749,33 @@ class TableEvidence(BaseModel):
 
 
 class PublicationEvidence(BaseModel):
-    """Evidence in the form of a publication."""
+    """Evidence in the form of a publication.
+
+    The pointer to *where* in the publication the evidence lives is split in
+    two, in the spirit of a W3C selector: ``section`` is for the reader, and
+    ``label`` is an anchor in the source (e.g., a LaTeX ``\\label``) that
+    ``calkit check questions`` can verify still exists, so the reference
+    cannot rot when the document is reorganized.
+    """
 
     kind: Literal["publication"] = "publication"
     path: str
+    section: str | None = Field(
+        default=None,
+        description=(
+            "Section or subsection of the publication where the evidence "
+            "is presented, as a reader would find it, e.g., '4.2' or "
+            "'Results'."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        description=(
+            "Anchor for the section in the publication's source, e.g., a "
+            "LaTeX label such as 'sec:results'. Checked against the "
+            "source of the LaTeX stage that builds the publication."
+        ),
+    )
     explanation: str | None = None
 
 
@@ -1413,15 +1786,38 @@ class Question(BaseModel):
     ``kind``, so citing something doesn't require declaring it at the top
     level first. The top-level collections are for the things worth naming or
     annotating, not a registry that evidence has to be registered in.
+
+    Keep the answer to the claim itself and let the evidence carry the
+    numbers: a ``value`` evidence entry can be templated into the text by
+    name, as in ``"about {improvement:.1f}x"``, so it is read from the
+    results file rather than retyped. Longer reasoning belongs in the
+    publication, pointed at with a publication evidence entry and its
+    ``section``.
+
+    An answer is a claim about the evidence as it was when the answer was
+    last edited, and Git records when that was. ``calkit check questions``
+    reports a question as stale when any of its evidence has changed since
+    that commit, so editing the question after re-reading it against the
+    new evidence is how to say it still holds.
     """
 
     question: str
     hypothesis: str | None = None
     answer: str | None = None
+    notes: str | None = Field(
+        default=None,
+        description=(
+            "Free-form notes, e.g., why a question is still open and what "
+            "would answer it. Unlike an answer, notes make no claim, so a "
+            "question with notes and no answer is reported as unanswered "
+            "rather than as an answer lacking evidence."
+        ),
+    )
     evidence: (
         list[
             FigureEvidence
             | ResultsEvidence
+            | ValueEvidence
             | TableEvidence
             | PublicationEvidence
         ]

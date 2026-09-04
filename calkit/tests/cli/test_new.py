@@ -1100,6 +1100,10 @@ def test_new_nix_env_stages_flake(tmp_dir):
 def test_new_release(tmp_dir, monkeypatch, httpserver):
     # Set up a mock Zenodo API so the test doesn't depend on the real sandbox
     record_id = "test-record-abc123"
+    # A new version of a record gets its own ID, which the client must switch
+    # to; only the draft endpoints below are shared between the two
+    version_record_id = "test-record-def456"
+    any_record_id = f"(?:{record_id}|{version_record_id})"
     doi = "10.5072/zenodo.test123"
     # Point the Zenodo base URL at the local mock server and provide a dummy
     # token so no real credentials are needed.  Both env vars are inherited
@@ -1115,26 +1119,27 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json({"id": record_id, "pids": {}})
     # POST /records/{id}/draft/files – initiate a file upload slot
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="POST"
     ).respond_with_json({"entries": []})
     # PUT /records/{id}/draft/files/{filename}/content – stream file bytes
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/content$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/content$"),
         method="PUT",
     ).respond_with_data("", status=200)
     # POST /records/{id}/draft/files/{filename}/commit – finalise upload
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files/.+/commit$"),
+        re.compile(rf"^/records/{any_record_id}/draft/files/.+/commit$"),
         method="POST",
     ).respond_with_json({"key": "file", "status": "completed"})
     # POST /records/{id}/draft/pids/doi – reserve a DOI for a draft
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/pids/doi$"), method="POST"
+        re.compile(rf"^/records/{any_record_id}/draft/pids/doi$"),
+        method="POST",
     ).respond_with_json({"pids": {"doi": {"identifier": doi}}})
     # GET /records/{id}/draft/files – list files already in the draft
     # (used by --reupload to decide which files to delete first)
     httpserver.expect_request(
-        re.compile(rf"^/records/{record_id}/draft/files$"), method="GET"
+        re.compile(rf"^/records/{any_record_id}/draft/files$"), method="GET"
     ).respond_with_json({"entries": []})
     # POST /records/{id}/draft/actions/publish – publish the draft
     httpserver.expect_request(
@@ -1143,6 +1148,16 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     ).respond_with_json(
         {"id": record_id, "pids": {"doi": {"identifier": doi}}}
     )
+    # POST /records/{id}/versions – create a new version of a record, and
+    # PUT /records/{new_id}/draft – set that new version's metadata; the draft
+    # is only mocked under the new ID, so a client that failed to switch to it
+    # would get no response here
+    httpserver.expect_request(
+        re.compile(rf"^/records/{record_id}/versions$"), method="POST"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
+    httpserver.expect_request(
+        re.compile(rf"^/records/{version_record_id}/draft$"), method="PUT"
+    ).respond_with_json({"id": version_record_id, "pids": {}})
     # GET /records/{id} – fetch the published record for post-test assertions
     httpserver.expect_request(
         re.compile(rf"^/records/{record_id}$"), method="GET"
@@ -1267,7 +1282,6 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     git_tags = git.Repo().tags
     assert "v0.1.0" in [tag.name for tag in git_tags]
     # Check the license is correct
-    # TODO: It seems like we can't use multiple license IDs with the API
     record_id = release["record_id"]
     record = calkit.invenio.get(f"/records/{record_id}")
     metadata = record["metadata"]
@@ -1275,6 +1289,36 @@ def test_new_release(tmp_dir, monkeypatch, httpserver):
     assert metadata["license"] == {"id": "cc-by-4.0"}
     related = metadata["related_identifiers"]
     assert related[0]["identifier"] == "https://github.com/calkit/test-project"
+    # Issue #1582: SPDX IDs are case-insensitive, but the InvenioRDM license
+    # vocabulary rejects anything but the lowercase form, so release again
+    # with the licenses spelled in uppercase to check they are normalized
+    subprocess.check_call(
+        [
+            "calkit",
+            "new",
+            "release",
+            "--name",
+            "v0.2.0",
+            "--license",
+            "MIT",
+            "--license",
+            "CC-BY-4.0",
+            "--draft",
+            "--no-github",
+        ]
+    )
+    # Every set of metadata sent to the service should have carried both
+    # licenses as separate lowercase rights entries, rather than collapsing
+    # them into one: the first release detected them from the LICENSE file,
+    # the second took them from the uppercase --license options
+    rights_sent = [
+        body["metadata"]["rights"]
+        for request, _ in httpserver.log
+        if (body := request.get_json(silent=True)) and "metadata" in body
+    ]
+    expected_rights = [{"id": "mit"}, {"id": "cc-by-4.0"}]
+    assert len(rights_sent) >= 2
+    assert rights_sent == [expected_rights] * len(rights_sent)
     # TODO: Test that we can delete the release
     # This will fail if it's not a draft
     # subprocess.check_call(

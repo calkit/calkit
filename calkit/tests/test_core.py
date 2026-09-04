@@ -42,6 +42,22 @@ def test_detect_project_name(tmp_dir):
     with open("calkit.yaml", "w") as f:
         f.write("owner: someone-else\nname: some-project\n")
     assert calkit.detect_project_name() == "someone-else/some-project"
+    # calkit.yaml is what a project is, so it wins over a remote that says
+    # something else, which is what a fork's remote does
+    with open("calkit.yaml", "w") as f:
+        f.write("name: some-project\n")
+    assert calkit.detect_project_name() == "someone/some-project"
+    # Calkit is built around GitHub, but a project on another host still has
+    # to be nameable, since its name ends up in image tags and kernel names
+    for url, expected in [
+        ("https://gitlab.com/a-group/a-repo.git", "a-group/a-repo"),
+        ("git@gitlab.com:a-group/sub/a-repo.git", "sub/a-repo"),
+        ("ssh://git@git.example.org:2222/a-group/a-repo", "a-group/a-repo"),
+    ]:
+        with open("calkit.yaml", "w") as f:
+            f.write("{}\n")
+        repo.remote().set_url(url)
+        assert calkit.detect_project_name() == expected
 
 
 def test_save_calkit_info_preserves_unicode(tmp_dir):
@@ -279,7 +295,7 @@ def test_ryaml_dump_leaves_no_trailing_whitespace():
     import calkit
 
     # Value lengths near the wrap width are what trigger it
-    for n in range(60, 80):
+    for n in range(60, 92):
         buf = io.StringIO()
         data = {"stages": {"s": {"cmd": "python " + "a" * n}}}
         calkit.ryaml.dump(data, buf)

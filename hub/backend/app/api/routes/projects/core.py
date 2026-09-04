@@ -53,6 +53,7 @@ from TexSoup import TexSoup
 
 import app.imports
 import app.projects
+import app.tasks
 import calkit
 import calkit.core
 import calkit.detect
@@ -63,6 +64,7 @@ import calkit.resources
 import calkit.templates
 from app import (
     arxiv,
+    cache,
     github,
     messaging,
     mixpanel,
@@ -71,6 +73,7 @@ from app import (
     users,
     zotero,
 )
+from app import thumbnails as thumbnails_mod
 from app.api.deps import (
     CurrentUser,
     CurrentUserOptional,
@@ -85,6 +88,7 @@ from app.core import (
     normalize_artifact_path,
     params_from_url,
     ryaml,
+    title_from_path,
     utcnow,
 )
 from app.dvc import (
@@ -145,6 +149,7 @@ from app.models import (
     Publication,
     PublicationComponent,
     PublicationComponents,
+    PublicationKind,
     Question,
     QuestionEvidence,
     QuestionPublic,
@@ -224,13 +229,6 @@ RESULT_EXTS = {
     ".html",
 }
 RESULT_DIRS = {"results", "result"}
-
-
-def _title_from_path(path: str) -> str:
-    """Derive a human-readable title from an artifact's file name."""
-    # Repo paths are always Posix, so parse them as such regardless of host OS.
-    stem = PurePosixPath(path).stem
-    return stem.replace("_", " ").replace("-", " ").capitalize()
 
 
 def _normalize_artifact_file_path(path: str) -> str:
@@ -1298,8 +1296,12 @@ def get_project(
         # Read at the requested ref. get_repo only fetches a ref, it does
         # not check it out, so get_ck_info_from_repo (working tree) would
         # report the default branch's calkit.yaml keys instead.
+        # Only the key names are wanted, so this takes the C loader rather
+        # than ruamel's round-trip parser: on a large calkit.yaml that is
+        # the difference between a few milliseconds and a quarter of a
+        # second, and this request is what the whole project page waits on.
         ck_info = app.projects.get_ck_info_for_ref(
-            project=project, repo=repo, ref=ref
+            project=project, repo=repo, ref=ref, read_only=True
         )
         resp.calkit_info_keys = list(ck_info.keys())
         # Read status if present
@@ -2643,7 +2645,7 @@ def _discover_figures(
     # they validate against the Figure model.
     for fig in figures:
         if not fig.get("title"):
-            fig["title"] = _title_from_path(fig["path"])
+            fig["title"] = title_from_path(fig["path"])
     declared_paths = {fig["path"] for fig in figures}
 
     def _maybe_add_figure(path: str) -> None:
@@ -2659,7 +2661,7 @@ def _discover_figures(
             d in FIGURE_DIRS for d in dir_parts
         ):
             if path not in declared_paths:
-                figures.append({"path": path, "title": _title_from_path(path)})
+                figures.append({"path": path, "title": title_from_path(path)})
                 declared_paths.add(path)
 
     # Auto-detect figures from the repo tree
@@ -2705,21 +2707,16 @@ def _discover_figures(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Also auto-detect figures from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
         if dvc_out.get("type") == "dir":
             continue
         _maybe_add_figure(dvc_path)
-    dvc_lock: dict[str, Any] = {}
-    if figures:
-        try:
-            if tree.is_file("dvc.lock"):
-                # Read-only: parsed for stage lookups, never written back.
-                dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
-        except Exception as e:
-            logger.warning(f"Failed to read dvc.lock for figures: {e}")
+    # dvc.lock comes back parsed (and cached) from the call above; a project
+    # of any size keeps a megabyte of it, so parsing it twice per request is
+    # most of the request.
     return _FigureContext(
         figures=figures,
         tree=tree,
@@ -2738,6 +2735,7 @@ def _resolve_figures(
     ctx: _FigureContext,
     figures: list[dict[str, Any]],
     resolve_content: bool = True,
+    thumbnails: bool = False,
 ) -> list[Figure]:
     """Resolve content, comment counts and stage status for ``figures``.
 
@@ -2821,6 +2819,22 @@ def _resolve_figures(
         fig["content"] = item.content
         fig["url"] = item.url
         fig["storage"] = item.storage
+        if thumbnails:
+            # A figure over the inline limit comes back as a URL with no
+            # bytes, so read it from the tree instead; one that lives only in
+            # object storage has neither, and keeps its URL.
+            raw: bytes | None = None
+            if item.content is not None:
+                raw = base64.b64decode(item.content)
+            elif tree.is_file(fig["path"]):
+                raw = tree.read_bytes(fig["path"])
+            if raw is not None:
+                fig["thumbnail"] = thumbnails_mod.get_thumbnail_b64(
+                    raw, fig["path"]
+                )
+            # The full-size bytes are what this call was avoiding sending.
+            if fig.get("thumbnail"):
+                fig["content"] = None
         return _annotate(fig)
 
     if not resolve_content:
@@ -2874,6 +2888,15 @@ def get_project_figures(
             "listing that skips object storage entirely."
         ),
     ),
+    thumbnails: bool = Query(
+        False,
+        description=(
+            "Send a small WebP preview in `thumbnail` instead of the "
+            "full-size bytes in `content`. This is what a grid of previews "
+            "wants: a page of figures is otherwise megabytes of base64 to "
+            "draw images a couple of hundred pixels tall."
+        ),
+    ),
 ) -> FiguresPage:
     """Get a page of the project's figures.
 
@@ -2918,7 +2941,8 @@ def get_project_figures(
         ref=ref,
         ctx=ctx,
         figures=page,
-        resolve_content=include_content,
+        resolve_content=include_content or thumbnails,
+        thumbnails=thumbnails,
     )
     return FiguresPage(
         items=items,
@@ -2951,7 +2975,7 @@ def _build_results(
         if not res.get("title"):
             # A result's name is a better title than its path, since several
             # results can share one file and only the name tells them apart
-            res["title"] = res.get("name") or _title_from_path(res["path"])
+            res["title"] = res.get("name") or title_from_path(res["path"])
         results.append(res)
     declared_paths = {res["path"] for res in results}
 
@@ -2977,7 +3001,7 @@ def _build_results(
 
     def _maybe_add_result(path: str) -> None:
         if path not in declared_paths and _is_result_path(path):
-            results.append({"path": path, "title": _title_from_path(path)})
+            results.append({"path": path, "title": title_from_path(path)})
             declared_paths.add(path)
 
     # Auto-detect results from the repo tree
@@ -3025,7 +3049,7 @@ def _build_declared_tables(
             continue
         tbl = dict(tbl)
         if not tbl.get("title"):
-            tbl["title"] = _title_from_path(tbl["path"])
+            tbl["title"] = title_from_path(tbl["path"])
         tables.append(
             Result.model_validate(
                 {
@@ -3086,7 +3110,7 @@ def _build_tables(
             if k in {"path", "title", "description", "stage"}
         }
         if not tbl.get("title"):
-            tbl["title"] = _title_from_path(tbl["path"])
+            tbl["title"] = title_from_path(tbl["path"])
         tables.append(tbl)
         known_paths.add(tbl["path"])
     # Evidence declares what it points at inline, so a question can cite a
@@ -3100,7 +3124,7 @@ def _build_tables(
                 continue
             path = ev.get("path")
             if path and path not in known_paths:
-                tables.append({"path": path, "title": _title_from_path(path)})
+                tables.append({"path": path, "title": title_from_path(path)})
                 known_paths.add(path)
     auto: list[dict[str, Any]] = []
 
@@ -3121,7 +3145,7 @@ def _build_tables(
                 return
         elif not _is_table_path(path):
             return
-        auto.append({"path": path, "title": _title_from_path(path)})
+        auto.append({"path": path, "title": title_from_path(path)})
         known_paths.add(path)
 
     # Auto-detect from the repo tree
@@ -3150,7 +3174,7 @@ def _build_tables(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Also auto-detect tables from DVC lock outs (files stored with DVC)
     for dvc_path, dvc_out in dvc_lock_outs.items():
@@ -3161,11 +3185,8 @@ def _build_tables(
     if not tables:
         return []
     # Staleness is best-effort: never let it block the listing.
-    dvc_lock: dict[str, Any] = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         dvc_yaml: dict[str, Any] = {}
         if tree.is_file("dvc.yaml"):
             dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
@@ -3278,10 +3299,11 @@ def _build_publications(
         ref=ref,
     )
     publications = ck_info.get("publications", [])
-    for pub in publications:
-        if not pub.get("title"):
-            pub["title"] = _title_from_path(pub["path"])
-    return [Publication.model_validate(pub) for pub in publications]
+    return [
+        Publication.model_validate(pub)
+        for pub in publications
+        if isinstance(pub, dict) and pub.get("path")
+    ]
 
 
 @router.get("/projects/{owner_name}/{project_name}/results")
@@ -4407,14 +4429,6 @@ def get_project_dataset(
         return DatasetForImport.model_validate(ds)
 
 
-class GitSourcePost(BaseModel):
-    repo_url: str
-    # None means the default branch's current head, which is fetched and
-    # then recorded by its commit, so the entry is pinned either way
-    rev: str | None = None
-    path: str | None = None
-
-
 class CreatorPost(BaseModel):
     """Someone credited with creating a dataset.
 
@@ -4446,7 +4460,14 @@ class ImportedFromPost(BaseModel):
     git_rev: str | None = None
     url: str | None = None
     doi: str | None = None
-    git: GitSourcePost | None = None
+    # A Git repo that isn't a Calkit project. Flat, like the project
+    # fields above and like calkit.yaml: 'path' is inside imported_from
+    # either way, and the source-naming key beside it says what it is a
+    # path within.
+    git_repo_url: str | None = None
+    # None means the default branch's current head, which is fetched and
+    # then recorded by its commit, so the entry is pinned either way
+    git_ref: str | None = None
     # Aliased type: the field is also called `date`, and under Python 3.14's
     # lazy annotations a bare `date` here resolves to this field's default.
     date: date_type | None = None
@@ -4476,7 +4497,7 @@ class ImportedFromPost(BaseModel):
         """
         kinds = [
             k
-            for k in ["project", "url", "doi", "git"]
+            for k in ["project", "url", "doi", "git_repo_url"]
             if getattr(self, k) is not None
         ]
         if len(kinds) != 1:
@@ -4485,7 +4506,7 @@ class ImportedFromPost(BaseModel):
                 "An imported dataset must name exactly one source: a "
                 "project, a URL, a DOI, or a Git repo",
             )
-        return kinds[0]
+        return "git" if kinds[0] == "git_repo_url" else kinds[0]
 
     def to_ck_dict(self) -> dict[str, Any]:
         """Render the calkit.yaml form of this source."""
@@ -4505,8 +4526,13 @@ class ImportedFromPost(BaseModel):
         elif kind == "doi":
             out["doi"] = self.doi
         else:
-            assert self.git is not None
-            out["git"] = self.git.model_dump(exclude_none=True)
+            out["git_repo_url"] = self.git_repo_url
+            if self.path:
+                out["path"] = self.path
+            if self.git_ref:
+                out["git_ref"] = self.git_ref
+            if self.git_rev:
+                out["git_rev"] = self.git_rev
         if self.date is not None:
             out["date"] = self.date.isoformat()
         return out
@@ -4746,17 +4772,21 @@ def post_project_dataset(
             files = app.imports.resolve_doi_files(str(req.imported_from.doi))
             landed, _ = app.imports.fetch_files(files, wdir, req.path)
         else:
-            git_src = req.imported_from.git
-            assert git_src is not None
+            src = req.imported_from
+            assert src.git_repo_url is not None
             commit = app.imports.fetch_git_path(
-                git_src.repo_url, git_src.rev, git_src.path, wdir, req.path
+                src.git_repo_url,
+                src.git_ref or src.git_rev,
+                src.path,
+                wdir,
+                req.path,
             )
             # What's recorded is the commit that was fetched: a request
             # without one (the default branch's head) is pinned from here
             # on, like any other
-            git_entry = (ds.get("imported_from") or {}).get("git")
-            if isinstance(git_entry, dict):
-                git_entry["rev"] = commit
+            entry = ds.get("imported_from")
+            if isinstance(entry, dict):
+                entry["git_rev"] = commit
         if landed != req.path:
             if landed in [d.get("path") for d in datasets] or os.path.exists(
                 os.path.join(wdir, landed + ".dvc")
@@ -4981,6 +5011,16 @@ def get_project_publications(
     current_user: CurrentUserOptional,
     session: SessionDep,
     ref: str | None = None,
+    include_content: bool = Query(
+        False,
+        description=(
+            "Inline each publication's content rather than leaving the "
+            "caller to fetch it from the returned URL. Off by default: a "
+            "listing only needs the metadata, and one PDF can otherwise be "
+            "almost the whole response. Content is still inlined for a file "
+            "with no URL, since there would be no other way to reach it."
+        ),
+    ),
 ) -> list[Publication]:
     project = app.projects.get_project(
         owner_name=owner_name,
@@ -5013,14 +5053,11 @@ def get_project_publications(
         ck_info_full,
         dvc_lock_outs,
         zip_path_map,
-        _,
+        dvc_lock,
     ) = app.projects.get_ck_info_and_dvc_outs_from_tree(project, tree)
     # Staleness is best-effort: never let it block the publication listing.
-    dvc_lock: dict = {}
     stage_statuses = {}
     try:
-        if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=pipeline,
             dvc_lock=dvc_lock,
@@ -5035,7 +5072,11 @@ def get_project_publications(
             f"Failed to compute pipeline status for publications: {e}"
         )
     for pub in publications:
-        if not pub.get("stage") and pub.get("path"):
+        # calkit.yaml is hand-written: an entry that isn't a mapping, or has
+        # no path, names no file, so there's nothing to list for it.
+        if not isinstance(pub, dict) or not pub.get("path"):
+            continue
+        if not pub.get("stage"):
             auto_stage = find_stage_for_path(pub["path"], dvc_lock)
             if auto_stage is not None:
                 pub["stage"] = auto_stage
@@ -5059,7 +5100,13 @@ def get_project_publications(
                     dvc_lock_outs=dvc_lock_outs,
                     zip_path_map=zip_path_map,
                 )
-                pub["content"] = item.content
+                # Only worth omitting when there's a URL to fetch it from:
+                # a file small enough to live in Git rather than object
+                # storage has no URL, and dropping its content would leave
+                # nothing to render.
+                pub["content"] = (
+                    item.content if include_content or not item.url else None
+                )
                 pub["storage"] = item.storage
                 # Prioritize URL if already defined
                 if "url" not in pub:
@@ -5702,17 +5749,7 @@ def post_project_publication(
     current_user: CurrentUser,
     session: SessionDep,
     path: Annotated[str, Form()],
-    kind: Annotated[
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "presentation",
-            "poster",
-            "report",
-            "book",
-        ],
-        Form(),
-    ],
+    kind: Annotated[PublicationKind, Form()],
     title: Annotated[str, Form()],
     description: Optional[Annotated[str, Form()]] = Form(None),
     stage: Optional[Annotated[str, Form()]] = Form(None),
@@ -5840,7 +5877,7 @@ def post_project_publication(
         publications.append(
             dict(
                 path=path,
-                type=kind,
+                kind=kind,
                 title=title,
                 description=description,
                 stage=stage,
@@ -5892,18 +5929,7 @@ async def post_project_overleaf_publication(
     current_user: CurrentUser,
     session: SessionDep,
     path: Annotated[str, Form()],
-    kind: Annotated[
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "report",
-            "book",
-            "masters-thesis",
-            "phd-thesis",
-            "other",
-        ],
-        Form(),
-    ],
+    kind: Annotated[PublicationKind, Form()],
     overleaf_project_url: Optional[Annotated[str, Form()]] = Form(None),
     title: Optional[Annotated[str, Form()]] = Form(None),
     description: Optional[Annotated[str, Form()]] = Form(None),
@@ -6307,10 +6333,12 @@ async def post_project_overleaf_publication(
     subprocess.run(
         ["calkit", "check", "pipeline", "--compile"], cwd=repo.working_dir
     )
-    # Added after compiling, which manages the folder's .gitignore, so the
-    # commit holds what's on disk
+    # Added after compiling, which manages the folder's .gitignore and the
+    # repo's .gitattributes, so the commit holds what's on disk
     repo.git.add(path)
     repo.git.add("dvc.yaml")
+    if os.path.isfile(os.path.join(repo.working_dir, ".gitattributes")):
+        repo.git.add(".gitattributes")
     if auto_build:
         workflow_dir = os.path.join(repo.working_dir, ".github", "workflows")
         os.makedirs(workflow_dir, exist_ok=True)
@@ -6518,10 +6546,10 @@ def get_project_overleaf_sync_status(
     try:
         tree = app.projects.get_repo_tree_for_ref(repo, None)
         if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         dvc_yaml: dict = {}
         if tree.is_file("dvc.yaml"):
-            dvc_yaml = ryaml.load(tree.read_bytes("dvc.yaml").decode()) or {}
+            dvc_yaml = load_yaml_fast(tree.read_bytes("dvc.yaml")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_yaml,
             dvc_lock=dvc_lock,
@@ -6767,6 +6795,76 @@ def post_project_sync(
     return Message(message="success")
 
 
+class ProjectPushEventPost(BaseModel):
+    """A push that happened somewhere else.
+
+    What was pushed and where, recorded for reference: the hub works out the
+    current state from the repo itself, so none of this is trusted as input,
+    but it is what makes a log line worth reading.
+    """
+
+    git_rev: str | None = None
+    remote: str | None = None
+    branch: str | None = None
+    # What was pushed: "git", "dvc", "docker". A push that sent data
+    # somewhere other than Git changes what the project resolves to without
+    # moving a commit, which is the one thing the hub can't work out for
+    # itself by looking at the repo.
+    targets: list[str] | None = None
+
+
+# One route per kind of event rather than one route with a kind field.
+# Events have little in common beyond the project they concern -- a push
+# carries a revision, something else won't -- so a shared body would become a
+# set of fields that only apply sometimes, and a shared handler a branch on
+# which ones. A path per kind keeps each body to what that event actually
+# has, gives the generated clients one typed call each, and leaves room for
+# kinds that need different access than a push does.
+@router.post("/projects/{owner_name}/{project_name}/events/push")
+def post_project_push_event(
+    owner_name: str,
+    project_name: str,
+    current_user: CurrentUser,
+    session: SessionDep,
+    req: ProjectPushEventPost,
+) -> Message:
+    """Tell the hub this project has been pushed to somewhere else.
+
+    ``calkit push`` reports here, so the person who just pushed doesn't have
+    to be the one who waits for the pipeline, figures and references to be
+    worked out again. The GitHub App's webhook says the same thing for
+    anyone pushing through GitHub; this covers the rest, and arrives sooner.
+
+    Needs write access, since it is a request to spend server time on the
+    project, and returns immediately either way: warming is an optimization,
+    and a deployment with no queue configured simply doesn't do it.
+    """
+    project = app.projects.get_project(
+        owner_name=owner_name,
+        project_name=project_name,
+        session=session,
+        current_user=current_user,
+        min_access_level="write",
+    )
+    logger.info(
+        f"{project.owner_account_name}/{project.name} reported a push",
+        extra={
+            "event_kind": "push",
+            "event_git_rev": req.git_rev,
+            "event_remote": req.remote,
+            "event_branch": req.branch,
+        },
+    )
+    # Warming is normally skipped when the commit is already warm. That is
+    # the wrong answer for a push that moved data rather than code: the
+    # commit is the same and what it resolves to is not.
+    moved_data = bool(set(req.targets or []) - {"git"})
+    queued = app.tasks.enqueue_warm(
+        project.owner_account_name, project.name, force=moved_data
+    )
+    return Message(message="Queued" if queued else "Not queued")
+
+
 @router.get("/projects/{owner_name}/{project_name}/pipeline")
 def get_project_pipeline(
     owner_name: str,
@@ -6807,7 +6905,9 @@ def get_project_pipeline(
     dvc_content = None
     if tree.is_file("dvc.yaml"):
         dvc_content = tree.read_text("dvc.yaml")
-        dvc_pipeline = ryaml.load(dvc_content) or {}
+        # Only inspected, never written back, so it doesn't need the
+        # round-trip parser -- see load_yaml_fast.
+        dvc_pipeline = load_yaml_fast(dvc_content) or {}
     # calkit.yaml is the source of truth, and the committed dvc.yaml can lag
     # behind it: a stage added from the hub, a publication from a template,
     # a run not made yet. When the Calkit pipeline declares a stage the
@@ -6855,32 +6955,50 @@ def get_project_pipeline(
     # statuses below are still worth showing.
     mermaid = ""
     pipeline_error: str | None = None
-    try:
-        mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
-        logger.info(
-            f"Created Mermaid diagram for {owner_name}/{project_name}:\n"
-            f"{mermaid}"
+    # Everything below is derived from the tree at this commit, so the
+    # commit identifies it. Building the diagram walks the whole graph
+    # through DVC, which is over a second on a pipeline of any size.
+    commit_sha = resolve_commit_sha(repo, ref)
+    mermaid_key = (
+        cache.make_key(
+            "mermaid", f"{owner_name}/{project_name}".lower(), commit_sha
         )
-    except Exception as e:
-        pipeline_error = str(e).strip() or type(e).__name__
-        logger.info(
-            f"Invalid pipeline for {owner_name}/{project_name}: "
-            f"{type(e).__name__}: {e}"
-        )
+        if commit_sha
+        else None
+    )
+    cached_mermaid = cache.get_json(mermaid_key) if mermaid_key else None
+    if isinstance(cached_mermaid, dict):
+        mermaid = cached_mermaid.get("mermaid") or ""
+        pipeline_error = cached_mermaid.get("error")
+    else:
+        try:
+            mermaid = make_mermaid_diagram(dvc_pipeline, params=params)
+        except Exception as e:
+            pipeline_error = str(e).strip() or type(e).__name__
+            logger.info(
+                f"Invalid pipeline for {owner_name}/{project_name}: "
+                f"{type(e).__name__}: {e}"
+            )
+        if mermaid_key:
+            cache.set_json(
+                mermaid_key, {"mermaid": mermaid, "error": pipeline_error}
+            )
     # Compute per-stage staleness against the committed dvc.lock
     stage_statuses: dict = {}
     overall_status = "unknown"
     try:
         dvc_lock: dict = {}
         if tree.is_file("dvc.lock"):
-            dvc_lock = ryaml.load(tree.read_bytes("dvc.lock").decode()) or {}
+            # A megabyte of dvc.lock through the round-trip parser is
+            # seconds of the request on its own.
+            dvc_lock = load_yaml_fast(tree.read_bytes("dvc.lock")) or {}
         stage_statuses = compute_stage_statuses(
             dvc_yaml=dvc_pipeline,
             dvc_lock=dvc_lock,
             tree=tree,
             owner_name=project.owner_account_name,
             project_name=project.name,
-            cache_token=resolve_commit_sha(repo, ref),
+            cache_token=commit_sha,
         )
         overall_status = calc_overall_pipeline_status(stage_statuses)
         mermaid = color_mermaid_by_status(mermaid, stage_statuses)
@@ -7849,10 +7967,30 @@ class References(BaseModel):
     files: list[ReferenceFile] | None = None
     entries: list[ReferenceEntry] | None = None
     imported_from: ImportInfo | None = None
-    raw_text: str | None = None
     zotero: ReferenceZoteroLink | None = None
     # Names of pipeline stages that consume this .bib as a dependency/input.
     stages: list[str] | None = None
+
+
+def parse_bib_entries(raw_text: str) -> list[dict]:
+    """Parse a BibTeX file into its entries, cached on the text itself.
+
+    Parsing dominates the references endpoint: a project with a paper-sized
+    bibliography spends several seconds here, and does it again on every
+    read. The result is a pure function of the bytes, so the cache is keyed
+    by their hash -- which also means the copies of one shared ``.bib`` that
+    a multi-paper project keeps per publication all answer from a single
+    entry, rather than being parsed once each.
+    """
+    key = cache.make_key(
+        "bib", hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+    )
+    cached = cache.get_json(key)
+    if isinstance(cached, list):
+        return cached
+    entries = bibtexparser.loads(raw_text).entries
+    cache.set_json(key, entries)
+    return entries
 
 
 @router.get("/projects/{owner_name}/{project_name}/references")
@@ -7998,10 +8136,8 @@ def get_project_references(
         if os.path.isfile(os.path.join(repo.working_dir, path)):
             with open(os.path.join(repo.working_dir, path)) as f:
                 raw_text = f.read()
-            ref_collection["raw_text"] = raw_text
             try:
-                refs = bibtexparser.loads(raw_text)
-                entries = refs.entries
+                entries = parse_bib_entries(raw_text)
             except Exception as e:
                 logger.warning(f"Failed to parse BibTeX file {path}: {e}")
                 entries = []
@@ -9827,7 +9963,32 @@ def get_project_repro_check(
         ttl=DEFAULT_REPO_TTL,
         ref=ref,
     )
+    # A pure function of the tree at this commit, and a second and a half of
+    # work on a large project, so it is worked out once per commit rather
+    # than once per visitor.
+    commit_sha = resolve_commit_sha(repo, ref)
+    key = (
+        cache.make_key(
+            "repro-check",
+            f"{project.owner_account_name}/{project.name}".lower(),
+            commit_sha,
+        )
+        if commit_sha
+        else None
+    )
+    if key is not None:
+        cached = cache.get_json(key)
+        if cached is not None:
+            try:
+                return ReproCheck.model_validate(cached)
+            except ValidationError as e:
+                # Written by an older shape of ReproCheck; drop it rather
+                # than recompute past it on every request until it expires.
+                logger.warning(f"Discarding unreadable repro check: {e}")
+                cache.delete(key)
     res = check_reproducibility(wdir=str(repo.working_dir))
+    if key is not None:
+        cache.set_json(key, res.model_dump())
     return res
 
 
@@ -9899,10 +10060,7 @@ class ProjectApp(BaseModel):
 
 
 def _app_serve_url(owner_name: str, project_name: str, name: str) -> str:
-    return (
-        f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
-        f"/apps/{name}/serve/"
-    )
+    return f"/projects/{owner_name}/{project_name}/apps/{name}/serve/"
 
 
 def _project_apps_from_ck_info(
@@ -10071,7 +10229,7 @@ def serve_project_app_file(
         if resolved is None:
             raise HTTPException(404, "Ref not found")
         base = (
-            f"{settings.API_V1_STR}/projects/{owner_name}/{project_name}"
+            f"/projects/{owner_name}/{project_name}"
             f"/apps/{app_name}/{resolved}/serve/"
         )
         return RedirectResponse(base + path.strip("/"), status_code=302)
@@ -10188,12 +10346,12 @@ def get_project_showcase(
         showcase_tree = app.projects.get_repo_tree_for_ref(repo, ref)
         if showcase_tree.is_file("dvc.lock"):
             showcase_dvc_lock = (
-                ryaml.load(showcase_tree.read_bytes("dvc.lock").decode()) or {}
+                load_yaml_fast(showcase_tree.read_bytes("dvc.lock")) or {}
             )
         showcase_dvc_yaml: dict = {}
         if showcase_tree.is_file("dvc.yaml"):
             showcase_dvc_yaml = (
-                ryaml.load(showcase_tree.read_bytes("dvc.yaml").decode()) or {}
+                load_yaml_fast(showcase_tree.read_bytes("dvc.yaml")) or {}
             )
         showcase_stage_statuses = compute_stage_statuses(
             dvc_yaml=showcase_dvc_yaml,

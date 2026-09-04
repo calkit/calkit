@@ -12,7 +12,7 @@ import typer
 from typing_extensions import Annotated
 
 import calkit
-from calkit.cli import raise_error
+from calkit.cli import raise_error, warn
 
 update_app = typer.Typer(no_args_is_help=True)
 
@@ -872,16 +872,71 @@ def update_docker_env(
         str | None,
         typer.Option("--image", help="Docker image name/tag."),
     ] = None,
+    registry: Annotated[
+        str | None,
+        typer.Option(
+            "--registry",
+            help=(
+                "Registry prefix to push images to and pull them from, or "
+                "'ghcr.io' for the project's own namespace in the GitHub "
+                "Container Registry, or 'none' to keep images local."
+            ),
+        ),
+    ] = None,
+    lock: Annotated[
+        bool,
+        typer.Option(
+            "--lock",
+            help=(
+                "Rebuild or repull the image and write fresh lock files for "
+                "every architecture."
+            ),
+        ),
+    ] = False,
 ) -> None:
     """Update a docker environment."""
+    from calkit.environments import (
+        get_all_docker_lock_fpaths,
+        get_env_lock_fpath,
+    )
+
     ck_info, env = _load_env(env_name)
     if env.get("kind") != "docker":
         raise_error(f"Environment '{env_name}' is not a docker environment")
-    if image is None:
-        raise_error("No updates specified. Use --image to set the image.")
-    env["image"] = image
-    calkit.save_calkit_info(ck_info)
-    typer.echo(f"Updated docker environment '{env_name}'")
+    if image is None and registry is None and not lock:
+        raise_error(
+            "No updates specified. Use --image, --registry, or --lock."
+        )
+    if image is not None:
+        env["image"] = image
+    if registry is not None:
+        if registry.lower() in ["none", "false"]:
+            # A shell can't pass YAML's null, so this is how it's asked for,
+            # but what belongs in calkit.yaml is the null itself
+            env["registry"] = None
+        else:
+            env["registry"] = registry
+    if image is not None or registry is not None:
+        calkit.save_calkit_info(ck_info)
+        typer.echo(f"Updated docker environment '{env_name}'")
+    if not lock:
+        return
+    # Relocking throws away the existing lock files so the image is fetched or
+    # rebuilt from the environment's spec, which is the only way to pick up an
+    # image whose tag has been moved out from under a recorded digest
+    for lock_fpath in get_all_docker_lock_fpaths(env_name=env_name):
+        if os.path.isfile(lock_fpath):
+            typer.echo(f"Removing lock file: {lock_fpath}")
+            os.remove(lock_fpath)
+    legacy_lock_fpath = get_env_lock_fpath(
+        env=env, env_name=env_name, as_posix=False, legacy=True
+    )
+    if legacy_lock_fpath is not None and os.path.isfile(legacy_lock_fpath):
+        os.remove(legacy_lock_fpath)
+    from calkit.cli.check import check_environment
+
+    typer.echo(f"Relocking docker environment '{env_name}'")
+    check_environment(env_name=env_name, verbose=True)
 
 
 @update_app.command(name="slurm-env")
@@ -1207,9 +1262,48 @@ def update_stage(
     calkit.save_calkit_info(ck_info)
 
 
+def _resolve_imported_from(source: str, date: str | None = None) -> dict:
+    """Read a source written as one string into an ``imported_from``.
+
+    A URL, a DOI, a Git clone URL, a forge file link, or a Calkit project
+    path is recognized for what it is. Anything else is recorded as a
+    description: someone answering "where did this come from?" in words
+    has still answered it, and storing that under ``url`` would make the
+    entry claim something it can't deliver.
+    """
+    from pydantic import TypeAdapter
+
+    from calkit.models.core import ImportedFromType
+    from calkit.provenance import source_from_location
+
+    try:
+        parsed = source_from_location(source)
+    except ValueError:
+        parsed = {"description": source}
+    if date is not None:
+        parsed["date"] = date
+    return (
+        TypeAdapter(ImportedFromType)
+        .validate_python(parsed)
+        .model_dump(exclude_none=True)
+    )
+
+
 @update_app.command(name="figure")
 def update_figure(
     path: Annotated[str, typer.Argument(help="Path to the figure file.")],
+    imported_from: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from",
+            help=(
+                "Where this came from, as a URL, a DOI, a Git clone URL, a "
+                "Calkit project path, or, failing all of those, a "
+                "description in words. Which one it is is worked out from "
+                "how it's written."
+            ),
+        ),
+    ] = None,
     imported_from_url: Annotated[
         str | None,
         typer.Option(
@@ -1226,21 +1320,31 @@ def update_figure(
     ] = None,
 ) -> None:
     """Update a figure entry in calkit.yaml."""
-    if imported_from_url is None and stage is None:
+    if imported_from is not None and imported_from_url is not None:
+        raise_error(
+            "--imported-from says where this came from on its own, so it "
+            "can't be combined with --imported-from-url."
+        )
+    if imported_from is None and imported_from_url is None and stage is None:
         raise_error("No updates specified.")
+    source_dict = None
+    if imported_from is not None:
+        source_dict = _resolve_imported_from(imported_from)
+    elif imported_from_url is not None:
+        source_dict = {"url": imported_from_url}
     ck_info = calkit.load_calkit_info()
     figures = ck_info.get("figures", [])
     for fig in figures:
         if fig.get("path") == path:
-            if imported_from_url is not None:
-                fig["imported_from"] = {"url": imported_from_url}
+            if source_dict is not None:
+                fig["imported_from"] = source_dict
             if stage is not None:
                 fig["stage"] = stage
             break
     else:
         entry: dict = {"path": path}
-        if imported_from_url is not None:
-            entry["imported_from"] = {"url": imported_from_url}
+        if source_dict is not None:
+            entry["imported_from"] = source_dict
         if stage is not None:
             entry["stage"] = stage
         figures.append(entry)
@@ -1251,6 +1355,18 @@ def update_figure(
 @update_app.command(name="dataset")
 def update_dataset(
     path: Annotated[str, typer.Argument(help="Path to the dataset file.")],
+    imported_from: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from",
+            help=(
+                "Where this came from, as a URL, a DOI, a Git clone URL, a "
+                "Calkit project path, or, failing all of those, a "
+                "description in words. Which one it is is worked out from "
+                "how it's written."
+            ),
+        ),
+    ] = None,
     imported_from_url: Annotated[
         str | None,
         typer.Option(
@@ -1272,13 +1388,26 @@ def update_dataset(
             help="Clone URL of the Git repo the dataset was imported from.",
         ),
     ] = None,
+    imported_from_git_ref: Annotated[
+        str | None,
+        typer.Option(
+            "--imported-from-git-ref",
+            help=(
+                "Branch, tag, or commit to follow, e.g. 'main'. The commit "
+                "it resolves to is recorded in .calkit/imports.json by "
+                "'calkit sync import', not here."
+            ),
+        ),
+    ] = None,
     imported_from_git_rev: Annotated[
         str | None,
         typer.Option(
             "--imported-from-git-rev",
+            hidden=True,
             help=(
-                "Commit hash it was taken from. A branch or tag isn't "
-                "accepted, since it would move."
+                "Deprecated; the resolved commit lives in "
+                ".calkit/imports.json. Use --imported-from-git-ref to say "
+                "what to follow."
             ),
         ),
     ] = None,
@@ -1310,7 +1439,6 @@ def update_dataset(
 
     from calkit.models.core import (
         Dataset,
-        _GitSource,
         _ImportedFromDoi,
         _ImportedFromGit,
         _ImportedFromUrl,
@@ -1324,44 +1452,58 @@ def update_dataset(
         "--imported-from-git-url": imported_from_git_url,
     }
     sources_given = [k for k, v in source_options.items() if v is not None]
+    if imported_from is not None:
+        if sources_given:
+            raise_error(
+                "--imported-from says where this came from on its own, so "
+                "it can't be combined with " + ", ".join(source_options) + "."
+            )
+        sources_given = ["--imported-from"]
     if len(sources_given) > 1:
         raise_error("Specify only one of " + ", ".join(source_options) + ".")
     if not sources_given and (
-        imported_from_git_rev is not None
+        imported_from_git_ref is not None
+        or imported_from_git_rev is not None
         or imported_from_git_path is not None
         or imported_from_date is not None
     ):
         raise_error(
-            "--imported-from-git-rev, --imported-from-git-path, and "
+            "--imported-from-git-ref, --imported-from-git-path, and "
             "--imported-from-date go with one of "
             + ", ".join(source_options)
             + "."
         )
+    if imported_from_git_rev is not None:
+        warn(
+            "--imported-from-git-rev is deprecated; the resolved commit is "
+            "recorded in .calkit/imports.json by 'calkit sync import'. Use "
+            "--imported-from-git-ref to say what to follow."
+        )
     if not sources_given and stage is None:
         raise_error("No updates specified.")
-    imported_from: dict | None = None
+    source_dict: dict | None = None
     if sources_given:
         date = imported_from_date.date() if imported_from_date else None
         try:
-            source: _ImportedFromUrl | _ImportedFromDoi | _ImportedFromGit
-            if imported_from_url is not None:
+            source: (
+                _ImportedFromUrl | _ImportedFromDoi | _ImportedFromGit | None
+            ) = None
+            if imported_from is not None:
+                source_dict = _resolve_imported_from(
+                    imported_from, date.isoformat() if date else None
+                )
+            elif imported_from_url is not None:
                 source = _ImportedFromUrl(url=imported_from_url, date=date)
             elif imported_from_doi is not None:
                 source = _ImportedFromDoi(doi=imported_from_doi, date=date)
             else:
-                if imported_from_git_rev is None:
-                    raise_error(
-                        "--imported-from-git-rev is required with "
-                        "--imported-from-git-url."
-                    )
                 source = _ImportedFromGit(
-                    git=_GitSource(
-                        repo_url=calkit.normalize_git_url(
-                            imported_from_git_url or ""
-                        ),
-                        rev=imported_from_git_rev,
-                        path=imported_from_git_path,
+                    git_repo_url=calkit.normalize_git_url(
+                        imported_from_git_url or ""
                     ),
+                    git_ref=imported_from_git_ref,
+                    git_rev=imported_from_git_rev,
+                    path=imported_from_git_path,
                     date=date,
                 )
         except ValidationError as e:
@@ -1369,7 +1511,8 @@ def update_dataset(
                 "Invalid import source: "
                 + "; ".join(str(err["msg"]) for err in e.errors())
             )
-        imported_from = source.model_dump(exclude_none=True)
+        if source is not None:
+            source_dict = source.model_dump(exclude_none=True)
     ck_info = calkit.load_calkit_info()
     datasets = ck_info.get("datasets", [])
     for ds in datasets:
@@ -1379,8 +1522,8 @@ def update_dataset(
         ds = {"path": path}
         datasets.append(ds)
         ck_info["datasets"] = datasets
-    if imported_from is not None:
-        ds["imported_from"] = imported_from
+    if source_dict is not None:
+        ds["imported_from"] = source_dict
     if stage is not None:
         ds["stage"] = stage
     # Checked as a whole, so an import added to a dataset someone collected

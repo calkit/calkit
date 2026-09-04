@@ -64,6 +64,164 @@ misc:
 Scripts count. A figure resting on a script nobody will claim has just as
 little behind it as one resting on data nobody collected.
 
+### Bringing a file in from elsewhere
+
+`calkit import path` copies a file into the project and writes the entry
+for you, which is the usual way one of these gets recorded. A link copied
+out of the browser is enough:
+
+```sh
+calkit import path \
+  https://github.com/myorg/setups/blob/main/setups/setup.sh \
+  scripts/setup.sh
+```
+
+A GitHub or GitLab link to a file is read as the Git source it actually
+is, rather than as an HTML page that happens to contain the file: the
+repo, the branch, and the path within it all come out of the URL.
+A link that names no revision, including one written out by hand as
+`https://github.com/myorg/setups/setups/setup.sh`, takes the default
+branch.
+An SSH clone URL works the same way, since that is the thing most often
+copied out of a forge:
+
+```sh
+calkit import path git@github.com:myorg/setups/setups/setup.sh \
+  scripts/setup.sh --git-ref main
+```
+
+The repo is taken to be the first two segments after the host, which is
+right for GitHub and for GitLab projects outside nested groups. For
+anything else---or for a repo Calkit can't read a URL for at all---name
+the repo outright:
+
+```sh
+calkit import path setups/setup.sh scripts/setup.sh \
+  --git-repo https://github.com/myorg/setups.git --git-ref main
+```
+
+A branch whose name contains a slash, like `feature/foo`, needs no special
+handling: a URL doesn't say where such a branch ends and the path begins,
+so the split is checked against the repo when the file is fetched and
+corrected if the guess was wrong. `--git-ref` still overrides it.
+
+Other addresses work too, and are read as what they are:
+
+| Written as                          | Recorded as                               |
+| ----------------------------------- | ----------------------------------------- |
+| A GitHub or GitLab link to a file   | `git_repo_url`, with `git_ref` and `path` |
+| Any other URL                       | `url`                                     |
+| A DOI, bare or as a `doi.org` link  | `doi`                                     |
+| `someone/some-project/path/to/file` | `project`                                 |
+
+A DOI is recognized rather than downloaded, since it resolves to a
+landing page: saving that HTML and calling it the data is the mistake
+worth refusing. Use
+[`calkit import zenodo`](cli-reference.md) for a Zenodo record.
+
+It lands in `misc` unless `--kind` says otherwise, and the entry records
+the commit the file actually came from, even when a branch was named:
+
+```yaml
+misc:
+  - path: scripts/setup.sh
+    imported_from:
+      git_repo_url: https://github.com/myorg/setups.git
+      path: setups/setup.sh
+      git_ref: main
+```
+
+The copy is committed here rather than fetched on demand, so the project
+stays self-contained and a pipeline stage can depend on the file like any
+other input.
+
+To pick up later changes:
+
+```sh
+calkit sync import scripts/setup.sh
+```
+
+That takes the latest of whatever the entry follows---its `git_ref` if it
+names one, and the repo's default branch otherwise---and records the
+commit it lands on in the lock file.
+So `git_ref` is the question and the recorded commit is the answer:
+reading the answer back would make refreshing a no-op.
+
+`--git-ref` changes what an entry follows, from then on rather than just
+this once:
+
+```sh
+calkit sync import scripts/setup.sh --git-ref v1.2
+```
+
+A `git_ref` naming a commit rather than a branch is a fixed point, so an
+import pinned that way---including one taken from a link to a file at a
+particular commit---stays where it is when refreshed.
+
+Either way this is a one-way copy from the source, not a merge: local
+changes to the file are discarded. An import is a claim about where the
+bytes came from, and an edit that survived would make that claim false.
+If the file needs to differ here, it isn't imported---drop the
+`imported_from` and record who changed it instead.
+
+To see everything a project took from elsewhere, whichever list it was
+recorded in:
+
+```sh
+calkit list imports
+```
+
+And to refresh all of them at once:
+
+```sh
+calkit sync import --all
+```
+
+An entry that can't be refreshed in place---a dataset tracked by DVC, or a
+record named only by a DOI---is reported and skipped rather than stopping
+the rest, as is one whose source can't be reached, since a repo being down
+shouldn't leave every other import stale. The command exits non-zero when
+anything was skipped, so a script notices.
+
+## What goes where
+
+`calkit.yaml` records what a person declared---the repo, the path within
+it, and the `git_ref` to follow. What a fetch resolved to goes in
+`.calkit/imports.json`, keyed by path:
+
+```json
+{
+  "scripts/setup.sh": {
+    "fetched": "2026-08-31T23:14:21+00:00",
+    "rev": "4fadbcf62125c19c9cbf31de60831f656ffe5d4e",
+    "hash": "sha256:9f2b..."
+  }
+}
+```
+
+That file is committed, so everyone cloning the project gets the same
+bytes, the way they do from `dvc.lock`. Everything Calkit keeps under
+`.calkit` is managed by Calkit---read and write it through the CLI, the
+web app, or the extension rather than by hand.
+
+To pin an import, write the commit hash as its `git_ref`. A commit is a thing
+to follow that happens never to move, so no separate field is needed and
+`calkit.yaml` stays a statement of intent.
+
+The recorded checksum is what makes a local edit visible. Refreshing a
+file that has been changed since it was fetched would discard that work,
+so it is reported and refused until `--force` says otherwise:
+
+```sh
+calkit sync import scripts/setup.sh
+# Error: 'scripts/setup.sh' has been edited since it was imported ...
+```
+
+An entry written before this split carries its `git_rev` in
+`calkit.yaml`.
+It is still read, and refreshing the import moves it across, so nothing
+has to be migrated by hand.
+
 `created_by` is the same key for all of them, whether the work was
 collecting data, drawing a diagram, or taking a photograph, and it takes a
 list, since work usually has more than one person behind it. Each entry
@@ -171,7 +329,8 @@ beats an attestation whenever one exists. Prefer, in order:
 1. **A DOI**, which resolves and is citable
 2. **A Git repo at a specific commit**, which names exact bytes. A repo and
    path with no revision names whatever is there today, which is a mutable
-   claim dressed as a citation, so `rev` must be a commit hash rather than a
+   claim dressed as a citation, so `git_rev` must be a commit hash rather
+   than a
    branch or tag
 3. **A URL**, optionally with the date it was retrieved
 4. **An attestation** that someone collected or created it, when there's

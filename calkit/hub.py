@@ -365,9 +365,17 @@ def _request(
     as_json=True,
     auth: bool = True,
     base_url: str | None = None,
+    max_retries: int = 10,
+    allow_login: bool = True,
     **kwargs,
 ):
-    max_retries = 10
+    """Make a request to the hub.
+
+    ``max_retries`` and ``allow_login`` exist for calls that are worth
+    making but not worth waiting on: reporting something in the background
+    should not sit through two minutes of backoff, nor stop to ask an
+    unauthenticated user to log in.
+    """
     base_delay_seconds = 0.25
     max_delay_seconds = 30
     # Bound how long a single attempt can hang so stalled connections become
@@ -381,7 +389,11 @@ def _request(
     # We may prompt the user via the device login flow only when stdin and
     # stdout are TTYs (i.e. not in CI, daemons, or piped subprocesses) and
     # the user hasn't opted out via the env var.
-    can_prompt = auth and not os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN")
+    can_prompt = (
+        auth
+        and allow_login
+        and not os.environ.get("CALKIT_NO_INTERACTIVE_LOGIN")
+    )
     if can_prompt:
         try:
             can_prompt = sys.stdin.isatty() and sys.stdout.isatty()

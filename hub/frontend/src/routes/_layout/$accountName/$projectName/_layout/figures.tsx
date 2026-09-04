@@ -35,6 +35,7 @@ import { z } from "zod"
 import ClearableInput from "../../../../../components/Common/ClearableInput"
 import LoadingSpinner from "../../../../../components/Common/LoadingSpinner"
 import NoArtifactFound from "../../../../../components/Common/NoArtifactFound"
+import { decodeBase64Utf8 } from "../../../../../lib/strings"
 
 import { type Figure, ProjectsService } from "../../../../../client"
 import { ArtifactCompareModal } from "../../../../../components/Common/ArtifactCompareModal"
@@ -60,9 +61,107 @@ const figuresSearchSchema = z.object({
   q: z.string().optional(),
 })
 
-// Each figure's content is fetched and inlined by the API, so pages are kept
-// small; projects with hundreds of figures otherwise take minutes to load.
+// The grid asks for previews rather than the figures themselves: a page of
+// full-size plots is megabytes of base64 to draw images 140px tall.
 const FIGURES_PER_PAGE = 20
+
+// A Plotly figure is data, not pixels, so the API has nothing to rasterize and
+// the grid draws it here instead.
+//
+// It is drawn once into an image rather than left as a live plot: a tile is
+// 140px tall and a page holds twenty of them, and twenty Plotly instances
+// build twenty SVG scene graphs that stay on the page. Rendered to a data URL
+// the tile costs no more than any other thumbnail.
+//
+// At this size the chrome is what has to go -- the default margins alone are
+// most of a 140px canvas, before a title or tick labels. What makes a plot
+// recognisable that small is the shape of its traces.
+const thumbnailLayout = (layout: Record<string, unknown>) => ({
+  ...layout,
+  title: undefined,
+  showlegend: false,
+  margin: { l: 2, r: 2, t: 2, b: 2 },
+  xaxis: { ...(layout.xaxis as object), visible: false, title: undefined },
+  yaxis: { ...(layout.yaxis as object), visible: false, title: undefined },
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+})
+
+function PlotlyThumbnail({ figure }: { figure: Figure }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    // Start over whenever the figure's content does: this component is
+    // reused across a ref change or a refetch, and without the reset it
+    // would keep showing the previous image, or stay stuck on a failure
+    // that no longer applies.
+    setSrc(null)
+    setFailed(false)
+    if (!figure.content) {
+      setFailed(true)
+      return
+    }
+    let cancelled = false
+    const draw = async () => {
+      try {
+        const spec = JSON.parse(decodeBase64Utf8(String(figure.content)))
+        if (!spec.data || !spec.layout) throw new Error("not a Plotly figure")
+        // The prebuilt bundle, which is what react-plotly.js imports too --
+        // bare "plotly.js" resolves to its unbuilt source entry, which is a
+        // second copy of the library with different interop. It carries no
+        // types of its own; the API is the one "plotly.js" declares.
+        const Plotly =
+          // @ts-expect-error -- prebuilt bundle, untyped; see above
+          (await import("plotly.js/dist/plotly"))
+            .default as typeof import("plotly.js")
+        const url = await Plotly.toImage(
+          { data: spec.data, layout: thumbnailLayout(spec.layout) },
+          { format: "webp", width: 320, height: 200 },
+        )
+        if (!cancelled) setSrc(url)
+      } catch {
+        if (!cancelled) setFailed(true)
+      }
+    }
+    draw()
+    return () => {
+      cancelled = true
+    }
+  }, [figure.content])
+  // A .json that turns out not to be a Plotly figure, or one Plotly can't
+  // draw, falls back to the same icon as any other format with no preview.
+  if (failed) {
+    return (
+      <Flex
+        height="140px"
+        align="center"
+        justify="center"
+        color="gray.400"
+        fontSize="3xl"
+      >
+        <Icon as={getIcon(figure)} />
+      </Flex>
+    )
+  }
+  if (!src) {
+    return (
+      <Flex height="140px" align="center" justify="center">
+        <LoadingSpinner />
+      </Flex>
+    )
+  }
+  return (
+    <Flex height="140px" align="center" justify="center">
+      <Image
+        src={src}
+        alt={figure.title}
+        objectFit="contain"
+        maxW="100%"
+        maxH="140px"
+      />
+    </Flex>
+  )
+}
 
 export const Route = createFileRoute(
   "/_layout/$accountName/$projectName/_layout/figures",
@@ -101,6 +200,25 @@ function FigureThumbnail({
 
   const renderThumb = () => {
     const lowerPath = figure.path.toLowerCase()
+    if (lowerPath.endsWith(".json") && figure.content) {
+      return <PlotlyThumbnail figure={figure} />
+    }
+    // A preview the API rendered: one image tag for every format that has
+    // one, including the PDFs that would otherwise each need a PDF renderer
+    // running in the page just to draw a 140px tile.
+    if (figure.thumbnail) {
+      return (
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={`data:image/webp;base64,${figure.thumbnail}`}
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
+      )
+    }
     if (
       (lowerPath.endsWith(".png") ||
         lowerPath.endsWith(".jpg") ||
@@ -117,17 +235,22 @@ function FigureThumbnail({
       }
       const mime = mimeMap[ext] ?? "image/png"
       return (
-        <Image
-          src={
-            figure.content
-              ? `data:${mime};base64,${figure.content}`
-              : String(figure.url)
-          }
-          alt={figure.title}
-          objectFit="contain"
-          width="100%"
-          height="140px"
-        />
+        // Centred at no more than its own size: a plot scales down to fit,
+        // while a small icon stays small instead of being blown up to fill
+        // the tile and going soft.
+        <Flex height="140px" align="center" justify="center">
+          <Image
+            src={
+              figure.content
+                ? `data:${mime};base64,${figure.content}`
+                : String(figure.url)
+            }
+            alt={figure.title}
+            objectFit="contain"
+            maxW="100%"
+            maxH="140px"
+          />
+        </Flex>
       )
     }
     if (lowerPath.endsWith(".pdf") && (figure.content || figure.url)) {
@@ -239,6 +362,7 @@ function ProjectFigures() {
         project_name: projectName,
         ref,
         limit: FIGURES_PER_PAGE,
+        thumbnails: true,
         offset,
         // Filtering happens server-side, across every figure in the project
         // rather than just the ones on this page.

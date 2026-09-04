@@ -1,14 +1,34 @@
 """Tests for ``calkit.cli.check``."""
 
+import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import time
 
 import pytest
 
 import calkit
+import calkit.environments
+
+
+def engine_records_build_digests() -> bool:
+    # The containerd image store writes a manifest when an image is built,
+    # so the image carries the digest it will have in a registry before it
+    # is pushed anywhere. The classic store writes none: a manifest names
+    # the compressed layers, and nothing compresses them until a push, so a
+    # digest only exists once the image has been sent somewhere.
+    try:
+        out = subprocess.check_output(
+            ["docker", "info", "--format", "{{json .DriverStatus}}"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+    return "io.containerd.snapshotter" in out
 
 
 def test_check_venv(tmp_dir):
@@ -234,6 +254,37 @@ def test_check_docker_env(tmp_dir):
     with open("Dockerfile", "w") as f:
         f.write("FROM python:3.9-slim\n")
     # Now check the environment
+    out = subprocess.check_output(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ],
+        text=True,
+        stderr=subprocess.STDOUT,
+    )
+    with open("Dockerfile-lock.json") as f:
+        lock = json.load(f)
+    # What an image is called is in calkit.yaml, not in the lock, so
+    # renaming it doesn't rerun every stage in the environment
+    assert "RepoTags" not in lock
+    # An image built here and never pushed anywhere has a digest no registry
+    # can serve, which would send anyone reading the lock on a failed pull
+    assert lock["RepoDigests"] == []
+    # Where the image store gives a build no digest at all, there is nothing
+    # to record even once a registry is configured without a push, so say so
+    # while the build that prompted it is still on screen
+    if not engine_records_build_digests():
+        assert "set 'registry' on the environment" in out
+    # Checking again with nothing changed must not rebuild, and must leave
+    # the lock byte-identical so no stage using it reruns
+    with open("Dockerfile-lock.json", "rb") as f:
+        lock_bytes = f.read()
     subprocess.check_call(
         [
             "calkit",
@@ -246,6 +297,47 @@ def test_check_docker_env(tmp_dir):
             "Dockerfile-lock.json",
         ]
     )
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == lock_bytes
+    # Changing the Dockerfile must invalidate the lock rather than reuse the
+    # image it identifies
+    with open("Dockerfile", "w") as f:
+        f.write("FROM python:3.9-slim\nRUN touch /changed\n")
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    with open("Dockerfile-lock.json") as f:
+        new_lock = json.load(f)
+    assert new_lock["DockerfileMD5"] != lock["DockerfileMD5"]
+    assert new_lock["RootFS"]["Layers"] != lock["RootFS"]["Layers"]
+    with open("Dockerfile-lock.json", "rb") as f:
+        renamed_lock_bytes = f.read()
+    # Renaming the image leaves the lock alone: it describes the same
+    # content, and a rename that reran every stage would be reporting a
+    # change to software that didn't change
+    subprocess.check_call(
+        [
+            "calkit",
+            "check",
+            "docker-env",
+            "python-3.9-slim-renamed",
+            "-i",
+            "Dockerfile",
+            "-o",
+            "Dockerfile-lock.json",
+        ]
+    )
+    with open("Dockerfile-lock.json", "rb") as f:
+        assert f.read() == renamed_lock_bytes
     # Now modify the image to fail to build and ensure the lock file is deleted
     with open("Dockerfile", "w") as f:
         f.write("FROM non-existent-image:latest\n")
@@ -263,6 +355,502 @@ def test_check_docker_env(tmp_dir):
             ]
         )
     assert not os.path.exists("Dockerfile-lock.json")
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_locks_every_platform(tmp_dir):
+    from calkit.environments import get_docker_arch
+
+    arch = get_docker_arch()
+    other_arch = "amd64" if arch != "amd64" else "arm64"
+    argv = [
+        "calkit",
+        "check",
+        "docker-env",
+        "alpine:3.18",
+        "-o",
+        f"locks/{arch}.json",
+        "--lock-arch",
+        "amd64",
+        "--lock-arch",
+        "arm64",
+    ]
+    out = subprocess.check_output(argv, text=True)
+    # The other platforms are read from the exact image this one locked, not
+    # from the tag, which can move onto a different build between checks and
+    # leave one set of lock files describing two of them
+    assert "Reading platforms available for alpine@sha256:" in out
+    # Both platforms get locked from this one machine, so moving the project
+    # to the other doesn't invalidate every stage in the environment
+    with open(f"locks/{arch}.json") as f:
+        mine = json.load(f)
+    with open(f"locks/{other_arch}.json") as f:
+        theirs = json.load(f)
+    assert mine["Architecture"] == arch
+    assert theirs["Architecture"] == other_arch
+    assert mine["RootFS"]["Layers"] != theirs["RootFS"]["Layers"]
+    # Both name the same multi-platform index, which is what makes either
+    # one pullable from either machine
+    assert mine["RepoDigests"] == theirs["RepoDigests"]
+    assert mine["RepoDigests"]
+    # Deleting the image must bring it back by the digest in the lock rather
+    # than by tag, and must leave the lock files untouched
+    with open(f"locks/{arch}.json", "rb") as f:
+        lock_bytes = f.read()
+    subprocess.check_call(["docker", "rmi", "-f", "alpine:3.18"])
+    out = subprocess.check_output(argv, text=True)
+    assert "Pulling image by digest" in out
+    with open(f"locks/{arch}.json", "rb") as f:
+        assert f.read() == lock_bytes
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_migrates_a_legacy_lock(tmp_dir):
+    image = "calkit-legacy-lock-test"
+    subprocess.check_call(["calkit", "init"])
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo legacy > /hi.txt\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {"kind": "docker", "path": "Dockerfile", "image": image}
+    }
+    calkit.save_calkit_info(ck_info)
+    check_argv = ["calkit", "check", "environment", "-n", "main"]
+    arch = calkit.environments.get_docker_arch()
+    lock_fpath = f".calkit/env-locks/main/{arch}.json"
+    legacy_lock_fpath = ".calkit/env-locks/main.json"
+    try:
+        subprocess.check_call(check_argv)
+        with open(lock_fpath) as f:
+            built_lock = json.load(f)
+        # A project locked before locks were kept per architecture has a
+        # single lock file named after the environment, written by the
+        # machine that checked it, so it describes this architecture
+        os.replace(lock_fpath, legacy_lock_fpath)
+        # Something else leaving an image under this tag must not be taken
+        # for the one the lock describes and written into the migrated lock,
+        # which is what taking a legacy lock for another architecture's did:
+        # its image is never checked against the lock, since it isn't
+        # expected to be here. It's built rather than tagged from an
+        # existing image, since another test running alongside this one is
+        # free to delete whatever that image was
+        with open("Other.dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo something-else > /hi.txt\n")
+        subprocess.check_call(
+            ["docker", "build", "-t", image, "-f", "Other.dockerfile", "."]
+        )
+        subprocess.check_call(check_argv)
+        assert not os.path.isfile(legacy_lock_fpath)
+        with open(lock_fpath) as f:
+            migrated = json.load(f)
+        assert migrated["RootFS"]["Layers"] == built_lock["RootFS"]["Layers"]
+        assert migrated["DockerfileMD5"] == built_lock["DockerfileMD5"]
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_pulls_from_registry_instead_of_rebuilding(tmp_dir):
+    container = "calkit-test-registry"
+    registry = "localhost:5678"
+    subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+    # An image left in the daemon by an earlier run still carries a digest
+    # under this registry, and a rebuild lands on it, since it has the same
+    # content, which would make an image that was never sent to this
+    # registry look like one that was. A '--filter reference=' doesn't match
+    # an image whose only reference is a digest, which is the kind left
+    # behind here, so the listing is scanned instead
+    listed = subprocess.check_output(
+        ["docker", "images", "-a", "--format", "{{.Repository}} {{.ID}}"],
+        text=True,
+    ).splitlines()
+    stale = [
+        line.split()[-1] for line in listed if line.startswith(f"{registry}/")
+    ]
+    if stale:
+        subprocess.run(["docker", "rmi", "-f"] + stale, capture_output=True)
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            "5678:5000",
+            "registry:2",
+        ],
+        capture_output=True,
+    )
+    if started.returncode != 0:
+        pytest.skip("Could not start a local registry")
+    try:
+        for _ in range(30):
+            up = subprocess.run(
+                ["docker", "exec", container, "true"], capture_output=True
+            )
+            if up.returncode == 0:
+                break
+            time.sleep(1)
+        image = "calkit-registry-test"
+        subprocess.check_call(["calkit", "init"])
+        with open("Dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo hi > /hi.txt\n")
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"] = {
+            "main": {
+                "kind": "docker",
+                "path": "Dockerfile",
+                "image": image,
+                "registry": f"{registry}/proj",
+            }
+        }
+        calkit.save_calkit_info(ck_info)
+        check_argv = ["calkit", "check", "environment", "-n", "main"]
+        arch = calkit.environments.get_docker_arch()
+        lock_fpath = f".calkit/env-locks/main/{arch}.json"
+        # Checking builds the image and records the digest it will have in
+        # the registry. Where the image store keeps a manifest that digest
+        # is the build's own, and publishing is left to 'calkit push';
+        # where it doesn't, only a push can say what the digest is, so
+        # checking sends the image rather than leave the lock naming
+        # nothing to pull
+        digests_at_build = engine_records_build_digests()
+        out = subprocess.check_output(check_argv, text=True)
+        if digests_at_build:
+            assert "Pushing image" not in out
+        else:
+            assert "Pushing image" in out
+        with open(lock_fpath, "rb") as f:
+            built_lock_bytes = f.read()
+        built_lock = json.loads(built_lock_bytes)
+        assert len(built_lock["RepoDigests"]) == 1
+        assert built_lock["RepoDigests"][0].startswith("sha256:")
+        # An image built before a registry was configured must reach it
+        # without a rebuild, or an existing project could only publish what
+        # it already has by throwing it away first
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        if digests_at_build:
+            assert "Pushing image for 'main'" in out
+        else:
+            # Checking already sent it, and pushing asks the registry rather
+            # than sending it a second time
+            assert "already in the registry" in out
+        assert "exporting layers" not in out
+        with open(lock_fpath) as f:
+            lock = json.load(f)
+        # Pushing sends exactly the digest the build already recorded, so
+        # the lock is left alone rather than rewritten, and no stage reruns
+        # for having published an image that didn't change
+        assert lock["RepoDigests"] == built_lock["RepoDigests"]
+        with open(lock_fpath, "rb") as f:
+            assert f.read() == built_lock_bytes
+        with open(lock_fpath, "rb") as f:
+            lock_bytes = f.read()
+        subprocess.check_call(
+            [
+                "docker",
+                "rmi",
+                "-f",
+                image,
+                f"{registry}/proj/{image}:latest",
+            ]
+        )
+        out = subprocess.check_output(check_argv, text=True)
+        assert "Pulling image by digest" in out
+        assert "Pushing image" not in out
+        # Coming back from the registry has to leave the lock exactly as it
+        # was, or every stage in the environment reruns for nothing
+        with open(lock_fpath, "rb") as f:
+            assert f.read() == lock_bytes
+        # Checking an image that hasn't changed must not go back to the
+        # registry to ask which platforms it has. The answer can't have
+        # changed, and asking put a network round-trip in front of every
+        # check for any project whose image isn't published for both
+        out = subprocess.check_output(check_argv, text=True)
+        assert "Reading platforms available" not in out
+        with open(lock_fpath, "rb") as f:
+            assert f.read() == lock_bytes
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+        subprocess.run(
+            ["docker", "rmi", "-f", "calkit-registry-test"],
+            capture_output=True,
+        )
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_push_does_not_reach_a_registry_with_nothing_to_send(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    ck_info = calkit.load_calkit_info()
+    # An environment with no registry is kept local, and one named after
+    # someone else's image already lives where it can be pulled from, so
+    # neither is anything to publish
+    ck_info["environments"] = {
+        "local": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": "calkit-nothing-to-push",
+        },
+        "tex": {"kind": "docker", "image": "alpine:3.18"},
+    }
+    calkit.save_calkit_info(ck_info)
+    out = subprocess.check_output(["calkit", "push", "docker"], text=True)
+    assert "No Docker environments are set up to be pushed" in out
+    assert "Pushing image" not in out
+    # An environment that is set up, but whose image was never built here,
+    # is nothing this machine can publish either. Reaching an unreachable
+    # registry would mean a round-trip, and credentials asked for or
+    # replaced, for a push that was never going to happen
+    ck_info["environments"]["local"]["registry"] = "localhost:5999/nope"
+    calkit.save_calkit_info(ck_info)
+    result = subprocess.run(
+        ["calkit", "push", "docker"], capture_output=True, text=True
+    )
+    assert result.returncode == 0
+    output = result.stdout + result.stderr
+    assert "No local image" in output
+    assert "Pushing image" not in output
+    assert "localhost:5999" not in output
+    # Pushing everything doesn't nag about an image nobody asked to send
+    result = subprocess.run(
+        ["calkit", "push", "--no-git", "--no-dvc"],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0
+    assert "No local image" not in result.stdout + result.stderr
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_keeps_other_arch_locks_it_cannot_ask_about(tmp_dir):
+    image = "calkit-unreachable-registry-test"
+    subprocess.check_call(["calkit", "init"])
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo unreachable > /hi.txt\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "main": {
+            "kind": "docker",
+            "path": "Dockerfile",
+            "image": image,
+            "registry": "localhost:5999/unreachable",
+        }
+    }
+    calkit.save_calkit_info(ck_info)
+    arch = calkit.environments.get_docker_arch()
+    other_arch = "amd64" if arch == "arm64" else "arm64"
+    other_lock_fpath = f".calkit/env-locks/main/{other_arch}.json"
+    try:
+        subprocess.check_output(
+            ["calkit", "check", "environment", "-n", "main"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        # A lock for a platform this machine can't run, describing an image
+        # the registry can't be asked about
+        os.makedirs(os.path.dirname(other_lock_fpath), exist_ok=True)
+        with open(other_lock_fpath, "w") as f:
+            json.dump(
+                {
+                    "RepoDigests": ["sha256:" + "0" * 64],
+                    "Architecture": other_arch,
+                    "Os": "linux",
+                    "RootFS": {"Type": "layers", "Layers": ["sha256:nope"]},
+                    "DockerfileMD5": calkit.get_md5("Dockerfile"),
+                    "DepsMD5s": {},
+                },
+                f,
+                indent=4,
+            )
+        with open(other_lock_fpath, "rb") as f:
+            other_lock_bytes = f.read()
+        # Rebuilding asks the registry which platforms it serves, and it
+        # can't answer. Being unable to ask is not the registry saying the
+        # platform is gone, so the lock has to survive it, or a teammate on
+        # that architecture rebuilds for nothing
+        with open("Dockerfile", "a") as f:
+            f.write("RUN echo again > /again.txt\n")
+        subprocess.check_output(
+            ["calkit", "check", "environment", "-n", "main"],
+            text=True,
+            stderr=subprocess.STDOUT,
+        )
+        assert os.path.isfile(other_lock_fpath)
+        with open(other_lock_fpath, "rb") as f:
+            assert f.read() == other_lock_bytes
+    finally:
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_push_sends_docker_images_to_their_registry(tmp_dir):
+    container = "calkit-test-registry-push"
+    registry = "localhost:5679"
+    subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            container,
+            "-p",
+            "5679:5000",
+            "registry:2",
+        ],
+        capture_output=True,
+    )
+    if started.returncode != 0:
+        pytest.skip("Could not start a local registry")
+    image = "calkit-push-test"
+    try:
+        subprocess.check_call(["calkit", "init"])
+        with open("Dockerfile", "w") as f:
+            f.write("FROM alpine:3.18\nRUN echo pushed > /hi.txt\n")
+        subprocess.check_call(["docker", "build", "-t", image, "."])
+        ck_info = calkit.load_calkit_info()
+        ck_info["environments"] = {
+            "main": {
+                "kind": "docker",
+                "path": "Dockerfile",
+                "image": image,
+                "registry": f"{registry}/proj",
+            },
+            # An environment named after someone else's image is already
+            # somewhere it can be pulled back from, so it isn't pushed
+            "tex": {"kind": "docker", "image": "alpine:3.18"},
+        }
+        calkit.save_calkit_info(ck_info)
+        # Tagging an image for a registry gives it a digest under that repo
+        # locally, so a push that never happened must not look like one that
+        # did, or every later push is skipped
+        subprocess.check_call(
+            ["docker", "tag", image, f"{registry}/proj/{image}:latest"]
+        )
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        assert f"Pushing image for 'main' to {registry}/proj/" in out
+        assert "tex" not in out
+        # Once the registry really has it, pushing again sends nothing
+        out = subprocess.check_output(
+            ["calkit", "push", "--no-git", "--no-dvc"], text=True
+        )
+        assert "Pushing image" not in out
+        assert "already in the registry" in out
+        # Naming a target sends only that one, so an image can go out
+        # without a Git push, which is what makes it usable mid-work
+        out = subprocess.check_output(["calkit", "push", "docker"], text=True)
+        assert "already in the registry" in out
+        assert "Pushing to Git remote" not in out
+        assert "Pushing to DVC remote" not in out
+        # An unknown target is a typo, not a request to push everything
+        result = subprocess.run(
+            ["calkit", "push", "dockre"], capture_output=True, text=True
+        )
+        assert result.returncode != 0
+        assert "Invalid target to push" in result.stderr
+    finally:
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
+        subprocess.run(["docker", "rmi", "-f", image], capture_output=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="TODO: Docker daemon not available on windows-latest GHA runners",
+)
+def test_check_docker_env_does_not_push(tmp_dir):
+    with open("Dockerfile", "w") as f:
+        f.write("FROM alpine:3.18\nRUN echo unpushed > /hi.txt\n")
+    argv = [
+        "calkit",
+        "check",
+        "docker-env",
+        "calkit-unpushed-test",
+        "-i",
+        "Dockerfile",
+        "-o",
+        "lock.json",
+        "--registry",
+        "localhost:5999/unreachable",
+    ]
+    try:
+        out = subprocess.check_output(
+            argv, text=True, stderr=subprocess.STDOUT
+        )
+        with open("lock.json") as f:
+            lock = json.load(f)
+        if not engine_records_build_digests():
+            # This image store gives a build no digest, so the only way to
+            # learn one is to push, and the registry isn't there. The lock
+            # still describes the image; it just can't say where to pull it
+            # from, which is reported rather than passed off as locked
+            assert "Failed to push image" in out
+            assert lock["RepoDigests"] == []
+            return
+        # Publishing an image is 'calkit push', not something that happens
+        # on the way to running a stage, so an unreachable registry is not
+        # even contacted here
+        assert "Pushing image" not in out
+        # A manifest is content-addressed, so the digest this build has is
+        # the one it will have once pushed. Recording it without contacting
+        # the registry is what lets a clone pull rather than rebuild as soon
+        # as anyone sends the image
+        assert len(lock["RepoDigests"]) == 1
+        assert lock["RepoDigests"][0].startswith("sha256:")
+        # A lock written before digests were taken from the build has none,
+        # and the image it describes is still the one here, so the digest
+        # gets filled in rather than left missing until a rebuild
+        lock["RepoDigests"] = []
+        with open("lock.json", "w") as f:
+            json.dump(lock, f, indent=4)
+        subprocess.check_output(argv, text=True, stderr=subprocess.STDOUT)
+        with open("lock.json") as f:
+            backfilled = json.load(f)
+        assert backfilled["RepoDigests"][0].startswith("sha256:")
+        assert backfilled["RootFS"] == lock["RootFS"]
+        # And nothing should have tagged the image for the registry, since
+        # that would fake a registry digest on it
+        info = json.loads(
+            subprocess.check_output(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "calkit-unpushed-test",
+                    "--format",
+                    "{{json .RepoDigests}}",
+                ],
+                text=True,
+            )
+        )
+        assert not [d for d in info if d.startswith("localhost:5999")]
+    finally:
+        subprocess.run(
+            ["docker", "rmi", "-f", "calkit-unpushed-test"],
+            capture_output=True,
+        )
 
 
 def test_check_env_rejects_an_invalid_lock_property(tmp_dir):
@@ -366,3 +954,324 @@ def test_check_envs_preloads_env_vars(tmp_dir, monkeypatch):
     # Should succeed: check envs preloads CALKIT_VAR → path resolves to
     # requirements.txt; without preloading $CALKIT_VAR would not resolve
     subprocess.check_call(["calkit", "check", "envs"])
+
+
+def _project() -> None:
+    """A project whose paper cites one computed value and types another."""
+    subprocess.check_call(["calkit", "init"])
+    with open("results.json", "w") as f:
+        json.dump({"DragCoefficient": 0.42, "LiftCoefficient": 1.23}, f)
+    with open("compute.py", "w") as f:
+        f.write("print(1)\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["environments"] = {
+        "py": {"kind": "uv-venv", "path": "reqs.txt", "python": "3.13"}
+    }
+    with open("reqs.txt", "w") as f:
+        f.write("polars\n")
+    # The Calkit-native way to get a value onto the page: a stage computes
+    # it, a json-to-latex stage turns the results file into commands, and
+    # the document refers to it by key
+    ck_info["pipeline"] = {
+        "stages": {
+            "compute": {
+                "kind": "python-script",
+                "environment": "py",
+                "script_path": "compute.py",
+                "outputs": [{"path": "results.json", "storage": "git"}],
+            },
+            "results-latex": {
+                "kind": "json-to-latex",
+                "command_name": "result",
+                "inputs": ["results.json"],
+                "outputs": [{"path": "results.tex", "storage": "git"}],
+            },
+            "build-paper": {
+                "kind": "latex",
+                "environment": "py",
+                "target_path": "main.tex",
+            },
+        }
+    }
+    ck_info["publications"] = [
+        {"title": "My Paper", "path": "main.tex", "kind": "journal-article"}
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n"
+            "\\begin{document}\n"
+            "\\input{results}\n"
+            "A value read from the pipeline: \\result[DragCoefficient].\n"
+            "The same value typed by hand: 0.42.\n"
+            "A value with nothing behind it: 3.14.\n"
+            "\\ckfigure[width=0.75\\textwidth]{f.pdf}\n"
+            "\\end{document}\n"
+        )
+    # The check reads the compiled pipeline, which is where the commands
+    # that identify a from-json stage live
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+
+
+def test_check_repro_literals(tmp_dir):
+    _project()
+    result = subprocess.run(
+        ["calkit", "check", "repro"], capture_output=True, text=True
+    )
+    # A retyped value is the one finding that fails the check
+    assert result.returncode == 1
+    # 0.42 is computed by the pipeline and typed into the document anyway:
+    # right today, wrong the next time that stage runs. That is the copy
+    # and paste worth catching, and it counts against the project.
+    assert "Values typed out rather than read from the pipeline: 1" in (
+        result.stdout
+    )
+    # 3.14 has nothing behind it, which is worth a look but is not a
+    # defect: most numbers in a paper are not results
+    assert "Numbers with nothing recorded behind them: 1" in result.stdout
+    assert "worth a look" in result.stdout
+    # The summary stays a summary and points at the findings
+    assert "3.14" not in result.stdout
+    assert "0.42" not in result.stdout
+    # The mark itself is whatever the console can encode---a Windows one
+    # cannot encode a cross---so the line is checked without it
+    assert (
+        "Values typed out rather than read from the pipeline: 1"
+        in result.stdout
+    )
+    assert "[-c retyped]" in result.stdout
+    assert "[-c numbers]" in result.stdout
+    assert "calkit check repro -c retyped" in result.stdout
+    out = subprocess.run(
+        ["calkit", "check", "repro", "-c", "retyped"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "0.42" in out
+    assert "results.json:DragCoefficient" in out
+    assert "main.tex:5" in out
+    numbers = subprocess.run(
+        ["calkit", "check", "repro", "-c", "numbers"],
+        capture_output=True,
+        text=True,
+    )
+    # Asking for advice does not make the defect go away
+    assert numbers.returncode == 1
+    out = numbers.stdout
+    assert "3.14" in out
+    assert "0.42" not in out
+    # Both detail views say what they do not catch, since a check offered
+    # as guidance is only useful if its blind spots are known
+    assert "What this does not catch" in out
+    retyped = subprocess.run(
+        ["calkit", "check", "repro", "-c", "retyped"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "What this does not catch" in retyped
+    # A figure width is layout, not a result, whether the macro is
+    # LaTeX's or Calkit's
+    assert "0.75" not in out
+    result_json = subprocess.run(
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    )
+    assert result_json.returncode == 1
+    parsed = json.loads(result_json.stdout)
+    assert [f["value"] for f in parsed["retyped_values"]] == ["0.42"]
+    assert parsed["retyped_values"][0]["source"] == (
+        "results.json:DragCoefficient"
+    )
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == ["3.14"]
+    # A category with nothing behind it says so rather than printing an
+    # empty table, and one that isn't a category is an error
+    out = subprocess.run(
+        ["calkit", "check", "repro", "-c", "provenance"],
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert "provenance: nothing to report" in out
+    bad = subprocess.run(
+        ["calkit", "check", "repro", "-c", "nope"],
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
+    # A stage that names a nested key puts that value within the
+    # document's reach, so typing it is the same copy and paste. Reading
+    # only the top level would miss exactly what the stage exposed.
+    with open("results.json", "w") as f:
+        json.dump(
+            {
+                "DragCoefficient": 0.42,
+                "cases": {"a": {"cp": 0.7321}},
+                # Named by no key, so the document has no command for it
+                "NotExposed": 0.6194,
+            },
+            f,
+        )
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"]["stages"]["results-latex"]["keys"] = [
+        "DragCoefficient",
+        "cases.a.cp",
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    calkit.pipeline.to_dvc(ck_info=ck_info, write=True)
+    with open("main.tex", "a") as f:
+        f.write("A nested value typed by hand: 0.7321.\n")
+        f.write("A value the stage does not expose: 0.6194.\n")
+    out = subprocess.run(
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    ).stdout
+    retyped_values = {
+        f["value"]: f["source"] for f in json.loads(out)["retyped_values"]
+    }
+    assert retyped_values.get("0.7321") == "results.json:cases.a.cp"
+    # Once a stage names its keys, what it does not name is out of the
+    # document's reach: reporting it would ask for a command that was
+    # never generated. It is still a result-like number with nothing
+    # recorded behind it, which is the weaker list
+    assert "0.6194" not in retyped_values
+    assert "0.6194" in {
+        f["value"] for f in json.loads(out)["unattributed_numbers"]
+    }
+    # The file a json-to-latex stage writes is full of the very numbers
+    # the check looks for, and reporting them would flag the fix itself
+    with open("results.tex", "w") as f:
+        f.write("\\newcommand\\result[1][all]{0.42 1.23 9.99}\n")
+    out = subprocess.run(
+        ["calkit", "check", "repro", "--json"], capture_output=True, text=True
+    ).stdout
+    parsed = json.loads(out)
+    assert sorted(f["value"] for f in parsed["retyped_values"]) == [
+        "0.42",
+        "0.7321",
+    ]
+    # 0.6194 stays in the weaker list: the stage reads its file but does
+    # not name that key, so the document cannot reference it
+    assert [f["value"] for f in parsed["unattributed_numbers"]] == [
+        "3.14",
+        "0.6194",
+    ]
+
+
+def test_check_questions(tmp_dir):
+    import json
+
+    subprocess.check_call(["calkit", "init"])
+    os.makedirs("results")
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 8}, f)
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"] = [
+        {
+            "question": "Do the top structures use the rectifier?",
+            "answer": "{n_top} of eight do.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "results/findings.json",
+                    "key": "n_top",
+                }
+            ],
+        }
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "add", "-A"])
+    subprocess.check_call(["git", "commit", "-q", "-m", "Answer"])
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "Answers consistent with their evidence: 1/1" in out
+    # Nothing in the project says where the results file came from, which
+    # is advice rather than a failure: the answer may be perfectly good
+    assert "Evidence with nothing recorded behind it: 1" in out
+    # Listing renders the placeholder from the results file
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 8 of eight do." in out
+    out = subprocess.check_output(
+        ["calkit", "list", "questions", "--raw"], text=True
+    )
+    assert "answer: {n_top} of eight do." in out
+    # The pipeline changes the number in a later commit: the check fails,
+    # status warns, JSON says stale, and the listing already shows 0
+    with open("results/findings.json", "w") as f:
+        json.dump({"n_top": 0}, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Re-run"])
+    proc = subprocess.run(
+        ["calkit", "check", "questions"], capture_output=True, text=True
+    )
+    assert proc.returncode == 1
+    assert "n_top was 8 at" in proc.stdout
+    proc = subprocess.run(
+        ["calkit", "check", "questions", "--json"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert json.loads(proc.stdout)["questions"][0]["status"] == "stale"
+    # Questions are a check of their own, not part of status
+    out = subprocess.check_output(["calkit", "status", "--json"], text=True)
+    assert "questions" not in json.loads(out)
+    bad = subprocess.run(
+        ["calkit", "status", "-c", "questions"],
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode != 0
+    assert "Invalid category" in bad.stderr
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "answer: 0 of eight do." in out
+    # Reviewing the answer is an edit to the question, which clears it
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["notes"] = "Reread against the new value."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Review"])
+    subprocess.check_call(["calkit", "check", "questions"])
+    # Declaring where the results file came from clears the advice
+    ck_info = calkit.load_calkit_info()
+    ck_info["datasets"] = [
+        {
+            "path": "results/findings.json",
+            "created_by": {"name": "A person"},
+        }
+    ]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    subprocess.check_call(["git", "commit", "-q", "-am", "Declare"])
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "nothing recorded behind it" not in out
+    # A console that cannot encode a check mark gets a '?' rather than a
+    # UnicodeEncodeError, which on Windows would kill the command with no
+    # output at all
+    env = dict(os.environ, PYTHONIOENCODING="cp1252")
+    out = subprocess.check_output(
+        ["calkit", "check", "questions"], text=True, env=env
+    )
+    assert "Answers consistent with their evidence: 1/1" in out
+    assert "\u2705" not in out
+    # The check can be pointed at a project somewhere else
+    os.makedirs("elsewhere")
+    out = subprocess.check_output(
+        ["calkit", "check", "questions", "--wdir", ".."],
+        text=True,
+        cwd="elsewhere",
+    )
+    assert "Questions answered: 1/1" in out
+    # A placeholder that names nothing renders as written, which looks
+    # like text somebody meant literally, so the listing says so
+    ck_info = calkit.load_calkit_info()
+    ck_info["questions"][0]["answer"] = "It is {missing} of them."
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    out = subprocess.check_output(["calkit", "list", "questions"], text=True)
+    assert "placeholders could not be filled" in out
+    assert "It is {missing} of them." in out
+    # A project with no questions says so rather than printing nothing
+    os.remove("calkit.yaml")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({}, f)
+    out = subprocess.check_output(["calkit", "check", "questions"], text=True)
+    assert "No questions defined." in out

@@ -57,6 +57,14 @@ def test_validate_bad_projects() -> None:
 
     # An environment missing a required field for its kind
     assert errors({"environments": {"e": {"kind": "docker"}}})
+    # 'image' and 'path' are both nullable, so requiring the key alone lets
+    # 'image: null' through, which says no more about what to run in than
+    # leaving it out does
+    assert errors({"environments": {"e": {"kind": "docker", "image": None}}})
+    assert errors({"environments": {"e": {"kind": "docker", "path": None}}})
+    assert not errors(
+        {"environments": {"e": {"kind": "docker", "image": "alpine:3.18"}}}
+    )
     # An environment with an unknown kind, since the kinds are a closed set
     # even though their properties are not
     assert errors({"environments": {"e": {"kind": "not-a-kind"}}})
@@ -134,6 +142,23 @@ def test_validate_bad_projects() -> None:
     )
     # A system environment, which has nothing to build or verify
     assert not errors({"environments": {"sassy": {"kind": "system"}}})
+    # An environment's files are written as 'inputs'. 'deps' is the name
+    # Docker envs were published with, still accepted but no longer
+    # documented, so it must keep validating on every kind that takes one
+    for key in ["inputs", "deps"]:
+        assert not errors(
+            {
+                "environments": {
+                    "sys": {"kind": "system", key: ["scripts/setup.sh"]},
+                    "img": {
+                        "kind": "docker",
+                        "image": "img",
+                        key: ["src/solver.C"],
+                    },
+                    "hpc": {"kind": "slurm", key: ["scripts/setup.sh"]},
+                }
+            }
+        )
     # Evidence defines what it points at inline, discriminated by kind, so
     # none of these need a matching top-level declaration
     assert not errors(

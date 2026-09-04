@@ -61,7 +61,10 @@ class _ThreadLocalYAML(threading.local):
         self.yaml = ruamel.yaml.YAML()
         self.yaml.indent(mapping=2, sequence=4, offset=2)
         self.yaml.preserve_quotes = True
-        self.yaml.width = 70
+        # 80 rather than ruamel's default so prose wrapped at the usual
+        # 79-80 columns is written back as it was; at 70, lines of 71-80
+        # characters were re-folded with a stray word on the next line
+        self.yaml.width = 80
 
 
 _yaml_local = _ThreadLocalYAML()
@@ -176,14 +179,36 @@ DVC_EXTENSIONS = [
 DVC_SIZE_THRESH_BYTES = 5_000_000
 
 
+def check_or_x(val: bool | int) -> str:
+    """A check mark for something that holds, an X for something that does
+    not.
+
+    The mark every report prints, so a project's checks read the same way
+    wherever they are shown.
+    """
+    return "✅" if val else "❌"
+
+
+def encode_safe(message: str, err: bool = False) -> str:
+    """A message with whatever the console cannot encode replaced.
+
+    A Windows console is typically cp1252, which has no check mark: left
+    alone, printing one raises UnicodeEncodeError and the command dies
+    with no output at all. Anything that can carry a mark or an emoji has
+    to go through here rather than straight to ``typer.echo``.
+    """
+    stream = sys.stderr if err else sys.stdout
+    enc = stream.encoding or "utf-8"
+    return message.encode(enc, errors="replace").decode(enc)
+
+
 def echo(message: str) -> None:
     """Print a message safely, replacing unencodable characters
     (e.g., emoji).
     """
     import typer
 
-    enc = sys.stdout.encoding or "utf-8"
-    typer.echo(message.encode(enc, errors="replace").decode(enc))
+    typer.echo(encode_safe(message))
 
 
 def find_project_dirs(relative=False, max_depth=3) -> list[str]:
@@ -1088,39 +1113,74 @@ def get_latest_project_status(wdir: str | None = None) -> ProjectStatus | None:
         return statuses[-1]  # type: ignore
 
 
+def get_owner_and_name_from_git_url(url: str) -> tuple[str, str] | None:
+    """Read an owner and project name out of a Git remote URL.
+
+    Handles the SSH and HTTPS forms of any host, since the last two path
+    segments name the owner and repo on GitHub, GitLab, and everything
+    modeled on them. A GitLab project inside subgroups takes the innermost
+    group as its owner, which is what its container registry namespace uses
+    as well. Returns None for a URL with nothing that looks like a path,
+    which is where a local or unusual remote ends up.
+    """
+    url = url.strip().removesuffix(".git").removesuffix("/")
+    # An SSH remote is 'git@host:owner/repo', whose path is what follows the
+    # colon rather than a slash
+    if "://" not in url and ":" in url:
+        url = url.split(":", 1)[-1]
+    else:
+        url = url.split("://", 1)[-1]
+        # Drop 'user@host' or 'host', leaving the path
+        url = url.split("/", 1)[-1] if "/" in url else ""
+    parts = [p for p in url.split("/") if p]
+    if len(parts) < 2:
+        return None
+    return parts[-2], parts[-1]
+
+
 def detect_project_name(
     wdir: str | None = None, prepend_owner: bool = True
 ) -> str:
     """Detect a Calkit project owner and name.
 
-    If ``prepend_owner`` is False, fall back to working directory name if
-    there is no Git repo or name specified in ``calkit.yaml``.
+    ``owner`` and ``name`` in ``calkit.yaml`` are what a project is, so
+    they're read first and the Git remote is only consulted for what they
+    don't say. A remote is a weaker answer: a fork's remote names whoever
+    forked it rather than the project it's a copy of.
+
+    If ``prepend_owner`` is False, fall back to the working directory name
+    if there is no Git remote or name specified in ``calkit.yaml``.
     """
     ck_info = load_calkit_info(wdir=wdir)
     name = ck_info.get("name")
     if name is not None and not prepend_owner:
         return name
     owner = ck_info.get("owner")
+    from_url = None
     if name is None or owner is None:
         try:
             url = calkit.git.get_repo(wdir).remote().url
+            from_url = get_owner_and_name_from_git_url(url)
         except (ValueError, calkit.git.InvalidGitRepositoryError):
-            if name is not None and not prepend_owner:
-                return name
-            if not prepend_owner:
-                if wdir is None:
-                    wdir = os.getcwd()
-                return os.path.basename(os.path.abspath(wdir))
-            raise ValueError("No Git remote set with name 'origin'")
-        from_url = url.split("github.com")[-1][1:].removesuffix(".git")
-        owner_name, project_name = from_url.split("/")
-    if name is None:
-        name = project_name
-    if owner is None:
-        owner = owner_name
-    if prepend_owner:
-        return f"{owner}/{name}"
-    return name
+            from_url = None
+    if from_url is not None:
+        owner_from_url, name_from_url = from_url
+        if name is None:
+            name = name_from_url
+        if owner is None:
+            owner = owner_from_url
+    if not prepend_owner:
+        if name is not None:
+            return name
+        if wdir is None:
+            wdir = os.getcwd()
+        return os.path.basename(os.path.abspath(wdir))
+    if name is None or owner is None:
+        raise ValueError(
+            "Project owner and name are not set in calkit.yaml, and no Git "
+            "remote names them"
+        )
+    return f"{owner}/{name}"
 
 
 def normalize_git_url(url: str) -> str:

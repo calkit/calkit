@@ -2,9 +2,10 @@
 
 import os
 import posixpath
-from typing import Callable
+import re
+from typing import Any, Callable
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, Field, computed_field
 
 import calkit
 from calkit.provenance import PROVENANCE_ARTIFACT_TYPES, has_provenance
@@ -88,12 +89,16 @@ _SCRIPT_DIRS_IGNORED = {
 }
 
 
-def _bool_to_check_x(val: bool | int) -> str:
-    """Convert a boolean to a checkmark or an X."""
-    if val:
-        return "✅"
-    else:
-        return "❌"
+#: Parts of the check that carry per-item detail, and the attribute
+#: holding it. The summary counts them; asking for a category lists them,
+#: since a wall of findings buries the one line that says what to do next.
+DETAIL_CATEGORIES = {
+    "retyped": "retyped_values",
+    "numbers": "unattributed_numbers",
+    "scripts": "scripts_not_in_pipeline",
+    "environments": "stages_without_env",
+    "provenance": "misc_needing_provenance",
+}
 
 
 class ReproCheck(BaseModel):
@@ -129,6 +134,14 @@ class ReproCheck(BaseModel):
     # pipeline therefore can't be reproducing
     scripts_not_in_pipeline: list[str] = []
     n_dvc_remotes: int
+    # Values the project computes that a manuscript typed out instead,
+    # which go stale the next time the stage behind them runs
+    retyped_values: list[dict] = Field(default_factory=list)
+    # Result-like numbers with nothing recorded behind them. Advisory:
+    # most numbers in a paper are not results, so this is a prompt to look
+    # rather than a list of defects, and it is not counted against the
+    # project.
+    unattributed_numbers: list[dict] = Field(default_factory=list)
     # TODO: Check calkit remotes are authenticated
 
     @computed_field  # type: ignore[prop-decorator]
@@ -265,35 +278,41 @@ class ReproCheck(BaseModel):
     def n_stages_with_env(self) -> int:
         return len(self.stages_with_env)
 
+    def _tag(self, category: str) -> str:
+        """Where to look for the findings behind a line, if there are any."""
+        return f" [-c {category}]" if self.details(category) else ""
+
     def to_pretty(self) -> str:
         """Format as a nice string to print."""
-        txt = f"Is a Git repo: {_bool_to_check_x(self.is_git_repo)}\n"
-        txt += f"Has README.md: {_bool_to_check_x(self.has_readme)}\n"
+        txt = f"Is a Git repo: {calkit.check_or_x(self.is_git_repo)}\n"
+        txt += f"Has README.md: {calkit.check_or_x(self.has_readme)}\n"
         txt += (
             f"Instructions in README.md: "
-            f"{_bool_to_check_x(self.instructions_in_readme)}\n"
+            f"{calkit.check_or_x(self.instructions_in_readme)}\n"
         )
-        txt += f"DVC initialized: {_bool_to_check_x(self.is_dvc_repo)}\n"
-        txt += f"DVC remote defined: {_bool_to_check_x(self.n_dvc_remotes)}\n"
-        txt += f"Has pipeline: {_bool_to_check_x(self.has_pipeline)}\n"
-        txt += f"Has Calkit info: {_bool_to_check_x(self.has_calkit_info)}\n"
+        txt += f"DVC initialized: {calkit.check_or_x(self.is_dvc_repo)}\n"
+        txt += f"DVC remote defined: {calkit.check_or_x(self.n_dvc_remotes)}\n"
+        txt += f"Has pipeline: {calkit.check_or_x(self.has_pipeline)}\n"
+        txt += f"Has Calkit info: {calkit.check_or_x(self.has_calkit_info)}\n"
         txt += (
             f"Has dev container spec: "
-            f"{_bool_to_check_x(self.has_dev_container)}\n"
+            f"{calkit.check_or_x(self.has_dev_container)}\n"
         )
         txt += (
             f"Environments defined: {self.n_environments} "
-            f"{_bool_to_check_x(self.n_environments)}\n"
+            f"{calkit.check_or_x(self.n_environments)}\n"
         )
         txt += (
             "Pipeline stages run in an environment: "
             f"{self.n_stages_with_env}/{self.n_stages} "
-            f"{_bool_to_check_x(self.n_stages_without_env == 0)}\n"
+            f"{calkit.check_or_x(self.n_stages_without_env == 0)}"
+            f"{self._tag('environments')}\n"
         )
         txt += (
             "Scripts not run by any pipeline stage: "
             f"{self.n_scripts_not_in_pipeline} "
-            f"{_bool_to_check_x(self.n_scripts_not_in_pipeline == 0)}\n"
+            f"{calkit.check_or_x(self.n_scripts_not_in_pipeline == 0)}"
+            f"{self._tag('scripts')}\n"
         )
         for artifact_type in PROVENANCE_ARTIFACT_TYPES:
             n = getattr(self, f"n_{artifact_type}")
@@ -302,16 +321,39 @@ class ReproCheck(BaseModel):
             txt += (
                 f"{artifact_type.capitalize()} with provenance recorded "
                 f"(stage, import, or attribution): {n_good}/{n} "
-                f"{_bool_to_check_x(n_bad == 0)}\n"
+                f"{calkit.check_or_x(n_bad == 0)}\n"
             )
         txt += (
             "Misc artifacts not made by hand but lacking provenance: "
             f"{self.n_misc_needing_provenance} "
-            f"{_bool_to_check_x(self.n_misc_needing_provenance == 0)}\n"
+            f"{calkit.check_or_x(self.n_misc_needing_provenance == 0)}"
+            f"{self._tag('provenance')}\n"
         )
+        txt += (
+            "Values typed out rather than read from the pipeline: "
+            f"{len(self.retyped_values)} "
+            f"{calkit.check_or_x(not self.retyped_values)}"
+            f"{self._tag('retyped')}\n"
+        )
+        # No check mark either way: these are worth a look, not a verdict
+        if self.unattributed_numbers:
+            txt += (
+                "Numbers with nothing recorded behind them: "
+                f"{len(self.unattributed_numbers)} (worth a look)"
+                f"{self._tag('numbers')}\n"
+            )
         if self.recommendation:
             txt += f"\nRecommendation: {self.recommendation}\n"
         return txt
+
+    def details(self, category: str) -> list:
+        """The items behind one summary line."""
+        return getattr(self, DETAIL_CATEGORIES[category], []) or []
+
+    @property
+    def categories_with_detail(self) -> list[str]:
+        """Categories that have something to show, in reporting order."""
+        return [c for c in DETAIL_CATEGORIES if self.details(c)]
 
 
 def _strings_in(obj: object) -> list[str]:
@@ -389,6 +431,381 @@ def find_scripts_not_in_pipeline(
         if path not in referenced:
             scripts.append(path)
     return scripts
+
+
+def _mask_match(match: re.Match) -> str:
+    """Whitespace as long as what matched.
+
+    Blanking rather than deleting, so every later match still reports the
+    line and column it has in the real file.
+    """
+    return " " * len(match.group(0))
+
+
+def _mask_exclusion_zones(tex_source: str) -> str:
+    """Blank the places a number can appear without being a result."""
+    masked = tex_source
+    # Comments: % to end of line, but not an escaped \%
+    masked = re.sub(r"(?<!\\)%.*$", _mask_match, masked, flags=re.MULTILINE)
+    # Environments whose contents are never results
+    for env in ["thebibliography"]:
+        pattern = (
+            r"\\begin\{"
+            + re.escape(env)
+            + r"\}.*?\\end\{"
+            + re.escape(env)
+            + r"\}"
+        )
+        masked = re.sub(pattern, _mask_match, masked, flags=re.DOTALL)
+    # Macros whose arguments are references, layout, or links rather than
+    # anything the project computed. \ckfigure and \ckinput are Calkit's
+    # own, and their options carry widths and scales.
+    macros_to_mask = [
+        r"\\cite[a-zA-Z]*\*?\{[^}]*\}",
+        r"\\bibitem\{[^}]*\}",
+        r"\\href\{[^}]*\}\{[^}]*\}",
+        r"\\url\{[^}]*\}",
+        r"\\doi\{[^}]*\}",
+        r"\\ref\{[^}]*\}",
+        r"\\eqref\{[^}]*\}",
+        r"\\pageref\{[^}]*\}",
+        r"\\label\{[^}]*\}",
+        r"\\input\{[^}]*\}",
+        r"\\include\{[^}]*\}",
+        r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\ckfigure(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\ckinput\{[^}]*\}",
+        r"\\usepackage(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\documentclass(?:\[[^\]]*\])?\{[^}]*\}",
+        r"\\setlength\{[^}]*\}\{[^}]*\}",
+        r"\\vspace\*?\{[^}]*\}",
+        r"\\hspace\*?\{[^}]*\}",
+        r"\\geometry\{[^}]*\}",
+        r"\\multicolumn\{[^}]*\}\{[^}]*\}\{[^}]*\}",
+    ]
+    for macro_pattern in macros_to_mask:
+        masked = re.sub(macro_pattern, _mask_match, masked, flags=re.DOTALL)
+    return masked
+
+
+#: A value the project computes has to be this distinctive before its
+#: appearance in prose means anything. "3" turns up in every paper; "0.42"
+#: is one somebody copied.
+MIN_SIGNIFICANT_DIGITS = 2
+#: Small integers are counts, indices and quantities any sentence might
+#: carry, so only larger ones are distinctive enough to mean something. A
+#: bare "500" in prose is very likely the 500 the config names; a bare "8"
+#: is not.
+MIN_DISTINCTIVE_INTEGER = 100
+
+
+def _is_distinctive(text: str) -> bool:
+    """Whether seeing this number in prose says anything."""
+    if re.fullmatch(r"-?\d+", text):
+        return abs(int(text)) >= MIN_DISTINCTIVE_INTEGER
+    if not re.fullmatch(r"-?\d*\.\d+(?:[eE][+-]?\d+)?", text):
+        return False
+    digits = re.sub(r"[^0-9]", "", text.split("e")[0].split("E")[0]).lstrip(
+        "0"
+    )
+    return len(digits) >= MIN_SIGNIFICANT_DIGITS
+
+
+def find_retyped_values(
+    tex_source: str,
+    filepath: str,
+    project_values: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Values the project computes that a document typed out instead.
+
+    This is the copy-paste that goes stale: a number the pipeline produces,
+    typed into the prose, correct today and wrong the next time the stage
+    runs. It is found by looking for the project's own values in the text,
+    rather than by looking for numbers in general -- most numbers in a
+    paper are not results, and a quantity quoted from a reference or chosen
+    by the author has nothing to be traced to.
+
+    Parameters
+    ----------
+    tex_source : str
+        The contents of the LaTeX file to scan.
+    filepath : str
+        The path of the LaTeX file, for reporting.
+    project_values : dict[str, str] | None
+        Value as it is written in a results file, mapped to where it came
+        from, e.g., ``{"0.42": "results/drag.json:DragCoefficient"}``.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        One finding per occurrence, each with keys:
+        - value: the number as the document wrote it
+        - source: the results file and key it duplicates
+        - file: the filepath
+        - line: 1-indexed line number
+        - column: 1-indexed column number
+        - context: the line the value is on
+        - reason: why it was flagged
+        - suggestion: how to make it come from the pipeline
+    """
+    if not project_values:
+        return []
+    masked_source = _mask_exclusion_zones(tex_source)
+    lines = tex_source.splitlines()
+    findings: list[dict[str, Any]] = []
+    for text, source in project_values.items():
+        if not _is_distinctive(text):
+            continue
+        # Bounded so 0.42 doesn't match inside 10.425 or 0.4251, while a
+        # value ending a sentence still does
+        pattern = r"(?<![\d.])" + re.escape(text) + r"(?!\d)(?!\.\d)"
+        for match in re.finditer(pattern, masked_source):
+            start = match.start()
+            preceding = tex_source[:start]
+            line_idx = preceding.count("\n")
+            col_idx = len(preceding) - preceding.rfind("\n") - 1
+            findings.append(
+                {
+                    "value": text,
+                    "source": source,
+                    "file": filepath,
+                    "line": line_idx + 1,
+                    "column": col_idx + 1,
+                    "context": (
+                        lines[line_idx].strip()
+                        if line_idx < len(lines)
+                        else ""
+                    ),
+                    "reason": (f"the project computes this value in {source}"),
+                    "suggestion": (
+                        "Reference the generated command from the "
+                        "'json-to-latex' stage over that file instead of "
+                        "typing the number, so the paper follows the "
+                        "analysis when it changes."
+                    ),
+                }
+            )
+    findings.sort(key=lambda f: (f["line"], f["column"]))
+    return findings
+
+
+#: What a result looks like when it is written out, most specific first,
+#: so a value with uncertainty is read whole rather than as a bare decimal
+_RESULT_LIKE_PATTERNS = [
+    # Values with uncertainty, e.g., 0.42 \pm 0.03
+    r"(\b\d+(?:\.\d+)?\s*\\pm\s*\d+(?:\.\d+)?\b)",
+    # Scientific notation, e.g., 1.2e-3 and 1.2\times10^{-3}
+    r"(\b\d+(?:\.\d+)?"
+    r"(?:[eE][+-]?\d+|\s*\\times\s*10\^\{?[+-]?\d+\}?)(?!\d))",
+    # Percentages, e.g., 12.7\%
+    r"(\b\d+(?:\.\d+)?\s*\\%)",
+    # Plain decimals, e.g., 0.42
+    r"(\b\d+\.\d+\b)",
+]
+#: A number in a sentence that cites somebody is usually theirs, not this
+#: project's, and there is nothing to trace it to
+_CITE_RE = re.compile(r"\\[a-zA-Z]*cite[a-zA-Z]*\*?\s*(?:\[[^\]]*\])*\{")
+
+
+def find_unattributed_numbers(
+    tex_source: str,
+    filepath: str,
+    project_values: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Result-like numbers in a document with nothing recorded behind them.
+
+    Weaker than :func:`find_retyped_values`, and offered as something to
+    look over rather than something to fix: most numbers in a paper are
+    not results. A quantity quoted from a reference, a threshold the
+    author chose, a tolerance -- none of them have anything to be traced
+    to, and writing them down as structured values would be a lot of work
+    for no gain. What this is good for is the number that *is* a result
+    and was never templated in.
+
+    ``project_values`` are values the project computes; anything matching
+    one is left to :func:`find_retyped_values`, which has more to say
+    about it.
+    """
+    known = set(project_values or {})
+    masked_source = _mask_exclusion_zones(tex_source)
+    lines = tex_source.splitlines()
+    findings: list[dict[str, Any]] = []
+    matched: list[tuple[int, int]] = []
+    for pattern in _RESULT_LIKE_PATTERNS:
+        for match in re.finditer(pattern, masked_source):
+            start, end = match.span(1)
+            # An earlier, more specific pattern claims its span, so a later
+            # one can't re-report part of the same literal
+            if any(max(start, s) < min(end, e) for s, e in matched):
+                continue
+            matched.append((start, end))
+            text = match.group(1).strip()
+            if text.replace(" ", "") in {v.replace(" ", "") for v in known}:
+                continue
+            preceding = tex_source[:start]
+            line_idx = preceding.count("\n")
+            line = lines[line_idx] if line_idx < len(lines) else ""
+            findings.append(
+                {
+                    "value": text,
+                    "file": filepath,
+                    "line": line_idx + 1,
+                    "column": len(preceding) - preceding.rfind("\n"),
+                    "context": line.strip(),
+                    "cited": bool(_CITE_RE.search(line)),
+                }
+            )
+    findings.sort(key=lambda f: (f["line"], f["column"]))
+    return findings
+
+
+def _project_values(wdir: str, stages: dict) -> dict[str, str]:
+    """Every value a ``json-to-latex`` stage puts within a document's reach.
+
+    Read from the results files those stages consume rather than from the
+    LaTeX they generate: the results file is what the value actually is,
+    and the generated commands are one rendering of it. Mapped back to
+    where it came from, so a finding can name the key to reference.
+    """
+    import json
+
+    from calkit.questions import resolve_key
+
+    values: dict[str, str] = {}
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex from-json" not in cmd:
+            continue
+        for dep in stage.get("deps", []) or []:
+            if not str(dep).endswith(".json"):
+                continue
+            try:
+                with open(os.path.join(wdir, str(dep))) as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            # What the document can reach is what the stage exposes. Named
+            # keys are exactly that list, and they may be nested, so a
+            # value the stage went out of its way to expose counts while
+            # everything around it does not: the fix for one of those is
+            # to name it, not to reference a command that was never
+            # generated. Without any names every top-level key is exposed.
+            named = _named_keys(cmd)
+            if named:
+                for key in named:
+                    try:
+                        value = resolve_key(data, key)
+                    except (KeyError, ValueError, IndexError, TypeError):
+                        continue
+                    if isinstance(value, (int, float)) and not isinstance(
+                        value, bool
+                    ):
+                        values.setdefault(str(value), f"{dep}:{key}")
+                continue
+            for key, value in data.items():
+                if isinstance(value, (int, float)) and not isinstance(
+                    value, bool
+                ):
+                    values.setdefault(str(value), f"{dep}:{key}")
+    return values
+
+
+def _named_keys(cmd: str) -> list[str]:
+    """The keys a ``json-to-latex`` stage names with ``--key``."""
+    import shlex
+
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return []
+    return [
+        parts[i + 1]
+        for i, part in enumerate(parts)
+        if part == "--key" and i + 1 < len(parts)
+    ]
+
+
+def _generated_tex_paths(wdir: str, stages: dict) -> set[str]:
+    """LaTeX files the pipeline writes, which are not manuscripts."""
+    paths: set[str] = set()
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex from-" not in cmd:
+            continue
+        for out in stage.get("outs", []) or []:
+            out_path = out if isinstance(out, str) else next(iter(out))
+            if str(out_path).endswith(".tex"):
+                paths.add(os.path.abspath(os.path.join(wdir, str(out_path))))
+    return paths
+
+
+def _tex_sources(wdir: str, ck_info: dict, stages: dict) -> set[str]:
+    """Every LaTeX file a manuscript is made of, following its inputs."""
+    targets: set[str] = set()
+    for pub in ck_info.get("publications", []) or []:
+        path = pub.get("path", "") if isinstance(pub, dict) else ""
+        if str(path).endswith(".tex"):
+            targets.add(str(path))
+    for stage in stages.values():
+        cmd = stage.get("cmd", "") or stage.get("do", {}).get("cmd", "")
+        if "calkit latex build" not in cmd:
+            continue
+        for dep in stage.get("deps", []) or []:
+            if str(dep).endswith(".tex"):
+                targets.add(str(dep))
+    found: set[str] = set()
+
+    def walk(rel: str) -> None:
+        full = os.path.abspath(os.path.join(wdir, rel))
+        if full in found or not os.path.isfile(full):
+            return
+        found.add(full)
+        try:
+            with open(full, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            return
+        for match in re.finditer(r"\\(?:input|include)\{([^}]+)\}", content):
+            child = match.group(1)
+            if not child.endswith(".tex"):
+                child += ".tex"
+            walk(
+                os.path.relpath(
+                    os.path.join(os.path.dirname(full), child), wdir
+                )
+            )
+
+    for target in targets:
+        walk(target)
+    return found
+
+
+def find_literals_in_project(
+    wdir: str, ck_info: dict, stages: dict
+) -> dict[str, list[dict]]:
+    """Numbers in a project's documents, in two kinds.
+
+    ``retyped`` are values the pipeline produces that a document typed out
+    instead, which is the copy-paste that goes stale. ``unattributed`` are
+    result-like numbers with nothing recorded behind them, which is a
+    weaker signal offered as something to look over.
+    """
+    values = _project_values(wdir, stages)
+    generated = _generated_tex_paths(wdir, stages)
+    out: dict[str, list[dict]] = {"retyped": [], "unattributed": []}
+    for path in sorted(_tex_sources(wdir, ck_info, stages) - generated):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            continue
+        rel = os.path.relpath(path, wdir)
+        out["retyped"] += find_retyped_values(content, rel, values)
+        out["unattributed"] += find_unattributed_numbers(content, rel, values)
+    return out
 
 
 def check_reproducibility(
@@ -473,4 +890,9 @@ def check_reproducibility(
     # DVC remotes
     dvc_remotes = calkit.dvc.get_remotes(wdir=wdir)
     res["n_dvc_remotes"] = len(dvc_remotes)
+    literals = find_literals_in_project(
+        wdir=wdir, ck_info=ck_info, stages=stages
+    )
+    res["retyped_values"] = literals["retyped"]
+    res["unattributed_numbers"] = literals["unattributed"]
     return ReproCheck.model_validate(res)

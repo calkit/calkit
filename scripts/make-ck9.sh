@@ -4,18 +4,18 @@ set -e
 # Get version from VCS via hatch
 VERSION="$(uvx --with 'virtualenv<20.29.0' hatch version)"
 
-# Create calk9 directory structure
-rm -rf calk9
-mkdir -p calk9
+# Create ck9 directory structure
+rm -rf ck9
+mkdir -p ck9
 
 # Create pyproject.toml
-cat > calk9/pyproject.toml <<EOF
+cat > ck9/pyproject.toml <<EOF
 [build-system]
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "calk9"
+name = "ck9"
 version = "$VERSION"
 description = "Reproducibility simplified."
 readme = "README.md"
@@ -29,30 +29,30 @@ Homepage = "https://calkit.org"
 Repository = "https://github.com/calkit/calkit"
 
 [project.scripts]
-calk9 = "calkit.cli:run"
+ck9 = "calkit.cli:run"
 EOF
 
 # Create README.md
-cat > calk9/README.md <<EOF
-# calk9
+cat > ck9/README.md <<EOF
+# ck9
 
 Alias package for [calkit-python](https://pypi.org/project/calkit-python/).
 
-This package provides the \`calk9\` command as a shorter alternative to \`calkit\`.
+This package provides the \`ck9\` command as a shorter alternative to \`calkit\`.
 
 ## Installation
 
 \`\`\`sh
-pip install calk9
+pip install ck9
 \`\`\`
 
 Or use with uvx without installation:
 
 \`\`\`sh
-uvx calk9 --help
+uvx ck9 --help
 \`\`\`
 
 See the [Calkit documentation](https://docs.calkit.org) for more information.
 EOF
 
-echo "Created calk9/ package with version $VERSION"
+echo "Created ck9/ package with version $VERSION"

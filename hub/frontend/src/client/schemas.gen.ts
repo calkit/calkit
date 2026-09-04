@@ -247,11 +247,12 @@ export const Body_projects_post_project_overleaf_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
+        "proposal",
         "report",
+        "blog",
         "book",
-        "masters-thesis",
+        "thesis",
         "phd-thesis",
-        "other",
       ],
       title: "Kind",
     },
@@ -385,10 +386,12 @@ export const Body_projects_post_project_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
-        "presentation",
-        "poster",
+        "proposal",
         "report",
+        "blog",
         "book",
+        "thesis",
+        "phd-thesis",
       ],
       title: "Kind",
     },
@@ -2397,6 +2400,17 @@ export const FigureSchema = {
       ],
       title: "Url",
     },
+    thumbnail: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Thumbnail",
+    },
     comment_count: {
       type: "integer",
       title: "Comment Count",
@@ -3224,40 +3238,6 @@ export const GitRemoteHeadSchema = {
   title: "GitRemoteHead",
 } as const
 
-export const GitSourcePostSchema = {
-  properties: {
-    repo_url: {
-      type: "string",
-      title: "Repo Url",
-    },
-    rev: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Rev",
-    },
-    path: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Path",
-    },
-  },
-  type: "object",
-  required: ["repo_url"],
-  title: "GitSourcePost",
-} as const
-
 export const GithubPullRequestSchema = {
   properties: {
     number: {
@@ -3528,15 +3508,27 @@ export const ImportedFromPostSchema = {
       ],
       title: "Doi",
     },
-    git: {
+    git_repo_url: {
       anyOf: [
         {
-          $ref: "#/components/schemas/GitSourcePost",
+          type: "string",
         },
         {
           type: "null",
         },
       ],
+      title: "Git Repo Url",
+    },
+    git_ref: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Ref",
     },
     date: {
       anyOf: [
@@ -4946,17 +4938,17 @@ export const PresentationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
-          enum: ["slides", "poster", "talk"],
+          enum: ["slides", "poster"],
         },
         {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -5017,6 +5009,8 @@ export const PresentationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Presentation",
+  description:
+    "A presentation declared in calkit.yaml, or auto-detected in the repo.",
 } as const
 
 export const PresignedChunkedAccessSchema = {
@@ -6420,6 +6414,62 @@ export const ProjectPublicSchema = {
   title: "ProjectPublic",
 } as const
 
+export const ProjectPushEventPostSchema = {
+  properties: {
+    git_rev: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Git Rev",
+    },
+    remote: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Remote",
+    },
+    branch: {
+      anyOf: [
+        {
+          type: "string",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Branch",
+    },
+    targets: {
+      anyOf: [
+        {
+          items: {
+            type: "string",
+          },
+          type: "array",
+        },
+        {
+          type: "null",
+        },
+      ],
+      title: "Targets",
+    },
+  },
+  type: "object",
+  title: "ProjectPushEventPost",
+  description:
+    "A push that happened somewhere else.\n\nWhat was pushed and where, recorded for reference: the hub works out the\ncurrent state from the repo itself, so none of this is trusted as input,\nbut it is what makes a log line worth reading.",
+} as const
+
 export const ProjectStatusSchema = {
   properties: {
     timestamp: {
@@ -6513,24 +6563,26 @@ export const PublicationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
           enum: [
             "journal-article",
             "conference-paper",
-            "presentation",
-            "poster",
+            "proposal",
             "report",
+            "blog",
             "book",
+            "thesis",
+            "phd-thesis",
           ],
         },
         {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -6623,6 +6675,7 @@ export const PublicationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Publication",
+  description: "A publication declared in calkit.yaml.",
 } as const
 
 export const PublicationComponentSchema = {
@@ -7458,17 +7511,6 @@ export const ReferencesSchema = {
           type: "null",
         },
       ],
-    },
-    raw_text: {
-      anyOf: [
-        {
-          type: "string",
-        },
-        {
-          type: "null",
-        },
-      ],
-      title: "Raw Text",
     },
     zotero: {
       anyOf: [
@@ -8696,6 +8738,22 @@ export const ReproCheckSchema = {
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
+    },
+    retyped_values: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Retyped Values",
+    },
+    unattributed_numbers: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Unattributed Numbers",
     },
     recommendation: {
       anyOf: [
@@ -11004,6 +11062,22 @@ export const ReproCheckWritableSchema = {
     n_dvc_remotes: {
       type: "integer",
       title: "N Dvc Remotes",
+    },
+    retyped_values: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Retyped Values",
+    },
+    unattributed_numbers: {
+      items: {
+        additionalProperties: true,
+        type: "object",
+      },
+      type: "array",
+      title: "Unattributed Numbers",
     },
   },
   type: "object",

@@ -335,18 +335,20 @@ Stage definitions belong in `pipeline.stages` in `calkit.yaml`.
 
 Common stage parameters:
 
-| Parameter      | Type                                             | Required | Default | Description                                                                                                                                     |
-| -------------- | ------------------------------------------------ | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `environment`  | str                                              | yes      |         | Name of the environment in which to run this stage.                                                                                             |
-| `wdir`         | str \| None                                      | no       | null    | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                   |
-| `inputs`       | list[str \| PathInput \| InputsFromStageOutputs] | no       |         | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted. |
-| `outputs`      | list[str \| PathOutput]                          | no       |         | Paths this stage produces.                                                                                                                      |
-| `always_run`   | bool                                             | no       | False   | Run this stage every time the pipeline is run, even if nothing has changed.                                                                     |
-| `iterate_over` | list[StageIteration] \| None                     | no       | null    | Arguments over which to run this stage multiple times.                                                                                          |
-| `description`  | str \| None                                      | no       | null    | A description of what this stage does.                                                                                                          |
-| `frozen`       | bool                                             | no       | False   | Never rerun this stage, treating its outputs as up-to-date.                                                                                     |
-| `scheduler`    | StageSchedulerOptions \| None                    | no       | null    | Options for running this stage on a job scheduler (SLURM or PBS).                                                                               |
-| `slurm`        | StageSchedulerOptions \| None                    | no       | null    | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                       |
+| Parameter           | Type                                             | Required | Default   | Description                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------ | -------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`       | str                                              | yes      |           | Name of the environment in which to run this stage.                                                                                                                                                                                                                                                                   |
+| `wdir`              | str \| None                                      | no       | null      | Working directory in which to run, relative to the project root. Note that all other paths in the stage are relative to this.                                                                                                                                                                                         |
+| `inputs`            | list[str \| PathInput \| InputsFromStageOutputs] | no       |           | Paths this stage depends on, which trigger a rerun when they change. Normally plain path strings; an object carrying a 'path' is also accepted.                                                                                                                                                                       |
+| `outputs`           | list[str \| PathOutput]                          | no       |           | Paths this stage produces.                                                                                                                                                                                                                                                                                            |
+| `always_run`        | bool                                             | no       | False     | Run this stage every time the pipeline is run, even if nothing has changed.                                                                                                                                                                                                                                           |
+| `iterate_over`      | list[StageIteration] \| None                     | no       | null      | Arguments over which to run this stage multiple times.                                                                                                                                                                                                                                                                |
+| `description`       | str \| None                                      | no       | null      | A description of what this stage does.                                                                                                                                                                                                                                                                                |
+| `frozen`            | bool                                             | no       | False     | Never rerun this stage, treating its outputs as up-to-date.                                                                                                                                                                                                                                                           |
+| `scheduler`         | StageSchedulerOptions \| None                    | no       | null      | Options for running this stage on a job scheduler (SLURM or PBS).                                                                                                                                                                                                                                                     |
+| `setup`             | list[str] \| None                                | no       | null      | Commands run before this stage's own command, in the same shell as the command, so a variable they set or a function they define is in scope for it, exported or not. Combined with the environment's 'default_setup' as 'env_default_setup' says. Only for environments that have one: 'system', 'slurm', and 'pbs'. |
+| `env_default_setup` | Literal['ignore', 'replace', 'merge']            | no       | 'replace' | How to combine 'setup' with the environment's 'default_setup'. 'replace' (default) runs the environment's only when the stage names none of its own; 'merge' runs the environment's first, then the stage's; 'ignore' never runs the environment's.                                                                   |
+| `slurm`             | StageSchedulerOptions \| None                    | no       | null      | Deprecated name for 'scheduler'; set 'scheduler' instead.                                                                                                                                                                                                                                                             |
 
 Parameters whose type is a named object, like `PathOutput`, are described under [nested parameter types](#nested-parameter-types).
 
@@ -370,11 +372,12 @@ Model class: `DockerCommandStage`
 
 Model class: `JsonToLatexStage`
 
-| Kind-specific parameter | Type                   | Required | Default    | Description                                         |
-| ----------------------- | ---------------------- | -------- | ---------- | --------------------------------------------------- |
-| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage. |
-| `command_name`          | str \| None            | no       | null       | Name of the LaTeX command to define for each value. |
-| `format`                | dict[str, str] \| None | no       | null       | Format strings for values, keyed by their JSON key. |
+| Kind-specific parameter | Type                   | Required | Default    | Description                                                                                                                                                                                                                                           |
+| ----------------------- | ---------------------- | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str                    | no       | '\_system' | Name of the environment in which to run this stage.                                                                                                                                                                                                   |
+| `command_name`          | str \| None            | no       | null       | Name of the LaTeX command to define for each value.                                                                                                                                                                                                   |
+| `format`                | dict[str, str] \| None | no       | null       | Format strings for values, keyed by their JSON key.                                                                                                                                                                                                   |
+| `keys`                  | list[str]              | no       |            | Keys to expose to the document, dotted to reach into nested output, e.g., 'cases.a.cp'. Without any, every top-level key is exposed, which is fine for a results file written for the paper and unwieldy for one exported wholesale from an analysis. |
 
 ### `julia-command`
 
@@ -518,6 +521,32 @@ Model class: `MatlabScriptStage`
 | `script_path`           | str         | yes      |         | Path to the MATLAB script to run.                |
 | `matlab_path`           | str \| None | no       | null    | Directory added to the MATLAB path, recursively. |
 
+### `procedure`
+
+Model class: `ProcedureStage`
+
+A procedure carried out by a person, as a pipeline stage.
+
+Not everything can be automated. A sample prepared by hand, a rig
+switched on and read off, a survey administered: the work is real and
+everything downstream rests on it, but nothing in the pipeline knows
+whether it has happened. Declaring it as a stage puts a manual step
+where automated ones are: running the pipeline walks the person
+through the procedure's steps, prompting for whatever it asks them to
+record, and the run log becomes an output the next stage reads like
+any other.
+
+The log is a directory of one CSV per run, kept in Git rather than
+DVC, and never cleared before a run: earlier runs are data, not stale
+output. Declaring further `outputs` is allowed for a procedure that
+writes something else too, e.g., a file the instrument saves.
+
+| Kind-specific parameter | Type | Required | Default    | Description                                                                                               |
+| ----------------------- | ---- | -------- | ---------- | --------------------------------------------------------------------------------------------------------- |
+| `environment`           | str  | no       | '\_system' | Name of the environment in which to run this stage.                                                       |
+| `procedure_name`        | str  | yes      |            | Name of the procedure to carry out, as it is keyed under 'procedures' in calkit.yaml.                     |
+| `no_commit`             | bool | no       | False      | Do not commit the run log after each step. The log is still written; only the commit per step is skipped. |
+
 ### `python-script`
 
 Model class: `PythonScriptStage`
@@ -654,28 +683,25 @@ each sublist the length of `arg_name`.
 
 Parameters for running a stage on a job scheduler (SLURM or PBS).
 
-The environment-level `default_options` / `default_setup` are
-applied by `calkit scheduler batch` at submission time.
-The mode for each list is controlled independently by
-`env_default_options` and `env_default_setup`:
+The environment-level `default_options` are applied by `calkit
+scheduler batch` at submission time, in the mode `env_default_options`
+names: `replace` (the default) uses them only when the stage names
+none of its own, `merge` puts them before the stage's, and `ignore`
+never applies them.
 
-- `replace` (default): if the stage provides values, those are used
-  and env defaults are skipped; if the stage's list is empty, env
-  defaults fill in.
-- `merge`: env defaults are prepended to whatever the stage
-  provides (the scheduler's last-occurrence-wins behavior keeps stage
-  values on top of any conflicts).
-- `ignore`: env defaults are never applied, regardless of whether
-  the stage provided any values.
+`setup` and `env_default_setup` were once written here too. They
+belong to the stage, not to the scheduler: a stage on a `system`
+environment has setup commands and no scheduler at all. They are still
+accepted here and hoisted onto the stage when it loads.
 
-| Parameter             | Type                                  | Required | Default   | Description                                                      |
-| --------------------- | ------------------------------------- | -------- | --------- | ---------------------------------------------------------------- |
-| `options`             | list[str] \| None                     | no       | null      | Options passed to the scheduler at submission.                   |
-| `setup`               | list[str] \| None                     | no       | null      | Commands run at the start of the job script.                     |
-| `env_default_options` | Literal['ignore', 'replace', 'merge'] | no       | 'replace' | How to combine 'options' with the environment's default_options. |
-| `env_default_setup`   | Literal['ignore', 'replace', 'merge'] | no       | 'replace' | How to combine 'setup' with the environment's default_setup.     |
-| `log_path`            | str \| None                           | no       | null      | Path at which to write the job log.                              |
-| `log_storage`         | Literal['git', 'dvc'] \| None         | no       | 'git'     | Where to store the job log.                                      |
+| Parameter             | Type                                  | Required | Default   | Description                                                                                                                                    |
+| --------------------- | ------------------------------------- | -------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options`             | list[str] \| None                     | no       | null      | Options passed to the scheduler at submission.                                                                                                 |
+| `setup`               | list[str] \| None                     | no       | null      | Deprecated; set 'setup' on the stage itself. Setup commands are not a scheduler concept, and a stage on a 'system' environment needs them too. |
+| `env_default_options` | Literal['ignore', 'replace', 'merge'] | no       | 'replace' | How to combine 'options' with the environment's default_options.                                                                               |
+| `env_default_setup`   | Literal['ignore', 'replace', 'merge'] | no       | 'replace' | Deprecated; set 'env_default_setup' on the stage itself, alongside its 'setup'.                                                                |
+| `log_path`            | str \| None                           | no       | null      | Path at which to write the job log.                                                                                                            |
+| `log_storage`         | Literal['git', 'dvc'] \| None         | no       | 'git'     | Where to store the job log.                                                                                                                    |
 
 #### `CopyFileToFile`
 

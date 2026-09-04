@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import posixpath
+import re
 import shlex
 from collections.abc import Callable
 from pathlib import Path
@@ -171,19 +172,16 @@ EnvDefaultsMode = Literal["ignore", "replace", "merge"]
 class StageSchedulerOptions(BaseModel):
     """Parameters for running a stage on a job scheduler (SLURM or PBS).
 
-    The environment-level ``default_options`` / ``default_setup`` are
-    applied by ``calkit scheduler batch`` at submission time.
-    The mode for each list is controlled independently by
-    ``env_default_options`` and ``env_default_setup``:
+    The environment-level ``default_options`` are applied by ``calkit
+    scheduler batch`` at submission time, in the mode ``env_default_options``
+    names: ``replace`` (the default) uses them only when the stage names
+    none of its own, ``merge`` puts them before the stage's, and ``ignore``
+    never applies them.
 
-    - ``replace`` (default): if the stage provides values, those are used
-      and env defaults are skipped; if the stage's list is empty, env
-      defaults fill in.
-    - ``merge``: env defaults are prepended to whatever the stage
-      provides (the scheduler's last-occurrence-wins behavior keeps stage
-      values on top of any conflicts).
-    - ``ignore``: env defaults are never applied, regardless of whether
-      the stage provided any values.
+    ``setup`` and ``env_default_setup`` were once written here too. They
+    belong to the stage, not to the scheduler: a stage on a ``system``
+    environment has setup commands and no scheduler at all. They are still
+    accepted here and hoisted onto the stage when it loads.
     """
 
     options: list[str] | None = Field(
@@ -192,7 +190,10 @@ class StageSchedulerOptions(BaseModel):
     )
     setup: list[str] | None = Field(
         default=None,
-        description="Commands run at the start of the job script.",
+        deprecated=True,
+        description="Deprecated; set 'setup' on the stage itself. Setup "
+        "commands are not a scheduler concept, and a stage on a 'system' "
+        "environment needs them too.",
     )
     env_default_options: EnvDefaultsMode = Field(
         default="replace",
@@ -201,8 +202,9 @@ class StageSchedulerOptions(BaseModel):
     )
     env_default_setup: EnvDefaultsMode = Field(
         default="replace",
-        description="How to combine 'setup' with the environment's "
-        "default_setup.",
+        deprecated=True,
+        description="Deprecated; set 'env_default_setup' on the stage "
+        "itself, alongside its 'setup'.",
     )
     log_path: str | None = Field(
         default=None, description="Path at which to write the job log."
@@ -251,6 +253,7 @@ class Stage(BaseModel):
         "map-paths",
         "marimo-html-wasm",
         "markdown",
+        "procedure",
     ] = Field(description="What kind of stage this is.")
     environment: str = Field(
         description="Name of the environment in which to run this stage."
@@ -302,6 +305,23 @@ class Stage(BaseModel):
         description="Options for running this stage on a job scheduler "
         "(SLURM or PBS).",
     )
+    setup: list[str] | None = Field(
+        default=None,
+        description="Commands run before this stage's own command, in the "
+        "same shell as the command, so a variable they set or a function "
+        "they define is in scope for it, exported or not. Combined "
+        "with the environment's 'default_setup' as 'env_default_setup' "
+        "says. Only for environments that have one: 'system', 'slurm', "
+        "and 'pbs'.",
+    )
+    env_default_setup: EnvDefaultsMode = Field(
+        default="replace",
+        description="How to combine 'setup' with the environment's "
+        "'default_setup'. 'replace' (default) runs the environment's only "
+        "when the stage names none of its own; 'merge' runs the "
+        "environment's first, then the stage's; 'ignore' never runs the "
+        "environment's.",
+    )
     # Do not allow extra keys
     model_config = ConfigDict(extra="forbid")
     # Resolved at pipeline-compilation time by set_stage_scheduler_options;
@@ -316,6 +336,11 @@ class Stage(BaseModel):
     # the compiled command dispatches there first. Also resolved by
     # set_stage_scheduler_options.
     _system_env: str | None = PrivateAttr(default=None)
+    # The setup commands this stage actually runs, with the environment's
+    # 'default_setup' already merged in per 'env_default_setup'. Resolved
+    # when the pipeline is compiled, so the command in dvc.yaml says
+    # everything that runs and DVC reruns the stage when any of it changes.
+    _system_env_setup: list[str] = PrivateAttr(default_factory=list)
 
     # Declared so the published schema accepts what the validator below
     # already migrates; without it an editor flags a ``slurm:`` stage that
@@ -353,6 +378,33 @@ class Stage(BaseModel):
         }
         if "slurm" in data:
             data["scheduler"] = data.pop("slurm")
+        # 'setup' and 'env_default_setup' used to be written under the
+        # scheduler block. They describe the stage, not the scheduler, so
+        # they are hoisted here. A caller that built the options in Python
+        # is handled the same way as parsed YAML: leaving those set on the
+        # object would drop them silently, since nothing reads them there
+        # any more. Either form is copied first, so the caller's own dict
+        # or model isn't rewritten underneath it.
+        scheduler = data.get("scheduler")
+        if isinstance(scheduler, StageSchedulerOptions):
+            scheduler = scheduler.model_dump(exclude_defaults=True)
+        if isinstance(scheduler, dict):
+            scheduler = dict(scheduler)
+            hoisted = False
+            for key in ("setup", "env_default_setup"):
+                if scheduler.get(key) is None:
+                    continue
+                if data.get(key) is not None:
+                    raise ValueError(
+                        f"Stage sets '{key}' both on itself and under "
+                        f"'scheduler'; keep the one on the stage"
+                    )
+                data[key] = scheduler.pop(key)
+                hoisted = True
+            # A block that held nothing but setup commands is now empty, and
+            # writing 'scheduler: {}' back to calkit.yaml would leave the
+            # reader wondering what was meant to be in it
+            data["scheduler"] = scheduler if scheduler or not hoisted else None
         return data
 
     def to_ck_dict(self) -> dict:
@@ -397,8 +449,56 @@ class Stage(BaseModel):
         raise NotImplementedError
 
     @property
+    def setup_file_path(self) -> str | None:
+        """Where this stage's resolved setup commands are written.
+
+        The compiled command names this path rather than carrying the
+        commands themselves. DVC runs a stage's command through cmd.exe on
+        Windows and through ``$SHELL`` elsewhere, and no one quoting
+        survives both: single quotes are literal to cmd.exe, and double
+        quotes let a POSIX shell expand ``$(...)`` at the wrong time. A
+        path has no spaces or metacharacters, so it survives either.
+
+        It is a DVC dep, so editing either list reruns the stage. It is
+        not committed: unlike an import's lock file, nothing here is
+        unrecoverable -- it is derived from ``calkit.yaml`` and rewritten
+        by every compile, which is to say by every ``calkit run`` and
+        ``calkit status``, the same way a cleaned notebook is.
+        """
+        if not self._system_env_setup:
+            return None
+        # Stage names can carry characters a path shouldn't, e.g. the '@'
+        # DVC gives an iterated stage
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.name)
+        return posixpath.join(".calkit", "stage-setup", f"{safe}.json")
+
+    def write_setup_file(self, wdir: str | None = None) -> str | None:
+        """Write the resolved setup commands, returning the path."""
+        import json
+
+        rel_path = self.setup_file_path
+        if rel_path is None:
+            return None
+        fpath = os.path.join(wdir, rel_path) if wdir else rel_path
+        os.makedirs(os.path.dirname(fpath), exist_ok=True)
+        content = json.dumps(self._system_env_setup, indent=2) + "\n"
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                if f.read() == content:
+                    return rel_path
+        # newline="\n" so the file is byte-identical on every platform:
+        # text mode writes CRLF on Windows, and this is a DVC dep, so the
+        # stage would rerun purely from switching machine
+        with open(fpath, "w", newline="\n") as f:
+            f.write(content)
+        return rel_path
+
+    @property
     def dvc_deps(self) -> list[str]:
         deps = []
+        setup_file = self.setup_file_path
+        if setup_file is not None:
+            deps.append(setup_file)
         for i in self.inputs:
             if isinstance(i, InputsFromStageOutputs):
                 continue
@@ -461,6 +561,14 @@ class Stage(BaseModel):
             # from the snapshot and from what the workspace says the run
             # produced, so it can't fall out of step with the pipeline
             cmd = f"calkit xenv -n {self._system_env} --no-check"
+            # The whole chain, the environment's defaults included, is
+            # already merged and written beside the pipeline; the command
+            # names the file rather than carrying the commands, since no
+            # shell quoting survives both cmd.exe and a POSIX shell. The
+            # file is a dep, so editing either list still reruns the stage.
+            setup_file = self.setup_file_path
+            if setup_file is not None:
+                cmd += f" --setup-file {setup_file}"
             if self.inner_environment == self.outer_environment:
                 return cmd + " --"
             # The inner xenv runs in the workspace rather than here
@@ -502,8 +610,8 @@ class Stage(BaseModel):
         # (``replace``); this keeps the compiled cmd minimal.
         if opts.env_default_options != "replace":
             cmd += f" --env-default-options {opts.env_default_options}"
-        if opts.env_default_setup != "replace":
-            cmd += f" --env-default-setup {opts.env_default_setup}"
+        if self.env_default_setup != "replace":
+            cmd += f" --env-default-setup {self.env_default_setup}"
         if self.environment != "_system":
             cmd += f" --environment {self.outer_environment}"
         if opts.log_path is not None:
@@ -531,9 +639,8 @@ class Stage(BaseModel):
         if opts.options is not None:
             for opt in opts.options:
                 cmd += f" --option {opt}"
-        if opts.setup is not None:
-            for setup_cmd in opts.setup:
-                cmd += f" --setup {shlex.quote(setup_cmd)}"
+        for setup_cmd in self.setup or []:
+            cmd += f" --setup {shlex.quote(setup_cmd)}"
         return cmd
 
     @property
@@ -1156,6 +1263,16 @@ class JsonToLatexStage(Stage):
         default=None,
         description="Format strings for values, keyed by their JSON key.",
     )
+    keys: list[str] = Field(
+        default=[],
+        description=(
+            "Keys to expose to the document, dotted to reach into nested "
+            "output, e.g., 'cases.a.cp'. Without any, every top-level key "
+            "is exposed, which is fine for a results file written for the "
+            "paper and unwieldy for one exported wholesale from an "
+            "analysis."
+        ),
+    )
 
     @property
     def dvc_cmd(self) -> str:
@@ -1172,6 +1289,8 @@ class JsonToLatexStage(Stage):
             cmd += f" --output '{out_path}'"
         if self.command_name is not None:
             cmd += f" --command {self.command_name}"
+        for key in self.keys:
+            cmd += f" --key {shlex.quote(key)}"
         if self.format is not None:
             fmt_json = json.dumps(self.format)
             cmd += f" --format-json '{fmt_json}'"
@@ -1801,6 +1920,79 @@ class MarimoHtmlWasmStage(Stage):
         return cmd
 
 
+class ProcedureStage(Stage):
+    """A procedure carried out by a person, as a pipeline stage.
+
+    Not everything can be automated. A sample prepared by hand, a rig
+    switched on and read off, a survey administered: the work is real and
+    everything downstream rests on it, but nothing in the pipeline knows
+    whether it has happened. Declaring it as a stage puts a manual step
+    where automated ones are: running the pipeline walks the person
+    through the procedure's steps, prompting for whatever it asks them to
+    record, and the run log becomes an output the next stage reads like
+    any other.
+
+    The log is a directory of one CSV per run, kept in Git rather than
+    DVC, and never cleared before a run: earlier runs are data, not stale
+    output. Declaring further ``outputs`` is allowed for a procedure that
+    writes something else too, e.g., a file the instrument saves.
+    """
+
+    kind: Literal["procedure"] = "procedure"
+    # A person in a room, not a runtime; nothing to activate
+    environment: str = "_system"
+    procedure_name: str = Field(
+        description=(
+            "Name of the procedure to carry out, as it is keyed under "
+            "'procedures' in calkit.yaml."
+        )
+    )
+    no_commit: bool = Field(
+        default=False,
+        description=(
+            "Do not commit the run log after each step. The log is still "
+            "written; only the commit per step is skipped."
+        ),
+    )
+    # Set at compile time when the procedure is kept in its own file, so
+    # editing the steps means the procedure should be carried out again.
+    # Resolved rather than declared: which form a procedure takes is
+    # calkit.yaml's business, not the stage's.
+    _procedure_path: str | None = PrivateAttr(default=None)
+
+    @property
+    def log_dir(self) -> str:
+        """Where ``calkit xproc`` writes this procedure's run logs."""
+        return f".calkit/procedure-runs/{self.procedure_name}"
+
+    @property
+    def dvc_cmd(self) -> str:
+        cmd = f"calkit xproc {shlex.quote(self.procedure_name)}"
+        if self.no_commit:
+            cmd += " --no-commit"
+        return cmd
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        # A change to what the person is asked to do means it is a
+        # different procedure, and the old run no longer stands for it
+        deps = ["calkit.yaml"]
+        if self._procedure_path is not None:
+            deps.append(self._procedure_path)
+        return deps + super().dvc_deps
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        outs: list[str | dict] = [
+            {self.log_dir: dict(cache=False, persist=True)}
+        ]
+        for out in super().dvc_outs:
+            path = out if isinstance(out, str) else next(iter(out))
+            if path != self.log_dir:
+                outs.append(out)
+        return outs
+
+
 class MarkdownStage(Stage):
     """A stage sourced from a Markdown file's annotated code blocks.
 
@@ -1891,6 +2083,7 @@ class Pipeline(BaseModel):
                 | MapPathsStage
                 | MarimoHtmlWasmStage
                 | MarkdownStage
+                | ProcedureStage
             ),
             Discriminator("kind"),
         ],
@@ -1920,11 +2113,17 @@ class Pipeline(BaseModel):
         ``stage.scheduler`` so the stage's ``xenv_cmd`` emits
         ``calkit scheduler batch``.
 
-        Environment-level ``default_options`` and ``default_setup`` are NOT
-        merged into the stage here; the batch CLI applies them at submission
-        time so the pipeline does not need to be recompiled when env defaults
-        change.
+        Environment-level ``default_options`` are NOT merged into the stage
+        here; the batch CLI applies them at submission time, which for a
+        scheduler is the last moment before the job script is written.
+
+        ``default_setup`` is merged here for a ``system`` environment,
+        which has no submission step: compilation is the last moment before
+        such a stage runs, so the merged chain goes into the command DVC
+        records. A scheduler env's is still left to the batch CLI.
         """
+        from calkit.environments import merge_setup_commands
+
         # Stage kinds that don't require a separate inner runtime, so they
         # can run on a plain (non-composite) scheduler env. Anything else
         # must use a composite env like ``<scheduler-env>:<inner-env>``.
@@ -1951,10 +2150,42 @@ class Pipeline(BaseModel):
                 )
             env = environments.get(stage.outer_environment, {})
             kind = env.get("kind")
+            # Setup commands are run by whatever dispatches the stage, and
+            # only these kinds dispatch one: the others hand the command to
+            # a runtime that has no shell of its own to prepare. Reported
+            # rather than ignored, since a stage whose setup silently never
+            # ran is a stage that ran against the wrong toolchain. The
+            # built-in '_system' env is included in that: it is compiled to
+            # a bare command with nothing wrapping it, and a project that
+            # needs setup is a project that should name its machine.
+            if (
+                stage.setup or stage.env_default_setup != "replace"
+            ) and kind not in ("system", "slurm", "pbs"):
+                described = (
+                    "the built-in '_system' environment"
+                    if env_name == "_system"
+                    else f"environment '{env_name}' of kind '{kind}'"
+                )
+                raise ValueError(
+                    f"Stage '{stage.name}' sets 'setup' commands but runs "
+                    f"in {described}, which has no setup step to run them "
+                    "in; use a 'system', 'slurm', or 'pbs' environment, "
+                    "either directly or as the outer half of a composite "
+                    "environment"
+                )
             if kind == "system":
                 # A system env names the machine, so it can wrap an inner
                 # runtime the same way a scheduler env does.
                 stage._system_env = stage.outer_environment
+                # Merged here rather than by 'calkit xenv' at run time: a
+                # system env has no submission step, so compilation is the
+                # last moment before the stage runs, and resolving it here
+                # puts the whole chain in the command DVC records.
+                stage._system_env_setup = merge_setup_commands(
+                    env.get("default_setup"),
+                    stage.setup,
+                    stage.env_default_setup,
+                )
                 if stage.inner_environment == stage.outer_environment:
                     continue
                 inner_env = environments.get(stage.inner_environment)
@@ -2025,16 +2256,19 @@ class Pipeline(BaseModel):
             if stage.log_storage != "git":
                 sched_opts["log_storage"] = stage.log_storage
             if stage.scheduler is not None:
-                if stage.scheduler.setup:
-                    sched_opts["setup"] = list(stage.scheduler.setup)
                 if stage.scheduler.env_default_options != "replace":
                     sched_opts["env_default_options"] = (
                         stage.scheduler.env_default_options
                     )
-                if stage.scheduler.env_default_setup != "replace":
-                    sched_opts["env_default_setup"] = (
-                        stage.scheduler.env_default_setup
-                    )
+            # Setup commands belong to the stage. A legacy stage that wrote
+            # them under 'scheduler' has already had them hoisted by
+            # normalize_legacy_keys, so this reads them from one place and
+            # writes them back to one place.
+            stage_setup: dict = {}
+            if stage.setup:
+                stage_setup["setup"] = list(stage.setup)
+            if stage.env_default_setup != "replace":
+                stage_setup["env_default_setup"] = stage.env_default_setup
             new_stage = ShellScriptStage(
                 kind="shell-script",
                 name=name,
@@ -2051,6 +2285,7 @@ class Pipeline(BaseModel):
                 scheduler=StageSchedulerOptions(**sched_opts)
                 if sched_opts
                 else StageSchedulerOptions(),
+                **stage_setup,
             )
             self.stages[name] = new_stage
             calkit_yaml_stage: dict = {
@@ -2076,6 +2311,7 @@ class Pipeline(BaseModel):
                 ]
             if sched_opts:
                 calkit_yaml_stage["scheduler"] = sched_opts
+            calkit_yaml_stage |= stage_setup
             if stage.wdir is not None:
                 calkit_yaml_stage["wdir"] = stage.wdir
             if stage.always_run:
@@ -2090,6 +2326,23 @@ class Pipeline(BaseModel):
                 ]
             converted[name] = calkit_yaml_stage
         return converted
+
+    def resolve_procedure_paths(self, procedures: dict) -> None:
+        """Tell procedure stages where their procedure is written down.
+
+        A procedure is either inline in calkit.yaml or in a file of its
+        own, and only the second gives a stage anything extra to depend
+        on. Which form it takes is calkit.yaml's business, so the stage is
+        told rather than asked to declare it.
+        """
+        for stage in self.stages.values():
+            if not isinstance(stage, ProcedureStage):
+                continue
+            entry = (procedures or {}).get(stage.procedure_name)
+            path = entry.get("path") if isinstance(entry, dict) else None
+            # Assigned either way: a procedure moved back inline must not
+            # leave the stage depending on a file that is no longer there
+            stage._procedure_path = path if isinstance(path, str) else None
 
     def ensure_env_lock_paths_are_inputs(
         self, env_lock_fpaths: dict[str, list[str]]

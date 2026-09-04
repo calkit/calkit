@@ -25,7 +25,8 @@ from ruamel.yaml import YAMLError
 from sqlmodel import Session, select
 
 import calkit
-from app import github, users
+from app import cache, github, users
+from app.config import settings
 from app.core import load_yaml_fast, logger, ryaml
 from app.models import GitRef, Project, User, UserProjectAccess
 
@@ -34,8 +35,12 @@ _SYMLINK_MODE = 0o120000
 # Max seconds a single git network subprocess may run before being killed,
 # so a stalled remote can't wedge a worker indefinitely. Clone gets a
 # larger budget than fetch since initial clones of large repos are
-# legitimately slower.
-GIT_CLONE_TIMEOUT = 300
+# legitimately slower: a research project carrying its results in Git runs
+# to a gigabyte across a few thousand commits, which is several minutes on
+# a good connection. Anything under that is not a safety limit, it is a
+# project the hub can never open, because each attempt restarts from
+# nothing.
+GIT_CLONE_TIMEOUT = 900
 GIT_FETCH_TIMEOUT = 120
 
 
@@ -133,6 +138,49 @@ def _make_git_auth_env(
     return env
 
 
+# How long a remote's head SHA is trusted.
+#
+# Longer than a clone's own TTL, deliberately: a clone that lapses asks
+# whether the remote moved, so a shorter window here would mean the answer
+# had always expired by the time it was wanted, and every lapse would pay
+# for its own round trip. At several times the clone TTL, one answer covers
+# many lapses, across every user's clone of the project.
+#
+# Being minutes stale costs little now that a push says so directly, through
+# the GitHub App's webhook or `calkit push` (see ``app.warm``). This poll is
+# the fallback for pushes that arrive without either.
+REMOTE_HEAD_TTL = 300
+
+
+def get_remote_head_sha(
+    repo: git.Repo, remote_url: str, branch: str
+) -> str | None:
+    """The SHA ``origin`` has for ``branch``, or None if it can't be read.
+
+    ``ls-remote`` costs about as much as a fetch that has nothing to
+    transfer -- both are a round trip to the host -- so this is only worth
+    doing because the answer is cached and a fetch's isn't. When it comes
+    back equal to what we already have, the fetch can be skipped entirely.
+    """
+    key = cache.make_key("remote-head", remote_url, branch)
+    cached = cache.get_json(key)
+    if isinstance(cached, str):
+        return cached
+    try:
+        with _timed("ls-remote", branch=branch):
+            out = repo.git.ls_remote(
+                ["origin", branch], kill_after_timeout=GIT_FETCH_TIMEOUT
+            )
+    except GitCommandError as e:
+        logger.warning(f"Could not read remote head for {branch}: {e}")
+        return None
+    line = out.strip().split("\n")[0] if out.strip() else ""
+    sha = line.split()[0] if line else None
+    if sha:
+        cache.set_json(key, sha, ttl=REMOTE_HEAD_TTL)
+    return sha
+
+
 def get_repo(
     project: Project,
     user: User | None,
@@ -154,17 +202,27 @@ def get_repo(
         # github_username is None for GitHub-less users; fall back to the
         # (always-present, unique) account name for a stable temp path.
         user_dir = user.github_username or user.account.name
-        base_dir = f"/tmp/{user_dir}/{owner_name}/{project_name}"
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, user_dir, owner_name, project_name
+        )
     else:
-        base_dir = f"/tmp/anonymous/{owner_name}/{project_name}"
+        base_dir = os.path.join(
+            settings.CLONE_ROOT, "anonymous", owner_name, project_name
+        )
     repo_dir = os.path.join(base_dir, "repo")
     updated_fpath = os.path.join(base_dir, "updated.txt")
     lock_fpath = os.path.join(base_dir, "updating.lock")
     lock = FileLock(lock_fpath, timeout=5)
     os.makedirs(base_dir, exist_ok=True)
-    if os.path.isdir(repo_dir) and fresh:
+    if fresh and os.path.isdir(repo_dir):
         logger.info("Deleting repo directory to clone a fresh copy")
         shutil.rmtree(repo_dir, ignore_errors=True)
+        # The marker is what says a complete checkout exists, so it has to go
+        # with the tree it described. Leaving it behind claims a repo that is
+        # no longer there, and the next read fails on the missing directory
+        # instead of cloning again.
+        if os.path.isfile(updated_fpath):
+            os.remove(updated_fpath)
     # Clone the repo if it doesn't exist -- it will be in a "repo" dir
     access_token: str | None = None
     if user is not None:
@@ -245,42 +303,93 @@ def get_repo(
         git_plain_url += ".git"
     newly_cloned = False
     repo = None
-    if not os.path.isdir(repo_dir):
+    # `updated.txt` appears only after a clone has finished, so a repo
+    # directory without one is a clone that is still running or that died
+    # partway -- not something to read.
+    if not os.path.isfile(updated_fpath):
         newly_cloned = True
         logger.info(f"Git cloning into {repo_dir}")
         try:
             with lock:
-                try:
-                    clone_cmd = ["git", "clone", git_plain_url, repo_dir]
-                    env = (
-                        {**os.environ, **_make_git_auth_env(access_token)}
-                        if access_token
-                        else None
-                    )
-                    with _timed(
-                        "clone",
-                        repo=f"{owner_name}/{project_name}",
-                    ):
-                        subprocess.check_call(
-                            clone_cmd,
-                            env=env,
-                            timeout=GIT_CLONE_TIMEOUT,
+                # Whoever holds the lock owns this directory, so re-check
+                # inside it: another worker may have finished the clone while
+                # we waited, in which case there is nothing left to do.
+                if not os.path.isfile(updated_fpath):
+                    # Clone alongside the destination and move it into place
+                    # only once git says it finished. `repo_dir` then either
+                    # doesn't exist or holds a complete checkout -- never a
+                    # tree that a reader could mistake for a project with no
+                    # files in it. Anything left from an earlier attempt that
+                    # died is ours to clear, since we hold the lock.
+                    staging_dir = repo_dir + ".cloning"
+                    for stale in (staging_dir, repo_dir):
+                        if os.path.isdir(stale):
+                            logger.warning(f"Removing incomplete {stale}")
+                            shutil.rmtree(stale, ignore_errors=True)
+                    try:
+                        clone_cmd = ["git", "clone"]
+                        if settings.GIT_CLONE_FILTER:
+                            clone_cmd.append(
+                                f"--filter={settings.GIT_CLONE_FILTER}"
+                            )
+                        clone_cmd += [git_plain_url, staging_dir]
+                        env = (
+                            {**os.environ, **_make_git_auth_env(access_token)}
+                            if access_token
+                            else None
                         )
-                except subprocess.CalledProcessError:
-                    logger.error("Failed to clone repo")
-                    # It's possible another process cloned this repo just as
-                    # we were about to, so check again
-                    if not os.path.isdir(repo_dir):
+                        with _timed(
+                            "clone",
+                            repo=f"{owner_name}/{project_name}",
+                        ):
+                            subprocess.check_call(
+                                clone_cmd,
+                                env=env,
+                                timeout=GIT_CLONE_TIMEOUT,
+                            )
+                    except subprocess.CalledProcessError:
+                        logger.error("Failed to clone repo")
+                        shutil.rmtree(staging_dir, ignore_errors=True)
                         raise HTTPException(404, "Git repo not found")
-                # Touch a file so we can compute a TTL
-                subprocess.check_call(["touch", updated_fpath])
+                    except subprocess.TimeoutExpired:
+                        # Every retry starts this repo over from nothing, so
+                        # a repo too big to clone inside the budget never
+                        # converges however many times it is asked for. Say
+                        # so rather than letting it look like a server error.
+                        logger.error(
+                            f"Clone of {owner_name}/{project_name} exceeded "
+                            f"{GIT_CLONE_TIMEOUT}s"
+                        )
+                        shutil.rmtree(staging_dir, ignore_errors=True)
+                        raise HTTPException(
+                            504,
+                            "This project's repository took too long to "
+                            "download.",
+                        )
+                    os.rename(staging_dir, repo_dir)
+                    # Touch a file so we can compute a TTL
+                    subprocess.check_call(["touch", updated_fpath])
                 repo = git.Repo(repo_dir)
         except Timeout:
             logger.warning("Git repo lock timed out")
-    if os.path.isfile(updated_fpath):
-        last_updated = os.path.getmtime(updated_fpath)
-    else:
-        last_updated = 0
+    # `updated.txt` is only written once a clone has finished, so its absence
+    # means this checkout has never been complete -- either a first clone is
+    # running right now behind the lock we just gave up on, or one died
+    # partway. Reading the directory anyway hands callers a tree with no
+    # calkit.yaml and no files, which they cannot tell apart from a project
+    # that genuinely has neither: the request 200s with an empty list, or
+    # 404s on a file that does exist. Say "not ready yet" instead.
+    if not os.path.isfile(updated_fpath):
+        logger.warning(
+            f"Repo for {owner_name}/{project_name} is not ready "
+            "(no completed clone)"
+        )
+        raise HTTPException(
+            503,
+            "This project is still being prepared. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        )
+    last_updated = os.path.getmtime(updated_fpath)
     did_refresh = newly_cloned
     if not newly_cloned:
         # TODO: Only pull if we know we need to, perhaps with a call to GitHub
@@ -349,10 +458,32 @@ def get_repo(
                             kill_after_timeout=GIT_FETCH_TIMEOUT,
                         )
                     subprocess.call(["touch", updated_fpath])
-                if not is_shallow:
+                # Ask what the remote has before going to get it. That
+                # answer is shared between everyone's clone of the project,
+                # so most expiries are settled without touching the network,
+                # and when it matches ours there is nothing to fetch at all.
+                already_current = False
+                if not is_shallow and ref is None:
+                    branch_name = repo.active_branch.name
+                    try:
+                        local_head: str | None = repo.head.commit.hexsha
+                    except (ValueError, GitCommandError):
+                        local_head = None
+                    remote_head = (
+                        get_remote_head_sha(repo, git_plain_url, branch_name)
+                        if local_head
+                        else None
+                    )
+                    if remote_head is not None and remote_head == local_head:
+                        logger.info(
+                            f"{repo_label} is already at {remote_head[:7]}"
+                        )
+                        subprocess.call(["touch", updated_fpath])
+                        did_refresh = True
+                        already_current = True
+                if not is_shallow and not already_current:
                     logger.info("Git fetching")
                     if ref is None:
-                        branch_name = repo.active_branch.name
                         with _timed(
                             "fetch", repo=repo_label, branch=branch_name
                         ):
@@ -583,7 +714,7 @@ def get_overleaf_repo(
     """Get a freshly pulled Overleaf repository for a user/project."""
     owner_name, project_name = project.owner_github_name, project.name
     base_dir = (
-        f"/tmp/{user.github_username}/{owner_name}/"
+        f"{settings.CLONE_ROOT}/{user.github_username}/{owner_name}/"
         f"{project_name}/overleaf/{overleaf_project_id}"
     )
     repo_dir = os.path.join(base_dir, "repo")
@@ -908,6 +1039,18 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     cached = _peek_dvc_lock_outs(blob_sha)
     if cached is not None:
         return cached
+    # A history walk reads dvc.lock at every commit that touched the file,
+    # and a project of any size keeps a megabyte of it: parsing a thousand
+    # revisions is minutes of work that is identical for every worker, every
+    # viewer and every restart. Keyed by the blob, so it is only ever done
+    # once anywhere.
+    shared_key = cache.make_key("dvc-lock-outs", blob_sha)
+    shared = cache.get_json(shared_key)
+    if isinstance(shared, dict):
+        _DVC_LOCK_PARSE_CACHE[blob_sha] = shared
+        if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
+            _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+        return shared
     try:
         # Not ryaml: we only pull plain strings out of this and never write it
         # back. On a 47 KB dvc.lock that is ~6 ms/parse versus ~94 ms, which
@@ -917,7 +1060,15 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
         data = {}
     outs: dict[str, str] = {}
     for stage in (data.get("stages") or {}).values():
+        # A revision can carry a stage name with nothing under it, which
+        # parses to None. Walking history means reading every dvc.lock a
+        # project ever had, so one malformed old revision must not take the
+        # whole file history down with it.
+        if not isinstance(stage, dict):
+            continue
         for out in stage.get("outs") or []:
+            if not isinstance(out, dict):
+                continue
             p = out.get("path")
             if not p:
                 continue
@@ -925,6 +1076,7 @@ def _parse_dvc_lock_outs(blob_sha: str, read_bytes) -> dict[str, str]:
     _DVC_LOCK_PARSE_CACHE[blob_sha] = outs
     if len(_DVC_LOCK_PARSE_CACHE) > _DVC_LOCK_PARSE_CACHE_MAX:
         _DVC_LOCK_PARSE_CACHE.popitem(last=False)
+    cache.set_json(shared_key, outs)
     return outs
 
 

@@ -83,11 +83,17 @@ Install the Calkit plugin with:
 /plugin install calkit@calkit
 ```
 
-This gives you two action skills:
+This gives you these action skills:
 
 - `/calkit:create-pipeline` — converts an ad hoc repo into a reproducible
   pipeline end-to-end
 - `/calkit:add-pipeline-stage` — adds a single stage to an existing pipeline
+- `/calkit:build-paper-pipeline` — builds the pipeline stages your
+  manuscript's TODO comments ask for, working backwards from the writing,
+  and keeps the project's questions and answers matching the paper. See
+  [writing first](tutorials/writing-first.md).
+- `/calkit:check-questions` — reviews whether the project's answers still
+  follow from their evidence
 
 Calkit conventions are loaded automatically whenever you work in a Calkit
 project.

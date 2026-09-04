@@ -26,6 +26,30 @@ def test_publication_kind_no_longer_allows_presentation():
     Publication(path="p.pdf", title="P", kind="journal-article")
 
 
+def test_publication_reads_legacy_type_as_kind():
+    # The web app wrote `type` before it was renamed to `kind`, so existing
+    # projects still have that spelling on disk
+    assert (
+        Publication.model_validate(
+            {"path": "p.pdf", "type": "journal-article"}
+        ).kind
+        == "journal-article"
+    )
+    # An explicit kind wins over a stale type
+    assert (
+        Publication.model_validate(
+            {"path": "p.pdf", "kind": "report", "type": "book"}
+        ).kind
+        == "report"
+    )
+    # A type this model has no kind for stays ignored rather than refused,
+    # e.g. the poster the web app used to offer, which is a presentation here
+    assert (
+        Publication.model_validate({"path": "p.pdf", "type": "poster"}).kind
+        is None
+    )
+
+
 def test_project_info_has_results_and_presentations():
     info = ProjectInfo.model_validate(
         {

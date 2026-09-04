@@ -1370,7 +1370,7 @@ def get_publication_from_repo(
     publications = ck_info.get("publications", [])
     # Get the figure content (will be base64-encoded)
     for pub in publications:
-        if pub.get("path") == path:
+        if isinstance(pub, dict) and pub.get("path") == path:
             item = get_contents_from_repo(
                 project=project,
                 repo=repo,

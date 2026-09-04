@@ -7,7 +7,7 @@ import re
 from datetime import date as date_type
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import (
     AliasChoices,
@@ -570,10 +570,25 @@ class Table(_CalkitObject):
     """
 
 
+PresentationKind = Literal["slides", "poster"]
+
+
 class Presentation(_CalkitObject):
-    kind: Literal["slides", "poster"] | None = Field(
+    kind: PresentationKind | None = Field(
         default=None, description="What kind of presentation this is."
     )
+
+
+PublicationKind = Literal[
+    "journal-article",
+    "conference-paper",
+    "proposal",
+    "report",
+    "blog",
+    "book",
+    "thesis",
+    "phd-thesis",
+]
 
 
 class Publication(_CalkitObject):
@@ -588,19 +603,7 @@ class Publication(_CalkitObject):
     # presented rather than published, and carry no DOI or venue of record.
     # Optional since publications can be created without a kind, e.g., by
     # ``calkit overleaf sync``, whose ``--kind`` option has no default.
-    kind: (
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "proposal",
-            "report",
-            "blog",
-            "book",
-            "thesis",
-            "phd-thesis",
-        ]
-        | None
-    ) = None
+    kind: PublicationKind | None = None
     doi: str | None = Field(
         default=None,
         description=(
@@ -617,15 +620,23 @@ class Publication(_CalkitObject):
 
     @model_validator(mode="before")
     @classmethod
-    def _drop_written_is_published(cls, data: object) -> object:
+    def _read_legacy_keys(cls, data: object) -> object:
         # ``is_published`` used to be a plain field, so older calkit.yaml
         # files may still write it. It's accepted and dropped rather than
         # refused: extra keys are ignored by default anyway, and the
         # computed property below is the only reading of it. A written
         # ``true`` with no DOI isn't honored, since a claim with nothing
         # resolvable behind it is exactly what the derivation replaces.
-        if isinstance(data, dict):
-            data = {k: v for k, v in data.items() if k != "is_published"}
+        #
+        # ``type`` is the spelling the web app wrote before it was renamed to
+        # ``kind``, so publications created there still have it on disk.
+        if not isinstance(data, dict):
+            return data
+        data = {k: v for k, v in data.items() if k != "is_published"}
+        if not data.get("kind") and data.get("type") in get_args(
+            PublicationKind
+        ):
+            data["kind"] = data.pop("type")
         return data
 
     @computed_field  # type: ignore[prop-decorator]

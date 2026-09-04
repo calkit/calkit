@@ -247,11 +247,12 @@ export const Body_projects_post_project_overleaf_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
+        "proposal",
         "report",
+        "blog",
         "book",
-        "masters-thesis",
+        "thesis",
         "phd-thesis",
-        "other",
       ],
       title: "Kind",
     },
@@ -385,10 +386,12 @@ export const Body_projects_post_project_publicationSchema = {
       enum: [
         "journal-article",
         "conference-paper",
-        "presentation",
-        "poster",
+        "proposal",
         "report",
+        "blog",
         "book",
+        "thesis",
+        "phd-thesis",
       ],
       title: "Kind",
     },
@@ -4935,17 +4938,17 @@ export const PresentationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
-          enum: ["slides", "poster", "talk"],
+          enum: ["slides", "poster"],
         },
         {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -5006,6 +5009,8 @@ export const PresentationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Presentation",
+  description:
+    "A presentation declared in calkit.yaml, or auto-detected in the repo.",
 } as const
 
 export const PresignedChunkedAccessSchema = {
@@ -6558,24 +6563,26 @@ export const PublicationSchema = {
       ],
       title: "Description",
     },
-    type: {
+    kind: {
       anyOf: [
         {
           type: "string",
           enum: [
             "journal-article",
             "conference-paper",
-            "presentation",
-            "poster",
+            "proposal",
             "report",
+            "blog",
             "book",
+            "thesis",
+            "phd-thesis",
           ],
         },
         {
           type: "null",
         },
       ],
-      title: "Type",
+      title: "Kind",
     },
     stage: {
       anyOf: [
@@ -6668,6 +6675,7 @@ export const PublicationSchema = {
   type: "object",
   required: ["path", "title"],
   title: "Publication",
+  description: "A publication declared in calkit.yaml.",
 } as const
 
 export const PublicationComponentSchema = {

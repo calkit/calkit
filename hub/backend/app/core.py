@@ -95,6 +95,13 @@ def normalize_artifact_path(path: str) -> str:
     return "" if normalized == "." else normalized
 
 
+def title_from_path(path: str) -> str:
+    """Derive a human-readable title from an artifact's file name."""
+    # Repo paths are always Posix, so parse them as such regardless of host OS.
+    stem = posixpath.splitext(posixpath.basename(path))[0]
+    return stem.replace("_", " ").replace("-", " ").capitalize()
+
+
 CATEGORIES_SINGULAR_TO_PLURAL = {
     "figure": "figures",
     "dataset": "datasets",

@@ -88,6 +88,7 @@ from app.core import (
     normalize_artifact_path,
     params_from_url,
     ryaml,
+    title_from_path,
     utcnow,
 )
 from app.dvc import (
@@ -148,6 +149,7 @@ from app.models import (
     Publication,
     PublicationComponent,
     PublicationComponents,
+    PublicationKind,
     Question,
     QuestionEvidence,
     QuestionPublic,
@@ -227,13 +229,6 @@ RESULT_EXTS = {
     ".html",
 }
 RESULT_DIRS = {"results", "result"}
-
-
-def _title_from_path(path: str) -> str:
-    """Derive a human-readable title from an artifact's file name."""
-    # Repo paths are always Posix, so parse them as such regardless of host OS.
-    stem = PurePosixPath(path).stem
-    return stem.replace("_", " ").replace("-", " ").capitalize()
 
 
 def _normalize_artifact_file_path(path: str) -> str:
@@ -2654,7 +2649,7 @@ def _discover_figures(
     # they validate against the Figure model.
     for fig in figures:
         if not fig.get("title"):
-            fig["title"] = _title_from_path(fig["path"])
+            fig["title"] = title_from_path(fig["path"])
     declared_paths = {fig["path"] for fig in figures}
 
     def _maybe_add_figure(path: str) -> None:
@@ -2670,7 +2665,7 @@ def _discover_figures(
             d in FIGURE_DIRS for d in dir_parts
         ):
             if path not in declared_paths:
-                figures.append({"path": path, "title": _title_from_path(path)})
+                figures.append({"path": path, "title": title_from_path(path)})
                 declared_paths.add(path)
 
     # Auto-detect figures from the repo tree
@@ -2984,7 +2979,7 @@ def _build_results(
         if not res.get("title"):
             # A result's name is a better title than its path, since several
             # results can share one file and only the name tells them apart
-            res["title"] = res.get("name") or _title_from_path(res["path"])
+            res["title"] = res.get("name") or title_from_path(res["path"])
         results.append(res)
     declared_paths = {res["path"] for res in results}
 
@@ -3010,7 +3005,7 @@ def _build_results(
 
     def _maybe_add_result(path: str) -> None:
         if path not in declared_paths and _is_result_path(path):
-            results.append({"path": path, "title": _title_from_path(path)})
+            results.append({"path": path, "title": title_from_path(path)})
             declared_paths.add(path)
 
     # Auto-detect results from the repo tree
@@ -3058,7 +3053,7 @@ def _build_declared_tables(
             continue
         tbl = dict(tbl)
         if not tbl.get("title"):
-            tbl["title"] = _title_from_path(tbl["path"])
+            tbl["title"] = title_from_path(tbl["path"])
         tables.append(
             Result.model_validate(
                 {
@@ -3118,7 +3113,7 @@ def _build_tables(
             if k in {"path", "title", "description", "stage"}
         }
         if not tbl.get("title"):
-            tbl["title"] = _title_from_path(tbl["path"])
+            tbl["title"] = title_from_path(tbl["path"])
         tables.append(tbl)
         known_paths.add(tbl["path"])
     # Evidence declares what it points at inline, so a question can cite a
@@ -3132,7 +3127,7 @@ def _build_tables(
                 continue
             path = ev.get("path")
             if path and path not in known_paths:
-                tables.append({"path": path, "title": _title_from_path(path)})
+                tables.append({"path": path, "title": title_from_path(path)})
                 known_paths.add(path)
     auto: list[dict[str, Any]] = []
 
@@ -3153,7 +3148,7 @@ def _build_tables(
                 return
         elif not _is_table_path(path):
             return
-        auto.append({"path": path, "title": _title_from_path(path)})
+        auto.append({"path": path, "title": title_from_path(path)})
         known_paths.add(path)
 
     # Auto-detect from the repo tree
@@ -3308,10 +3303,11 @@ def _build_publications(
         ref=ref,
     )
     publications = ck_info.get("publications", [])
-    for pub in publications:
-        if not pub.get("title"):
-            pub["title"] = _title_from_path(pub["path"])
-    return [Publication.model_validate(pub) for pub in publications]
+    return [
+        Publication.model_validate(pub)
+        for pub in publications
+        if isinstance(pub, dict) and pub.get("path")
+    ]
 
 
 @router.get("/projects/{owner_name}/{project_name}/results")
@@ -5082,7 +5078,11 @@ def get_project_publications(
             f"Failed to compute pipeline status for publications: {e}"
         )
     for pub in publications:
-        if not pub.get("stage") and pub.get("path"):
+        # calkit.yaml is hand-written: an entry that isn't a mapping, or has
+        # no path, names no file, so there's nothing to list for it.
+        if not isinstance(pub, dict) or not pub.get("path"):
+            continue
+        if not pub.get("stage"):
             auto_stage = find_stage_for_path(pub["path"], dvc_lock)
             if auto_stage is not None:
                 pub["stage"] = auto_stage
@@ -5758,17 +5758,7 @@ def post_project_publication(
     current_user: CurrentUser,
     session: SessionDep,
     path: Annotated[str, Form()],
-    kind: Annotated[
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "presentation",
-            "poster",
-            "report",
-            "book",
-        ],
-        Form(),
-    ],
+    kind: Annotated[PublicationKind, Form()],
     title: Annotated[str, Form()],
     description: Optional[Annotated[str, Form()]] = Form(None),
     stage: Optional[Annotated[str, Form()]] = Form(None),
@@ -5896,7 +5886,7 @@ def post_project_publication(
         publications.append(
             dict(
                 path=path,
-                type=kind,
+                kind=kind,
                 title=title,
                 description=description,
                 stage=stage,
@@ -5948,18 +5938,7 @@ async def post_project_overleaf_publication(
     current_user: CurrentUser,
     session: SessionDep,
     path: Annotated[str, Form()],
-    kind: Annotated[
-        Literal[
-            "journal-article",
-            "conference-paper",
-            "report",
-            "book",
-            "masters-thesis",
-            "phd-thesis",
-            "other",
-        ],
-        Form(),
-    ],
+    kind: Annotated[PublicationKind, Form()],
     overleaf_project_url: Optional[Annotated[str, Form()]] = Form(None),
     title: Optional[Annotated[str, Form()]] = Form(None),
     description: Optional[Annotated[str, Form()]] = Form(None),

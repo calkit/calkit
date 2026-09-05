@@ -15,7 +15,13 @@ from sqlmodel import Session, select
 import app.stripe
 from app import utcnow
 from app.config import settings
-from app.core import INVALID_ACCOUNT_NAMES, ORG_ONLY_ACCOUNT_NAMES
+from app.core import (
+    ACCOUNT_NAME_RULE,
+    INVALID_ACCOUNT_NAMES,
+    ORG_ONLY_ACCOUNT_NAMES,
+    account_name_is_valid,
+    sanitize_account_name,
+)
 from app.github import token_resp_text_to_dict
 from app.messaging import EMAIL_VERIFICATION_CODE_MINUTES
 from app.models import (
@@ -138,15 +144,29 @@ def check_email_allowed(email: str | None) -> None:
 
 def create_user(*, session: Session, user_create: UserCreate) -> User:
     check_email_allowed(user_create.email)
-    account_name = user_create.account_name or user_create.github_username
-    if not account_name:
-        account_name = user_create.email.split("@")[0]
+    # A name they typed is checked; one derived from a GitHub handle or an
+    # email address is cleaned up, since they never chose it and an address
+    # like "a.b+c@x.com" would otherwise be refused a signup.
+    # The name as typed is kept for display; the account itself is named by
+    # the normalized form.
+    display_name = user_create.account_name
+    if user_create.account_name:
+        account_name = user_create.account_name.lower()
+        if not account_name_is_valid(account_name):
+            raise HTTPException(422, ACCOUNT_NAME_RULE)
+    else:
+        account_name = sanitize_account_name(
+            user_create.github_username or user_create.email.split("@")[0]
+        )
+        if not account_name_is_valid(account_name):
+            # Nothing usable was left, so give them something that works;
+            # they can rename later.
+            account_name = f"user-{secrets.token_hex(4)}"
+        display_name = account_name
     # Only set a GitHub name when the user actually has a GitHub account;
     # GitHub-less (email/Google) signups leave it null.
     github_name = user_create.github_username
-    if account_name.lower() in (
-        INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES
-    ):
+    if account_name in (INVALID_ACCOUNT_NAMES + ORG_ONLY_ACCOUNT_NAMES):
         raise HTTPException(422, "Invalid account name")
     existing = session.exec(
         select(Account).where(Account.name == account_name.lower())
@@ -174,8 +194,8 @@ def create_user(*, session: Session, user_create: UserCreate) -> User:
         update={
             "hashed_password": get_password_hash(user_create.password),
             "account": Account(
-                name=account_name.lower(),
-                display_name=account_name,
+                name=account_name,
+                display_name=display_name or account_name,
                 github_name=github_name,
             ),  # type: ignore
         },

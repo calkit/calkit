@@ -18,8 +18,27 @@ export HUB_VERSION ?= $(shell git describe --tags --match 'hub/v*' --always 2>/d
 tex-engine: ## Download the TeX Live bundles for the LaTeX editor (idempotent).
 	@bash frontend/scripts/download-tex-engine.sh
 
+# A `up` that fails partway (a port already bound, most often) can leave
+# containers running but attached to no network, which every log reports as
+# a healthy start and every client as a dead service.
+.PHONY: fix-unattached
+fix-unattached: ## Recreate containers left with no network by a failed up.
+	@broken=""; \
+	for s in $$(${DOCKER_COMPOSE_DEV} ps --services --status running); do \
+		cid=$$(${DOCKER_COMPOSE_DEV} ps -q $$s); \
+		[ -n "$$cid" ] || continue; \
+		ip=$$(docker inspect $$cid \
+			--format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' \
+			| tr -d ' '); \
+		[ -n "$$ip" ] || broken="$$broken $$s"; \
+	done; \
+	if [ -n "$$broken" ]; then \
+		echo "Recreating unattached containers:$$broken"; \
+		${DOCKER_COMPOSE_DEV} up -d --force-recreate $$broken; \
+	fi
+
 .PHONY: dev
-dev: tex-engine ## Start up all containers for development.
+dev: tex-engine fix-unattached ## Start up all containers for development.
 	${DOCKER_COMPOSE_DEV} up
 
 .PHONY: api-dev

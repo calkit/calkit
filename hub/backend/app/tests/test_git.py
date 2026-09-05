@@ -4,6 +4,7 @@ import concurrent.futures
 import json
 import os
 import random
+import subprocess
 from pathlib import Path
 
 import git
@@ -479,3 +480,218 @@ def test_get_repo_applies_the_configured_clone_filter(monkeypatch):
         assert not any(a.startswith("--filter") for a in commands[1])
     finally:
         _shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def test_shared_read_checkout_is_shared_and_never_written(monkeypatch):
+    import shutil as _shutil
+
+    from app.config import settings
+
+    project = _StubProject(f"ck-shared-{random.randint(0, 10**9)}")
+    monkeypatch.setattr(app.git, "record_project_update", lambda *a, **k: None)
+    real_check_call = app.git.subprocess.check_call
+    clones: list[str] = []
+
+    def fake_check_call(cmd, *args, **kwargs):
+        if cmd[:2] == ["git", "clone"]:
+            target = cmd[-1]
+            clones.append(target)
+            os.makedirs(target, exist_ok=True)
+            r = git.Repo.init(target)
+            r.git.config(["user.name", "CI Test"])
+            r.git.config(["user.email", "ci-test@example.com"])
+            (Path(target) / "notes.txt").write_text("one")
+            r.git.add(["notes.txt"])
+            r.git.commit(["-m", "Init"])
+            return 0
+        return real_check_call(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(app.git.subprocess, "check_call", fake_check_call)
+    shared_base = os.path.join(
+        settings.CLONE_ROOT,
+        app.git.SHARED_READER_DIR,
+        project.owner_github_name,
+        project.name,
+    )
+    anon_base = os.path.join(
+        settings.CLONE_ROOT,
+        "anonymous",
+        project.owner_github_name,
+        project.name,
+    )
+    try:
+        # A public project reads from one copy, so a second reader finds
+        # it already there
+        repo = app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            read_only=True,
+        )
+        assert app.git.SHARED_READER_DIR in str(repo.working_dir)
+        assert len(clones) == 1
+        app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            read_only=True,
+        )
+        assert len(clones) == 1
+        # A write that lands there is refused, not authored in a tree
+        # others are reading
+        assert app.git.is_shared_read_checkout(repo)
+        with pytest.raises(HTTPException) as excinfo:
+            app.git.refuse_if_shared(repo)
+        assert excinfo.value.status_code == 500
+        # Git refuses too, so a write bypassing our helpers is stopped
+        hooks_dir = os.path.join(str(repo.working_dir), ".git", "hooks")
+        for hook in app.git._SHARED_HOOKS:
+            assert os.access(os.path.join(hooks_dir, hook), os.X_OK)
+        (Path(str(repo.working_dir)) / "notes.txt").write_text("two")
+        repo.git.add(["notes.txt"])
+        with pytest.raises(git.exc.GitCommandError):
+            repo.git.commit(["-m", "Should never land"])
+        repo.git.reset(["--hard"])
+        # Not asking for it gets the caller its own copy, exactly as before
+        own = app.git.get_repo(
+            project=project, user=None, session=None, ttl=600
+        )
+        assert app.git.SHARED_READER_DIR not in str(own.working_dir)
+        assert not app.git.is_shared_read_checkout(own)
+        assert len(clones) == 2
+        # A private project with no App installation keeps its own copy
+        project.is_public = False
+        monkeypatch.setattr(
+            app.github,
+            "get_app_installation_token",
+            lambda *a, **k: (_ for _ in ()).throw(
+                app.github.GitHubAppNotConfigured("no app")
+            ),
+        )
+        private = app.git.get_repo(
+            project=project,
+            user=None,
+            session=None,
+            ttl=600,
+            read_only=True,
+        )
+        assert app.git.SHARED_READER_DIR not in str(private.working_dir)
+        # The account names that would land a writable checkout somewhere
+        # it must never go are renamed rather than trusted
+        assert app.git._clone_dir_segment("octocat") == "octocat"
+        for hostile in ("..", ".", "", app.git.SHARED_READER_DIR):
+            segment = app.git._clone_dir_segment(hostile)
+            assert segment.startswith("acct_")
+            assert segment != app.git.SHARED_READER_DIR
+        assert app.git._clone_dir_segment("a/b") == "a_b"
+        # Stable across calls
+        assert app.git._clone_dir_segment("..") == app.git._clone_dir_segment(
+            ".."
+        )
+    finally:
+        _shutil.rmtree(shared_base, ignore_errors=True)
+        _shutil.rmtree(anon_base, ignore_errors=True)
+
+
+def test_working_tree_refuses_paths_outside_the_checkout(tmp_path):
+    # Two checkouts side by side, the way CLONE_ROOT holds them
+    victim = tmp_path / "_shared" / "victim-owner" / "victim-proj" / "repo"
+    ours = tmp_path / "_shared" / "us" / "our-proj" / "repo"
+    victim.mkdir(parents=True)
+    ours.mkdir(parents=True)
+    (victim / "private.csv").write_text("secret,data\n")
+    (ours / "ours.csv").write_text("ours\n")
+    tree = app.git.WorkingTree(str(ours))
+    # Our own files read normally
+    assert tree.is_file("ours.csv")
+    assert tree.read_bytes("ours.csv") == b"ours\n"
+    assert tree.size("ours.csv") == 5
+    assert "ours.csv" in tree.listdir(None)
+    # Walking out finds nothing, however it is spelled
+    escapes = [
+        "../../../victim-owner/victim-proj/repo/private.csv",
+        "a/../../../../victim-owner/victim-proj/repo/private.csv",
+        str(victim / "private.csv"),
+    ]
+    for path in escapes:
+        assert not tree.is_file(path)
+        assert not tree.exists(path)
+        assert not tree.is_safe_symlink(path)
+        with pytest.raises(HTTPException) as excinfo:
+            tree.read_bytes(path)
+        assert excinfo.value.status_code == 404
+    with pytest.raises(HTTPException):
+        tree.listdir("../../../victim-owner/victim-proj/repo")
+    # Repo plumbing is not project content, however it is spelled, but a
+    # name that merely starts with ".git" is
+    (ours / ".gitignore").write_text("*.pyc\n")
+    for internal in (".git", ".git/config", "a/../.git/config"):
+        assert not tree.is_file(internal)
+        with pytest.raises(HTTPException):
+            tree.read_bytes(internal)
+    # A symlink is the spelling that survives normalization, so the
+    # resolved path is checked too
+    (ours / "link").symlink_to(".git")
+    with pytest.raises(HTTPException):
+        tree.read_bytes("link/config")
+    assert tree.read_bytes(".gitignore") == b"*.pyc\n"
+    # A symlink is the other way out, so content reads resolve
+    (ours / "link.csv").symlink_to(victim / "private.csv")
+    assert tree.is_file("link.csv")
+    assert not tree.is_safe_symlink("link.csv")
+    with pytest.raises(HTTPException):
+        tree.read_bytes("link.csv")
+    # One that stays inside still reads
+    (ours / "inside.csv").symlink_to(ours / "ours.csv")
+    assert tree.is_safe_symlink("inside.csv")
+    assert tree.read_bytes("inside.csv") == b"ours\n"
+
+
+def test_remote_head_cache_is_bypassed_when_the_caller_wants_the_truth(
+    tmp_path,
+):
+    origin = tmp_path / "origin.git"
+    seed = tmp_path / "seed"
+    subprocess.check_call(
+        ["git", "init", "--bare", "-q", "-b", "main", str(origin)]
+    )
+    subprocess.check_call(["git", "init", "-q", "-b", "main", str(seed)])
+    for k, v in (("user.email", "ci@example.com"), ("user.name", "CI")):
+        subprocess.check_call(["git", "-C", str(seed), "config", k, v])
+    (seed / "f.txt").write_text("v1\n")
+    subprocess.check_call(["git", "-C", str(seed), "add", "f.txt"])
+    subprocess.check_call(["git", "-C", str(seed), "commit", "-qm", "v1"])
+    subprocess.check_call(
+        ["git", "-C", str(seed), "remote", "add", "origin", str(origin)]
+    )
+    subprocess.check_call(
+        ["git", "-C", str(seed), "push", "-q", "origin", "main"]
+    )
+    clone = tmp_path / "clone"
+    subprocess.check_call(["git", "clone", "-q", str(origin), str(clone)])
+    repo = git.Repo(str(clone))
+    old = repo.head.commit.hexsha
+    # A read before the push leaves the pre-push head in the cache
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == old
+    (seed / "f.txt").write_text("v2\n")
+    subprocess.check_call(["git", "-C", str(seed), "commit", "-qam", "v2"])
+    subprocess.check_call(
+        ["git", "-C", str(seed), "push", "-q", "origin", "main"]
+    )
+    new = (
+        subprocess.check_output(["git", "-C", str(seed), "rev-parse", "HEAD"])
+        .decode()
+        .strip()
+    )
+    assert new != old
+    # A cached read still answers with the old head, which is what let a
+    # push land without the warm it queued ever fetching it
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == old
+    # ttl=0/None callers ask the remote instead, and refresh the cache
+    assert (
+        app.git.get_remote_head_sha(repo, str(origin), "main", use_cache=False)
+        == new
+    )
+    assert app.git.get_remote_head_sha(repo, str(origin), "main") == new

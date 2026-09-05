@@ -16,18 +16,19 @@ minutes and the threadpool is what serves requests.
 """
 
 import time
+from typing import Any, Callable
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app import cache
 from app.core import logger
 from app.db import engine
-from app.models import Account, Project, User
+from app.models import Account, Project, User, UserOrgMembership
 
 
 def warm_project(
     owner_name: str, project_name: str, force: bool = False
-) -> dict:
+) -> dict[str, Any]:
     """Refresh a project's clone and recompute what the project view reads.
 
     Returns a summary of what ran, for the worker log. Never raises: a warm
@@ -47,15 +48,27 @@ def warm_project(
         if project is None:
             logger.warning(f"Nothing to warm: {owner_name}/{project_name}")
             return {"project": f"{owner_name}/{project_name}", "found": False}
-        # A private project can't be cloned anonymously, so warm it as its
-        # owner. The clone is per user, but everything computed from it is
-        # keyed by content or commit, so one pass fills the shared caches for
-        # everyone regardless of whose checkout produced it.
+        # The steps below go through the routes, which check access as
+        # somebody, so a private project needs a user even when the shared
+        # checkout could be read without one. An org account has no user of
+        # its own, so warm as one of its members -- any of them can read it.
         user: User | None = None
         if not project.is_public:
-            user = session.exec(
-                select(User).where(User.id == project.owner_account.user_id)
-            ).first()
+            account = project.owner_account
+            if account.user_id is not None:
+                user = session.exec(
+                    select(User).where(User.id == account.user_id)
+                ).first()
+            elif account.org_id is not None:
+                user = session.exec(
+                    select(User)
+                    .join(
+                        UserOrgMembership,
+                        UserOrgMembership.user_id == User.id,  # type: ignore[arg-type]
+                    )
+                    .where(UserOrgMembership.org_id == account.org_id)
+                    .order_by(col(UserOrgMembership.role_id).desc())
+                ).first()
             if user is None:
                 logger.warning(
                     f"No user to warm private {owner_name}/{project_name}"
@@ -76,7 +89,14 @@ def warm_project(
         slug = f"{owner_name}/{project_name}".lower()
         warmed_key = cache.make_key("warmed", slug)
         try:
-            repo = get_repo(project=project, user=user, session=session, ttl=0)
+            # Read-only, so this warms the checkout readers land on.
+            repo = get_repo(
+                project=project,
+                user=user,
+                session=session,
+                ttl=0,
+                read_only=True,
+            )
             done.append("clone")
             sha = resolve_commit_sha(repo, None)
         except Exception as e:
@@ -120,7 +140,9 @@ def warm_project(
     }
 
 
-def _steps():
+def _steps() -> list[
+    tuple[str, Callable[[Project, User | None, Session], None]]
+]:
     """The warm steps, in the order the project view needs them.
 
     Imported lazily and listed here rather than called inline so one failing
@@ -137,7 +159,9 @@ def _steps():
     """
     from app.api.routes.projects import core as routes
 
-    def pipeline(project, user, session):
+    def pipeline(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_pipeline(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -146,7 +170,7 @@ def _steps():
             ref=None,
         )
 
-    def figures(project, user, session):
+    def figures(project: Project, user: User | None, session: Session) -> None:
         # Every argument is passed, including the ones with defaults: called
         # outside a request, a FastAPI ``Query(...)`` default arrives as the
         # Query object rather than its value, and a Query object is truthy.
@@ -163,7 +187,9 @@ def _steps():
             thumbnails=True,
         )
 
-    def references(project, user, session):
+    def references(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_references(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -172,7 +198,9 @@ def _steps():
             ref=None,
         )
 
-    def questions(project, user, session):
+    def questions(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_questions(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -181,7 +209,9 @@ def _steps():
             ref=None,
         )
 
-    def datasets(project, user, session):
+    def datasets(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_datasets(
             owner_name=project.owner_account_name,
             project_name=project.name,
@@ -190,7 +220,9 @@ def _steps():
             ref=None,
         )
 
-    def publications(project, user, session):
+    def publications(
+        project: Project, user: User | None, session: Session
+    ) -> None:
         routes.get_project_publications(
             owner_name=project.owner_account_name,
             project_name=project.name,

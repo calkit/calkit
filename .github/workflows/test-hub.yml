@@ -148,6 +148,11 @@ jobs:
       - run: cp .env.example .env
       - run: docker compose build
       - run: docker compose down -v --remove-orphans
+      # The container's own `npm install` would otherwise run inside the
+      # window "Wait for services" is timing, which is what made that step
+      # fail on a slow runner.
+      - name: Install frontend dependencies in the dev container
+        run: docker compose run --rm --no-deps frontend npm ci
       - run: docker compose --profile objects up -d
       - name: Wait for services
         run: |
@@ -160,6 +165,10 @@ jobs:
       - name: Run Playwright tests
         run: npx playwright test
         working-directory: hub/frontend
+      # Logs are otherwise torn down with the runner.
+      - name: Show container logs
+        if: failure()
+        run: docker compose logs --no-color --tail 200
       - name: Tear down
         if: always()
         run: docker compose down -v --remove-orphans

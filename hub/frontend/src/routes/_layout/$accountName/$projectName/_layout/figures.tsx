@@ -76,16 +76,30 @@ const FIGURES_PER_PAGE = 20
 // At this size the chrome is what has to go -- the default margins alone are
 // most of a 140px canvas, before a title or tick labels. What makes a plot
 // recognisable that small is the shape of its traces.
-const thumbnailLayout = (layout: Record<string, unknown>) => ({
-  ...layout,
-  title: undefined,
-  showlegend: false,
-  margin: { l: 2, r: 2, t: 2, b: 2 },
-  xaxis: { ...(layout.xaxis as object), visible: false, title: undefined },
-  yaxis: { ...(layout.yaxis as object), visible: false, title: undefined },
-  paper_bgcolor: "rgba(0,0,0,0)",
-  plot_bgcolor: "rgba(0,0,0,0)",
-})
+const thumbnailLayout = (layout: Record<string, unknown>) => {
+  // Every axis, not just the first: a figure with stacked subplots carries
+  // xaxis2, yaxis3 and so on, and each keeps its own ticks and title. Left
+  // in, they overlap the traces and each other at this size.
+  const hidden = { visible: false, title: undefined }
+  const axes: Record<string, unknown> = { xaxis: hidden, yaxis: hidden }
+  for (const key of Object.keys(layout)) {
+    if (/^[xy]axis\d*$/.test(key)) {
+      axes[key] = { ...(layout[key] as object), ...hidden }
+    }
+  }
+  return {
+    ...layout,
+    title: undefined,
+    showlegend: false,
+    margin: { l: 2, r: 2, t: 2, b: 2 },
+    ...axes,
+    // Subplot titles are annotations rather than titles, so they survive
+    // everything above and land on top of what they label.
+    annotations: [],
+    paper_bgcolor: "rgba(0,0,0,0)",
+    plot_bgcolor: "rgba(0,0,0,0)",
+  }
+}
 
 function PlotlyThumbnail({ figure }: { figure: Figure }) {
   const [src, setSrc] = useState<string | null>(null)

@@ -61,11 +61,11 @@ const BlueLink = (props: any) => {
 // Send prop to children of <pre> to differentiate if they are block code or not
 const pre = ({ children, ...props }: any) => {
   return (
-    <pre {...props}>
+    <Box as="pre" maxW="100%" overflowX="auto" {...props}>
       {React.Children.map(children, (child) => {
         return React.cloneElement(child, { insidePre: true })
       })}
-    </pre>
+    </Box>
   )
 }
 

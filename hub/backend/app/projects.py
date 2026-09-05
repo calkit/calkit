@@ -798,8 +798,8 @@ def get_ck_info_and_dvc_outs_from_tree(
         return hit_value
     # Not in this process, which says nothing about whether it has been
     # worked out: there are several workers, and they all restart on a
-    # deploy. Keyed by the bytes it was derived from, so an entry is never
-    # stale and is shared by every worker and every viewer.
+    # deploy. Keyed by the bytes it was derived from, so any edit to them
+    # invalidates it; object storage is the one input the key can't see.
     shared_key = cache.make_key("ck-dvc", cache_key)
     shared = cache.get_json(shared_key)
     if isinstance(shared, list) and len(shared) == 4:
@@ -851,7 +851,24 @@ def get_ck_info_and_dvc_outs_from_tree(
         _ck_dvc_cache[cache_key] = (now, result)
         if len(_ck_dvc_cache) > _CK_DVC_CACHE_MAX:
             _ck_dvc_cache.popitem(last=False)
-    cache.set_json(shared_key, list(result))
+    # A directory whose .dir object isn't in storage yet expands to nothing,
+    # and a push makes that wrong without changing the key, so it goes no
+    # further than the in-process entry above, which ages out in minutes.
+    missing_dir_outs = [
+        out["path"]
+        for stage in dvc_lock.get("stages", {}).values()
+        for out in stage.get("outs", [])
+        if str(out.get("md5", "")).endswith(".dir")
+        and out["path"] not in dvc_lock_outs
+    ]
+    if missing_dir_outs:
+        logger.warning(
+            f"Not caching incomplete DVC outs for {owner_name}/"
+            f"{project_name}; .dir objects missing from storage for: "
+            f"{', '.join(sorted(missing_dir_outs))}"
+        )
+    else:
+        cache.set_json(shared_key, list(result))
     return result
 
 
